@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -110,8 +111,8 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1000)))
-	EncodeSender(2, *uint256.NewInt(1000), v)
+	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -122,52 +123,85 @@ func TestNonceFromAddress(t *testing.T) {
 	defer tx.Rollback()
 	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
 	assert.NoError(err)
-	var txSlots TxSlots
-	txSlot1 := &TxSlot{
-		tip:    300000,
-		feeCap: 300000,
-		gas:    100000,
-		nonce:  3,
+
+	{
+		var txSlots TxSlots
+		txSlot1 := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot1.IdHash[0] = 1
+		txSlots.Append(txSlot1, addr[:], true)
+
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
 	}
-	txSlot1.IdHash[0] = 1
-	txSlots.Append(txSlot1, addr[:], true)
-	/*
-		txSlots.Append(&TxSlot{
+
+	{
+		txSlots := TxSlots{}
+		txSlot2 := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  4,
+		}
+		txSlot2.IdHash[0] = 2
+		txSlot3 := &TxSlot{
 			tip:    300000,
 			feeCap: 300000,
 			gas:    100000,
 			nonce:  6,
-		}, addr[:], true)
-	*/
-	var reasons []DiscardReason
-	reasons, err = pool.AddLocalTxs(ctx, txSlots)
-	assert.NoError(err)
-	for _, reason := range reasons {
-		assert.Equal(Success, reason)
+		}
+		txSlot3.IdHash[0] = 2
+		txSlots.Append(txSlot2, addr[:], true)
+		txSlots.Append(txSlot3, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(4), nonce)
 	}
-	txSlots = TxSlots{}
-	txSlot2 := &TxSlot{
-		tip:    300000,
-		feeCap: 300000,
-		gas:    100000,
-		nonce:  4,
+	// test too expencive tx
+	{
+		var txSlots TxSlots
+		txSlot1 := &TxSlot{
+			tip:    9 * common.Ether,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot1.IdHash[0] = 1
+		txSlots.Append(txSlot1, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(InsufficientFunds, reason, reason.String())
+		}
 	}
-	txSlot2.IdHash[0] = 2
-	txSlot3 := &TxSlot{
-		tip:    300000,
-		feeCap: 300000,
-		gas:    100000,
-		nonce:  6,
+
+	// test too low nonce
+	{
+		var txSlots TxSlots
+		txSlot1 := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  1,
+		}
+		txSlot1.IdHash[0] = 1
+		txSlots.Append(txSlot1, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(NonceTooLow, reason, reason.String())
+		}
 	}
-	txSlot3.IdHash[0] = 2
-	txSlots.Append(txSlot2, addr[:], true)
-	txSlots.Append(txSlot3, addr[:], true)
-	reasons, err = pool.AddLocalTxs(ctx, txSlots)
-	assert.NoError(err)
-	for _, reason := range reasons {
-		assert.Equal(Success, reason)
-	}
-	nonce, ok := pool.NonceFromAddress(addr)
-	assert.True(ok)
-	assert.Equal(uint64(4), nonce)
 }

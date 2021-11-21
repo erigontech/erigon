@@ -149,6 +149,8 @@ const (
 	GasUintOverflow     DiscardReason = 15
 	IntrinsicGas        DiscardReason = 16
 	RLPTooLong          DiscardReason = 17
+	NonceTooLow         DiscardReason = 18
+	InsufficientFunds   DiscardReason = 19
 )
 
 func (r DiscardReason) String() string {
@@ -187,6 +189,10 @@ func (r DiscardReason) String() string {
 		return "IntrinsicGas"
 	case RLPTooLong:
 		return "RLPTooLong"
+	case NonceTooLow:
+		return "nonce too low"
+	case InsufficientFunds:
+		return "insufficient funds"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -357,10 +363,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	_, unwindTxs, err = p.validateTxs(unwindTxs)
-	if err != nil {
-		return err
-	}
 	if err := minedTxs.Valid(); err != nil {
 		return err
 	}
@@ -368,6 +370,10 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	if err := p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs); err != nil {
+		return err
+	}
+	_, unwindTxs, err = p.validateTxs(unwindTxs, cacheView)
+	if err != nil {
 		return err
 	}
 
@@ -436,12 +442,13 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	if l == 0 {
 		return nil
 	}
-	_, newTxs, err := p.validateTxs(*p.unprocessedRemoteTxs)
+
+	err = p.senders.registerNewSenders(*p.unprocessedRemoteTxs)
 	if err != nil {
 		return err
 	}
 
-	err = p.senders.onNewTxs(newTxs)
+	_, newTxs, err := p.validateTxs(*p.unprocessedRemoteTxs, cacheView)
 	if err != nil {
 		return err
 	}
@@ -582,7 +589,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
 	}
 }
 
-func (p *TxPool) validateTx(txn *TxSlot, isLocal bool) DiscardReason {
+func (p *TxPool) validateTx(txn *TxSlot, isLocal bool, stateCache kvcache.CacheView) DiscardReason {
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && txn.feeCap < p.cfg.MinFeeCap {
 		return UnderPriced
@@ -597,8 +604,22 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool) DiscardReason {
 	if uint64(p.all.count(txn.senderID)) > p.cfg.AccountSlots {
 		return Spammer
 	}
+
+	// check nonce and balance
+	senderNonce, senderBalance, _ := p.senders.info(stateCache, txn.senderID)
+	if senderNonce > txn.nonce {
+		return NonceTooLow
+	}
+	// Transactor should have enough funds to cover the costs
+	total := uint256.NewInt(txn.gas)
+	total.Mul(total, uint256.NewInt(txn.tip))
+	total.Add(total, &txn.value)
+	if senderBalance.Cmp(total) < 0 {
+		return InsufficientFunds
+	}
 	return Success
 }
+
 func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 	const (
 		// txSlotSize is used to calculate how many data slots a single transaction
@@ -618,7 +639,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 	}
 	return nil
 }
-func (p *TxPool) validateTxs(txs TxSlots) (reasons []DiscardReason, goodTxs TxSlots, err error) {
+func (p *TxPool) validateTxs(txs TxSlots, stateCache kvcache.CacheView) (reasons []DiscardReason, goodTxs TxSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
 	reasons = make([]DiscardReason, len(txs.txs))
@@ -629,7 +650,7 @@ func (p *TxPool) validateTxs(txs TxSlots) (reasons []DiscardReason, goodTxs TxSl
 
 	goodCount := 0
 	for i, txn := range txs.txs {
-		reason := p.validateTx(txn, txs.isLocal[i])
+		reason := p.validateTx(txn, txs.isLocal[i], stateCache)
 		if reason == Success {
 			goodCount++
 			// Success here means no DiscardReason yet, so leave it NotSet
@@ -652,7 +673,6 @@ func (p *TxPool) validateTxs(txs TxSlots) (reasons []DiscardReason, goodTxs TxSl
 			j++
 		}
 	}
-
 	return reasons, goodTxs, nil
 }
 
@@ -688,11 +708,6 @@ func fillDiscardReasons(reasons []DiscardReason, newTxs TxSlots, discardReasonsL
 }
 
 func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]DiscardReason, error) {
-	reasons, newTxs, err := p.validateTxs(newTransactions)
-	if err != nil {
-		return nil, err
-	}
-
 	coreTx, err := p.coreDB().BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -711,7 +726,12 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if err = p.senders.onNewTxs(newTxs); err != nil {
+	if err = p.senders.registerNewSenders(newTransactions); err != nil {
+		return nil, err
+	}
+
+	reasons, newTxs, err := p.validateTxs(newTransactions, cacheView)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1434,7 +1454,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 
 		isLocalTx := p.isLocalLRU.Contains(string(k))
 
-		if reason := p.validateTx(txn, isLocalTx); reason != NotSet && reason != Success {
+		if reason := p.validateTx(txn, isLocalTx, cacheView); reason != NotSet && reason != Success {
 			return nil
 		}
 		txs.Resize(uint(i + 1))
@@ -1457,7 +1477,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 			pendingBaseFee = binary.BigEndian.Uint64(v)
 		}
 	}
-	err = p.senders.onNewTxs(txs)
+	err = p.senders.registerNewSenders(txs)
 	if err != nil {
 		return err
 	}
@@ -1719,7 +1739,7 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 	return nonce, balance, nil
 }
 
-func (sc *sendersBatch) onNewTxs(newTxs TxSlots) (err error) {
+func (sc *sendersBatch) registerNewSenders(newTxs TxSlots) (err error) {
 	for i := 0; i < len(newTxs.txs); i++ {
 		addr := newTxs.senders.At(i)
 		addrS := string(addr)
