@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -35,6 +37,35 @@ func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash co
 	}
 
 	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
+}
+
+type RemoteBlockReader struct {
+	client remote.ETHBACKENDClient
+}
+
+func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
+	return &RemoteBlockReader{client}
+}
+
+func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
+	reply, err := back.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	block = &types.Block{}
+	err = rlp.Decode(bytes.NewReader(reply.BlockRlp), block)
+	if err != nil {
+		return nil, nil, err
+	}
+	senders = make([]common.Address, len(reply.Senders)/20)
+	for i := range senders {
+		senders[i].SetBytes(reply.Senders[i*20 : (i+1)*20])
+	}
+	if len(senders) == block.Transactions().Len() { //it's fine if no senders provided - they can be lazy recovered
+		block.SendersToTxs(senders)
+	}
+	return block, senders, nil
 }
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots

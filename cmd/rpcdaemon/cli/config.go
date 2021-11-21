@@ -237,15 +237,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
-		if cfg.Snapshot.Enabled {
-			allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
-			if err != nil {
-				return nil, nil, nil, nil, nil, nil, err
-			}
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-		} else {
-			blockReader = snapshotsync.NewBlockReader()
-		}
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -255,6 +246,17 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
+	if cfg.SingleNodeMode {
+		if cfg.Snapshot.Enabled {
+			allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, err
+			}
+			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+		} else {
+			blockReader = snapshotsync.NewBlockReader()
+		}
+	}
 	if cfg.PrivateApiAddr == "" {
 		return db, eth, txPool, mining, stateCache, blockReader, nil
 	}
@@ -276,7 +278,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	remoteEth := services.NewRemoteBackend(conn, db)
+	if !cfg.SingleNodeMode {
+		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
+	}
+	remoteEth := services.NewRemoteBackend(conn, db, blockReader)
 	blockReader = remoteEth
 
 	txpoolConn := conn
