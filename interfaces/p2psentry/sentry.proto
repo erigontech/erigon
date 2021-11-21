@@ -69,7 +69,7 @@ message SendMessageByMinBlockRequest {
 
 message SendMessageByIdRequest {
   OutboundMessageData data = 1;
-  types.H512 peer_id = 2;
+  types.H256 peer_id = 2;
 }
 
 message SendMessageToRandomPeersRequest {
@@ -77,24 +77,24 @@ message SendMessageToRandomPeersRequest {
   uint64 max_peers = 2;
 }
 
-message SentPeers {repeated types.H512 peers = 1;}
+message SentPeers {repeated types.H256 peers = 1;}
 
 enum PenaltyKind {Kick = 0;}
 
 message PenalizePeerRequest {
-  types.H512 peer_id = 1;
+  types.H256 peer_id = 1;
   PenaltyKind penalty = 2;
 }
 
 message PeerMinBlockRequest {
-  types.H512 peer_id = 1;
+  types.H256 peer_id = 1;
   uint64 min_block = 2;
 }
 
 message InboundMessage {
   MessageId id = 1;
   bytes data = 2;
-  types.H512 peer_id = 3;
+  types.H256 peer_id = 3;
 }
 
 message Forks {
@@ -133,7 +133,7 @@ message PeersReply {
     Connect = 0;
     Disconnect = 1;
   }
-  types.H512 peer_id = 1;
+  types.H256 peer_id = 1;
   PeerEvent event = 2;
 }
 

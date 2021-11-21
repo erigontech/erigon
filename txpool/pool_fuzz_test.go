@@ -455,7 +455,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		require.NoError(err)
 		defer tx.Rollback()
 		// start blocks from 0, set empty hash - then kvcache will also work on this
-		h1, h22 := gointerfaces.ConvertHashToH256([32]byte{}), gointerfaces.ConvertHashToH256([32]byte{22})
+		h0, h22 := gointerfaces.ConvertHashToH256([32]byte{}), gointerfaces.ConvertHashToH256([32]byte{22})
 
 		var txID uint64
 		_ = coreDB.View(ctx, func(tx kv.Tx) error {
@@ -466,7 +466,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			DatabaseViewID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 0, BlockHash: h1},
+				{BlockHeight: 0, BlockHash: h0},
 			},
 		}
 		for id, sender := range senders {
@@ -492,7 +492,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			DatabaseViewID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 1, BlockHash: h1},
+				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs2, tx)
@@ -504,7 +504,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			DatabaseViewID:      txID,
 			PendingBlockBaseFee: pendingBaseFee,
 			ChangeBatch: []*remote.StateChange{
-				{BlockHeight: 0, BlockHash: h1, Direction: remote.Direction_UNWIND},
+				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
 			},
 		}
 		err = pool.OnNewBlock(ctx, change, txs2, TxSlots{}, tx)
