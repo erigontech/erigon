@@ -118,6 +118,9 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if err != nil {
 		return nil, err
 	}
+	if blockNum == 0 {
+		return []ParityTrace{}, nil
+	}
 	bn := hexutil.Uint64(blockNum)
 
 	// Extract transactions from block
