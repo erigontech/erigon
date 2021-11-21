@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
@@ -111,7 +112,7 @@ func ExecuteBlock(
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	callTracer := NewCallTracer(contractHasTEVM)
+	callTracer := calltracer.NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
 	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, contractHasTEVM)
@@ -131,17 +132,17 @@ func ExecuteBlock(
 		}
 	}
 	if writeCallTraces {
-		callTracer.tos[block.Coinbase()] = false
+		callTracer.Tos[block.Coinbase()] = false
 		for _, uncle := range block.Uncles() {
-			callTracer.tos[uncle.Coinbase] = false
+			callTracer.Tos[uncle.Coinbase] = false
 		}
-		list := make(common.Addresses, len(callTracer.froms)+len(callTracer.tos))
+		list := make(common.Addresses, len(callTracer.Froms)+len(callTracer.Tos))
 		i := 0
-		for addr := range callTracer.froms {
+		for addr := range callTracer.Froms {
 			copy(list[i][:], addr[:])
 			i++
 		}
-		for addr := range callTracer.tos {
+		for addr := range callTracer.Tos {
 			copy(list[i][:], addr[:])
 			i++
 		}
@@ -157,15 +158,15 @@ func ExecuteBlock(
 			}
 			var v [length.Addr + 1]byte
 			copy(v[:], addr[:])
-			if _, ok := callTracer.froms[addr]; ok {
+			if _, ok := callTracer.Froms[addr]; ok {
 				v[length.Addr] |= 1
 			}
-			if _, ok := callTracer.tos[addr]; ok {
+			if _, ok := callTracer.Tos[addr]; ok {
 				v[length.Addr] |= 2
 			}
 			// TEVM marking still untranslated contracts
 			if vmConfig.EnableTEMV {
-				if created = callTracer.tos[addr]; created {
+				if created = callTracer.Tos[addr]; created {
 					v[length.Addr] |= 4
 				}
 			}

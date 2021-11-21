@@ -3,22 +3,29 @@ package privateapi
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"math/big"
+	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -39,14 +46,15 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	ctx           context.Context
-	eth           EthBackend
-	events        *Events
-	db            kv.RwDB
-	blockReader   *snapshotsync.BlockReader
-	config        *params.ChainConfig
-	executeConfig stagedsync.ExecuteBlockCfg
-	vmConfig      vm.Config
+	ctx         context.Context
+	eth         EthBackend
+	events      *Events
+	db          kv.RwDB
+	blockReader *snapshotsync.BlockReader
+	config      *params.ChainConfig
+	accumulator *shards.Accumulator
+	stateStream bool
+	vmConfig    vm.Config
 }
 
 type EthBackend interface {
@@ -55,9 +63,9 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, config *params.ChainConfig, executeConfig stagedsync.ExecuteBlockCfg, vmConfig vm.Config, events *Events) *EthBackendServer {
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, config *params.ChainConfig, vmConfig vm.Config, events *Events) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events,
-		config: config, db: db, executeConfig: executeConfig,
+		config: config, db: db,
 		vmConfig: vmConfig, blockReader: snapshotsync.NewBlockReader(),
 	}
 }
@@ -293,7 +301,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
 	// Execute the payload
-	if err := stagedsync.ExecuteBlock(block, tx, batch, s.executeConfig, s.vmConfig, true, true, true, contractHasTEVM, false); err != nil {
+	if err := s.executePayload(block, tx, batch, s.vmConfig, s.config, contractHasTEVM); err != nil {
 		return &remote.EngineExecutePayloadReply{
 			Status: Invalid,
 		}, nil
@@ -316,4 +324,112 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, err
 	}
 	return nil, nil
+}
+
+func newStateReaderWriter(
+	batch ethdb.Database,
+	tx kv.RwTx,
+	block *types.Block,
+	accumulator *shards.Accumulator,
+	stateStream bool,
+) (state.StateReader, state.WriterWithChangeSets, error) {
+
+	var stateReader state.StateReader
+	var stateWriter state.WriterWithChangeSets
+
+	stateReader = state.NewPlainStateReader(batch)
+
+	if stateStream {
+		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
+		if err != nil {
+			return nil, nil, err
+		}
+		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, false)
+	} else {
+		accumulator = nil
+	}
+	stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
+
+	return stateReader, stateWriter, nil
+}
+
+func (s *EthBackendServer) executePayload(
+	block *types.Block,
+	tx kv.RwTx,
+	batch ethdb.Database,
+	vmConfig vm.Config, // emit copy, because will modify it
+	chainConfig *params.ChainConfig,
+	contractHasTEVM func(contractHash common.Hash) (bool, error)) error {
+	blockNum := block.NumberU64()
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, s.accumulator, s.stateStream)
+	if err != nil {
+		return err
+	}
+
+	// where the magic happens
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+
+	callTracer := calltracer.NewCallTracer(contractHasTEVM)
+	vmConfig.Debug = true
+	vmConfig.Tracer = callTracer
+	receipts, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHeader, serenity.New(), block, stateReader, stateWriter, nil, nil, contractHasTEVM)
+	if err != nil {
+		return err
+	}
+
+	if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+		return err
+	}
+
+	callTracer.Tos[block.Coinbase()] = false
+	for _, uncle := range block.Uncles() {
+		callTracer.Tos[uncle.Coinbase] = false
+	}
+	list := make(common.Addresses, len(callTracer.Froms)+len(callTracer.Tos))
+	i := 0
+	for addr := range callTracer.Froms {
+		copy(list[i][:], addr[:])
+		i++
+	}
+	for addr := range callTracer.Tos {
+		copy(list[i][:], addr[:])
+		i++
+	}
+	sort.Sort(list)
+	// List may contain duplicates
+	var blockNumEnc [8]byte
+	binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
+	var prev common.Address
+	var created bool
+	for j, addr := range list {
+		if j > 0 && prev == addr {
+			continue
+		}
+		var v [length.Addr + 1]byte
+		copy(v[:], addr[:])
+		if _, ok := callTracer.Froms[addr]; ok {
+			v[length.Addr] |= 1
+		}
+		if _, ok := callTracer.Tos[addr]; ok {
+			v[length.Addr] |= 2
+		}
+		// TEVM marking still untranslated contracts
+		if vmConfig.EnableTEMV {
+			if created = callTracer.Tos[addr]; created {
+				v[length.Addr] |= 4
+			}
+		}
+		if j == 0 {
+			if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+				return err
+			}
+		} else {
+			if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
+				return err
+			}
+		}
+		copy(prev[:], addr[:])
+	}
+
+	return nil
 }
