@@ -502,9 +502,9 @@ func TransactionsIdx(chainID uint256.Int, firstTxID uint64, segmentFileName stri
 	return nil
 }
 
-func HeadersIdx(segmentFileName string) error {
+func HeadersIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 	num := make([]byte, 8)
-	if err := Idx(segmentFileName, 0, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		return idx.AddKey(num[:n], offset)
 	}); err != nil {
@@ -513,9 +513,9 @@ func HeadersIdx(segmentFileName string) error {
 	return nil
 }
 
-func BodiesIdx(segmentFileName string) error {
+func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 	num := make([]byte, 8)
-	if err := Idx(segmentFileName, 0, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		return idx.AddKey(num[:n], offset)
 	}); err != nil {
