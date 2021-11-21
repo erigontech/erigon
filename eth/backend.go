@@ -48,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -376,12 +375,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 
-<<<<<<< HEAD
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, chainConfig,
-		stagedsync.StageExecuteBlocksCfg(backend.chainDB, config.Prune, config.BatchSize,
-			nil, chainConfig, serenity.New(), &vm.Config{EnableTEMV: config.Prune.Experiments.TEVM}, backend.notifications.Accumulator,
-			config.StateStream, tmpdir), vm.Config{EnableTEMV: config.Prune.Experiments.TEVM}, backend.notifications.Events)
-=======
 	var blockReader interfaces.BlockReader
 	if config.Snapshot.Enabled {
 		allSnapshots, err := snapshotsync.OpenAll(config.Snapshot.Dir)
@@ -393,7 +386,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		blockReader = snapshotsync.NewBlockReader()
 	}
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader)
->>>>>>> origin/devel
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials

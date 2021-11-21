@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -91,7 +90,7 @@ func readBlock(blockNum uint64, tx kv.Tx) (*types.Block, error) {
 	return b, err
 }
 
-func ExecuteBlock(
+func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
 	batch ethdb.Database,
@@ -132,57 +131,8 @@ func ExecuteBlock(
 		}
 	}
 	if writeCallTraces {
-		callTracer.Tos[block.Coinbase()] = false
-		for _, uncle := range block.Uncles() {
-			callTracer.Tos[uncle.Coinbase] = false
-		}
-		list := make(common.Addresses, len(callTracer.Froms)+len(callTracer.Tos))
-		i := 0
-		for addr := range callTracer.Froms {
-			copy(list[i][:], addr[:])
-			i++
-		}
-		for addr := range callTracer.Tos {
-			copy(list[i][:], addr[:])
-			i++
-		}
-		sort.Sort(list)
-		// List may contain duplicates
-		var blockNumEnc [8]byte
-		binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
-		var prev common.Address
-		var created bool
-		for j, addr := range list {
-			if j > 0 && prev == addr {
-				continue
-			}
-			var v [length.Addr + 1]byte
-			copy(v[:], addr[:])
-			if _, ok := callTracer.Froms[addr]; ok {
-				v[length.Addr] |= 1
-			}
-			if _, ok := callTracer.Tos[addr]; ok {
-				v[length.Addr] |= 2
-			}
-			// TEVM marking still untranslated contracts
-			if vmConfig.EnableTEMV {
-				if created = callTracer.Tos[addr]; created {
-					v[length.Addr] |= 4
-				}
-			}
-			if j == 0 {
-				if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-					return err
-				}
-			} else {
-				if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-					return err
-				}
-			}
-			copy(prev[:], addr[:])
-		}
+		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
-
 	return nil
 }
 
@@ -292,7 +242,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = ExecuteBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop

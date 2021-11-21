@@ -3,11 +3,8 @@ package privateapi
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"math/big"
-	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -214,6 +211,21 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
 		eip1559 = true
 	}
+
+	// Decode transactions
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+	transactions := make([]types.Transaction, len(req.Transactions))
+
+	for i, encodedTransaction := range req.Transactions {
+		reader.Reset(encodedTransaction)
+		stream.Reset(reader, 0)
+		if transactions[i], err = types.DecodeTransaction(stream); err != nil {
+			return nil, err
+		}
+		i++
+	}
+
 	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
 	var extra_data common.Hash = gointerfaces.ConvertH256ToHash(req.ExtraData)
 	header := types.Header{
@@ -230,7 +242,12 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		GasUsed:     req.GasUsed,
 		GasLimit:    req.GasLimit,
 		Time:        req.Timestamp,
+		MixDigest:   common.Hash{},
+		UncleHash:   types.EmptyUncleHash,
+		Difficulty:  serenity.SerenityDifficulty,
+		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
+		TxHash:      types.DeriveSha(types.Transactions(transactions)),
 	}
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
@@ -249,19 +266,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		}, rawdb.CommissionPayload(tx, req.BlockNumber, blockHash)
 	}
 
-	// Decode transactions
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
-	transactions := make([]types.Transaction, len(req.Transactions))
-
-	for i, encodedTransaction := range req.Transactions {
-		reader.Reset(encodedTransaction)
-		stream.Reset(reader, 0)
-		if transactions[i], err = types.DecodeTransaction(stream); err != nil {
-			return nil, err
-		}
-		i++
-	}
 	// Write Header(we do not need to add difficulty after "The merge")
 	rawdb.WriteHeader(tx, &header)
 	if err := rawdb.WriteCanonicalHash(tx, blockHash, req.BlockNumber); err != nil {
@@ -288,8 +292,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 	block := types.NewBlock(&header, transactions, []*types.Header{}, []*types.Receipt{})
 	// Create batch
-	var batch ethdb.DbWithPendingMutations
-	batch = olddb.NewBatch(tx, ctx.Done())
+	batch := olddb.NewBatch(tx, ctx.Done())
 	defer batch.Rollback()
 	// TEVM handler
 	var contractHasTEVM func(contractHash common.Hash) (bool, error)
@@ -378,55 +381,5 @@ func (s *EthBackendServer) executePayload(
 		return err
 	}
 
-	callTracer.Tos[block.Coinbase()] = false
-	for _, uncle := range block.Uncles() {
-		callTracer.Tos[uncle.Coinbase] = false
-	}
-	list := make(common.Addresses, len(callTracer.Froms)+len(callTracer.Tos))
-	i := 0
-	for addr := range callTracer.Froms {
-		copy(list[i][:], addr[:])
-		i++
-	}
-	for addr := range callTracer.Tos {
-		copy(list[i][:], addr[:])
-		i++
-	}
-	sort.Sort(list)
-	// List may contain duplicates
-	var blockNumEnc [8]byte
-	binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
-	var prev common.Address
-	var created bool
-	for j, addr := range list {
-		if j > 0 && prev == addr {
-			continue
-		}
-		var v [length.Addr + 1]byte
-		copy(v[:], addr[:])
-		if _, ok := callTracer.Froms[addr]; ok {
-			v[length.Addr] |= 1
-		}
-		if _, ok := callTracer.Tos[addr]; ok {
-			v[length.Addr] |= 2
-		}
-		// TEVM marking still untranslated contracts
-		if vmConfig.EnableTEMV {
-			if created = callTracer.Tos[addr]; created {
-				v[length.Addr] |= 4
-			}
-		}
-		if j == 0 {
-			if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-				return err
-			}
-		} else {
-			if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-				return err
-			}
-		}
-		copy(prev[:], addr[:])
-	}
-
-	return nil
+	return callTracer.WriteToDb(tx, block, s.vmConfig)
 }
