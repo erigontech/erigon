@@ -1,4 +1,3 @@
-//go:build gorules
 // +build gorules
 
 package gorules
