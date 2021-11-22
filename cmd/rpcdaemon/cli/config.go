@@ -56,7 +56,6 @@ type Flags struct {
 	RpcAllowListFilePath string
 	RpcBatchConcurrency  uint
 	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolV2             bool
 	TxPoolApiAddr        string
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
@@ -120,7 +119,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 			}
 			cfg.Snapshot.Dir = path.Join(cfg.Datadir, "snapshots")
 		}
-		cfg.TxPoolV2 = true
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
@@ -285,12 +283,13 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	blockReader = remoteEth
 
 	txpoolConn := conn
-	if cfg.TxPoolV2 {
+	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
+
 	mining = services.NewMiningService(txpoolConn)
 	txPool = services.NewTxPoolService(txpoolConn)
 	if db == nil {
