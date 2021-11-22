@@ -8,25 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context,
-	sm prune.Mode,
-	headers HeadersCfg,
-	blockHashCfg BlockHashesCfg,
-	bodies BodiesCfg,
-	difficulty DifficultyCfg,
-	senders SendersCfg,
-	exec ExecuteBlockCfg,
-	trans TranspileCfg,
-	hashState HashStateCfg,
-	trieCfg TrieCfg,
-	history HistoryCfg,
-	logIndex LogIndexCfg,
-	callTraces CallTracesCfg,
-	txLookup TxLookupCfg,
-	txPool TxPoolCfg,
-	finish FinishCfg,
-	test bool,
-) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, difficulty DifficultyCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -218,20 +200,6 @@ func DefaultStages(ctx context.Context,
 			},
 		},
 		{
-			ID:          stages.TxPool,
-			Description: "Update transaction pool",
-			Disabled:    txPool.config.Disable || txPool.config.V2,
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
-				return SpawnTxPool(s, tx, txPool, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindTxPool(u, s, tx, txPool, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneTxPool(p, tx, txPool, ctx)
-			},
-		},
-		{
 			ID:          stages.Finish,
 			Description: "Final: update current block for the RPC API",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, _ Unwinder, tx kv.RwTx) error {
@@ -263,7 +231,6 @@ var DefaultForwardOrder = UnwindOrder{
 	stages.StorageHistoryIndex,
 	stages.LogIndex,
 	stages.TxLookup,
-	stages.TxPool,
 	stages.Finish,
 }
 
@@ -290,10 +257,6 @@ var DefaultUnwindOrder = UnwindOrder{
 	stages.Execution,
 	stages.Senders,
 
-	// Unwinding of tx pool (re-injecting transactions into the pool needs to happen after unwinding execution)
-	// also tx pool is before senders because senders unwind is inside cycle transaction
-	stages.TxPool,
-
 	stages.Bodies,
 	stages.BlockHashes,
 	stages.Headers,
@@ -314,10 +277,6 @@ var DefaultPruneOrder = PruneOrder{
 	stages.Translation,
 	stages.Execution,
 	stages.Senders,
-
-	// Unwinding of tx pool (reinjecting transactions into the pool needs to happen after unwinding execution)
-	// also tx pool is before senders because senders unwind is inside cycle transaction
-	stages.TxPool,
 
 	stages.Bodies,
 	stages.BlockHashes,

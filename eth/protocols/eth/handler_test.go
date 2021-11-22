@@ -49,7 +49,6 @@ var (
 // in the `eth` protocol without actually doing any data processing.
 type testBackend struct {
 	db          kv.RwDB
-	txpool      *core.TxPool
 	headBlock   *types.Block
 	genesis     *types.Block
 	chainConfig *params.ChainConfig
@@ -83,19 +82,15 @@ func newTestBackendWithGenerator(t *testing.T, blocks int, generator func(int, *
 
 	b := &testBackend{
 		db:          m.DB,
-		txpool:      core.NewTxPool(txconfig, m.ChainConfig, m.DB),
 		headBlock:   headBlock,
 		genesis:     m.Genesis,
 		chainConfig: params.TestChainConfig,
 	}
-	t.Cleanup(func() {
-		b.txpool.Stop()
-	})
 	return b
 }
 
 func (b *testBackend) DB() kv.RwDB        { return b.db }
-func (b *testBackend) TxPool() eth.TxPool { return b.txpool }
+func (b *testBackend) TxPool() eth.TxPool { return nil }
 func (b *testBackend) RunPeer(peer *eth.Peer, handler eth.Handler) error {
 	// Normally the backend would do peer mainentance and handshakes. All that
 	// is omitted and we will just give control back to the handler.

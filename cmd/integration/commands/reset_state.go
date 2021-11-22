@@ -65,9 +65,6 @@ func resetState(db kv.RwDB, logger log.Logger, ctx context.Context) error {
 	if err := db.Update(ctx, resetTxLookup); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, resetTxPool); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, resetFinish); err != nil {
 		return err
 	}
@@ -218,16 +215,6 @@ func resetTxLookup(tx kv.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStagePruneProgress(tx, stages.TxLookup, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
-func resetTxPool(tx kv.RwTx) error {
-	if err := stages.SaveStageProgress(tx, stages.TxPool, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.TxPool, 0); err != nil {
 		return err
 	}
 	return nil

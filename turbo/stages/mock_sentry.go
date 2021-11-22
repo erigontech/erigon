@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -73,18 +73,18 @@ type MockSentry struct {
 
 	Notifications *stagedsync.Notifications
 
-	// Pool v2
-	TxPoolV2Fetch      *txpool2.Fetch
-	TxPoolV2Send       *txpool2.Send
-	TxPoolV2GrpcServer *txpool2.GrpcServer
-	TxPoolV2           *txpool2.TxPool
-	txPoolV2DB         kv.RwDB
+	// TxPool
+	TxPoolFetch      *txpool.Fetch
+	TxPoolSend       *txpool.Send
+	TxPoolGrpcServer *txpool.GrpcServer
+	TxPool           *txpool.TxPool
+	txPoolDB         kv.RwDB
 }
 
 func (ms *MockSentry) Close() {
 	ms.cancel()
-	if ms.txPoolV2DB != nil {
-		ms.txPoolV2DB.Close()
+	if ms.txPoolDB != nil {
+		ms.txPoolDB.Close()
 	}
 	ms.DB.Close()
 }
@@ -218,34 +218,33 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
 	if !cfg.TxPool.Disable {
-		cfg.TxPool.V2 = true
-		poolCfg := txpool2.DefaultConfig
-		newTxs := make(chan txpool2.Hashes, 1024)
+		poolCfg := txpool.DefaultConfig
+		newTxs := make(chan txpool.Hashes, 1024)
 		if t != nil {
 			t.Cleanup(func() {
 				close(newTxs)
 			})
 		}
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
-		mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.txPoolV2DB = memdb.NewPoolDB()
+		mock.txPoolDB = memdb.NewPoolDB()
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
-		mock.TxPoolV2Fetch = txpool2.NewFetch(mock.Ctx, sentries, mock.TxPoolV2, stateChangesClient, mock.DB, mock.txPoolV2DB, *chainID)
-		mock.TxPoolV2Fetch.SetWaitGroup(&mock.ReceiveWg)
-		mock.TxPoolV2Send = txpool2.NewSend(mock.Ctx, sentries, mock.TxPoolV2)
-		mock.TxPoolV2GrpcServer = txpool2.NewGrpcServer(mock.Ctx, mock.TxPoolV2, mock.txPoolV2DB, *chainID)
+		mock.TxPoolFetch = txpool.NewFetch(mock.Ctx, sentries, mock.TxPool, stateChangesClient, mock.DB, mock.txPoolDB, *chainID)
+		mock.TxPoolFetch.SetWaitGroup(&mock.ReceiveWg)
+		mock.TxPoolSend = txpool.NewSend(mock.Ctx, sentries, mock.TxPool)
+		mock.TxPoolGrpcServer = txpool.NewGrpcServer(mock.Ctx, mock.TxPool, mock.txPoolDB, *chainID)
 
-		mock.TxPoolV2Fetch.ConnectCore()
+		mock.TxPoolFetch.ConnectCore()
 		mock.StreamWg.Add(1)
-		mock.TxPoolV2Fetch.ConnectSentries()
+		mock.TxPoolFetch.ConnectSentries()
 		mock.StreamWg.Wait()
 
-		go txpool2.MainLoop(mock.Ctx, mock.txPoolV2DB, mock.DB, mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams, func() {})
+		go txpool.MainLoop(mock.Ctx, mock.txPoolDB, mock.DB, mock.TxPool, newTxs, mock.TxPoolSend, mock.TxPoolGrpcServer.NewSlotsStreams, func() {})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -302,7 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			mock.DB,
 			cfg.BatchSize,
 			mock.ChainConfig,
-		), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageTxPoolCfg(mock.DB, nil, cfg.TxPool, func() {}), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
+		), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -319,7 +318,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
-			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, nil, mock.TxPoolV2, nil, mock.tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, mock.tmpdir),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
 			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
@@ -429,13 +428,13 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	if ms.TxPoolV2 != nil {
+	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
-	if ms.TxPoolV2 != nil {
+	if ms.TxPool != nil {
 		ms.ReceiveWg.Wait() // Wait for TxPool notification
 	}
 	// Check if the latest header was imported or rolled back
