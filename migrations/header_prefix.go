@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 )
 
 var headerPrefixToSeparateBuckets = Migration{
@@ -40,15 +40,15 @@ var headerPrefixToSeparateBuckets = Migration{
 		logPrefix := "split_header_prefix_bucket"
 		const loadStep = "load"
 
-		canonicalCollector, err := etl.NewCollectorFromFiles(tmpdir + "canonical")
+		canonicalCollector, err := etl.NewCollectorFromFiles(logPrefix, tmpdir+"canonical")
 		if err != nil {
 			return err
 		}
-		tdCollector, err := etl.NewCollectorFromFiles(tmpdir + "td")
+		tdCollector, err := etl.NewCollectorFromFiles(logPrefix, tmpdir+"td")
 		if err != nil {
 			return err
 		}
-		headersCollector, err := etl.NewCollectorFromFiles(tmpdir + "headers")
+		headersCollector, err := etl.NewCollectorFromFiles(logPrefix, tmpdir+"headers")
 		if err != nil {
 			return err
 		}
@@ -57,16 +57,16 @@ var headerPrefixToSeparateBuckets = Migration{
 		case "":
 			// can't use files if progress field not set, clear them
 			if canonicalCollector != nil {
-				canonicalCollector.Close(logPrefix)
+				canonicalCollector.Close()
 				canonicalCollector = nil
 			}
 
 			if tdCollector != nil {
-				tdCollector.Close(logPrefix)
+				tdCollector.Close()
 				tdCollector = nil
 			}
 			if headersCollector != nil {
-				headersCollector.Close(logPrefix)
+				headersCollector.Close()
 				headersCollector = nil
 			}
 		case loadStep:
@@ -81,16 +81,16 @@ var headerPrefixToSeparateBuckets = Migration{
 				if rec := recover(); rec != nil {
 					panic(rec)
 				}
-				canonicalCollector.Close(logPrefix)
-				tdCollector.Close(logPrefix)
-				headersCollector.Close(logPrefix)
+				canonicalCollector.Close()
+				tdCollector.Close()
+				headersCollector.Close()
 			}()
 			goto LoadStep
 		}
 
-		canonicalCollector = etl.NewCriticalCollector(tmpdir+"canonical", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
-		tdCollector = etl.NewCriticalCollector(tmpdir+"td", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
-		headersCollector = etl.NewCriticalCollector(tmpdir+"headers", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		canonicalCollector = etl.NewCriticalCollector(logPrefix, tmpdir+"canonical", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		tdCollector = etl.NewCriticalCollector(logPrefix, tmpdir+"td", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
+		headersCollector = etl.NewCriticalCollector(logPrefix, tmpdir+"headers", etl.NewSortableBuffer(etl.BufferOptimalSize*4))
 		defer func() {
 			// don't clean if error or panic happened
 			if err != nil {
@@ -99,9 +99,9 @@ var headerPrefixToSeparateBuckets = Migration{
 			if rec := recover(); rec != nil {
 				panic(rec)
 			}
-			canonicalCollector.Close(logPrefix)
-			tdCollector.Close(logPrefix)
-			headersCollector.Close(logPrefix)
+			canonicalCollector.Close()
+			tdCollector.Close()
+			headersCollector.Close()
 		}()
 
 		err = tx.ForEach(kv.HeaderPrefixOld, []byte{}, func(k, v []byte) error {
@@ -127,13 +127,13 @@ var headerPrefixToSeparateBuckets = Migration{
 
 	LoadStep:
 		// Now transaction would have been re-opened, and we should be re-using the space
-		if err = canonicalCollector.Load(logPrefix, tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = canonicalCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the storage table: %w", err)
 		}
-		if err = tdCollector.Load(logPrefix, tx, kv.HeaderTD, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = tdCollector.Load(tx, kv.HeaderTD, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
-		if err = headersCollector.Load(logPrefix, tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		if err = headersCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 			return fmt.Errorf("loading the transformed data back into the acc table: %w", err)
 		}
 		if err := BeforeCommit(tx, nil, true); err != nil {

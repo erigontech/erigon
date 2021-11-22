@@ -28,6 +28,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -230,7 +231,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 			panic(fmt.Errorf("proof produced by this engine is invalid: %w", err))
 		}
 		epochSet := list.validators
-		log.Debug("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
+		log.Trace("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
 		e.finalityChecker = NewRollingFinality(epochSet)
 		if proof.SignalNumber >= DEBUG_LOG_FROM {
 			fmt.Printf("new rolling finality: %d\n", proof.SignalNumber)
@@ -563,7 +564,7 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 	//nolint
 	if step == parentStep ||
 		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
-		log.Debug("[engine] Multiple blocks proposed for step", "num", parentStep)
+		log.Trace("[aura] Multiple blocks proposed for step", "num", parentStep)
 		_ = setNumber
 		/*
 			self.validators.report_malicious(
@@ -1095,7 +1096,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 	// first check to avoid generating signature most of the time
 	// (but there's still a race to the `compare_exchange`)
 	if !c.step.canPropose.Load() {
-		log.Trace("[engine] Aborting seal generation. Can't propose.")
+		log.Trace("[aura] Aborting seal generation. Can't propose.")
 		return nil
 	}
 	parentStep, err := headerStep(parent)
@@ -1107,24 +1108,24 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 	// filter messages from old and future steps and different parents
 	expectedDiff := calculateScore(parentStep, step, 0)
 	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
-		log.Debug(fmt.Sprintf("[engine] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
+		log.Trace(fmt.Sprintf("[aura] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
 		return nil
 	}
 
 	if parentStep > step {
-		log.Warn(fmt.Sprintf("[engine] Aborting seal generation for invalid step: %d > %d", parentStep, step))
+		log.Warn(fmt.Sprintf("[aura] Aborting seal generation for invalid step: %d > %d", parentStep, step))
 		return nil
 	}
 
 	validators, setNumber, err := c.epochSet(chain, nil, current, nil)
 	if err != nil {
-		log.Warn("[engine] Unable to generate seal", "err", err)
+		log.Warn("[aura] Unable to generate seal", "err", err)
 		return nil
 	}
 
 	stepProposerAddr, err := stepProposer(validators, current.ParentHash, step, call)
 	if err != nil {
-		log.Warn("[engine] Unable to get stepProposer", "err", err)
+		log.Warn("[aura] Unable to get stepProposer", "err", err)
 		return nil
 	}
 	if stepProposerAddr != current.Coinbase {
@@ -1142,7 +1143,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 	/*
 		signature, err := c.sign(current.bareHash())
 			if err != nil {
-				log.Warn("[engine] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
+				log.Warn("[aura] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
 				return nil
 			}
 	*/
@@ -1244,7 +1245,7 @@ func (c *AuRa) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *AuRa) Close() error {
-	common.SafeClose(c.exitCh)
+	libcommon.SafeClose(c.exitCh)
 	return nil
 }
 

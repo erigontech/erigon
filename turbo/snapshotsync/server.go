@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/anacrolix/torrent"
-	"github.com/golang/protobuf/ptypes/empty"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
@@ -16,7 +17,7 @@ var (
 	ErrNotSupportedSnapshot  = errors.New("not supported snapshot for this network id")
 )
 var (
-	_ DownloaderServer = &SNDownloaderServer{}
+	_ snapshotsync.DownloaderServer = &SNDownloaderServer{}
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
@@ -48,18 +49,18 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 }
 
 type SNDownloaderServer struct {
-	DownloaderServer
+	snapshotsync.UnimplementedDownloaderServer
 	t  *Client
 	db kv.RwDB
 }
 
-func (s *SNDownloaderServer) Download(ctx context.Context, request *DownloadSnapshotRequest) (*empty.Empty, error) {
+func (s *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*emptypb.Empty, error) {
 	if err := s.db.Update(ctx, func(tx kv.RwTx) error {
 		return s.t.AddSnapshotsTorrents(ctx, tx, request.NetworkId, FromSnapshotTypes(request.Type))
 	}); err != nil {
 		return nil, err
 	}
-	return &empty.Empty{}, nil
+	return &emptypb.Empty{}, nil
 }
 func (s *SNDownloaderServer) Load() error {
 	return s.db.View(context.Background(), func(tx kv.Tx) error {
@@ -67,8 +68,8 @@ func (s *SNDownloaderServer) Load() error {
 	})
 }
 
-func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *SnapshotsRequest) (*SnapshotsInfoReply, error) {
-	reply := SnapshotsInfoReply{}
+func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
+	reply := snapshotsync.SnapshotsInfoReply{}
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

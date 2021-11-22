@@ -48,10 +48,6 @@ var (
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
-
-	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
-	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
-	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
 )
 
 var AllStages = []SyncStage{

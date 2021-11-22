@@ -84,7 +84,7 @@ func (db *ChecksumDB) DownloadFile(url, dstPath string) error {
 
 	resp, respErr := http.Get(url)
 	if respErr != nil {
-		return fmt.Errorf("download error: %v", respErr)
+		return fmt.Errorf("download error: %w", respErr)
 	} else if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download error: status %d", resp.StatusCode)
 	}

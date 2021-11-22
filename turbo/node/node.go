@@ -120,6 +120,10 @@ func NewNodeConfig() *node.Config {
 	return &nodeConfig
 }
 
+func MakeConfigNodeDefault() *node.Node {
+	return makeConfigNode(NewNodeConfig())
+}
+
 func makeConfigNode(config *node.Config) *node.Node {
 	stack, err := node.New(config)
 	if err != nil {

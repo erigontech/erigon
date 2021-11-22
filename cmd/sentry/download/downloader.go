@@ -12,12 +12,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	debug2 "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -90,7 +90,11 @@ func RecvUploadMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -118,7 +122,11 @@ func RecvUploadMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
+			if rlp.IsDecodeError(err) {
+				log.Debug("[RecvUploadMessage]: Handling incoming message", "error", err)
+			} else {
+				log.Warn("[RecvUploadMessage]: Handling incoming message", "error", err)
+			}
 		}
 		if wg != nil {
 			wg.Done()
@@ -177,7 +185,11 @@ func RecvUploadHeadersMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -203,7 +215,11 @@ func RecvUploadHeadersMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("RecvUploadMessage: Handling incoming message", "error", err)
+			if rlp.IsDecodeError(err) {
+				log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
+			} else {
+				log.Warn("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
+			}
 		}
 		if wg != nil {
 			wg.Done()
@@ -266,7 +282,11 @@ func RecvMessage(
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug2.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
@@ -301,7 +321,11 @@ func RecvMessage(
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			return err
+			if rlp.IsDecodeError(err) {
+				log.Debug("[RecvMessage] Handling incoming message", "error", err)
+			} else {
+				log.Warn("[RecvMessage] Handling incoming message", "error", err)
+			}
 		}
 
 		if wg != nil {
@@ -373,7 +397,7 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
-		return fmt.Errorf("decode NewBlockHashes66: %v", err)
+		return fmt.Errorf("decode NewBlockHashes66: %w", err)
 	}
 	for _, announce := range request {
 		cs.Hd.SaveExternalAnnounce(announce.Hash)
@@ -391,7 +415,7 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 			},
 		})
 		if err != nil {
-			return fmt.Errorf("encode header request: %v", err)
+			return fmt.Errorf("encode header request: %w", err)
 		}
 		outreq := proto_sentry.SendMessageByIdRequest{
 			PeerId: req.PeerId,
@@ -405,7 +429,7 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 			if isPeerNotFoundErr(err) {
 				continue
 			}
-			return fmt.Errorf("send header request: %v", err)
+			return fmt.Errorf("send header request: %w", err)
 		}
 	}
 	return nil
@@ -418,7 +442,7 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
-		return fmt.Errorf("decode newBlockHashes65: %v", err)
+		return fmt.Errorf("decode newBlockHashes65: %w", err)
 	}
 	for _, announce := range request {
 		cs.Hd.SaveExternalAnnounce(announce.Hash)
@@ -433,7 +457,7 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 			Origin:  eth.HashOrNumber{Hash: announce.Hash},
 		})
 		if err != nil {
-			return fmt.Errorf("encode header request: %v", err)
+			return fmt.Errorf("encode header request: %w", err)
 		}
 		outreq := proto_sentry.SendMessageByIdRequest{
 			PeerId: req.PeerId,
@@ -447,7 +471,7 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 			if isPeerNotFoundErr(err) {
 				continue
 			}
-			return fmt.Errorf("send header request: %v", err)
+			return fmt.Errorf("send header request: %w", err)
 		}
 	}
 	return nil
@@ -480,7 +504,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 	// Parse the entire request from scratch
 	var request eth.BlockHeadersPacket66
 	if err := rlp.DecodeBytes(in.Data, &request); err != nil {
-		return fmt.Errorf("decode 5 BlockHeadersPacket66: %v", err)
+		return fmt.Errorf("decode 5 BlockHeadersPacket66: %w", err)
 	}
 	headers := request.BlockHeadersPacket
 	var heighestBlock uint64
@@ -507,7 +531,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 				if req != nil {
 					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
 						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
-						log.Debug("Sent request", "height", req.Number)
+						log.Trace("Sent request", "height", req.Number)
 					}
 				}
 				cs.Penalize(ctx, penalties)
@@ -522,7 +546,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 			}
 		}
 	} else {
-		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
+		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   in.PeerId,
@@ -555,7 +579,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 	// Parse the entire request from scratch
 	var request eth.BlockHeadersPacket
 	if err := rlp.DecodeBytes(in.Data, &request); err != nil {
-		return fmt.Errorf("decode 5 BlockHeadersPacket66: %v", err)
+		return fmt.Errorf("decode 5 BlockHeadersPacket66: %w", err)
 	}
 	headers := request
 	var heighestBlock uint64
@@ -582,7 +606,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 				if req != nil {
 					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
 						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
-						log.Debug("Sent request", "height", req.Number)
+						log.Trace("Sent request", "height", req.Number)
 					}
 				}
 				cs.Penalize(ctx, penalties)
@@ -597,7 +621,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 			}
 		}
 	} else {
-		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
+		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   in.PeerId,
@@ -631,7 +655,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	// Parse the entire request from scratch
 	var request eth.NewBlockPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode 4 NewBlockMsg: %v", err)
+		return fmt.Errorf("decode 4 NewBlockMsg: %w", err)
 	}
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
@@ -651,7 +675,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 			}
 		}
 	} else {
-		return fmt.Errorf("singleHeaderAsSegment failed: %v", err)
+		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	cs.Bd.AddToPrefetch(request.Block)
 	outreq := proto_sentry.PeerMinBlockRequest{
@@ -661,14 +685,14 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Debug(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
 	return nil
 }
 
 func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode BlockBodiesPacket66: %v", err)
+		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
 	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
@@ -678,7 +702,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode blockBodies65: %v", err)
+		return fmt.Errorf("decode blockBodies65: %w", err)
 	}
 	txs, uncles := request.Unpack()
 	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
@@ -695,7 +719,7 @@ func (cs *ControlServerImpl) receipts65(ctx context.Context, inreq *proto_sentry
 func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockHeaders66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockHeaders66: %w, data: %x", err, inreq.Data)
 	}
 
 	var headers []*types.Header
@@ -713,7 +737,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 		BlockHeadersPacket: headers,
 	})
 	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
+		return fmt.Errorf("encode header response: %w", err)
 	}
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
@@ -725,9 +749,9 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
 		if !isPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 65: %v", err)
+			return fmt.Errorf("send header response 65: %w", err)
 		}
-		return fmt.Errorf("send header response 66: %v", err)
+		return fmt.Errorf("send header response 66: %w", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
@@ -736,7 +760,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockHeadersPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockHeaders65: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockHeaders65: %w, data: %x", err, inreq.Data)
 	}
 
 	var headers []*types.Header
@@ -751,7 +775,7 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 	}
 	b, err := rlp.EncodeToBytes(eth.BlockHeadersPacket(headers))
 	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
+		return fmt.Errorf("encode header response: %w", err)
 	}
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
@@ -763,7 +787,7 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
 		if !isPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 65: %v", err)
+			return fmt.Errorf("send header response 65: %w", err)
 		}
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
@@ -773,7 +797,7 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockBodies66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
 	}
 	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
@@ -787,7 +811,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 		BlockBodiesRLPPacket: response,
 	})
 	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
+		return fmt.Errorf("encode header response: %w", err)
 	}
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
@@ -801,7 +825,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 		if isPeerNotFoundErr(err) {
 			return nil
 		}
-		return fmt.Errorf("send bodies response: %v", err)
+		return fmt.Errorf("send bodies response: %w", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
 	return nil
@@ -810,7 +834,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockBodies65: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getBlockBodies65: %w, data: %x", err, inreq.Data)
 	}
 	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
@@ -821,7 +845,7 @@ func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(eth.BlockBodiesRLPPacket(response))
 	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
+		return fmt.Errorf("encode header response: %w", err)
 	}
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
@@ -835,7 +859,7 @@ func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_
 		if isPeerNotFoundErr(err) {
 			return nil
 		}
-		return fmt.Errorf("send bodies response: %v", err)
+		return fmt.Errorf("send bodies response: %w", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
 	return nil
@@ -844,7 +868,7 @@ func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_
 func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
 	}
 	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
@@ -861,7 +885,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 		ReceiptsRLPPacket: receipts,
 	})
 	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
+		return fmt.Errorf("encode header response: %w", err)
 	}
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
@@ -875,7 +899,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 		if isPeerNotFoundErr(err) {
 			return nil
 		}
-		return fmt.Errorf("send bodies response: %v", err)
+		return fmt.Errorf("send bodies response: %w", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
 	return nil
@@ -884,7 +908,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetReceiptsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts65: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getReceipts65: %w, data: %x", err, inreq.Data)
 	}
 	tx, err := cs.db.BeginRo(ctx)
 	if err != nil {
@@ -898,7 +922,7 @@ func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sen
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket(receipts))
 	if err != nil {
-		return fmt.Errorf("encode header response: %v", err)
+		return fmt.Errorf("encode header response: %w", err)
 	}
 	outreq := proto_sentry.SendMessageByIdRequest{
 		PeerId: inreq.PeerId,
@@ -912,7 +936,7 @@ func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sen
 		if isPeerNotFoundErr(err) {
 			return nil
 		}
-		return fmt.Errorf("send bodies response: %v", err)
+		return fmt.Errorf("send bodies response: %w", err)
 	}
 	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
 	return nil

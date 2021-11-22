@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -37,7 +38,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		return nil, err
 	}
 	if chainConfig.IsLondon(blockNumber) && blockHash != (common.Hash{}) {
-		block, err := rawdb.ReadBlockByHash(tx, blockHash)
+		block, err := api.blockByHashWithSenders(tx, blockHash)
 		if err != nil {
 			return nil, err
 		}
@@ -49,6 +50,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
+	if curHeader == nil {
+		return nil, nil
+	}
 
 	// No finalized transaction, try to retrieve it from the pool
 	reply, err := api.txPool.Transactions(ctx, &txpool.TransactionsRequest{Hashes: []*types.H256{gointerfaces.ConvertHashToH256(hash)}})
@@ -56,7 +60,8 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		return nil, err
 	}
 	if len(reply.RlpTxs[0]) > 0 {
-		txn, err = types2.UnmarshalTransactionFromBinary(reply.RlpTxs[0])
+		s := rlp.NewStream(bytes.NewReader(reply.RlpTxs[0]), uint64(len(reply.RlpTxs[0])))
+		txn, err = types2.DecodeTransaction(s)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +111,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByBlockHashAndIndex
-	block, _, err := rawdb.ReadBlockByHashWithSenders(tx, blockHash)
+	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +136,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockHashAndIndex
-	block, err := rawdb.ReadBlockByHash(tx, blockHash)
+	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +161,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +186,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getRawTransactionByBlockNumberAndIndex
-	blockNum, err := getBlockNumber(blockNr, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := api.blockByRPCNumber(blockNr, tx)
 	if err != nil {
 		return nil, err
 	}

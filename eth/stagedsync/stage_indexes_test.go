@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -172,9 +173,9 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 }
 
 func expectNoHistoryBefore(t *testing.T, tx kv.Tx, csbucket string, prunedTo uint64) {
-	prefixLen := common.AddressLength
+	prefixLen := length.Addr
 	if csbucket == kv.StorageChangeSet {
-		prefixLen = common.HashLength
+		prefixLen = length.Hash
 	}
 	afterPrune := 0
 	err := tx.ForEach(changeset.Mapper[csbucket].IndexBucket, nil, func(k, _ []byte) error {

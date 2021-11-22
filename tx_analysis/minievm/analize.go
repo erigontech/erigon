@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -19,7 +20,7 @@ type Analizer struct {
 
 }
 
-func Analize(header *types.Header, tx rpctest.EthTransaction) Analysis {
+func Analize(header *types.Header, tx rpctest.EthTransaction, sdb *state.IntraBlockState) (Analysis, error) {
 
 	analysis := Analysis{
 		ReadPoints:  make([]common.Address, 0),
@@ -29,14 +30,16 @@ func Analize(header *types.Header, tx rpctest.EthTransaction) Analysis {
 	if tx.To == nil {
 		// contract creation
 		fmt.Println("Contract creation")
+		// create()
 	} else {
 		// message call
 		fmt.Println("Message call")
+		// call()
 	}
 
 	createEVMctx()
 
-	return analysis
+	return analysis, nil
 }
 
 func createEVMctx() {
@@ -44,5 +47,25 @@ func createEVMctx() {
 }
 
 func create(sender common.Address, code []byte, value *uint256.Int) {
+
+}
+
+func create2() {
+
+}
+
+func call() {
+
+}
+
+func callCode() {
+
+}
+
+func delegateCall() {
+
+}
+
+func staticCall() {
 
 }

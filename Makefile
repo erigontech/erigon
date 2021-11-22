@@ -4,14 +4,14 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test ./... -p 2
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags)
+GIT_TAG    ?= $(shell git describe --tags `git rev-list --tags="v*" --max-count=1`)
 GOBUILD = env GO111MODULE=on $(GO) build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
 GO_DBG_BUILD = $(GO) build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
 
-all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
+all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry txpool
 
 go-version:
 	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
@@ -68,6 +68,11 @@ rpcdaemon:
 	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
+
+txpool:
+	$(GOBUILD) -o $(GOBIN)/txpool ./cmd/txpool
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/txpool\" to launch txpool."
 
 integration:
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
@@ -129,7 +134,7 @@ lintci:
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.41.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.42.1
 
 clean:
 	env GO111MODULE=on go clean -cache

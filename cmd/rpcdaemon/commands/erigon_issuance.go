@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -74,7 +73,7 @@ func (api *ErigonImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*
 	if err != nil {
 		return nil, err
 	}
-	return rawdb.ReadBlockByNumber(tx, blockNum)
+	return api.blockByNumberWithSenders(tx, blockNum)
 }
 
 // Issuance structure to return information about issuance

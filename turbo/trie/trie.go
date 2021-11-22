@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -473,9 +474,9 @@ func findSubTriesToLoad(nd node, nibblePath []byte, hook []byte, rl RetainDecide
 		}
 		return newPrefixes, newFixedBits, newHooks
 	case hashNode:
-		newPrefixes = append(prefixes, common.CopyBytes(dbPrefix))
+		newPrefixes = append(prefixes, libcommon.Copy(dbPrefix))
 		newFixedBits = append(fixedbits, bits)
-		newHooks = append(hooks, common.CopyBytes(hook))
+		newHooks = append(hooks, libcommon.Copy(hook))
 		return newPrefixes, newFixedBits, newHooks
 	}
 	return prefixes, fixedbits, hooks
@@ -528,7 +529,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 	var nn node
 	switch n := origNode.(type) {
 	case nil:
-		return true, NewShortNode(common.CopyBytes(key[pos:]), value)
+		return true, NewShortNode(libcommon.Copy(key[pos:]), value)
 	case *accountNode:
 		updated, nn = t.insertRecursive(n.storage, key, pos, value)
 		if updated {
@@ -555,13 +556,13 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
 			} else {
-				c1 = NewShortNode(common.CopyBytes(n.Key[matchlen+1:]), n.Val)
+				c1 = NewShortNode(libcommon.Copy(n.Key[matchlen+1:]), n.Val)
 			}
 			var c2 node
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				c2 = NewShortNode(common.CopyBytes(key[pos+matchlen+1:]), value)
+				c2 = NewShortNode(libcommon.Copy(key[pos+matchlen+1:]), value)
 			}
 			branch := &duoNode{}
 			if n.Key[matchlen] < key[pos+matchlen] {
@@ -578,7 +579,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 				newNode = branch // current node leaves the generation, but new node branch joins it
 			} else {
 				// Otherwise, replace it with a short node leading up to the branch.
-				n.Key = common.CopyBytes(key[pos : pos+matchlen])
+				n.Key = libcommon.Copy(key[pos : pos+matchlen])
 				n.Val = branch
 				n.ref.len = 0
 				newNode = n
@@ -612,7 +613,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			if len(key) == pos+1 {
 				child = value
 			} else {
-				child = NewShortNode(common.CopyBytes(key[pos+1:]), value)
+				child = NewShortNode(libcommon.Copy(key[pos+1:]), value)
 			}
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
@@ -631,7 +632,7 @@ func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
-				n.Children[key[pos]] = NewShortNode(common.CopyBytes(key[pos+1:]), value)
+				n.Children[key[pos]] = NewShortNode(libcommon.Copy(key[pos+1:]), value)
 			}
 			updated = true
 			n.ref.len = 0
@@ -719,7 +720,7 @@ func (t *Trie) HookSubTries(subTries SubTries, hooks [][]byte) error {
 			return fmt.Errorf("root==nil for hook %x", hookNibbles)
 		}
 		if err := t.hook(hookNibbles, root, hash[:]); err != nil {
-			return fmt.Errorf("hook %x: %v", hookNibbles, err)
+			return fmt.Errorf("hook %x: %w", hookNibbles, err)
 		}
 	}
 	return nil
@@ -1236,7 +1237,7 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 		return nil
 	}
 
-	return common.CopyBytes(rlp)
+	return libcommon.Copy(rlp)
 }
 
 func (t *Trie) evictNodeFromHashMap(nd node) {

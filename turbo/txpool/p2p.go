@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -51,7 +51,7 @@ func NewP2PServer(ctx context.Context, sentries []direct.SentryClient, txPool *c
 func (tp *P2PServer) newPooledTransactionHashes66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding newPooledTransactionHashes66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding newPooledTransactionHashes66: %w, data: %x", err, inreq.Data)
 	}
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
@@ -59,7 +59,7 @@ func (tp *P2PServer) newPooledTransactionHashes66(ctx context.Context, inreq *pr
 func (tp *P2PServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.NewPooledTransactionHashesPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding newPooledTransactionHashes65: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding newPooledTransactionHashes65: %w, data: %x", err, inreq.Data)
 	}
 	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
 }
@@ -67,7 +67,7 @@ func (tp *P2PServer) newPooledTransactionHashes65(ctx context.Context, inreq *pr
 func (tp *P2PServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	txs := &eth.PooledTransactionsPacket66{}
 	if err := txs.DecodeRLP(rlp.NewStream(bytes.NewReader(inreq.Data), 0)); err != nil {
-		return fmt.Errorf("decoding pooledTransactions66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding pooledTransactions66: %w, data: %x", err, inreq.Data)
 	}
 
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), txs.PooledTransactionsPacket, true)
@@ -76,7 +76,7 @@ func (tp *P2PServer) pooledTransactions66(ctx context.Context, inreq *proto_sent
 func (tp *P2PServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	txs := &eth.PooledTransactionsPacket{}
 	if err := txs.DecodeRLP(rlp.NewStream(bytes.NewReader(inreq.Data), 0)); err != nil {
-		return fmt.Errorf("decoding pooledTransactions65: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding pooledTransactions65: %w, data: %x", err, inreq.Data)
 	}
 
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), *txs, true)
@@ -92,7 +92,7 @@ func (tp *P2PServer) transactions65(ctx context.Context, inreq *proto_sentry.Inb
 	}
 	var query eth.TransactionsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding TransactionsPacket: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding TransactionsPacket: %w, data: %x", err, inreq.Data)
 	}
 	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
 }
@@ -103,7 +103,7 @@ func (tp *P2PServer) getPooledTransactions66(ctx context.Context, inreq *proto_s
 	}
 	var query eth.GetPooledTransactionsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding GetPooledTransactionsPacket66: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding GetPooledTransactionsPacket66: %w, data: %x", err, inreq.Data)
 	}
 	_, txs := eth.AnswerGetPooledTransactions(tp.TxPool, query.GetPooledTransactionsPacket)
 	b, err := rlp.EncodeToBytes(&eth.PooledTransactionsRLPPacket66{
@@ -111,7 +111,7 @@ func (tp *P2PServer) getPooledTransactions66(ctx context.Context, inreq *proto_s
 		PooledTransactionsRLPPacket: txs,
 	})
 	if err != nil {
-		return fmt.Errorf("encode GetPooledTransactionsPacket66 response: %v", err)
+		return fmt.Errorf("encode GetPooledTransactionsPacket66 response: %w", err)
 	}
 	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
 	outreq := proto_sentry.SendMessageByIdRequest{
@@ -120,7 +120,7 @@ func (tp *P2PServer) getPooledTransactions66(ctx context.Context, inreq *proto_s
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		return fmt.Errorf("send pooled transactions response: %v", err)
+		return fmt.Errorf("send pooled transactions response: %w", err)
 	}
 	return nil
 }
@@ -131,12 +131,12 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 	}
 	var query eth.GetPooledTransactionsPacket
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getPooledTransactions65: %v, data: %x", err, inreq.Data)
+		return fmt.Errorf("decoding getPooledTransactions65: %w, data: %x", err, inreq.Data)
 	}
 	_, txs := eth.AnswerGetPooledTransactions(tp.TxPool, query)
 	b, err := rlp.EncodeToBytes(eth.PooledTransactionsRLPPacket(txs))
 	if err != nil {
-		return fmt.Errorf("encode getPooledTransactions65 response: %v", err)
+		return fmt.Errorf("encode getPooledTransactions65 response: %w", err)
 	}
 	// TODO: implement logic from perr.ReplyPooledTransactionsRLP - to remember tx ids
 	outreq := proto_sentry.SendMessageByIdRequest{
@@ -145,7 +145,7 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 	}
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
-		return fmt.Errorf("send pooled transactions response: %v", err)
+		return fmt.Errorf("send pooled transactions response: %w", err)
 	}
 	return nil
 }
@@ -287,7 +287,11 @@ func RecvTxMessage(ctx context.Context,
 	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -325,7 +329,15 @@ func RecvTxMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Error("RecvTxMessage: Handling incoming message", "error", err)
+			s, ok := status.FromError(err)
+			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
+			if doLog {
+				if rlp.IsDecodeError(err) {
+					log.Debug("[RecvTxMessage] Handling incoming message", "error", err)
+				} else {
+					log.Warn("[RecvTxMessage] Handling incoming message", "error", err)
+				}
+			}
 		}
 		if wg != nil {
 			wg.Done()
@@ -368,7 +380,11 @@ func RecvPeers(ctx context.Context,
 	recentPeers *txpropagate.RecentlyConnectedPeers,
 	wg *sync.WaitGroup,
 ) (err error) {
-	defer func() { err = debug.ReportPanicAndRecover(err) }() // avoid crash because Erigon's core does many things
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

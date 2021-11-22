@@ -127,7 +127,7 @@ func newMemoryDB(logger log.Logger) (*DB, error) {
 func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	var db kv.RwDB
 	var err error
-	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(256 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
+	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(1024 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +362,7 @@ func (db *DB) Node(id ID) *Node {
 func mustDecodeNode(id, data []byte) *Node {
 	node := new(Node)
 	if err := rlp.DecodeBytes(data, &node.r); err != nil {
-		panic(fmt.Errorf("p2p/enode: can't decode node %x in DB: %v", id, err))
+		panic(fmt.Errorf("p2p/enode: can't decode node %x in DB: %w", id, err))
 	}
 	// Restore node id cache.
 	copy(node.id[:], id)
@@ -734,19 +734,16 @@ func (db *DB) commitCache(logit bool) {
 	entriesUpdated := 0
 	entriesDeleted := 0
 	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.Inodes)
-		if err != nil {
-			return err
-		}
+		var err error
 		db.kvCache.Ascend(func(i btree.Item) bool {
 			di := i.(*DbItem)
 			if di.val == nil {
-				if err = c.Delete(di.key, nil); err != nil {
+				if err = tx.Delete(kv.Inodes, di.key, nil); err != nil {
 					return false
 				}
 				entriesUpdated++
 			} else {
-				if err = c.Put(di.key, di.val); err != nil {
+				if err = tx.Put(kv.Inodes, di.key, di.val); err != nil {
 					return false
 				}
 				entriesDeleted++
@@ -766,11 +763,15 @@ func (db *DB) commitCache(logit bool) {
 
 // close flushes and closes the database files.
 func (db *DB) Close() {
+	select {
+	case <-db.quit:
+		return // means closed already
+	default:
+	}
 	if db.quit == nil {
 		return
 	}
 	close(db.quit)
-	db.quit = nil
 	db.kvCacheLock.Lock()
 	defer db.kvCacheLock.Unlock()
 	db.commitCache(true /* logit */)

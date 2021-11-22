@@ -43,10 +43,12 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 
 	content := map[string]map[string]map[string]*RPCTransaction{
 		"pending": make(map[string]map[string]*RPCTransaction),
+		"baseFee": make(map[string]map[string]*RPCTransaction),
 		"queued":  make(map[string]map[string]*RPCTransaction),
 	}
 
 	pending := make(map[common.Address][]types.Transaction, 8)
+	baseFee := make(map[common.Address][]types.Transaction, 8)
 	queued := make(map[common.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		stream := rlp.NewStream(bytes.NewReader(reply.Txs[i].RlpTx), 0)
@@ -61,6 +63,11 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
 			pending[addr] = append(pending[addr], txn)
+		case proto_txpool.AllReply_BASE_FEE:
+			if _, ok := baseFee[addr]; !ok {
+				baseFee[addr] = make([]types.Transaction, 0, 4)
+			}
+			baseFee[addr] = append(baseFee[addr], txn)
 		case proto_txpool.AllReply_QUEUED:
 			if _, ok := queued[addr]; !ok {
 				queued[addr] = make([]types.Transaction, 0, 4)
@@ -80,6 +87,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
+	if curHeader == nil {
+		return nil, nil
+	}
 	// Flatten the pending transactions
 	for account, txs := range pending {
 		dump := make(map[string]*RPCTransaction)
@@ -87,6 +97,14 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
 		}
 		content["pending"][account.Hex()] = dump
+	}
+	// Flatten the baseFee transactions
+	for account, txs := range baseFee {
+		dump := make(map[string]*RPCTransaction)
+		for _, txn := range txs {
+			dump[fmt.Sprintf("%d", txn.GetNonce())] = newRPCPendingTransaction(txn, curHeader, cc)
+		}
+		content["baseFee"][account.Hex()] = dump
 	}
 	// Flatten the queued transactions
 	for account, txs := range queued {
@@ -107,6 +125,7 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, 
 	}
 	return map[string]hexutil.Uint{
 		"pending": hexutil.Uint(reply.PendingCount),
+		"baseFee": hexutil.Uint(reply.BaseFeeCount),
 		"queued":  hexutil.Uint(reply.QueuedCount),
 	}, nil
 }

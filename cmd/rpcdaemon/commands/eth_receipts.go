@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/RoaringBitmap/roaring"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -43,17 +44,22 @@ func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig,
 		return nil, err
 	}
 
-	var receipts types.Receipts
+	usedGas := new(uint64)
 	gp := new(core.GasPool).AddGas(block.GasLimit())
-	var usedGas = new(uint64)
+
+	ethashFaker := ethash.NewFaker()
+	noopWriter := state.NewNoopWriter()
+
+	receipts := make(types.Receipts, len(block.Transactions()))
+
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethash.NewFaker(), nil, gp, ibs, state.NewNoopWriter(), block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, ethashFaker, nil, gp, ibs, noopWriter, block.Header(), txn, usedGas, vm.Config{}, contractHasTEVM)
 		if err != nil {
 			return nil, err
 		}
 		receipt.BlockHash = block.Hash()
-		receipts = append(receipts, receipt)
+		receipts[i] = receipt
 	}
 
 	return receipts, nil
@@ -85,13 +91,24 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 
 		begin = 0
-		if crit.FromBlock != nil && crit.FromBlock.Sign() > 0 {
-			begin = crit.FromBlock.Uint64()
+		if crit.FromBlock != nil {
+			if crit.FromBlock.Sign() >= 0 {
+				begin = crit.FromBlock.Uint64()
+			} else {
+				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+			}
 		}
 		end = latest
-		if crit.ToBlock != nil && crit.ToBlock.Sign() > 0 {
-			end = crit.ToBlock.Uint64()
+		if crit.ToBlock != nil {
+			if crit.ToBlock.Sign() >= 0 {
+				end = crit.ToBlock.Uint64()
+			} else {
+				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+			}
 		}
+	}
+	if end < begin {
+		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 
 	blockNumbers := roaring.New()
@@ -136,7 +153,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = common.Stopped(ctx.Done()); err != nil {
+		if err = libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, err
 		}
 
@@ -166,7 +183,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 
 		if len(blockLogs) > 0 {
-			b, err := rawdb.ReadBlockByNumber(tx, blockNToMatch)
+			b, err := api.blockByNumberWithSenders(tx, blockNToMatch)
 			if err != nil {
 				return nil, err
 			}
@@ -240,7 +257,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 
 	// Extract transactions from block
-	block, senders, bErr := rawdb.ReadBlockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -259,9 +276,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, cc, block, senders)
+	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	if len(receipts) <= int(txIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
@@ -281,7 +298,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	block, senders, err := rawdb.ReadBlockByNumberWithSenders(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -292,9 +309,9 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, block, senders)
+	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %v", err)
+		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {

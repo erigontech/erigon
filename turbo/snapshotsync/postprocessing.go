@@ -8,10 +8,11 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -41,23 +42,23 @@ var (
 	Snapshot11kkTD             = []byte{138, 3, 199, 118, 5, 203, 95, 162, 81, 64, 161}
 )
 
-func PostProcessing(db kv.RwDB, downloadedSnapshots map[SnapshotType]*SnapshotsInfo) error {
-	if _, ok := downloadedSnapshots[SnapshotType_headers]; ok {
+func PostProcessing(db kv.RwDB, downloadedSnapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo) error {
+	if _, ok := downloadedSnapshots[snapshotsync.SnapshotType_headers]; ok {
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return GenerateHeaderIndexes(context.Background(), tx)
 		}); err != nil {
 			return err
 		}
 	}
-	if _, ok := downloadedSnapshots[SnapshotType_state]; ok {
+	if _, ok := downloadedSnapshots[snapshotsync.SnapshotType_state]; ok {
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return PostProcessState(tx, downloadedSnapshots[SnapshotType_state])
+			return PostProcessState(tx, downloadedSnapshots[snapshotsync.SnapshotType_state])
 		}); err != nil {
 			return err
 		}
 	}
 
-	if _, ok := downloadedSnapshots[SnapshotType_bodies]; ok {
+	if _, ok := downloadedSnapshots[snapshotsync.SnapshotType_bodies]; ok {
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return PostProcessBodies(tx)
 		}); err != nil {
@@ -121,7 +122,7 @@ func PostProcessBodies(tx kv.RwTx) error {
 	return tx.Commit()
 }
 
-func PostProcessState(db kv.RwTx, info *SnapshotsInfo) error {
+func PostProcessState(db kv.RwTx, info *snapshotsync.SnapshotsInfo) error {
 	v, err := stages.GetStageProgress(db, stages.Execution)
 	if err != nil {
 		return err

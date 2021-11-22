@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/tx_analysis/minievm"
 )
@@ -31,10 +32,11 @@ type worker struct {
 	done   chan bool
 	wg     *sync.WaitGroup
 	errs   int
-	report *report
+	report *Report
+	sdb    *state.IntraBlockState
 }
 
-func newWorker(id int, stop chan bool, wg *sync.WaitGroup, r *report) *worker {
+func newWorker(id int, stop chan bool, wg *sync.WaitGroup, r *Report) *worker {
 	// var tasks [][]byte
 	// totalTasks := 0
 	// mu := &sync.Mutex{}
@@ -55,14 +57,6 @@ func (w *worker) start() {
 
 	fmt.Printf("Starting a worker with id: %d...\n", w.id)
 
-	// logger := log_.New()
-	// db, err := mdbx.NewMDBX(logger).Path("/mnt/mx500_0/goerli/chaindata").Readonly().Open()
-	// if err != nil {
-	// 	fmt.Println(err)
-
-	// }
-	// defer db.Close()
-
 	active := false
 	stop := false
 	for {
@@ -72,9 +66,8 @@ func (w *worker) start() {
 			stop = true
 		case t := <-w.tasks:
 			active = true
-			blockN := t.header.Number.Uint64()
-			fmt.Printf("worker-%d received task: { block : %d, idx: %d}\n", w.id, blockN, t.idx)
-			minievm.Analize(t.header, t.tx)
+			fmt.Printf("worker-%d received task: { idx: %d }\n", w.id, t.idx)
+			minievm.Analize(t.header, t.tx, w.sdb)
 			// w.report.add(t.idx, analysis)
 		default:
 			if stop && len(w.tasks) == 0 {

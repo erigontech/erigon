@@ -72,7 +72,7 @@ make erigon
 ```
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
-in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name if
+in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
 ### Mining
@@ -133,15 +133,16 @@ Windows users may run erigon in 3 possible ways:
 
 ### Beacon Chain
 
-Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2 
-rely on availability of receipts - don't prune them: don't add 
-character `r` to `--prune` flag or set large `--prune.r.older=2_000_000`.
+Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
+relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipes are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
 
 You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
 
-If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default).
+If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default)
+.
 
-Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`, where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
+Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
+where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
 
@@ -161,7 +162,7 @@ is being updated on recurring basis.</code>
 **Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
 DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-<code> 🔬 See our detailed ETL explanation [here](/common/etl/README.md).</code>
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/ledgerwatch/erigon-lib/blob/main/etl/README.md).</code>
 
 **Plain state**.
 
@@ -178,7 +179,7 @@ Erigon uses a rearchitected full sync algorithm from
 It uses the same network primitives and is compatible with regular go-ethereum nodes that are using full sync, you do
 not need any special sync capabilities for Erigon to sync.
 
-When reimagining the full sync, we focused on batching data together and minimize DB overwrites. That makes it possible
+When reimagining the full sync, with focus on batching data together and minimize DB overwrites. That makes it possible
 to sync Ethereum mainnet in under 2 days if you have a fast enough network connection and an SSD drive.
 
 Examples of stages are:
@@ -213,7 +214,7 @@ Provide both `--datadir` and `--private.api.addr` options:
 make erigon
 ./build/bin/erigon --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 #### **For remote DB**
@@ -225,7 +226,7 @@ socket connection to pass data between them. To use this mode, run Erigon in one
 make erigon
 ./build/bin/erigon --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 **gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
@@ -274,15 +275,18 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 ### Default Ports and Protocols / Firewalls?
 
 #### `erigon` ports
+
 |  Port |  Protocol |      Purpose     |  Expose |
 |:-----:|:---------:|:----------------:|:-------:|
 | 30303 | TCP & UDP |  eth/66 peering  |  Public |
 | 30304 | TCP & UDP |  eth/65 peering  |  Public |
 |  9090 |    TCP    | gRPC Connections | Private |
 
-Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
+Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
+internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 
 #### `rpcdaemon` ports
+
 |  Port |  Protocol |      Purpose      |  Expose |
 |:-----:|:---------:|:-----------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets | Private |
@@ -290,22 +294,34 @@ Typically 30303 and 30304 are exposed to the internet to allow incoming peering 
 Typically 8545 is exposed only interally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
 
 #### `sentry` ports
+
 |  Port |  Protocol |      Purpose     |  Expose |
 |:-----:|:---------:|:----------------:|:-------:|
 | 30303 | TCP & UDP |      Peering     |  Public |
 |  9091 |    TCP    | gRPC Connections | Private |
 
-Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port 9091 is for internal gRCP connections (e.g erigon -> sentry)
+Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port
+9091 is for internal gRCP connections (e.g erigon -> sentry)
 
 #### Other ports
+
 | Port | Protocol | Purpose |  Expose |
 |:----:|:--------:|:-------:|:-------:|
 | 6060 |    TCP   |  pprof  | Private |
 | 6060 |    TCP   | metrics | Private |
 
-Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
+Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
+you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
 
-Also, ports 9092 and 9093 are reserved for future use of the consensus engine and shapshot downloader for gRPC (work in progress).
+Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
+### How to get diagnostic for bug report?
+
+- Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
+- Get CPU profiling: add `--pprof flag`
+  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+- Get RAM profiling: add `--pprof flag`
+  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
 
 Getting in touch
 ================
@@ -396,3 +412,7 @@ non-batched way.
 ### Filesystem's background features are expensive
 
 For example: btrfs's autodefrag option - may increase write IO 100x times
+
+### Gnome Tracker can kill Erigon
+
+[Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.

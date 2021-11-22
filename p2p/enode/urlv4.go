@@ -73,7 +73,7 @@ func ParseV4(rawurl string) (*Node, error) {
 	if m := incompleteNodeURL.FindStringSubmatch(rawurl); m != nil {
 		id, err := parsePubkey(m[1])
 		if err != nil {
-			return nil, fmt.Errorf("invalid public key (%v)", err)
+			return nil, fmt.Errorf("invalid public key (%w)", err)
 		}
 		return NewV4(id, nil, 0, 0), nil
 	}
@@ -124,7 +124,7 @@ func parseComplete(rawurl string) (*Node, error) {
 		return nil, errors.New("does not contain node ID")
 	}
 	if id, err = parsePubkey(u.User.String()); err != nil {
-		return nil, fmt.Errorf("invalid public key (%v)", err)
+		return nil, fmt.Errorf("invalid public key (%w)", err)
 	}
 	// Parse the IP address.
 	ip := net.ParseIP(u.Hostname())

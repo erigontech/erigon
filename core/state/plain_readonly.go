@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 type storageItem struct {
@@ -34,7 +34,7 @@ type storageItem struct {
 	value       uint256.Int
 }
 
-func (a *storageItem) Less(b llrb.Item) bool {
+func (a *storageItem) Less(b btree.Item) bool {
 	bi := b.(*storageItem)
 	return bytes.Compare(a.key[:], bi.key[:]) < 0
 }
@@ -44,11 +44,10 @@ type PlainState struct {
 	accChangesC, storageChangesC kv.CursorDupSort
 	tx                           kv.Tx
 	blockNr                      uint64
-	storage                      map[common.Address]*llrb.LLRB
+	storage                      map[common.Address]*btree.BTree
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
-
 	c1, _ := tx.Cursor(kv.AccountsHistory)
 	c2, _ := tx.Cursor(kv.StorageHistory)
 	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
@@ -57,7 +56,7 @@ func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 	return &PlainState{
 		tx:          tx,
 		blockNr:     blockNr,
-		storage:     make(map[common.Address]*llrb.LLRB),
+		storage:     make(map[common.Address]*btree.BTree),
 		accHistoryC: c1, storageHistoryC: c2, accChangesC: c3, storageChangesC: c4,
 	}
 }
@@ -71,7 +70,7 @@ func (s *PlainState) GetBlockNr() uint64 {
 }
 
 func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
-	st := llrb.New()
+	st := btree.New(16)
 	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 	copy(k[:], addr[:])
 	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr+1)
@@ -89,7 +88,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	overrideCounter := 0
 	min := &storageItem{key: startLocation}
 	if t, ok := s.storage[addr]; ok {
-		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
+		t.AscendGreaterOrEqual(min, func(i btree.Item) bool {
 			item := i.(*storageItem)
 			st.ReplaceOrInsert(item)
 			if !item.value.IsZero() {
@@ -121,7 +120,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 			return true, nil
 		}
 		si.value.SetBytes(vs)
-		st.InsertNoReplace(&si)
+		st.ReplaceOrInsert(&si)
 		if bytes.Compare(kLoc, lastKey[:]) > 0 {
 			// Beyond overrides
 			return st.Len() < maxResults+numDeletes, nil
@@ -133,7 +132,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	}
 	results := 0
 	var innerErr error
-	st.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
+	st.AscendGreaterOrEqual(min, func(i btree.Item) bool {
 		item := i.(*storageItem)
 		if !item.value.IsZero() {
 			// Skip if value == 0
@@ -231,7 +230,7 @@ func (s *PlainState) UpdateAccountCode(address common.Address, incarnation uint6
 func (s *PlainState) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
 	t, ok := s.storage[address]
 	if !ok {
-		t = llrb.New()
+		t = btree.New(16)
 		s.storage[address] = t
 	}
 	h := common.NewHasher()

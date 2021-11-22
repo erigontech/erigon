@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -17,13 +19,15 @@ import (
 type TxPoolCfg struct {
 	db        kv.RwDB
 	pool      *core.TxPool
+	config    core.TxPoolConfig
 	startFunc func()
 }
 
-func StageTxPoolCfg(db kv.RwDB, pool *core.TxPool, startFunc func()) TxPoolCfg {
+func StageTxPoolCfg(db kv.RwDB, pool *core.TxPool, config core.TxPoolConfig, startFunc func()) TxPoolCfg {
 	return TxPoolCfg{
 		db:        db,
 		pool:      pool,
+		config:    config,
 		startFunc: startFunc,
 	}
 }
@@ -42,9 +46,6 @@ func SpawnTxPool(s *StageState, tx kv.RwTx, cfg TxPoolCfg, ctx context.Context) 
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err
-	}
-	if to == s.BlockNumber {
-		return nil
 	}
 
 	logPrefix := s.LogPrefix()
@@ -103,7 +104,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -115,7 +116,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 		currentHeaderIdx++
 	}
 
-	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Trace(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	bodies, err := tx.Cursor(kv.BlockBody)
 	if err != nil {
 		return err
@@ -125,7 +126,7 @@ func incrementalTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPoo
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -199,7 +200,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 		blockNumber := binary.BigEndian.Uint64(k[:8])
@@ -210,7 +211,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 
 		copy(canonical[blockNumber-from-1][:], v)
 	}
-	log.Debug(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
+	log.Trace(fmt.Sprintf("[%s] Read canonical hashes", logPrefix), "hashes", len(canonical))
 	senders := make([][]common.Address, to-from+1)
 	sendersC, err := tx.Cursor(kv.Senders)
 	if err != nil {
@@ -221,7 +222,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 
@@ -235,9 +236,9 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 			// non-canonical case
 			continue
 		}
-		sendersArray := make([]common.Address, len(v)/common.AddressLength)
+		sendersArray := make([]common.Address, len(v)/length.Addr)
 		for i := 0; i < len(sendersArray); i++ {
-			copy(sendersArray[i][:], v[i*common.AddressLength:])
+			copy(sendersArray[i][:], v[i*length.Addr:])
 		}
 		senders[blockNumber-from-1] = sendersArray
 	}
@@ -252,7 +253,7 @@ func unwindTxPoolUpdate(logPrefix string, from, to uint64, pool *core.TxPool, tx
 		if err != nil {
 			return err
 		}
-		if err := common.Stopped(quitCh); err != nil {
+		if err := libcommon.Stopped(quitCh); err != nil {
 			return err
 		}
 

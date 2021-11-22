@@ -2,7 +2,7 @@
 
 Support only remote-miners.
 
-* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.sigkey=...` flags.
+* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.sigfile=...` flags.
 * Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
   , `--miner.gastarget`
 * RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate

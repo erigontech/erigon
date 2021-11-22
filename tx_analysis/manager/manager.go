@@ -3,10 +3,14 @@ package manager
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	log_ "github.com/ledgerwatch/log/v3"
 )
 
 type supply struct {
@@ -49,15 +53,17 @@ type Manager struct {
 	supply  chan *supply
 	workers []*worker
 	rr      *roundRobin
-	report  *report
+	report  *Report
+	reports chan<- *Report
 }
 
-func New() *Manager {
+func New(reports chan<- *Report) *Manager {
 	return &Manager{
 		mu:      sync.Mutex{},
 		supply:  make(chan *supply, 10),
 		workers: make([]*worker, 0),
 		report:  newReport(),
+		reports: reports,
 	}
 }
 
@@ -66,6 +72,19 @@ func (m *Manager) Start(cancel context.CancelFunc, stop chan bool, ready chan bo
 	m.rr = newRR(numWorkers)
 
 	wg := sync.WaitGroup{}
+
+	logger := log_.New()
+	db, err := mdbx.NewMDBX(logger).Path("/mnt/mx500_0/goerli/chaindata").Readonly().Open()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer tx.Rollback()
 
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
@@ -78,7 +97,7 @@ func (m *Manager) Start(cancel context.CancelFunc, stop chan bool, ready chan bo
 		go worker.start()
 	}
 
-	close(ready)
+	close(ready) // TODO reconsider this, close this in main tread
 
 	for {
 
@@ -92,8 +111,17 @@ func (m *Manager) Start(cancel context.CancelFunc, stop chan bool, ready chan bo
 			wg.Wait()
 			cancel()
 		case sup := <-m.supply:
+
 			header := sup.header
 			blockN := header.Number.Uint64()
+
+			reader := state.NewPlainState(tx, blockN)
+			sdb := state.New(reader)
+
+			for _, w := range m.workers {
+				w.sdb = sdb.Copy()
+			}
+
 			fmt.Printf("\n\nSupply received... block: %d, transactions: %d\n", blockN, len(sup.transactions))
 			fmt.Println("Distributing tasks...")
 
@@ -113,7 +141,8 @@ func (m *Manager) Start(cancel context.CancelFunc, stop chan bool, ready chan bo
 				}
 			}
 
-			m.report.write()
+			// m.report.write()
+			m.reports <- m.report
 		}
 	}
 }

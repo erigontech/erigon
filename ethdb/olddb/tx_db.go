@@ -159,27 +159,6 @@ func (m *TxDb) BatchSize() int {
 	return int(m.len)
 }
 
-func (m *TxDb) Walk(bucket string, startkey []byte, fixedbits int, walker func([]byte, []byte) (bool, error)) error {
-	// get cursor out of pool, then calls txDb.Put/Get/Delete on same bucket inside Walk callback - will not affect state of Walk
-	c, ok := m.cursors[bucket]
-	if ok {
-		delete(m.cursors, bucket)
-	} else {
-		var err error
-		c, err = m.tx.Cursor(bucket)
-		if err != nil {
-			return err
-		}
-	}
-	defer func() { // put cursor back to pool if can
-		if _, ok = m.cursors[bucket]; ok {
-			c.Close()
-		} else {
-			m.cursors[bucket] = c
-		}
-	}()
-	return ethdb.Walk(c, startkey, fixedbits, walker)
-}
 func (m *TxDb) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	return m.tx.ForEach(bucket, fromPrefix, walker)
 }

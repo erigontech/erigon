@@ -12,7 +12,6 @@ import (
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
 // needCompare - if false - doesn't call Erigon and doesn't compare responses
-// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
 func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
@@ -94,7 +93,7 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 			request := reqGen.debugTraceCall(tx.From, tx.To, &tx.Gas, &tx.GasPrice, &tx.Value, tx.Input, bn-1)
 			errCtx := fmt.Sprintf("block %d tx %s", bn, tx.Hash)
-			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs); err != nil {
+			if err := requestAndCompare(request, "debug_traceCall", errCtx, reqGen, needCompare, rec, errs, nil); err != nil {
 				fmt.Println(err)
 				return
 			}

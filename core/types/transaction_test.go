@@ -521,11 +521,11 @@ func TestTransactionCoding(t *testing.T) {
 func encodeDecodeJSON(tx Transaction) (Transaction, error) {
 	data, err := json.Marshal(tx)
 	if err != nil {
-		return nil, fmt.Errorf("json encoding failed: %v", err)
+		return nil, fmt.Errorf("json encoding failed: %w", err)
 	}
 	var parsedTx Transaction
 	if parsedTx, err = UnmarshalTransactionFromJSON(data); err != nil {
-		return nil, fmt.Errorf("json decoding failed: %v", err)
+		return nil, fmt.Errorf("json decoding failed: %w", err)
 	}
 	return parsedTx, nil
 }
@@ -534,11 +534,11 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	var buf bytes.Buffer
 	var err error
 	if err = tx.MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("rlp encoding failed: %v", err)
+		return nil, fmt.Errorf("rlp encoding failed: %w", err)
 	}
 	var parsedTx Transaction
 	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
-		return nil, fmt.Errorf("rlp decoding failed: %v", err)
+		return nil, fmt.Errorf("rlp decoding failed: %w", err)
 	}
 	return parsedTx, nil
 }

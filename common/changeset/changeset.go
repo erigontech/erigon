@@ -144,14 +144,35 @@ func AvailableStorageFrom(tx kv.Tx) (uint64, error) {
 	return binary.BigEndian.Uint64(k), nil
 }
 
-func Walk(db kv.Tx, bucket string, startkey []byte, fixedbits int, walker func(blockN uint64, k, v []byte) (bool, error)) error {
+// [from:to)
+func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint64, k, v []byte) error) error {
 	var blockN uint64
 	c, err := db.Cursor(bucket)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-	return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
+	return ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
+		blockN, k, v = FromDBFormat(k, v)
+		if blockN >= to {
+			return false, nil
+		}
+		if err := walker(blockN, k, v); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+func ForEach(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
+	var blockN uint64
+	return db.ForEach(bucket, startkey, func(k, v []byte) error {
+		blockN, k, v = FromDBFormat(k, v)
+		return walker(blockN, k, v)
+	})
+}
+func ForPrefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
+	var blockN uint64
+	return db.ForPrefix(bucket, startkey, func(k, v []byte) error {
 		blockN, k, v = FromDBFormat(k, v)
 		return walker(blockN, k, v)
 	})

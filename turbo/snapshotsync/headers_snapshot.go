@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -63,7 +64,7 @@ func GenerateHeadersSnapshot(ctx context.Context, db kv.Tx, sntx kv.RwTx, toBloc
 	tt := time.Now()
 	for i := uint64(0); i <= toBlock; i++ {
 		if common.IsCanceled(ctx) {
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		}
 		select {
 		case <-t.C:

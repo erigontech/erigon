@@ -278,7 +278,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
 	if height == nil {
-		//return newcfg, stored, stateDB, fmt.Errorf("missing block number for head header hash")
+		//return newcfg, storedBlock, fmt.Errorf("missing block number for head header hash")
 	} else {
 		compatErr := storedcfg.CheckCompatible(newcfg, *height)
 		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
@@ -307,6 +307,10 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.ErigonChainConfig
 	case ghash == params.SokolGenesisHash:
 		return params.SokolChainConfig
+	case ghash == params.KovanGenesisHash:
+		return params.KovanChainConfig
+	case ghash == params.FermionGenesisHash:
+		return params.FermionChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -425,13 +429,13 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
 	if err := statedb.CommitBlock(params.Rules{}, blockWriter); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 	if err := blockWriter.WriteChangeSets(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
 	}
 	if err := blockWriter.WriteHistory(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		return nil, statedb, fmt.Errorf("cannot write history: %w", err)
 	}
 	return block, statedb, nil
 }
@@ -600,6 +604,41 @@ func DefaultSokolGenesisBlock() *Genesis {
 		Alloc:      readPrealloc("allocs/sokol.json"),
 	}
 }
+
+func DefaultKovanGenesisBlock() *Genesis {
+	sealRlp, err := rlp.EncodeToBytes([][]byte{
+		common.FromHex(""),
+		common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return &Genesis{
+		Config:     params.KovanChainConfig,
+		Timestamp:  0x0,
+		SealRlp:    sealRlp,
+		GasLimit:   0x5B8D80,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/kovan.json"),
+	}
+}
+
+func DefaultFermionGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.FermionChainConfig,
+		Timestamp:  0x0,
+		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000003a03f6d88437328ce8623ef5e80c67383704ebc13ec60da1858ec7fa8edd0dc736611dba9ab4399942d5d120ad9c1692c5fa72dca20657254bbaa08d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x5B8D80,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/fermion.json"),
+	}
+}
+
+// Pre-calculated version of:
+//    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
+//    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
+var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
+var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {

@@ -8,7 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -18,13 +18,12 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 )
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, filters *filters.Filters, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
+func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, block *types.Block, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, stateCache kvcache.Cache, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -32,23 +31,20 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 			return state, block.Header(), nil
 		}
 	*/
-	blockNrOrHash.RequireCanonical = true // DoCall cannot be executed on non-canonical blocks
-	blockNumber, hash, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, filters)
-	if err != nil {
-		return nil, err
-	}
+	blockNumber := block.NumberU64()
 	var stateReader state.StateReader
 	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
-		stateReader = state.NewPlainStateReader(tx)
+		cacheView, err := stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
 		stateReader = state.NewPlainState(tx, blockNumber)
 	}
 	state := state.New(stateReader)
 
-	header := rawdb.ReadHeader(tx, hash, blockNumber)
-	if header == nil {
-		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
-	}
+	header := block.Header()
 
 	// Override the fields of specified contracts before execution.
 	if overrides != nil {
@@ -166,7 +162,7 @@ func getHashGetter(requireCanonical bool, tx kv.Tx) func(uint64) common.Hash {
 	return func(n uint64) common.Hash {
 		hash, err := rawdb.ReadCanonicalHash(tx, n)
 		if err != nil {
-			log.Debug("can't get block hash by number", "number", n, "only-canonical", requireCanonical)
+			log.Debug("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 		}
 		return hash
 	}

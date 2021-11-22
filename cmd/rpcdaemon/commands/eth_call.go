@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -39,9 +40,24 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	contractHasTEVM := ethdb.GetHasTEVM(tx)
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.filters, contractHasTEVM)
+	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.BaseAPI.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.stateCache, contractHasTEVM)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +144,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 
 	// Recap the highest gas limit with account's available balance.
 	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		stateReader := state.NewPlainStateReader(dbtx)
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return 0, err
+		}
+		stateReader := state.NewCachedReader2(cacheView, dbtx)
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the current state")
@@ -166,13 +186,30 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		return 0, err
 	}
 
-	contractHasTEVM := ethdb.GetHasTEVM(dbtx)
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(dbtx)
+	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.filters, contractHasTEVM)
+		numOrHash := rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}
+		blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(numOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+		if err != nil {
+			return false, nil, err
+		}
+		block, err := api.BaseAPI.blockWithSenders(dbtx, hash, blockNumber)
+		if err != nil {
+			return false, nil, err
+		}
+		if block == nil {
+			return false, nil, nil
+		}
+
+		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
+			api.GasCap, chainConfig, api.stateCache, contractHasTEVM)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit

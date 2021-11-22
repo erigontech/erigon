@@ -469,9 +469,11 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 		accessList: tx.AccessList,
 		checkNonce: true,
 	}
-	overflow := msg.gasPrice.SetFromBig(baseFee)
-	if overflow {
-		return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
 	}
 	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
 	if msg.gasPrice.Gt(tx.FeeCap) {
@@ -552,4 +554,20 @@ func (tx DynamicFeeTransaction) GetSender() (common.Address, bool) {
 
 func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
 	tx.from.Store(addr)
+}
+
+// NewTransaction creates an unsigned eip1559 transaction.
+func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
+	return &DynamicFeeTransaction{
+		CommonTx: CommonTx{
+			Nonce: nonce,
+			To:    &to,
+			Value: amount,
+			Gas:   gasLimit,
+			Data:  data,
+		},
+		ChainID: &chainID,
+		Tip:     gasTip,
+		FeeCap:  gasFeeCap,
+	}
 }

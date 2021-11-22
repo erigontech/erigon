@@ -29,7 +29,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
-	_debug "github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/log/v3"
@@ -59,24 +58,8 @@ func StartNode(stack *node.Node) {
 	if err := stack.Start(); err != nil {
 		Fatalf("Error starting protocol stack: %v", err)
 	}
-	go func() {
-		sigc := make(chan os.Signal, 1)
-		signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-		_debug.GetSigC(&sigc)
-		defer signal.Stop(sigc)
 
-		<-sigc
-		log.Info("Got interrupt, shutting down...")
-		go stack.Close()
-		for i := 10; i > 0; i-- {
-			<-sigc
-			if i > 1 {
-				log.Warn("Already shutting down, interrupt more to panic.", "times", i-1)
-			}
-		}
-		debug.Exit() // ensure trace and CPU profile data is flushed.
-		debug.LoudPanic("boom")
-	}()
+	go debug.ListenSignals(stack)
 }
 
 func SetupCobra(cmd *cobra.Command) error {

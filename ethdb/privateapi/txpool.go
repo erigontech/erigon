@@ -101,7 +101,7 @@ func (s *TxPoolServer) FindUnknown(ctx context.Context, in *proto_txpool.TxHashe
 
 func (s *TxPoolServer) Add(ctx context.Context, in *proto_txpool.AddRequest) (*proto_txpool.AddReply, error) {
 	reply := &proto_txpool.AddReply{Imported: make([]proto_txpool.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
-	txs, err := types.UnmarshalTransactionsFromBinary(in.RlpTxs)
+	txs, err := types.DecodeTransactions(in.RlpTxs)
 	if err != nil {
 		return nil, err
 	}

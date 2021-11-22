@@ -23,6 +23,14 @@ func (e nonCanonocalHashError) Error() string {
 }
 
 func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
+	return _GetBlockNumber(blockNrOrHash.RequireCanonical, blockNrOrHash, tx, filters)
+}
+
+func GetCanonicalBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
+	return _GetBlockNumber(true, blockNrOrHash, tx, filters)
+}
+
+func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *filters.Filters) (uint64, common.Hash, error) {
 	var blockNumber uint64
 	var err error
 	hash, ok := blockNrOrHash.Hash()
@@ -63,7 +71,7 @@ func GetBlockNumber(blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, filters *filt
 		if err != nil {
 			return 0, common.Hash{}, err
 		}
-		if blockNrOrHash.RequireCanonical && ch != hash {
+		if requireCanonical && ch != hash {
 			return 0, common.Hash{}, nonCanonocalHashError{hash}
 		}
 	}

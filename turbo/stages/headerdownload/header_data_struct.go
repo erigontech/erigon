@@ -80,6 +80,7 @@ type Anchor struct {
 	blockHeight uint64
 	timestamp   uint64 // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
 	timeouts    int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
+	idx         int    // Index of the anchor in the queue to be able to modify specific items
 }
 
 type AnchorQueue []*Anchor
@@ -98,11 +99,13 @@ func (aq AnchorQueue) Less(i, j int) bool {
 
 func (aq AnchorQueue) Swap(i, j int) {
 	aq[i], aq[j] = aq[j], aq[i]
+	aq[i].idx, aq[j].idx = i, j // Restore indices after the swap
 }
 
 func (aq *AnchorQueue) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
+	x.(*Anchor).idx = len(*aq)
 	*aq = append(*aq, x.(*Anchor))
 }
 
@@ -178,6 +181,7 @@ type HeaderDownload struct {
 	linkQueue          *LinkQueue     // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue   // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
+	SkipCycleHack      chan struct{} // devenet will signal to this channel to skip sync cycle and release write db transaction. It's temporary solution - later we will do mining without write transaction.
 	toAnnounce         []Announce
 	lock               sync.RWMutex
 	preverifiedHeight  uint64 // Block height corresponding to the last preverified hash
@@ -216,6 +220,7 @@ func NewHeaderDownload(
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
+		SkipCycleHack:      make(chan struct{}),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)
@@ -250,7 +255,7 @@ func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
 }
 
-// HeaderInserter incapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
+// HeaderInserter encapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
 	localTd          *big.Int
@@ -259,7 +264,6 @@ type HeaderInserter struct {
 	highestHash      common.Hash
 	newCanonical     bool
 	unwind           bool
-	prevHeight       uint64
 	unwindPoint      uint64
 	highest          uint64
 	highestTimestamp uint64

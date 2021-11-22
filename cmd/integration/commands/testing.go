@@ -108,6 +108,12 @@ func grpcTestDriverServer(ctx context.Context, testingAddr string) (*TestDriverS
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time: 10 * time.Minute,
 		}),
+		// Don't drop the connection, settings accordign to this comment on GitHub
+		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}

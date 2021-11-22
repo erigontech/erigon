@@ -10,6 +10,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/spf13/cobra"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -55,12 +56,12 @@ func BodySnapshot(ctx context.Context, logger log.Logger, dbPath, snapshotPath s
 	if err := snKV.Update(ctx, func(sntx kv.RwTx) error {
 		for i := uint64(1); i <= toBlock; i++ {
 			if common.IsCanceled(ctx) {
-				return common.ErrStopped
+				return libcommon.ErrStopped
 			}
 
 			hash, err = rawdb.ReadCanonicalHash(tx, i)
 			if err != nil {
-				return fmt.Errorf("getting canonical hash for block %d: %v", i, err)
+				return fmt.Errorf("getting canonical hash for block %d: %w", i, err)
 			}
 			body := rawdb.ReadBodyRLP(tx, hash, i)
 			if err = sntx.Put(kv.BlockBody, dbutils.BlockBodyKey(i, hash), body); err != nil {

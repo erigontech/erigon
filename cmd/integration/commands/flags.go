@@ -11,7 +11,6 @@ import (
 var (
 	chaindata                      string
 	databaseVerbosity              int
-	snapshotMode, snapshotDir      string
 	referenceChaindata             string
 	block, pruneTo, unwind         uint64
 	unwindEvery                    uint64
@@ -25,6 +24,8 @@ var (
 	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
+	pruneHBefore, pruneRBefore     uint64
+	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
 )
@@ -100,10 +101,6 @@ func withDatadir(cmd *cobra.Command) {
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
-
-	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
-	must(cmd.MarkFlagDirname("snapshot.dir"))
 
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
 }

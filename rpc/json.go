@@ -315,7 +315,7 @@ func parseArgumentArray(dec *json.Decoder, types []reflect.Type) ([]reflect.Valu
 		}
 		argval := reflect.New(types[i])
 		if err := dec.Decode(argval.Interface()); err != nil {
-			return args, fmt.Errorf("invalid argument %d: %v", i, err)
+			return args, fmt.Errorf("invalid argument %d: %w", i, err)
 		}
 		if argval.IsNil() && types[i].Kind() != reflect.Ptr {
 			return args, fmt.Errorf("missing value for required argument %d", i)

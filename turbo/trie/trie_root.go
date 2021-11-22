@@ -7,6 +7,7 @@ import (
 	"math/bits"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -946,7 +947,7 @@ func (c *AccTrieCursor) _consume() (bool, error) {
 
 func (c *AccTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	var ok bool
-	if err = common.Stopped(c.quit); err != nil {
+	if err = libcommon.Stopped(c.quit); err != nil {
 		return []byte{}, nil, false, err
 	}
 	c.SkipState = c.SkipState && c._hasTree()
@@ -1102,7 +1103,7 @@ func (c *StorageTrieCursor) _consume() (bool, error) {
 		if ok {
 			c.skipState = c.skipState && keyIsBefore(c.kBuf, c.nextCreated)
 			c.nextCreated = nextCreated
-			c.cur = common.CopyBytes(c.kBuf[80:])
+			c.cur = libcommon.Copy(c.kBuf[80:])
 			return true, nil
 		}
 	}
@@ -1254,7 +1255,7 @@ func (c *StorageTrieCursor) _nextSiblingInDB() error {
 
 func (c *StorageTrieCursor) _next() (k, v []byte, hasTree bool, err error) {
 	var ok bool
-	if err = common.Stopped(c.quit); err != nil {
+	if err = libcommon.Stopped(c.quit); err != nil {
 		return []byte{}, nil, false, err
 	}
 	c.skipState = c.skipState && c._hasTree()
@@ -1389,7 +1390,7 @@ func (c *StateCursor) Seek(seek []byte) ([]byte, []byte, []byte, error) {
 }
 
 func (c *StateCursor) Next() ([]byte, []byte, []byte, error) {
-	if err := common.Stopped(c.quit); err != nil {
+	if err := libcommon.Stopped(c.quit); err != nil {
 		return []byte{}, nil, nil, err
 	}
 	k, v, err := c.c.Next()

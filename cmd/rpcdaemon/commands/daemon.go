@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
@@ -12,10 +13,16 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters, cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+func APIList(ctx context.Context, db kv.RoDB,
+	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
+	stateCache kvcache.Cache,
+	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
-	base := NewBaseApi(filters)
+	base := NewBaseApi(filters, stateCache, cfg.SingleNodeMode)
+	if cfg.TevmEnabled {
+		base.EnableTevmExperiment()
+	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
@@ -23,8 +30,7 @@ func APIList(ctx context.Context, db kv.RoDB, eth services.ApiBackend, txPool tx
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
-	dbImpl := NewDBAPIImpl()   /* deprecated */
-	shhImpl := NewSHHAPIImpl() /* deprecated */
+	dbImpl := NewDBAPIImpl() /* deprecated */
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -70,18 +76,11 @@ func APIList(ctx context.Context, db kv.RoDB, eth services.ApiBackend, txPool tx
 				Service:   TraceAPI(traceImpl),
 				Version:   "1.0",
 			})
-		case "db":
+		case "db": /* Deprecated */
 			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "db",
 				Public:    true,
 				Service:   DBAPI(dbImpl),
-				Version:   "1.0",
-			})
-		case "shh":
-			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "shh",
-				Public:    true,
-				Service:   SHHAPI(shhImpl),
 				Version:   "1.0",
 			})
 		case "erigon":

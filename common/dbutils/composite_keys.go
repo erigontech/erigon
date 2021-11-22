@@ -42,13 +42,6 @@ func BlockBodyKey(number uint64, hash common.Hash) []byte {
 	return k
 }
 
-// ReceiptsKey = blockN (uint64 big endian)
-func ReceiptsKey(blockNumber uint64) []byte {
-	newK := make([]byte, 8)
-	binary.BigEndian.PutUint64(newK, blockNumber)
-	return newK
-}
-
 // LogKey = blockN (uint64 big endian) + txId (uint32 big endian)
 func LogKey(blockNumber uint64, txId uint32) []byte {
 	newK := make([]byte, 8+4)

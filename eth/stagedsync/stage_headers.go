@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -118,6 +119,7 @@ func HeadersForward(
 	var peer []byte
 	stopped := false
 	prevProgress := headerProgress
+Loop:
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
@@ -125,7 +127,7 @@ func HeadersForward(
 			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
 				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
-				log.Debug("Sent request", "height", req.Number)
+				log.Trace("Sent request", "height", req.Number)
 			}
 		}
 		cfg.penalize(ctx, penalties)
@@ -136,7 +138,7 @@ func HeadersForward(
 				peer = cfg.headerReqSend(ctx, req)
 				if peer != nil {
 					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
-					log.Debug("Sent request", "height", req.Number)
+					log.Trace("Sent request", "height", req.Number)
 				}
 			}
 			cfg.penalize(ctx, penalties)
@@ -148,7 +150,7 @@ func HeadersForward(
 		if req != nil {
 			peer = cfg.headerReqSend(ctx, req)
 			if peer != nil {
-				log.Debug("Sent skeleton request", "height", req.Number)
+				log.Trace("Sent skeleton request", "height", req.Number)
 			}
 		}
 		// Load headers into the database
@@ -184,7 +186,9 @@ func HeadersForward(
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
-			log.Debug("headerLoop woken up by the incoming request")
+			log.Trace("headerLoop woken up by the incoming request")
+		case <-cfg.hd.SkipCycleHack:
+			break Loop
 		}
 		timer.Stop()
 	}
@@ -201,9 +205,9 @@ func HeadersForward(
 		}
 	}
 	if stopped {
-		return common.ErrStopped
+		return libcommon.ErrStopped
 	}
-	// We do not print the followin line if the stage was interrupted
+	// We do not print the following line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
 	return nil
 }
@@ -240,7 +244,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 	return nil
 }
 
-func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (err error) {
+func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -284,41 +288,43 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg) (e
 		}
 	}
 	if badBlock {
-		// Find header with biggest TD
-		tdCursor, cErr := tx.Cursor(kv.HeaderTD)
-		if cErr != nil {
-			return cErr
-		}
-		defer tdCursor.Close()
-		var k, v []byte
-		k, v, err = tdCursor.Last()
-		if err != nil {
-			return err
-		}
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
-		for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
-			if len(k) != 40 {
-				return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
+			// Find header with biggest TD
+			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
+			if cErr != nil {
+				return cErr
 			}
-			var hash common.Hash
-			copy(hash[:], k[8:])
-			if cfg.hd.IsBadHeader(hash) {
-				continue
-			}
-			var td big.Int
-			if err = rlp.DecodeBytes(v, &td); err != nil {
+			defer tdCursor.Close()
+			var k, v []byte
+			k, v, err = tdCursor.Last()
+			if err != nil {
 				return err
 			}
-			if td.Cmp(&maxTd) > 0 {
-				maxTd.Set(&td)
-				copy(maxHash[:], k[8:])
-				maxNum = binary.BigEndian.Uint64(k[:8])
+			for ; err == nil && k != nil; k, v, err = tdCursor.Prev() {
+				if len(k) != 40 {
+					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
+				}
+				var hash common.Hash
+				copy(hash[:], k[8:])
+				if cfg.hd.IsBadHeader(hash) {
+					continue
+				}
+				var td big.Int
+				if err = rlp.DecodeBytes(v, &td); err != nil {
+					return err
+				}
+				if td.Cmp(&maxTd) > 0 {
+					maxTd.Set(&td)
+					copy(maxHash[:], k[8:])
+					maxNum = binary.BigEndian.Uint64(k[:8])
+				}
 			}
-		}
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
 		if maxNum == 0 {
 			maxNum = u.UnwindPoint

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -26,6 +27,11 @@ import (
 )
 
 func CreateTestKV(t *testing.T) kv.RwDB {
+	s, _, _ := CreateTestSentry(t)
+	return s.DB
+}
+
+func CreateTestSentry(t *testing.T) (*stages.MockSentry, *core.ChainPack, []*core.ChainPack) {
 	// Configure and generate a sample block chain
 	var (
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -196,7 +202,7 @@ func CreateTestKV(t *testing.T) kv.RwDB {
 		t.Fatal(err)
 	}
 
-	return m.DB
+	return m, chain, []*core.ChainPack{orphanedChain}
 }
 
 type IsMiningMock struct{}
@@ -214,7 +220,8 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	txpool.RegisterTxpoolServer(server, privateapi.NewTxPoolServer(ctx, m.TxPoolP2PServer.TxPool))
+	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.Notifications.Events))
+	txpool.RegisterTxpoolServer(server, m.TxPoolV2GrpcServer)
 	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)
 

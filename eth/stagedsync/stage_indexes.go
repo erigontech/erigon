@@ -12,11 +12,12 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -139,15 +140,12 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 	checkFlushEvery := time.NewTicker(cfg.flushEvery)
 	defer checkFlushEvery.Stop()
 
-	collectorUpdates := etl.NewCollector(cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorUpdates.Close(logPrefix)
+	collectorUpdates := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collectorUpdates.Close()
 
-	if err := changeset.Walk(tx, changesetBucket, dbutils.EncodeBlockNumber(start), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN >= stop {
-			return false, nil
-		}
-		if err := common.Stopped(quit); err != nil {
-			return false, err
+	if err := changeset.ForRange(tx, changesetBucket, start, stop, func(blockN uint64, k, v []byte) error {
+		if err := libcommon.Stopped(quit); err != nil {
+			return err
 		}
 
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
@@ -157,11 +155,11 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush64(updates, cfg.bufLimit) {
 				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
-					return false, err
+					return err
 				}
 				updates = map[string]*roaring64.Bitmap{}
 			}
@@ -174,7 +172,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		}
 		m.Add(blockN)
 
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -221,7 +219,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		return nil
 	}
 
-	if err := collectorUpdates.Load(logPrefix, tx, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorUpdates.Load(tx, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -289,19 +287,19 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 	defer logEvery.Stop()
 
 	updates := map[string]struct{}{}
-	if err := changeset.Walk(db, csBucket, dbutils.EncodeBlockNumber(to), 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.ForEach(db, csBucket, dbutils.EncodeBlockNumber(to), func(blockN uint64, k, v []byte) error {
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-quitCh:
-			return false, common.ErrStopped
+			return libcommon.ErrStopped
 		default:
 		}
 		k = dbutils.CompositeKeyWithoutIncarnation(k)
 		updates[string(k)] = struct{}{}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -315,9 +313,9 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 func needFlush64(bitmaps map[string]*roaring64.Bitmap, memLimit datasize.ByteSize) bool {
 	sz := uint64(0)
 	for _, m := range bitmaps {
-		sz += m.GetSizeInBytes()
+		sz += m.GetSizeInBytes() * 2 // for golang's overhead
 	}
-	const memoryNeedsForKey = 32 * 2 // each key stored in RAM: as string ang slice of bytes
+	const memoryNeedsForKey = 32 * 2 * 2 //  len(key) * (string and bytes) overhead * go's map overhead
 	return uint64(len(bitmaps)*memoryNeedsForKey)+sz > uint64(memLimit)
 }
 
@@ -418,17 +416,19 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	collector := etl.NewCollector(tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer collector.Close(logPrefix)
+	collector := etl.NewCollector(logPrefix, tmpDir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
 
-	if err := changeset.Walk(tx, csTable, nil, 0, func(blockNum uint64, k, _ []byte) (bool, error) {
-		if blockNum >= pruneTo {
-			return false, nil
+	if err := changeset.ForRange(tx, csTable, 0, pruneTo, func(blockNum uint64, k, _ []byte) error {
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", csTable, "block_num", blockNum)
+		case <-ctx.Done():
+			return libcommon.ErrStopped
+		default:
 		}
-		if err := collector.Collect(k, nil); err != nil {
-			return false, err
-		}
-		return true, nil
+
+		return collector.Collect(k, nil)
 	}); err != nil {
 		return err
 	}
@@ -438,16 +438,16 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
 	defer c.Close()
-	prefixLen := common.AddressLength
+	prefixLen := length.Addr
 	if csTable == kv.StorageChangeSet {
-		prefixLen = common.HashLength
+		prefixLen = length.Hash
 	}
-	if err := collector.Load(logPrefix, tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := collector.Load(tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", fmt.Sprintf("%x", addr))
 		case <-ctx.Done():
-			return common.ErrStopped
+			return libcommon.ErrStopped
 		default:
 		}
 		for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {

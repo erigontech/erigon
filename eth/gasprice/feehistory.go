@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -241,7 +242,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		firstMissing = blocks
 	)
 	for ; blocks > 0; blocks-- {
-		if err = common.Stopped(ctx.Done()); err != nil {
+		if err = libcommon.Stopped(ctx.Done()); err != nil {
 			return common.Big0, nil, nil, nil, err
 		}
 		// Retrieve the next block number to fetch with this goroutine

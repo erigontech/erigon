@@ -125,9 +125,8 @@ func (b *SimulatedBackend) DB() kv.RwDB {
 }
 
 // Close terminates the underlying blockchain's update loop.
-func (b *SimulatedBackend) Close() error {
-	b.m.DB.Close()
-	return nil
+func (b *SimulatedBackend) Close() {
+	b.m.Close()
 }
 
 // Commit imports all the pending transactions as a single block and starts a
@@ -673,7 +672,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
-		return fmt.Errorf("invalid transaction: %v", senderErr)
+		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.GetNonce() != nonce {

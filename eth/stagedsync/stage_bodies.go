@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -94,6 +96,8 @@ func BodiesForward(
 	var req *bodydownload.BodyRequest
 	var peer []byte
 	stopped := false
+	prevProgress := bodyProgress
+	noProgressCount := 0 // How many time the progress was printed without actual progress
 Loop:
 	for !stopped {
 		// TODO: this is incorrect use
@@ -155,12 +159,20 @@ Loop:
 				u.UnwindTo(blockHeight-1, header.Hash())
 				break Loop
 			}
-			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
-				return fmt.Errorf("writing block body: %w", err)
+
+			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+			exists, err := tx.Has(kv.BlockBody, dbutils.BlockBodyKey(blockHeight, header.Hash()))
+			if err != nil {
+				return err
+			}
+			if !exists {
+				if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
+					return fmt.Errorf("writing block body: %w", err)
+				}
 			}
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
-				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
+				if err = s.Update(tx, blockHeight); err != nil {
 					return fmt.Errorf("saving Bodies progress: %w", err)
 				}
 			}
@@ -174,6 +186,9 @@ Loop:
 			stopped = true
 			break
 		}
+		if s.BlockNumber > 0 && noProgressCount >= 5 {
+			break
+		}
 		timer.Stop()
 		timer = time.NewTimer(1 * time.Second)
 		select {
@@ -181,14 +196,20 @@ Loop:
 			stopped = true
 		case <-logEvery.C:
 			deliveredCount, wastedCount := cfg.bd.DeliveryCounts()
+			if prevProgress == bodyProgress {
+				noProgressCount++
+			} else {
+				noProgressCount = 0 // Reset, there was progress
+			}
 			logProgressBodies(logPrefix, bodyProgress, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount)
+			prevProgress = bodyProgress
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
 			//log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
 		case <-timer.C:
 			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.bd.DeliveryNotify:
-			log.Debug("bodyLoop woken up by the incoming request")
+			log.Trace("bodyLoop woken up by the incoming request")
 		}
 		d6 += time.Since(start)
 	}
@@ -201,7 +222,7 @@ Loop:
 		}
 	}
 	if stopped {
-		return common.ErrStopped
+		return libcommon.ErrStopped
 	}
 	if bodyProgress > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
@@ -215,7 +236,7 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
-		"block number", committed,
+		"block_num", committed,
 		"delivery/sec", common.StorageSize(speed),
 		"wasted/sec", common.StorageSize(wastedSpeed),
 		"alloc", common.StorageSize(m.Alloc),

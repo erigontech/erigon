@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sync"
 	"time"
 
@@ -109,58 +110,60 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				}
 			}
 		}()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+		if !reflect.ValueOf(mining).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
+			go func() {
+				for {
 					select {
 					case <-ctx.Done():
 						return
 					default:
 					}
-					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					if err := ff.subscribeToPendingBlocks(ctx, mining); err != nil {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+							time.Sleep(time.Second)
+							continue
+						}
+						if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+							time.Sleep(time.Second)
+							continue
+						}
+						log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
 						time.Sleep(time.Second)
-						continue
 					}
-					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-						time.Sleep(time.Second)
-						continue
-					}
-					log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
-					time.Sleep(time.Second)
 				}
-			}
-		}()
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+			}()
+			go func() {
+				for {
 					select {
 					case <-ctx.Done():
 						return
 					default:
 					}
-					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+					if err := ff.subscribeToPendingLogs(ctx, mining); err != nil {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+							time.Sleep(time.Second)
+							continue
+						}
+						if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+							time.Sleep(time.Second)
+							continue
+						}
+						log.Warn("rpc filters: error subscribing to pending logs", "err", err)
 						time.Sleep(time.Second)
-						continue
 					}
-					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-						time.Sleep(time.Second)
-						continue
-					}
-					log.Warn("rpc filters: error subscribing to pending logs", "err", err)
-					time.Sleep(time.Second)
 				}
-			}
-		}()
+			}()
+		}
 	}
 
 	return ff
@@ -381,12 +384,13 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	defer ff.mu.RUnlock()
 
 	txs := make([]types.Transaction, len(reply.RplTxs))
-	for i, rplTx := range reply.RplTxs {
+	for i, rlpTx := range reply.RplTxs {
 		var decodeErr error
-		txs[i], decodeErr = types.UnmarshalTransactionFromBinary(rplTx)
+		s := rlp.NewStream(bytes.NewReader(rlpTx), uint64(len(rlpTx)))
+		txs[i], decodeErr = types.DecodeTransaction(s)
 		if decodeErr != nil {
 			// ignoring what we can't unmarshal
-			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr)
+			log.Warn("OnNewTx rpc filters, unprocessable payload", "err", decodeErr, "data", fmt.Sprintf("%x", rlpTx))
 			break
 		}
 	}

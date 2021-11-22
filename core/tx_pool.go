@@ -25,6 +25,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 const (
@@ -133,6 +135,8 @@ const (
 
 // TxPoolConfig are the configuration parameters of the transaction pool.
 type TxPoolConfig struct {
+	Disable   bool
+	V2        bool
 	Locals    []common.Address // Addresses that should be treated by default as local
 	NoLocals  bool             // Whether local transaction handling should be disabled
 	Journal   string           // Journal of local transactions to survive node restarts
@@ -145,6 +149,8 @@ type TxPoolConfig struct {
 	GlobalSlots  uint64 // Maximum number of executable transaction slots for all accounts
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
+
+	GlobalBaseFeeQueue uint64 // Maximum number of non-executable transaction slots for all accounts
 
 	Lifetime    time.Duration // Maximum amount of time non-executable transaction are queued
 	StartOnInit bool
@@ -159,10 +165,11 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	PriceLimit: 1,
 	PriceBump:  10,
 
-	AccountSlots: 16,
-	GlobalSlots:  4096,
-	AccountQueue: 64,
-	GlobalQueue:  1024,
+	AccountSlots:       16,
+	GlobalSlots:        10_000,
+	GlobalBaseFeeQueue: 30_000,
+	AccountQueue:       64,
+	GlobalQueue:        30_000,
 
 	Lifetime: 3 * time.Hour,
 }
@@ -246,7 +253,7 @@ type TxPool struct {
 	reorgDoneCh     chan chan struct{}
 	reorgShutdownCh chan struct{}  // requests shutdown of scheduleReorgLoop
 	wg              sync.WaitGroup // tracks loop, scheduleReorgLoop
-	isStarted       bool
+	isStarted       atomic.Bool
 	initFns         []func() error
 	stopFns         []func() error
 	stopCh          chan struct{}
@@ -320,7 +327,7 @@ func (pool *TxPool) Start(gasLimit uint64, headNumber uint64) error {
 	pool.wg.Add(1)
 	go pool.loop()
 
-	pool.isStarted = true
+	pool.isStarted.Store(true)
 
 	log.Info("transaction pool started")
 	return nil
@@ -349,7 +356,7 @@ func (pool *TxPool) loop() {
 
 		// System shutdown.
 		case <-pool.stopCh:
-			common.SafeClose(pool.reorgShutdownCh)
+			libcommon.SafeClose(pool.reorgShutdownCh)
 			return
 
 		// Handle stats reporting ticks
@@ -360,7 +367,7 @@ func (pool *TxPool) loop() {
 			pool.mu.RUnlock()
 
 			if pending != prevPending || queued != prevQueued || stales != prevStales {
-				log.Debug("Transaction pool status report", "executable", pending, "queued", queued, "stales", stales)
+				log.Trace("Transaction pool status report", "executable", pending, "queued", queued, "stales", stales)
 				prevPending, prevQueued, prevStales = pending, queued, stales
 			}
 
@@ -429,7 +436,7 @@ func (pool *TxPool) Stop() {
 		pool.journal.close()
 	}
 
-	pool.isStarted = false
+	pool.isStarted.Store(false)
 
 	log.Info("Transaction pool stopped")
 }
@@ -1464,7 +1471,7 @@ func (pool *TxPool) IsStarted() bool {
 		return false
 	}
 
-	return pool.isStarted
+	return pool.isStarted.Load()
 }
 
 func (pool *TxPool) AddInit(fns ...func() error) {

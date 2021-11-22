@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -16,7 +17,7 @@ type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
 func NewAccountChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
-		keyLen:  common.AddressLength,
+		keyLen:  length.Addr,
 	}
 }
 
@@ -36,8 +37,8 @@ func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) erro
 
 func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 	blockN := binary.BigEndian.Uint64(dbKey)
-	k := dbValue[:common.AddressLength]
-	v := dbValue[common.AddressLength:]
+	k := dbValue[:length.Addr]
+	v := dbValue[length.Addr:]
 
 	return blockN, k, v
 }
@@ -56,14 +57,12 @@ func FindAccount(c kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, er
 }
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
+// [startNum:endNum)
 func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]common.Address, error) {
 	changedAddrs := make(map[common.Address]struct{})
-	if err := Walk(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(startNum), 0, func(blockN uint64, k, v []byte) (bool, error) {
-		if blockN > endNum {
-			return false, nil
-		}
+	if err := ForRange(db, kv.AccountChangeSet, startNum, endNum, func(blockN uint64, k, v []byte) error {
 		changedAddrs[common.BytesToAddress(k)] = struct{}{}
-		return true, nil
+		return nil
 	}); err != nil {
 		return nil, err
 	}

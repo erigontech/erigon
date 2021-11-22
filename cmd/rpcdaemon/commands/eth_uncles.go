@@ -24,7 +24,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 	if err != nil {
 		return nil, err
 	}
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
-		log.Debug("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
+		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
 	uncle := types.NewBlockWithHeader(uncles[index])
@@ -56,7 +56,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	block, err := api.blockByHashWithSenders(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 
 	uncles := block.Uncles()
 	if index >= hexutil.Uint(len(uncles)) {
-		log.Debug("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
+		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
 	uncle := types.NewBlockWithHeader(uncles[index])
@@ -96,7 +96,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return &n, err
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, blockNum)
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

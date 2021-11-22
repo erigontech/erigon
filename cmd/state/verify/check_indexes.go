@@ -24,7 +24,7 @@ func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, i
 	startTime := time.Now()
 
 	i := 0
-	if err := changeset.Walk(tx, changeSetBucket, nil, 0, func(blockN uint64, k, v []byte) (bool, error) {
+	if err := changeset.ForEach(tx, changeSetBucket, nil, func(blockN uint64, k, v []byte) error {
 		i++
 		if i%100_000 == 0 {
 			fmt.Printf("Processed %dK, %s\n", blockN/1000, time.Since(startTime))
@@ -32,17 +32,17 @@ func CheckIndex(ctx context.Context, chaindata string, changeSetBucket string, i
 		select {
 		default:
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return ctx.Err()
 		}
 
 		bm, innerErr := bitmapdb.Get64(tx, indexBucket, dbutils.CompositeKeyWithoutIncarnation(k), blockN-1, blockN+1)
 		if innerErr != nil {
-			return false, innerErr
+			return innerErr
 		}
 		if !bm.Contains(blockN) {
-			return false, fmt.Errorf("%v,%v", blockN, common.Bytes2Hex(k))
+			return fmt.Errorf("%v,%v", blockN, common.Bytes2Hex(k))
 		}
-		return true, nil
+		return nil
 	}); err != nil {
 		return err
 	}

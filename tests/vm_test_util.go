@@ -83,7 +83,7 @@ type vmExecMarshaling struct {
 func (t *VMTest) Run(tx kv.RwTx, vmconfig vm.Config, blockNr uint64) error {
 	state, err := MakePreState(params.MainnetChainConfig.Rules(blockNr), tx, t.json.Pre, blockNr)
 	if err != nil {
-		return fmt.Errorf("error in MakePreState: %v", err)
+		return fmt.Errorf("error in MakePreState: %w", err)
 	}
 	ret, gasRemaining, err := t.exec(state, vmconfig)
 	// err is not supposed to be checked here, because in VM tests, the failure
@@ -117,7 +117,7 @@ func (t *VMTest) Run(tx kv.RwTx, vmconfig vm.Config, blockNr uint64) error {
 	}
 	root, err := trie.CalcRoot("test", tx)
 	if err != nil {
-		return fmt.Errorf("Error calculating state root: %v", err)
+		return fmt.Errorf("Error calculating state root: %w", err)
 	}
 	if t.json.PostStateRoot != (common.Hash{}) && root != t.json.PostStateRoot {
 		return fmt.Errorf("post state root mismatch, got %x, want %x", root, t.json.PostStateRoot)

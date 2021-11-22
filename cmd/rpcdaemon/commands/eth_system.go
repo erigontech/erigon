@@ -113,7 +113,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(&GasPriceOracleBackend{tx: tx, cc: cc}, ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(&GasPriceOracleBackend{tx: tx, cc: cc}, ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(&GasPriceOracleBackend{tx: tx, cc: cc}, ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
 
 	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -189,8 +189,13 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 }
 
 type GasPriceOracleBackend struct {
-	tx kv.Tx
-	cc *params.ChainConfig
+	tx      kv.Tx
+	cc      *params.ChainConfig
+	baseApi *BaseAPI
+}
+
+func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI) *GasPriceOracleBackend {
+	return &GasPriceOracleBackend{tx: tx, cc: cc, baseApi: baseApi}
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
@@ -206,16 +211,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 	return header, nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	blockNum, err := getBlockNumber(number, b.tx)
-	if err != nil {
-		return nil, err
-	}
-
-	block, _, err := rawdb.ReadBlockByNumberWithSenders(b.tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	return block, nil
+	return b.baseApi.blockByRPCNumber(number, b.tx)
 }
 func (b *GasPriceOracleBackend) ChainConfig() *params.ChainConfig {
 	return b.cc

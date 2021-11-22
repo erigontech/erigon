@@ -18,6 +18,8 @@ package params
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 var (
@@ -29,10 +31,12 @@ var (
 
 // see https://calver.org
 const (
-	VersionMajor    = 2021    // Major version component of the current release
-	VersionMinor    = 9       // Minor version component of the current release
-	VersionMicro    = 1       // Patch version component of the current release
-	VersionModifier = "alpha" // Patch version component of the current release
+	VersionMajor       = 2021   // Major version component of the current release
+	VersionMinor       = 11     // Minor version component of the current release
+	VersionMicro       = 3      // Patch version component of the current release
+	VersionModifier    = "beta" // Patch version component of the current release
+	VersionKeyCreated  = "ErigonVersionCreated"
+	VersionKeyFinished = "ErigonVersionFinished"
 )
 
 func withModifier(vsn string) string {
@@ -84,4 +88,20 @@ func VersionWithCommit(gitCommit, gitDate string) string {
 		vsn += "-" + gitDate
 	}
 	return vsn
+}
+
+func SetErigonVersion(tx kv.RwTx, versionKey string) error {
+	versionKeyByte := []byte(versionKey)
+	hasVersion, err := tx.Has(kv.DatabaseInfo, versionKeyByte)
+	if err != nil {
+		return err
+	}
+	if hasVersion {
+		return nil
+	}
+	// Save version if it does not exist
+	if err := tx.Put(kv.DatabaseInfo, versionKeyByte, []byte(Version)); err != nil {
+		return err
+	}
+	return nil
 }

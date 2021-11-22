@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path"
@@ -8,14 +9,18 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
@@ -30,8 +35,26 @@ import (
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 )
+
+var cmdStageHeaders = &cobra.Command{
+	Use:   "stage_headers",
+	Short: "",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := utils.RootContext()
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
+		defer db.Close()
+
+		if err := stageHeaders(db, ctx); err != nil {
+			log.Error("Error", "err", err)
+			return err
+		}
+		return nil
+	},
+}
 
 var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
@@ -262,6 +285,7 @@ func init() {
 	withChain(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
+	withIntegrityChecks(cmdStageSenders)
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
@@ -269,6 +293,12 @@ func init() {
 	withChain(cmdStageSenders)
 
 	rootCmd.AddCommand(cmdStageSenders)
+
+	withDatadir(cmdStageHeaders)
+	withUnwind(cmdStageHeaders)
+	withChain(cmdStageHeaders)
+
+	rootCmd.AddCommand(cmdStageHeaders)
 
 	withDatadir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
@@ -358,12 +388,64 @@ func init() {
 	withDatadir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
-	cmdSetPrune.Flags().Uint64Var(&pruneH, "--prune.h.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneR, "--prune.r.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneT, "--prune.t.older", 0, "")
-	cmdSetPrune.Flags().Uint64Var(&pruneC, "--prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneR, "prune.r.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneT, "prune.t.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneC, "prune.c.older", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneHBefore, "prune.h.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneRBefore, "prune.r.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneTBefore, "prune.t.before", 0, "")
+	cmdSetPrune.Flags().Uint64Var(&pruneCBefore, "prune.c.before", 0, "")
 	cmdSetPrune.Flags().StringSliceVar(&experiments, "experiments", nil, "Storage mode to override database")
 	rootCmd.AddCommand(cmdSetPrune)
+}
+
+func stageHeaders(db kv.RwDB, ctx context.Context) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		if unwind > 0 {
+			progress, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("read Bodies progress: %w", err)
+			}
+			if unwind > progress {
+				return fmt.Errorf("cannot unwind past 0")
+			}
+			if err = stages.SaveStageProgress(tx, stages.Headers, progress-unwind); err != nil {
+				return fmt.Errorf("saving Bodies progress failed: %w", err)
+			}
+			progress, err = stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("re-read Bodies progress: %w", err)
+			}
+			// remove all canonical markers from this point
+			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+				return tx.Delete(kv.HeaderCanonical, k, nil)
+			}); err != nil {
+				return err
+			}
+			if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+				return tx.Delete(kv.Headers, k, nil)
+			}); err != nil {
+				return err
+			}
+			if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+				return tx.Delete(kv.HeaderTD, k, nil)
+			}); err != nil {
+				return err
+			}
+			hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
+			if err != nil {
+				return err
+			}
+			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
+				log.Error("ReadHeadHeaderHash failed", "err", err)
+			}
+			log.Info("Progress", "headers", progress)
+			return nil
+		}
+		log.Info("This command only works with --unwind option")
+		return nil
+	})
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
@@ -395,11 +477,49 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	_, _, chainConfig, _, _, sync, _, _ := newSync(ctx, db, nil)
 
+	must(sync.SetCurrentStage(stages.Senders))
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	if integritySlow {
+		secp256k1.ContextForThread(1)
+		for i := block; ; i++ {
+			if err := common2.Stopped(ctx.Done()); err != nil {
+				return err
+			}
+			withoutSenders, _ := rawdb.ReadBlockByNumber(tx, i)
+			if withoutSenders == nil {
+				break
+			}
+			txs := withoutSenders.Transactions()
+			_, senders, _ := rawdb.ReadBlockByNumberWithSenders(tx, i)
+			if txs.Len() != len(senders) {
+				log.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
+				return nil
+			}
+			if txs.Len() == 0 {
+				continue
+			}
+			signer := types.MakeSigner(chainConfig, i)
+			for j := 0; j < txs.Len(); j++ {
+				from, err := signer.Sender(txs[j])
+				if err != nil {
+					return err
+				}
+				if !bytes.Equal(from[:], senders[j][:]) {
+					log.Error("wrong sender", "block", i, "tx", j, "db", fmt.Sprintf("%x", senders[j]), "expect", fmt.Sprintf("%x", from))
+				}
+			}
+			if i%10 == 0 {
+				log.Info("checked", "block", i)
+			}
+		}
+		return nil
+	}
 
 	if reset {
 		err = resetSenders(tx)
@@ -412,7 +532,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir)
+	pm, err := prune.Get(tx)
+	if err != nil {
+		return err
+	}
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)
@@ -431,6 +555,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.Execution))
 
 	if reset {
 		genesis, _ := byChain()
@@ -489,6 +614,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	tx, err := db.BeginRw(ctx)
@@ -544,6 +670,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.HashState))
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -597,6 +724,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.LogIndex))
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -651,6 +779,7 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
+	must(sync.SetCurrentStage(stages.CallTraces))
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -710,6 +839,8 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 func stageHistory(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -759,10 +890,11 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		err = stagedsync.PruneAccountHistoryIndex(ps, tx, cfg, ctx)
+		err = stagedsync.PruneStorageHistoryIndex(ps, tx, cfg, ctx)
 		if err != nil {
 			return err
 		}
+		_ = printStages(tx)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
@@ -778,6 +910,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	must(sync.SetCurrentStage(stages.TxLookup))
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -874,13 +1007,18 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
+	case params.KovanChainName:
+		chainConfig = params.KovanChainConfig
+		genesis = core.DefaultKovanGenesisBlock()
+	case params.FermionChainName:
+		chainConfig = params.FermionChainConfig
+		genesis = core.DefaultFermionGenesisBlock()
 	}
 	return genesis, chainConfig
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	snapshotDir = path.Join(datadir, "snapshot")
 	logger := log.New()
 
 	var pm prune.Mode
@@ -903,7 +1041,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var engine consensus.Engine
 	engine = ethash.NewFaker()
 	switch chain {
-	case params.SokolChainName:
+	case params.SokolChainName, params.KovanChainName:
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
 	}
 
@@ -940,17 +1078,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
+	cfg.TxPool.Disable = true
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
-		downloadServer,
-		tmpdir,
-		txPool,
-		txPoolP2PServer,
-		nil, nil, nil,
-	)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, downloadServer, tmpdir, txPool, txPoolP2PServer, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -958,7 +1091,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, false, true, tmpdir),
@@ -988,7 +1121,8 @@ func stage(st *stagedsync.Sync, tx kv.Tx, db kv.RoDB, stage stages.SyncStage) *s
 }
 
 func overrideStorageMode(db kv.RwDB) error {
-	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC, experiments)
+	pm, err := prune.FromCli(pruneFlag, pruneH, pruneR, pruneT, pruneC,
+		pruneHBefore, pruneRBefore, pruneTBefore, pruneCBefore, experiments)
 	if err != nil {
 		return err
 	}

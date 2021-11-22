@@ -37,7 +37,7 @@ const (
 	wsWriteBuffer      = 1024
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
-	wsMessageSizeLimit = 15 * 1024 * 1024
+	wsMessageSizeLimit = 32 * 1024 * 1024
 )
 
 var wsBufferPool = new(sync.Pool)
@@ -47,7 +47,7 @@ var wsBufferPool = new(sync.Pool)
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
 func (s *Server) WebsocketHandler(allowedOrigins []string, compression bool) http.Handler {
-	var upgrader = websocket.Upgrader{
+	upgrader := websocket.Upgrader{
 		EnableCompression: compression,
 		ReadBufferSize:    wsReadBuffer,
 		WriteBufferSize:   wsWriteBuffer,
@@ -57,7 +57,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, compression bool) htt
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Debug("WebSocket upgrade failed", "err", err)
+			log.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
 		codec := newWebsocketCodec(conn)
@@ -87,7 +87,7 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 			origins.Add("http://" + hostname)
 		}
 	}
-	log.Debug(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
+	log.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
 
 	f := func(req *http.Request) bool {
 		// Skip origin verification if no Origin header is present. The origin check
@@ -272,7 +272,7 @@ func (wc *websocketCodec) writeJSON(ctx context.Context, v interface{}) error {
 
 // pingLoop sends periodic ping frames when the connection is idle.
 func (wc *websocketCodec) pingLoop() {
-	var timer = time.NewTimer(wsPingInterval)
+	timer := time.NewTimer(wsPingInterval)
 	defer wc.wg.Done()
 	defer timer.Stop()
 

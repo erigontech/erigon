@@ -6,16 +6,17 @@ import (
 	"math/big"
 	"sync"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
@@ -97,14 +98,27 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	filters         *filters.Filters
-	_chainConfig    *params.ChainConfig
-	_genesis        *types.Block
-	_genesisSetOnce sync.Once
+	stateCache   kvcache.Cache // thread-safe
+	blocksLRU    *lru.Cache    // thread-safe
+	filters      *filters.Filters
+	_chainConfig *params.ChainConfig
+	_genesis     *types.Block
+	_genesisLock sync.RWMutex
+
+	TevmEnabled bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters) *BaseAPI {
-	return &BaseAPI{filters: f}
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode bool) *BaseAPI {
+	blocksLRUSize := 128 // ~32Mb
+	if !singleNodeMode {
+		blocksLRUSize = 512
+	}
+	blocksLRU, err := lru.New(blocksLRUSize)
+	if err != nil {
+		panic(err)
+	}
+
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -112,30 +126,73 @@ func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 	return cfg, err
 }
 
+func (api *BaseAPI) EnableTevmExperiment() { api.TevmEnabled = true }
+
 // nolint:unused
 func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
 }
 
-func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
-	if api._chainConfig != nil {
-		return api._chainConfig, api._genesis, nil
+func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
+	hash, hashErr := rawdb.ReadCanonicalHash(tx, number)
+	if hashErr != nil {
+		return nil, hashErr
 	}
+	return api.blockWithSenders(tx, hash, number)
+}
+func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.(*types.Block), nil
+		}
+	}
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, nil
+	}
+	return api.blockWithSenders(tx, hash, *number)
+}
+func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.(*types.Block), nil
+		}
+	}
+	block, _, err := rawdb.ReadBlockWithSenders(tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil { // don't save nil's to cache
+		return nil, nil
+	}
+	if api.blocksLRU != nil {
+		api.blocksLRU.Add(hash, block)
+	}
+	return block, nil
+}
 
+func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*params.ChainConfig, *types.Block, error) {
+	api._genesisLock.RLock()
+	cc, genesisBlock := api._chainConfig, api._genesis
+	api._genesisLock.RUnlock()
+
+	if cc != nil {
+		return cc, genesisBlock, nil
+	}
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	cc, err := rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
 	if cc != nil && genesisBlock != nil {
-		api._genesisSetOnce.Do(func() {
-			api._genesis = genesisBlock
-			api._chainConfig = cc
-		})
+		api._genesisLock.Lock()
+		api._genesis = genesisBlock
+		api._chainConfig = cc
+		api._genesisLock.Unlock()
 	}
 	return cc, genesisBlock, nil
 }
@@ -144,7 +201,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
+func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil
 	}
@@ -154,7 +211,7 @@ func (api *BaseAPI) getBlockByNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 		return nil, err
 	}
 
-	block, _, err := rawdb.ReadBlockByNumberWithSenders(tx, n)
+	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err
 }
 

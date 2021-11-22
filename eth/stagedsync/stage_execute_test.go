@@ -87,7 +87,7 @@ func TestPruneExecution(t *testing.T) {
 
 	s := &PruneState{ID: stages.Execution, ForwardProgress: 50}
 	// check pruning distance > than current stage progress
-	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: 100, Receipts: 101, CallTraces: 200}}, ctx, false)
+	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: prune.Distance(100), Receipts: prune.Distance(101), CallTraces: prune.Distance(200)}}, ctx, false)
 	assert.NoError(err)
 
 	available, err = changeset.AvailableFrom(tx)
@@ -98,7 +98,8 @@ func TestPruneExecution(t *testing.T) {
 	assert.Equal(uint64(1), available)
 
 	// pruning distance, first run
-	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: 5, Receipts: 15, CallTraces: 25}}, ctx, false)
+	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: prune.Distance(5),
+		Receipts: prune.Distance(15), CallTraces: prune.Distance(25)}}, ctx, false)
 	assert.NoError(err)
 
 	available, err = changeset.AvailableFrom(tx)
@@ -109,7 +110,8 @@ func TestPruneExecution(t *testing.T) {
 	assert.Equal(uint64(45), available)
 
 	// pruning distance, second run
-	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: 5, Receipts: 15, CallTraces: 25}}, ctx, false)
+	err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: prune.Distance(5),
+		Receipts: prune.Distance(15), CallTraces: prune.Distance(25)}}, ctx, false)
 	assert.NoError(err)
 
 	available, err = changeset.AvailableFrom(tx)

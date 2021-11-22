@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/prque"
@@ -229,7 +230,7 @@ func (f *BlockFetcher) Start() {
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *BlockFetcher) Stop() {
-	common.SafeClose(f.quit)
+	libcommon.SafeClose(f.quit)
 }
 
 // Notify announces the fetcher of the potential availability of a new block in
@@ -380,14 +381,14 @@ func (f *BlockFetcher) loop() {
 
 			count := f.announces[notification.origin] + 1
 			if count > hashLimit {
-				log.Debug("Peer exceeded outstanding announces", "peer", notification.origin, "limit", hashLimit)
+				log.Trace("Peer exceeded outstanding announces", "peer", notification.origin, "limit", hashLimit)
 				//blockAnnounceDOSMeter.Mark(1)
 				break
 			}
 			// If we have a valid block number, check that it's potentially useful
 			if notification.number > 0 {
 				if dist := int64(notification.number) - int64(f.chainHeight()); dist < -maxUncleDist || dist > maxQueueDist {
-					log.Debug("Peer discarded announcement", "peer", notification.origin, "number", notification.number, "hash", notification.hash, "distance", dist)
+					log.Trace("Peer discarded announcement", "peer", notification.origin, "number", notification.number, "hash", notification.hash, "distance", dist)
 					//blockAnnounceDropMeter.Mark(1)
 					break
 				}
@@ -688,14 +689,14 @@ func (f *BlockFetcher) enqueue(peer string, header *types.Header, block *types.B
 	// Ensure the peer isn't DOSing us
 	count := f.queues[peer] + 1
 	if count > blockLimit {
-		log.Debug("Discarded delivered header or block, exceeded allowance", "peer", peer, "number", number, "hash", hash, "limit", blockLimit)
+		log.Trace("Discarded delivered header or block, exceeded allowance", "peer", peer, "number", number, "hash", hash, "limit", blockLimit)
 		//blockBroadcastDOSMeter.Mark(1)
 		f.forgetHash(hash)
 		return
 	}
 	// Discard any past or too distant blocks
 	if dist := int64(number) - int64(f.chainHeight()); dist < -maxUncleDist || dist > maxQueueDist {
-		log.Debug("Discarded delivered header or block, too far away", "peer", peer, "number", number, "hash", hash, "distance", dist)
+		log.Trace("Discarded delivered header or block, too far away", "peer", peer, "number", number, "hash", hash, "distance", dist)
 		//blockBroadcastDropMeter.Mark(1)
 		f.forgetHash(hash)
 		return
@@ -714,7 +715,7 @@ func (f *BlockFetcher) enqueue(peer string, header *types.Header, block *types.B
 		if f.queueChangeHook != nil {
 			f.queueChangeHook(hash, true)
 		}
-		log.Debug("Queued delivered header or block", "peer", peer, "number", number, "hash", hash, "queued", f.queue.Size())
+		log.Trace("Queued delivered header or block", "peer", peer, "number", number, "hash", hash, "queued", f.queue.Size())
 	}
 }
 
@@ -725,7 +726,7 @@ func (f *BlockFetcher) importBlocks(peer string, block *types.Block) {
 	hash := block.Hash()
 
 	// Run the import on a new thread
-	log.Debug("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash)
+	log.Trace("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash)
 	defer func() {
 		f.forgetHash(hash)
 		f.forgetBlock(hash)
@@ -734,7 +735,7 @@ func (f *BlockFetcher) importBlocks(peer string, block *types.Block) {
 	// If the parent's unknown, abort insertion
 	parent := f.getBlock(block.ParentHash())
 	if parent == nil {
-		log.Debug("Unknown parent of propagated block", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash())
+		log.Trace("Unknown parent of propagated block", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash())
 		return
 	}
 	// Quickly validate the header and propagate the block if it passes
@@ -749,13 +750,13 @@ func (f *BlockFetcher) importBlocks(peer string, block *types.Block) {
 
 	default:
 		// Something went very wrong, drop the peer
-		log.Debug("Propagated block verification failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
+		log.Trace("Propagated block verification failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
 		f.dropPeer(peer)
 		return
 	}
 	// Run the actual import and log any issues
 	if _, err := f.insertChain(types.Blocks{block}); err != nil {
-		log.Debug("Propagated block import failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
+		log.Trace("Propagated block import failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
 		return
 	}
 	// If import succeeded, broadcast the block

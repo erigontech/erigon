@@ -77,6 +77,14 @@ var SokolBootnodes = []string{
 	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
 }
 
+var KovanBootnodes = []string{
+	"enode://30499bde23362f7d310a34518a2a6ff765921870bf0c3e63d21153cfa7ba9cf39cc7c8e54e9dad2f2b3c07288b3e91b220656833cc2d843a54875c229f3f959a@8.9.8.175:30303",
+	"enode://16898006ba2cd4fa8bf9a3dfe32684c178fa861df144bfc21fe800dc4838a03e342056951fa9fd533dcb0be1219e306106442ff2cf1f7e9f8faa5f2fc1a3aa45@116.203.116.241:30303",
+	"enode://49a0e1aa38caa12cbf31222cb4e31cef1e8794cb4dd38012f84498ac867b19584e29bbf6d53201d7dfd3b5eb0998a4d908d096ed4ddb5f9102c623852cd331ec@54.87.247.5:30303",
+}
+
+var FermionBootnodes = []string{}
+
 var V5Bootnodes = []string{
 	// Teku team's bootnode
 	"enr:-KG4QOtcP9X1FbIMOe17QNMKqDxCpm14jcX5tiOE4_TyMrFqbmhPZHK_ZPG2Gxb1GE2xdtodOfx9-cgvNtxnRyHEmC0ghGV0aDKQ9aX9QgAAAAD__________4JpZIJ2NIJpcIQDE8KdiXNlY3AyNTZrMaEDhpehBDbZjM_L9ek699Y7vhUJ-eAdMyQW_Fil522Y0fODdGNwgiMog3VkcIIjKA",

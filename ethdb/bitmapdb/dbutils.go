@@ -8,8 +8,8 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
@@ -113,7 +113,7 @@ func TruncateRange(db kv.RwTx, bucket string, key []byte, to uint32) error {
 		if _, err := chunk.WriteTo(buf); err != nil {
 			return err
 		}
-		return db.Put(bucket, chunkKey, common.CopyBytes(buf.Bytes()))
+		return db.Put(bucket, chunkKey, libcommon.Copy(buf.Bytes()))
 	})
 }
 
@@ -130,19 +130,21 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 		return nil, err
 	}
 	defer c.Close()
-	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
-		bm := roaring.New()
-		_, err := bm.ReadFrom(bytes.NewReader(v))
+	for k, v, err := c.Seek(fromKey); k != nil; k, v, err = c.Next() {
 		if err != nil {
-			return false, err
+			return nil, err
+		}
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
+		bm := roaring.New()
+		if _, err := bm.ReadFrom(bytes.NewReader(v)); err != nil {
+			return nil, err
 		}
 		chunks = append(chunks, bm)
 		if binary.BigEndian.Uint32(k[len(k)-4:]) >= to {
-			return false, nil
+			break
 		}
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 
 	if len(chunks) == 0 {
@@ -265,7 +267,7 @@ func TruncateRange64(db kv.RwTx, bucket string, key []byte, to uint64) error {
 		if _, err := chunk.WriteTo(buf); err != nil {
 			return err
 		}
-		return db.Put(bucket, chunkKey, common.CopyBytes(buf.Bytes()))
+		return db.Put(bucket, chunkKey, libcommon.Copy(buf.Bytes()))
 	})
 }
 
@@ -283,19 +285,22 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 		return nil, err
 	}
 	defer c.Close()
-	if err := ethdb.Walk(c, fromKey, len(key)*8, func(k, v []byte) (bool, error) {
+	for k, v, err := c.Seek(fromKey); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.HasPrefix(k, key) {
+			break
+		}
 		bm := roaring64.New()
 		_, err := bm.ReadFrom(bytes.NewReader(v))
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		chunks = append(chunks, bm)
 		if binary.BigEndian.Uint64(k[len(k)-8:]) >= to {
-			return false, nil
+			break
 		}
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 
 	if len(chunks) == 0 {

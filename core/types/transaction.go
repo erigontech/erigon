@@ -122,7 +122,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		return nil, err
 	}
 	if len(b) != 1 {
-		return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		return nil, fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
 	}
 	var tx Transaction
 	switch b[0] {
@@ -139,7 +139,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		}
 		tx = t
 	default:
-		return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
+		return nil, fmt.Errorf("%w, got: %d", rlp.ErrUnknownTxTypePrefix, b[0])
 	}
 	if kind == rlp.String {
 		if err = s.ListEnd(); err != nil {
@@ -151,46 +151,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 
 func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	kind, size, err := s.Kind()
-	if err != nil {
-		return nil, err
-	}
-	switch kind {
-	case rlp.List:
-		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s, size); err != nil {
-			return nil, err
-		}
-		return tx, nil
-	case rlp.Byte, rlp.String:
-		var b []byte
-		if b, err = s.Bytes(); err != nil {
-			return nil, err
-		}
-		if len(b) != 1 {
-			return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
-		}
-		var tx Transaction
-		switch b[0] {
-		case AccessListTxType:
-			t := &AccessListTx{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		case DynamicFeeTxType:
-			t := &DynamicFeeTransaction{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		default:
-			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
-		}
-		return tx, nil
-	default:
-		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
-	}
+	return DecodeTransaction(s)
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
@@ -212,11 +173,12 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 	return result, nil
 }
 
-func UnmarshalTransactionsFromBinary(txs [][]byte) ([]Transaction, error) {
+func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 	result := make([]Transaction, len(txs))
 	var err error
 	for i := range txs {
-		result[i], err = UnmarshalTransactionFromBinary(txs[i])
+		s := rlp.NewStream(bytes.NewReader(txs[i]), uint64(len(txs[i])))
+		result[i], err = DecodeTransaction(s)
 		if err != nil {
 			return nil, err
 		}

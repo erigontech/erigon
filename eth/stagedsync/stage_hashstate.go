@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -206,18 +207,18 @@ func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.E
 
 func transformPlainStateKey(key []byte) ([]byte, error) {
 	switch len(key) {
-	case common.AddressLength:
+	case length.Addr:
 		// account
 		hash, err := common.HashData(key)
 		return hash[:], err
-	case common.AddressLength + common.IncarnationLength + common.HashLength:
+	case length.Addr + length.Incarnation + length.Hash:
 		// storage
-		addrHash, err := common.HashData(key[:common.AddressLength])
+		addrHash, err := common.HashData(key[:length.Addr])
 		if err != nil {
 			return nil, err
 		}
-		inc := binary.BigEndian.Uint64(key[common.AddressLength:])
-		secKey, err := common.HashData(key[common.AddressLength+common.IncarnationLength:])
+		inc := binary.BigEndian.Uint64(key[length.Addr:])
+		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +231,7 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 }
 
 func transformContractCodeKey(key []byte) ([]byte, error) {
-	if len(key) != common.AddressLength+common.IncarnationLength {
+	if len(key) != length.Addr+length.Incarnation {
 		return nil, fmt.Errorf("could not convert code key from plain to hashed, unexpected len: %d", len(key))
 	}
 	address, incarnation := dbutils.PlainParseStoragePrefix(key)
@@ -304,18 +305,19 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		if len(value) == 0 {
 			return nil
 		}
-		var a accounts.Account
-		if err = a.DecodeForStorage(value); err != nil {
+
+		incarnation, err := accounts.DecodeIncarnationFromStorage(value)
+		if err != nil {
 			return err
 		}
-		if a.Incarnation == 0 {
+		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		var codeHash []byte
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
-			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
+			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, incarnation, err)
 		}
 		if codeHash == nil {
 			return nil
@@ -379,18 +381,18 @@ func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			return nil
 		}
 		var (
-			a        accounts.Account
 			newK     []byte
 			codeHash []byte
 			err      error
 		)
-		if err = a.DecodeForStorage(v); err != nil {
+		incarnation, err := accounts.DecodeIncarnationFromStorage(v)
+		if err != nil {
 			return err
 		}
-		if a.Incarnation == 0 {
+		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)

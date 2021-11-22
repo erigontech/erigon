@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -141,7 +142,7 @@ func transpileBatch(logPrefix string, stageProgress, toBlock uint64, cfg Transpi
 
 		select {
 		case <-quitCh:
-			return 0, common.ErrStopped
+			return 0, libcommon.ErrStopped
 		case <-logEvery.C:
 			prevContract, logTime = logTEVMProgress(logPrefix, prevContract, logTime, stageProgress)
 			tx.CollectMetrics()
@@ -259,7 +260,7 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 		"number", currentContract,
 		"contracts/s", speed,
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	logpairs = append(logpairs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Translated contracts", logPrefix), logpairs...)
 
 	return currentContract, currentTime
