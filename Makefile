@@ -110,11 +110,6 @@ tracker:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
 
-devnettest:
-	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
-
 db-tools:
 	@echo "Building db-tools"
 	rm -rf libmdbx # hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
