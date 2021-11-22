@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -74,7 +75,7 @@ func (lq *LinkQueue) Pop() interface{} {
 }
 
 type Anchor struct {
-	peerID      string
+	peerID      enode.ID
 	links       []*Link     // Links attached immediately to this anchor
 	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight uint64
@@ -157,7 +158,7 @@ type HeaderRequest struct {
 }
 
 type PenaltyItem struct {
-	PeerID  string
+	PeerID  enode.ID
 	Penalty Penalty
 }
 type Announce struct {

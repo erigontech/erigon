@@ -62,6 +62,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -342,7 +343,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		fetchTx := func(peerID string, hashes []common.Hash) error {
+		fetchTx := func(peerID enode.ID, hashes []common.Hash) error {
 			backend.txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
 			return nil
 		}

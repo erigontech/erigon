@@ -184,7 +184,7 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	if err := msg.Decode(&hs); err != nil {
 		return nil, err
 	}
-	if len(hs.ID) != 64 || !bitutil.TestBytes(hs.ID) {
+	if len(hs.Pubkey) != 64 || !bitutil.TestBytes(hs.Pubkey) {
 		return nil, DiscInvalidIdentity
 	}
 	return &hs, nil

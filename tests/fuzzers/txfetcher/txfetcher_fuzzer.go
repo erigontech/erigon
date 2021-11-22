@@ -28,10 +28,11 @@ import (
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 var (
-	peers []string
+	peers []enode.ID
 	txs   []types.Transaction
 )
 
@@ -39,9 +40,9 @@ func init() {
 	// Random is nice, but we need it deterministic
 	rand := rand.New(rand.NewSource(0x3a29))
 
-	peers = make([]string, 10)
+	peers = make([]enode.ID, 10)
 	for i := 0; i < len(peers); i++ {
-		peers[i] = fmt.Sprintf("Peer #%d", i)
+		peers[i] = enode.ID{byte(i)}
 	}
 	txs = make([]types.Transaction, 65536) // We need to bump enough to hit all the limits
 	for i := 0; i < len(txs); i++ {
@@ -83,7 +84,7 @@ func Fuzz(input []byte) int {
 		func(txs []types.Transaction) []error {
 			return make([]error, len(txs))
 		},
-		func(string, []common.Hash) error { return nil },
+		func(enode.ID, []common.Hash) error { return nil },
 		clock, rand,
 	)
 	f.Start()

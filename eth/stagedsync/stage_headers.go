@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -27,7 +28,7 @@ type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
 	chainConfig       params.ChainConfig
-	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) []byte
+	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
@@ -38,7 +39,7 @@ func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
 	chainConfig params.ChainConfig,
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) []byte,
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
@@ -117,7 +118,7 @@ func HeadersForward(
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx})
 
-	var peer []byte
+	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
 Loop:
@@ -134,19 +135,19 @@ Loop:
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			peer = cfg.headerReqSend(ctx, req)
-			if peer != nil {
+			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			if sentToPeer {
 				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
 		cfg.penalize(ctx, penalties)
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
-		for req != nil && peer != nil && maxRequests > 0 {
+		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				peer = cfg.headerReqSend(ctx, req)
-				if peer != nil {
+				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				if sentToPeer {
 					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
 				}
@@ -158,8 +159,8 @@ Loop:
 		// Send skeleton request if required
 		req = cfg.hd.RequestSkeleton()
 		if req != nil {
-			peer = cfg.headerReqSend(ctx, req)
-			if peer != nil {
+			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			if sentToPeer {
 				log.Trace("Sent skeleton request", "height", req.Number)
 			}
 		}
