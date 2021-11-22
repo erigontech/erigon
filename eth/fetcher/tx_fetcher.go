@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	mrand "math/rand"
-	"sort"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
@@ -30,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/log/v3"
 	//"github.com/ledgerwatch/erigon/metrics"
 )
@@ -101,7 +101,7 @@ var (
 // txAnnounce is the notification of the availability of a batch
 // of new transactions in the network.
 type txAnnounce struct {
-	origin string        // Identifier of the peer originating the notification
+	origin enode.ID      // Identifier of the peer originating the notification
 	hashes []common.Hash // Batch of transaction hashes being announced
 }
 
@@ -116,14 +116,14 @@ type txRequest struct {
 // txDelivery is the notification that a batch of transactions have been added
 // to the pool and should be untracked.
 type txDelivery struct {
-	origin string        // Identifier of the peer originating the notification
+	origin enode.ID      // Identifier of the peer originating the notification
 	hashes []common.Hash // Batch of transaction hashes having been delivered
 	direct bool          // Whether this is a direct reply or a broadcast
 }
 
 // txDrop is the notiication that a peer has disconnected.
 type txDrop struct {
-	peer string
+	peer enode.ID
 }
 
 // TxFetcher is responsible for retrieving new transaction based on announcements.
@@ -153,26 +153,26 @@ type TxFetcher struct {
 
 	// ID 1: Waiting lists for newly discovered transactions that might be
 	// broadcast without needing explicit request/reply round trips.
-	waitlist  map[common.Hash]map[string]struct{} // Transactions waiting for an potential broadcast
-	waittime  map[common.Hash]mclock.AbsTime      // Timestamps when transactions were added to the waitlist
-	waitslots map[string]map[common.Hash]struct{} // Waiting announcement sgroupped by peer (DoS protection)
+	waitlist  map[common.Hash]map[enode.ID]struct{} // Transactions waiting for an potential broadcast
+	waittime  map[common.Hash]mclock.AbsTime        // Timestamps when transactions were added to the waitlist
+	waitslots map[enode.ID]map[common.Hash]struct{} // Waiting announcement sgroupped by peer (DoS protection)
 
 	// ID 2: Queue of transactions that waiting to be allocated to some peer
 	// to be retrieved directly.
-	announces map[string]map[common.Hash]struct{} // Set of announced transactions, grouped by origin peer
-	announced map[common.Hash]map[string]struct{} // Set of download locations, grouped by transaction hash
+	announces map[enode.ID]map[common.Hash]struct{} // Set of announced transactions, grouped by origin peer
+	announced map[common.Hash]map[enode.ID]struct{} // Set of download locations, grouped by transaction hash
 
 	// ID 3: Set of transactions currently being retrieved, some which may be
 	// fulfilled and some rescheduled. Note, this step shares 'announces' from the
 	// previous stage to avoid having to duplicate (need it for DoS checks).
-	fetching   map[common.Hash]string              // Transaction set currently being retrieved
-	requests   map[string]*txRequest               // In-flight transaction retrievals
-	alternates map[common.Hash]map[string]struct{} // In-flight transaction alternate origins if retrieval fails
+	fetching   map[common.Hash]enode.ID              // Transaction set currently being retrieved
+	requests   map[enode.ID]*txRequest               // In-flight transaction retrievals
+	alternates map[common.Hash]map[enode.ID]struct{} // In-flight transaction alternate origins if retrieval fails
 
 	// Callbacks
-	hasTx    func(common.Hash) bool            // Retrieves a tx from the local txpool
-	addTxs   func([]types.Transaction) []error // Insert a batch of transactions into local txpool
-	fetchTxs func(string, []common.Hash) error // Retrieves a set of txs from a remote peer
+	hasTx    func(common.Hash) bool              // Retrieves a tx from the local txpool
+	addTxs   func([]types.Transaction) []error   // Insert a batch of transactions into local txpool
+	fetchTxs func(enode.ID, []common.Hash) error // Retrieves a set of txs from a remote peer
 
 	step  chan struct{} // Notification channel when the fetcher loop iterates
 	clock mclock.Clock  // Time wrapper to simulate in tests
@@ -181,28 +181,28 @@ type TxFetcher struct {
 
 // NewTxFetcher creates a transaction fetcher to retrieve transaction
 // based on hash announcements.
-func NewTxFetcher(hasTx func(common.Hash) bool, addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error) *TxFetcher {
+func NewTxFetcher(hasTx func(common.Hash) bool, addTxs func([]types.Transaction) []error, fetchTxs func(enode.ID, []common.Hash) error) *TxFetcher {
 	return NewTxFetcherForTests(hasTx, addTxs, fetchTxs, mclock.System{}, nil)
 }
 
 // NewTxFetcherForTests is a testing method to mock out the realtime clock with
 // a simulated version and the internal randomness with a deterministic one.
 func NewTxFetcherForTests(
-	hasTx func(common.Hash) bool, addTxs func([]types.Transaction) []error, fetchTxs func(string, []common.Hash) error,
+	hasTx func(common.Hash) bool, addTxs func([]types.Transaction) []error, fetchTxs func(enode.ID, []common.Hash) error,
 	clock mclock.Clock, rand *mrand.Rand) *TxFetcher {
 	return &TxFetcher{
 		notify:      make(chan *txAnnounce),
 		cleanup:     make(chan *txDelivery),
 		drop:        make(chan *txDrop),
 		quit:        make(chan struct{}),
-		waitlist:    make(map[common.Hash]map[string]struct{}),
+		waitlist:    make(map[common.Hash]map[enode.ID]struct{}),
 		waittime:    make(map[common.Hash]mclock.AbsTime),
-		waitslots:   make(map[string]map[common.Hash]struct{}),
-		announces:   make(map[string]map[common.Hash]struct{}),
-		announced:   make(map[common.Hash]map[string]struct{}),
-		fetching:    make(map[common.Hash]string),
-		requests:    make(map[string]*txRequest),
-		alternates:  make(map[common.Hash]map[string]struct{}),
+		waitslots:   make(map[enode.ID]map[common.Hash]struct{}),
+		announces:   make(map[enode.ID]map[common.Hash]struct{}),
+		announced:   make(map[common.Hash]map[enode.ID]struct{}),
+		fetching:    make(map[common.Hash]enode.ID),
+		requests:    make(map[enode.ID]*txRequest),
+		alternates:  make(map[common.Hash]map[enode.ID]struct{}),
 		underpriced: mapset.NewSet(),
 		hasTx:       hasTx,
 		addTxs:      addTxs,
@@ -214,7 +214,7 @@ func NewTxFetcherForTests(
 
 // Notify announces the fetcher of the potential availability of a new batch of
 // transactions in the network.
-func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
+func (f *TxFetcher) Notify(peer enode.ID, hashes []common.Hash) error {
 	// Keep track of all the announced transactions
 	//txAnnounceInMeter.Mark(int64(len(hashes)))
 
@@ -262,7 +262,7 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 // and the fetcher. This method may be called by both transaction broadcasts and
 // direct request replies. The differentiation is important so the fetcher can
 // re-shedule missing transactions as soon as possible.
-func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) error {
+func (f *TxFetcher) Enqueue(peer enode.ID, txs []types.Transaction, direct bool) error {
 	// Keep track of all the propagated transactions
 	//if direct {
 	//	txReplyInMeter.Mark(int64(len(txs)))
@@ -324,7 +324,7 @@ func (f *TxFetcher) Enqueue(peer string, txs []types.Transaction, direct bool) e
 
 // Drop should be called when a peer disconnects. It cleans up all the internal
 // data structures of the given node.
-func (f *TxFetcher) Drop(peer string) error {
+func (f *TxFetcher) Drop(peer enode.ID) error {
 	select {
 	case f.drop <- &txDrop{peer: peer}:
 		return nil
@@ -421,7 +421,7 @@ func (f *TxFetcher) loop() {
 					continue
 				}
 				// Transaction unknown to the fetcher, insert it into the waiting list
-				f.waitlist[hash] = map[string]struct{}{ann.origin: {}}
+				f.waitlist[hash] = map[enode.ID]struct{}{ann.origin: {}}
 				f.waittime[hash] = f.clock.Now()
 
 				if waitslots := f.waitslots[ann.origin]; waitslots != nil {
@@ -437,13 +437,13 @@ func (f *TxFetcher) loop() {
 			// If this peer is new and announced something already queued, maybe
 			// request transactions from them
 			if !oldPeer && len(f.announces[ann.origin]) > 0 {
-				f.scheduleFetches(timeoutTimer, timeoutTrigger, map[string]struct{}{ann.origin: {}})
+				f.scheduleFetches(timeoutTimer, timeoutTrigger, map[enode.ID]struct{}{ann.origin: {}})
 			}
 
 		case <-waitTrigger:
 			// At least one transaction's waiting time ran out, push all expired
 			// ones into the retrieval queues
-			actives := make(map[string]struct{})
+			actives := make(map[enode.ID]struct{})
 			for hash, instance := range f.waittime {
 				if time.Duration(f.clock.Now()-instance)+txGatherSlack > txArriveTimeout {
 					// Transaction expired without propagation, schedule for retrieval
@@ -751,11 +751,11 @@ func (f *TxFetcher) rescheduleTimeout(timer *mclock.Timer, trigger chan struct{}
 }
 
 // scheduleFetches starts a batch of retrievals for all available idle peers.
-func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, whitelist map[string]struct{}) {
+func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, whitelist map[enode.ID]struct{}) {
 	// Gather the set of peers we want to retrieve from (default to all)
 	actives := whitelist
 	if actives == nil {
-		actives = make(map[string]struct{})
+		actives = make(map[enode.ID]struct{})
 		for peer := range f.announces {
 			actives[peer] = struct{}{}
 		}
@@ -766,7 +766,7 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 	// For each active peer, try to schedule some transaction fetches
 	idle := len(f.requests) == 0
 
-	f.forEachPeer(actives, func(peer string) {
+	f.forEachPeer(actives, func(peer enode.ID) {
 		if f.requests[peer] != nil {
 			return // continue in the for-each
 		}
@@ -798,7 +798,7 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 			f.requests[peer] = &txRequest{hashes: hashes, time: f.clock.Now()}
 			//txRequestOutMeter.Mark(int64(len(hashes)))
 
-			go func(peer string, hashes []common.Hash) {
+			go func(peer enode.ID, hashes []common.Hash) {
 				// Try to fetch the transactions, but in case of a request
 				// failure (e.g. peer disconnected), reschedule the hashes.
 				if err := f.fetchTxs(peer, hashes); err != nil {
@@ -816,7 +816,7 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 
 // forEachPeer does a range loop over a map of peers in production, but during
 // testing it does a deterministic sorted random to allow reproducing issues.
-func (f *TxFetcher) forEachPeer(peers map[string]struct{}, do func(peer string)) {
+func (f *TxFetcher) forEachPeer(peers map[enode.ID]struct{}, do func(peer enode.ID)) {
 	// If we're running production, use whatever Go's map gives us
 	if f.rand == nil {
 		for peer := range peers {
@@ -825,12 +825,12 @@ func (f *TxFetcher) forEachPeer(peers map[string]struct{}, do func(peer string))
 		return
 	}
 	// We're running the test suite, make iteration deterministic
-	list := make([]string, 0, len(peers))
+	list := make([]enode.ID, 0, len(peers))
 	for peer := range peers {
 		list = append(list, peer)
 	}
-	sort.Strings(list)
-	rotateStrings(list, f.rand.Intn(len(list)))
+	sortPeerIDs(list)
+	rotatePeerIDs(list, f.rand.Intn(len(list)))
 	for _, peer := range list {
 		do(peer)
 	}
@@ -862,10 +862,22 @@ func (f *TxFetcher) forEachHash(hashes map[common.Hash]struct{}, do func(hash co
 	}
 }
 
-// rotateStrings rotates the contents of a slice by n steps. This method is only
+// sortPeerIDs sorts a slice of hashes. This method is only used in tests in order
+// to simulate random map iteration but keep it deterministic.
+func sortPeerIDs(slice []enode.ID) {
+	for i := 0; i < len(slice); i++ {
+		for j := i + 1; j < len(slice); j++ {
+			if bytes.Compare(slice[i][:], slice[j][:]) > 0 {
+				slice[i], slice[j] = slice[j], slice[i]
+			}
+		}
+	}
+}
+
+// rotatePeerIDs rotates the contents of a slice by n steps. This method is only
 // used in tests to simulate random map iteration but keep it deterministic.
-func rotateStrings(slice []string, n int) {
-	orig := make([]string, len(slice))
+func rotatePeerIDs(slice []enode.ID, n int) {
+	orig := make([]enode.ID, len(slice))
 	copy(orig, slice)
 
 	for i := 0; i < len(orig); i++ {

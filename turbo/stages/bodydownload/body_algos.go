@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -26,7 +27,7 @@ const BlockBufferSize = 128
 // validated at this point.
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
-type VerifyUnclesFunc func(peerID string, header *types.Header, uncles []*types.Header) error
+type VerifyUnclesFunc func(peerID enode.ID, header *types.Header, uncles []*types.Header) error
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
@@ -53,7 +54,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 		bd.deliveriesB[i] = nil
 		bd.requests[i] = nil
 	}
-	bd.peerMap = make(map[string]int)
+	bd.peerMap = make(map[enode.ID]int)
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
@@ -98,7 +99,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 			if currentTime < req.waitUntil {
 				continue
 			}
-			bd.peerMap[string(req.peerID)]++
+			bd.peerMap[req.peerID]++
 			bd.requests[blockNum-bd.requestedLow] = nil
 		}
 		var hash common.Hash
@@ -175,7 +176,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 	return bodyReq, blockNum, nil
 }
 
-func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer []byte) {
+func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer enode.ID) {
 	for _, blockNum := range bodyReq.BlockNums {
 		if blockNum < bd.requestedLow {
 			continue
@@ -189,7 +190,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID string) {
+func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID enode.ID) {
 	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
@@ -341,11 +342,11 @@ func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	return bd.deliveredCount, bd.wastedCount
 }
 
-func (bd *BodyDownload) GetPenaltyPeers() [][]byte {
-	peers := make([][]byte, len(bd.peerMap))
+func (bd *BodyDownload) GetPenaltyPeers() []enode.ID {
+	peers := make([]enode.ID, len(bd.peerMap))
 	i := 0
 	for p := range bd.peerMap {
-		peers[i] = []byte(p)
+		peers[i] = p
 		i++
 	}
 	return peers
@@ -357,7 +358,7 @@ func (bd *BodyDownload) PrintPeerMap() {
 		fmt.Printf("%s = %d\n", p, n)
 	}
 	fmt.Printf("---------------------------\n")
-	bd.peerMap = make(map[string]int)
+	bd.peerMap = make(map[enode.ID]int)
 }
 
 func (bd *BodyDownload) AddToPrefetch(block *types.Block) {

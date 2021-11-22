@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 var (
@@ -43,11 +44,11 @@ var (
 )
 
 type doTxNotify struct {
-	peer   string
+	peer   enode.ID
 	hashes []common.Hash
 }
 type doTxEnqueue struct {
-	peer   string
+	peer   enode.ID
 	txs    []types.Transaction
 	direct bool
 }
@@ -55,14 +56,14 @@ type doWait struct {
 	time time.Duration
 	step bool
 }
-type doDrop string
+type doDrop enode.ID
 type doFunc func()
 
-type isWaiting map[string][]common.Hash
+type isWaiting map[enode.ID][]common.Hash
 type isScheduled struct {
-	tracking map[string][]common.Hash
-	fetching map[string][]common.Hash
-	dangling map[string][]common.Hash
+	tracking map[enode.ID][]common.Hash
+	fetching map[enode.ID][]common.Hash
+	dangling map[enode.ID][]common.Hash
 }
 type isUnderpriced int
 
@@ -81,34 +82,34 @@ func TestTransactionFetcherWaiting(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Initial announcement to get something into the waitlist
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}, {0x02}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}, {0x02}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
 			}),
 			// Announce from a new peer to check that no overwrite happens
-			doTxNotify{peer: "B", hashes: []common.Hash{{0x03}, {0x04}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
-				"B": {{0x03}, {0x04}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{{0x03}, {0x04}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
+				{'B'}: {{0x03}, {0x04}},
 			}),
 			// Announce clashing hashes but unique new peer
-			doTxNotify{peer: "C", hashes: []common.Hash{{0x01}, {0x04}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
-				"B": {{0x03}, {0x04}},
-				"C": {{0x01}, {0x04}},
+			doTxNotify{peer: enode.ID{'C'}, hashes: []common.Hash{{0x01}, {0x04}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
+				{'B'}: {{0x03}, {0x04}},
+				{'C'}: {{0x01}, {0x04}},
 			}),
 			// Announce existing and clashing hashes from existing peer
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}, {0x03}, {0x05}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}, {0x03}, {0x05}},
-				"B": {{0x03}, {0x04}},
-				"C": {{0x01}, {0x04}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}, {0x03}, {0x05}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}, {0x03}, {0x05}},
+				{'B'}: {{0x03}, {0x04}},
+				{'C'}: {{0x01}, {0x04}},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
@@ -117,46 +118,46 @@ func TestTransactionFetcherWaiting(t *testing.T) {
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}, {0x03}, {0x05}},
-					"B": {{0x03}, {0x04}},
-					"C": {{0x01}, {0x04}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}, {0x03}, {0x05}},
+					{'B'}: {{0x03}, {0x04}},
+					{'C'}: {{0x01}, {0x04}},
 				},
-				fetching: map[string][]common.Hash{ // Depends on deterministic test randomizer
-					"A": {{0x02}, {0x03}, {0x05}},
-					"C": {{0x01}, {0x04}},
+				fetching: map[enode.ID][]common.Hash{ // Depends on deterministic test randomizer
+					{'A'}: {{0x02}, {0x03}, {0x05}},
+					{'C'}: {{0x01}, {0x04}},
 				},
 			},
 			// Queue up a non-fetchable transaction and then trigger it with a new
 			// peer (weird case to test 1 line in the fetcher)
-			doTxNotify{peer: "C", hashes: []common.Hash{{0x06}, {0x07}}},
-			isWaiting(map[string][]common.Hash{
-				"C": {{0x06}, {0x07}},
+			doTxNotify{peer: enode.ID{'C'}, hashes: []common.Hash{{0x06}, {0x07}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'C'}: {{0x06}, {0x07}},
 			}),
 			doWait{time: txArriveTimeout, step: true},
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}, {0x03}, {0x05}},
-					"B": {{0x03}, {0x04}},
-					"C": {{0x01}, {0x04}, {0x06}, {0x07}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}, {0x03}, {0x05}},
+					{'B'}: {{0x03}, {0x04}},
+					{'C'}: {{0x01}, {0x04}, {0x06}, {0x07}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x02}, {0x03}, {0x05}},
-					"C": {{0x01}, {0x04}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x02}, {0x03}, {0x05}},
+					{'C'}: {{0x01}, {0x04}},
 				},
 			},
-			doTxNotify{peer: "D", hashes: []common.Hash{{0x06}, {0x07}}},
+			doTxNotify{peer: enode.ID{'D'}, hashes: []common.Hash{{0x06}, {0x07}}},
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}, {0x03}, {0x05}},
-					"B": {{0x03}, {0x04}},
-					"C": {{0x01}, {0x04}, {0x06}, {0x07}},
-					"D": {{0x06}, {0x07}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}, {0x03}, {0x05}},
+					{'B'}: {{0x03}, {0x04}},
+					{'C'}: {{0x01}, {0x04}, {0x06}, {0x07}},
+					{'D'}: {{0x06}, {0x07}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x02}, {0x03}, {0x05}},
-					"C": {{0x01}, {0x04}},
-					"D": {{0x06}, {0x07}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x02}, {0x03}, {0x05}},
+					{'C'}: {{0x01}, {0x04}},
+					{'D'}: {{0x06}, {0x07}},
 				},
 			},
 		},
@@ -171,55 +172,55 @@ func TestTransactionFetcherSkipWaiting(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}, {0x02}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}, {0x02}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			// Announce overlaps from the same peer, ensure the new ones end up
 			// in stage one, and clashing ones don't get double tracked
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x02}, {0x03}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x03}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x02}, {0x03}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x03}},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			// Announce overlaps from a new peer, ensure new transactions end up
 			// in stage one and clashing ones get tracked for the new peer
-			doTxNotify{peer: "B", hashes: []common.Hash{{0x02}, {0x03}, {0x04}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x03}},
-				"B": {{0x03}, {0x04}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{{0x02}, {0x03}, {0x04}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x03}},
+				{'B'}: {{0x03}, {0x04}},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
-					"B": {{0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
+					{'B'}: {{0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 		},
@@ -234,65 +235,65 @@ func TestTransactionFetcherSingletonRequesting(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}, {0x02}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}, {0x02}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			// Announce a new set of transactions from the same peer and ensure
 			// they do not start fetching since the peer is already busy
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x03}, {0x04}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x03}, {0x04}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x03}, {0x04}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x03}, {0x04}},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}, {0x03}, {0x04}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}, {0x03}, {0x04}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			// Announce a duplicate set of transactions from a new peer and ensure
 			// uniquely new ones start downloading, even if clashing.
-			doTxNotify{peer: "B", hashes: []common.Hash{{0x02}, {0x03}, {0x05}, {0x06}}},
-			isWaiting(map[string][]common.Hash{
-				"B": {{0x05}, {0x06}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{{0x02}, {0x03}, {0x05}, {0x06}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'B'}: {{0x05}, {0x06}},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}, {0x03}, {0x04}},
-					"B": {{0x02}, {0x03}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}, {0x03}, {0x04}},
+					{'B'}: {{0x02}, {0x03}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
-					"B": {{0x03}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
+					{'B'}: {{0x03}},
 				},
 			},
 		},
@@ -311,7 +312,7 @@ func TestTransactionFetcherFailedRescheduling(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(origin string, hashes []common.Hash) error {
+				func(origin enode.ID, hashes []common.Hash) error {
 					<-proceed
 					return errors.New("peer disconnected")
 				},
@@ -319,33 +320,33 @@ func TestTransactionFetcherFailedRescheduling(t *testing.T) {
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}, {0x02}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}, {0x02}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			// While the original peer is stuck in the request, push in an second
 			// data source.
-			doTxNotify{peer: "B", hashes: []common.Hash{{0x02}}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{{0x02}}},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
-					"B": {{0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
+					{'B'}: {{0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
 			},
 			// Wait until the original request fails and check that transactions
@@ -356,11 +357,11 @@ func TestTransactionFetcherFailedRescheduling(t *testing.T) {
 			doWait{time: 0, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"B": {{0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'B'}: {{0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"B": {{0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'B'}: {{0x02}},
 				},
 			},
 			doFunc(func() {
@@ -383,29 +384,29 @@ func TestTransactionFetcherCleanup(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[0]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[0]},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			// Request should be delivered
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}, direct: true},
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -422,29 +423,29 @@ func TestTransactionFetcherCleanupEmpty(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[0]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[0]},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			// Deliver an empty response and ensure the transaction is cleared, not rescheduled
-			doTxEnqueue{peer: "A", txs: []types.Transaction{}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{}, direct: true},
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -460,36 +461,36 @@ func TestTransactionFetcherMissingRescheduling(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]}},
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]},
 				},
 			},
 			// Deliver the middle transaction requested, the one before which
 			// should be dropped and the one after re-requested.
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: true}, // This depends on the deterministic random
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}, direct: true}, // This depends on the deterministic random
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[2]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[2]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[2]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[2]},
 				},
 			},
 		},
@@ -506,30 +507,30 @@ func TestTransactionFetcherMissingCleanup(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[0], testTxsHashes[1]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[0], testTxsHashes[1]},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0], testTxsHashes[1]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0], testTxsHashes[1]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0], testTxsHashes[1]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0], testTxsHashes[1]},
 				},
 			},
 			// Deliver the middle transaction requested, the one before which
 			// should be dropped and the one after re-requested.
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[1]}, direct: true}, // This depends on the deterministic random
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[1]}, direct: true}, // This depends on the deterministic random
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -544,42 +545,42 @@ func TestTransactionFetcherBroadcasts(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Set up three transactions to be in different stats, waiting, queued and fetching
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[1]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[1]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[2]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[2]}},
 
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[2]},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[2]},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0], testTxsHashes[1]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0], testTxsHashes[1]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			// Broadcast all the transactions and ensure everything gets cleaned
 			// up, but the dangling request is left alone to avoid doing multiple
 			// concurrent requests.
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: false},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: false},
 			isWaiting(nil),
 			isScheduled{
 				tracking: nil,
 				fetching: nil,
-				dangling: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			// Deliver the requested hashes
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2]}, direct: true},
 			isScheduled{nil, nil, nil},
 		},
 	})
@@ -592,47 +593,47 @@ func TestTransactionFetcherWaitTimerResets(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}},
 			}),
 			isScheduled{nil, nil, nil},
 			doWait{time: txArriveTimeout / 2, step: false},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}},
 			}),
 			isScheduled{nil, nil, nil},
 
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x02}}},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x01}, {0x02}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x02}}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x01}, {0x02}},
 			}),
 			isScheduled{nil, nil, nil},
 			doWait{time: txArriveTimeout / 2, step: true},
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x02}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x02}},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
 				},
 			},
 
 			doWait{time: txArriveTimeout / 2, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
 				},
 			},
 		},
@@ -649,25 +650,25 @@ func TestTransactionFetcherTimeoutRescheduling(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Push an initial announcement through to the scheduled stage
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[0]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[0]},
 			}),
 			isScheduled{tracking: nil, fetching: nil},
 
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			// Wait until the delivery times out, everything should be cleaned up
@@ -676,31 +677,31 @@ func TestTransactionFetcherTimeoutRescheduling(t *testing.T) {
 			isScheduled{
 				tracking: nil,
 				fetching: nil,
-				dangling: map[string][]common.Hash{
-					"A": {},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {},
 				},
 			},
 			// Ensure that followup announcements don't get scheduled
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[1]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[1]}},
 			doWait{time: txArriveTimeout, step: true},
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[1]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[1]},
 				},
 				fetching: nil,
-				dangling: map[string][]common.Hash{
-					"A": {},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {},
 				},
 			},
 			// If the dangling request arrives a bit later, do not choke
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}, direct: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[1]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[1]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[1]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[1]},
 				},
 			},
 		},
@@ -714,45 +715,45 @@ func TestTransactionFetcherTimeoutTimerResets(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "B", hashes: []common.Hash{{0x02}}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{{0x02}}},
 			doWait{time: txArriveTimeout, step: true},
 
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}},
-					"B": {{0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
+					{'B'}: {{0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}},
-					"B": {{0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
+					{'B'}: {{0x02}},
 				},
 			},
 			doWait{time: txFetchTimeout - txArriveTimeout, step: true},
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"B": {{0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'B'}: {{0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"B": {{0x02}},
+				fetching: map[enode.ID][]common.Hash{
+					{'B'}: {{0x02}},
 				},
-				dangling: map[string][]common.Hash{
-					"A": {},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {},
 				},
 			},
 			doWait{time: txArriveTimeout, step: true},
 			isScheduled{
 				tracking: nil,
 				fetching: nil,
-				dangling: map[string][]common.Hash{
-					"A": {},
-					"B": {},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {},
+					{'B'}: {},
 				},
 			},
 		},
@@ -773,21 +774,21 @@ func TestTransactionFetcherRateLimiting(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Announce all the transactions, wait a bit and ensure only a small
 			// percentage gets requested
-			doTxNotify{peer: "A", hashes: hashes},
+			doTxNotify{peer: enode.ID{'A'}, hashes: hashes},
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": hashes,
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: hashes,
 				},
-				fetching: map[string][]common.Hash{
-					"A": hashes[1643 : 1643+maxTxRetrievals],
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: hashes[1643 : 1643+maxTxRetrievals],
 				},
 			},
 		},
@@ -811,50 +812,50 @@ func TestTransactionFetcherDoSProtection(t *testing.T) {
 			return NewTxFetcher(
 				func(common.Hash) bool { return false },
 				nil,
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Announce half of the transaction and wait for them to be scheduled
-			doTxNotify{peer: "A", hashes: hashesA[:maxTxAnnounces/2]},
-			doTxNotify{peer: "B", hashes: hashesB[:maxTxAnnounces/2-1]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: hashesA[:maxTxAnnounces/2]},
+			doTxNotify{peer: enode.ID{'B'}, hashes: hashesB[:maxTxAnnounces/2-1]},
 			doWait{time: txArriveTimeout, step: true},
 
 			// Announce the second half and keep them in the wait list
-			doTxNotify{peer: "A", hashes: hashesA[maxTxAnnounces/2 : maxTxAnnounces]},
-			doTxNotify{peer: "B", hashes: hashesB[maxTxAnnounces/2-1 : maxTxAnnounces-1]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: hashesA[maxTxAnnounces/2 : maxTxAnnounces]},
+			doTxNotify{peer: enode.ID{'B'}, hashes: hashesB[maxTxAnnounces/2-1 : maxTxAnnounces-1]},
 
 			// Ensure the hashes are split half and half
-			isWaiting(map[string][]common.Hash{
-				"A": hashesA[maxTxAnnounces/2 : maxTxAnnounces],
-				"B": hashesB[maxTxAnnounces/2-1 : maxTxAnnounces-1],
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: hashesA[maxTxAnnounces/2 : maxTxAnnounces],
+				{'B'}: hashesB[maxTxAnnounces/2-1 : maxTxAnnounces-1],
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": hashesA[:maxTxAnnounces/2],
-					"B": hashesB[:maxTxAnnounces/2-1],
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: hashesA[:maxTxAnnounces/2],
+					{'B'}: hashesB[:maxTxAnnounces/2-1],
 				},
-				fetching: map[string][]common.Hash{
-					"A": hashesA[1643 : 1643+maxTxRetrievals],
-					"B": append(append([]common.Hash{}, hashesB[maxTxAnnounces/2-3:maxTxAnnounces/2-1]...), hashesB[:maxTxRetrievals-2]...),
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: hashesA[1643 : 1643+maxTxRetrievals],
+					{'B'}: append(append([]common.Hash{}, hashesB[maxTxAnnounces/2-3:maxTxAnnounces/2-1]...), hashesB[:maxTxRetrievals-2]...),
 				},
 			},
 			// Ensure that adding even one more hash results in dropping the hash
-			doTxNotify{peer: "A", hashes: []common.Hash{hashesA[maxTxAnnounces]}},
-			doTxNotify{peer: "B", hashes: hashesB[maxTxAnnounces-1 : maxTxAnnounces+1]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{hashesA[maxTxAnnounces]}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: hashesB[maxTxAnnounces-1 : maxTxAnnounces+1]},
 
-			isWaiting(map[string][]common.Hash{
-				"A": hashesA[maxTxAnnounces/2 : maxTxAnnounces],
-				"B": hashesB[maxTxAnnounces/2-1 : maxTxAnnounces],
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: hashesA[maxTxAnnounces/2 : maxTxAnnounces],
+				{'B'}: hashesB[maxTxAnnounces/2-1 : maxTxAnnounces],
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": hashesA[:maxTxAnnounces/2],
-					"B": hashesB[:maxTxAnnounces/2-1],
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: hashesA[:maxTxAnnounces/2],
+					{'B'}: hashesB[:maxTxAnnounces/2-1],
 				},
-				fetching: map[string][]common.Hash{
-					"A": hashesA[1643 : 1643+maxTxRetrievals],
-					"B": append(append([]common.Hash{}, hashesB[maxTxAnnounces/2-3:maxTxAnnounces/2-1]...), hashesB[:maxTxRetrievals-2]...),
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: hashesA[1643 : 1643+maxTxRetrievals],
+					{'B'}: append(append([]common.Hash{}, hashesB[maxTxAnnounces/2-3:maxTxAnnounces/2-1]...), hashesB[:maxTxRetrievals-2]...),
 				},
 			},
 		},
@@ -878,20 +879,20 @@ func TestTransactionFetcherUnderpricedDedup(t *testing.T) {
 					}
 					return errs
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Deliver a transaction through the fetcher, but reject as underpriced
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0], testTxs[1]}, direct: true},
 			isScheduled{nil, nil, nil},
 
 			// Try to announce the transaction again, ensure it's not scheduled back
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]}}, // [2] is needed to force a step in the fetcher
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[2]},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1], testTxsHashes[2]}}, // [2] is needed to force a step in the fetcher
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[2]},
 			}),
 			isScheduled{nil, nil, nil},
 		},
@@ -918,20 +919,20 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 	// Generate a set of steps to announce and deliver the entire set of transactions
 	var steps []interface{}
 	for i := 0; i < maxTxUnderpricedSetSize/maxTxRetrievals; i++ {
-		steps = append(steps, doTxNotify{peer: "A", hashes: hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals]})
-		steps = append(steps, isWaiting(map[string][]common.Hash{
-			"A": hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals],
+		steps = append(steps, doTxNotify{peer: enode.ID{'A'}, hashes: hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals]})
+		steps = append(steps, isWaiting(map[enode.ID][]common.Hash{
+			{'A'}: hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals],
 		}))
 		steps = append(steps, doWait{time: txArriveTimeout, step: true})
 		steps = append(steps, isScheduled{
-			tracking: map[string][]common.Hash{
-				"A": hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals],
+			tracking: map[enode.ID][]common.Hash{
+				{'A'}: hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals],
 			},
-			fetching: map[string][]common.Hash{
-				"A": hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals],
+			fetching: map[enode.ID][]common.Hash{
+				{'A'}: hashes[i*maxTxRetrievals : (i+1)*maxTxRetrievals],
 			},
 		})
-		steps = append(steps, doTxEnqueue{peer: "A", txs: txs[i*maxTxRetrievals : (i+1)*maxTxRetrievals], direct: true})
+		steps = append(steps, doTxEnqueue{peer: enode.ID{'A'}, txs: txs[i*maxTxRetrievals : (i+1)*maxTxRetrievals], direct: true})
 		steps = append(steps, isWaiting(nil))
 		steps = append(steps, isScheduled{nil, nil, nil})
 		steps = append(steps, isUnderpriced((i+1)*maxTxRetrievals))
@@ -947,14 +948,14 @@ func TestTransactionFetcherUnderpricedDoSProtection(t *testing.T) {
 					}
 					return errs
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: append(steps, []interface{}{
 			// The preparation of the test has already been done in `steps`, add the last check
-			doTxNotify{peer: "A", hashes: []common.Hash{hashes[maxTxUnderpricedSetSize]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{hashes[maxTxUnderpricedSetSize]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{txs[maxTxUnderpricedSetSize]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{txs[maxTxUnderpricedSetSize]}, direct: true},
 			isUnderpriced(maxTxUnderpricedSetSize),
 		}...),
 	})
@@ -969,43 +970,43 @@ func TestTransactionFetcherOutOfBoundDeliveries(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Deliver something out of the blue
 			isWaiting(nil),
 			isScheduled{nil, nil, nil},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}, direct: false},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}, direct: false},
 			isWaiting(nil),
 			isScheduled{nil, nil, nil},
 
 			// Set up a few hashes into various stages
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[1]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[1]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[2]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[2]}},
 
-			isWaiting(map[string][]common.Hash{
-				"A": {testTxsHashes[2]},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {testTxsHashes[2]},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0], testTxsHashes[1]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0], testTxsHashes[1]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			// Deliver everything and more out of the blue
-			doTxEnqueue{peer: "B", txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2], testTxs[3]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'B'}, txs: []types.Transaction{testTxs[0], testTxs[1], testTxs[2], testTxs[3]}, direct: true},
 			isWaiting(nil),
 			isScheduled{
 				tracking: nil,
 				fetching: nil,
-				dangling: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 		},
@@ -1022,43 +1023,43 @@ func TestTransactionFetcherDrop(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Set up a few hashes into various stages
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x02}}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x02}}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x03}}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x03}}},
 
-			isWaiting(map[string][]common.Hash{
-				"A": {{0x03}},
+			isWaiting(map[enode.ID][]common.Hash{
+				{'A'}: {{0x03}},
 			}),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}, {0x02}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}, {0x02}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
 				},
 			},
 			// Drop the peer and ensure everything's cleaned out
-			doDrop("A"),
+			doDrop(enode.ID{'A'}),
 			isWaiting(nil),
 			isScheduled{nil, nil, nil},
 
 			// Push the node into a dangling (timeout) state
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {testTxsHashes[0]},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {testTxsHashes[0]},
 				},
 			},
 			doWait{time: txFetchTimeout, step: true},
@@ -1066,12 +1067,12 @@ func TestTransactionFetcherDrop(t *testing.T) {
 			isScheduled{
 				tracking: nil,
 				fetching: nil,
-				dangling: map[string][]common.Hash{
-					"A": {},
+				dangling: map[enode.ID][]common.Hash{
+					{'A'}: {},
 				},
 			},
 			// Drop the peer and ensure everything's cleaned out
-			doDrop("A"),
+			doDrop(enode.ID{'A'}),
 			isWaiting(nil),
 			isScheduled{nil, nil, nil},
 		},
@@ -1088,34 +1089,34 @@ func TestTransactionFetcherDropRescheduling(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Set up a few hashes into various stages
-			doTxNotify{peer: "A", hashes: []common.Hash{{0x01}}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{{0x01}}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxNotify{peer: "B", hashes: []common.Hash{{0x01}}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{{0x01}}},
 
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"A": {{0x01}},
-					"B": {{0x01}},
+				tracking: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
+					{'B'}: {{0x01}},
 				},
-				fetching: map[string][]common.Hash{
-					"A": {{0x01}},
+				fetching: map[enode.ID][]common.Hash{
+					{'A'}: {{0x01}},
 				},
 			},
 			// Drop the peer and ensure everything's cleaned out
-			doDrop("A"),
+			doDrop(enode.ID{'A'}),
 			isWaiting(nil),
 			isScheduled{
-				tracking: map[string][]common.Hash{
-					"B": {{0x01}},
+				tracking: map[enode.ID][]common.Hash{
+					{'B'}: {{0x01}},
 				},
-				fetching: map[string][]common.Hash{
-					"B": {{0x01}},
+				fetching: map[enode.ID][]common.Hash{
+					{'B'}: {{0x01}},
 				},
 			},
 		},
@@ -1133,17 +1134,17 @@ func TestTransactionFetcherFuzzCrash01(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}},
 
 			// Notify the dangling transaction once more and crash via a timeout
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txFetchTimeout, step: true},
 		},
 	})
@@ -1160,19 +1161,19 @@ func TestTransactionFetcherFuzzCrash02(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}},
 
 			// Notify the dangling transaction once more, re-fetch, and crash via a drop and timeout
-			doTxNotify{peer: "B", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doDrop("A"),
+			doDrop(enode.ID{'A'}),
 			doWait{time: txFetchTimeout, step: true},
 		},
 	})
@@ -1189,20 +1190,20 @@ func TestTransactionFetcherFuzzCrash03(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error { return nil },
+				func(enode.ID, []common.Hash) error { return nil },
 			)
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0], testTxsHashes[1]}},
 			doWait{time: txFetchTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0], testTxs[1]}},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0], testTxs[1]}},
 
 			// Notify the dangling transaction once more, partially deliver, clash&crash with a timeout
-			doTxNotify{peer: "B", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
 
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[1]}, direct: true},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[1]}, direct: true},
 			doWait{time: txFetchTimeout, step: true},
 		},
 	})
@@ -1222,7 +1223,7 @@ func TestTransactionFetcherFuzzCrash04(t *testing.T) {
 				func(txs []types.Transaction) []error {
 					return make([]error, len(txs))
 				},
-				func(string, []common.Hash) error {
+				func(enode.ID, []common.Hash) error {
 					<-proceed
 					return errors.New("peer disconnected")
 				},
@@ -1230,12 +1231,12 @@ func TestTransactionFetcherFuzzCrash04(t *testing.T) {
 		},
 		steps: []interface{}{
 			// Get a transaction into fetching mode and make it dangling with a broadcast
-			doTxNotify{peer: "A", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'A'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
-			doTxEnqueue{peer: "A", txs: []types.Transaction{testTxs[0]}},
+			doTxEnqueue{peer: enode.ID{'A'}, txs: []types.Transaction{testTxs[0]}},
 
 			// Notify the dangling transaction once more, re-fetch, and crash via an in-flight disconnect
-			doTxNotify{peer: "B", hashes: []common.Hash{testTxsHashes[0]}},
+			doTxNotify{peer: enode.ID{'B'}, hashes: []common.Hash{testTxsHashes[0]}},
 			doWait{time: txArriveTimeout, step: true},
 			doFunc(func() {
 				proceed <- struct{}{} // Allow peer A to return the failure
@@ -1291,7 +1292,7 @@ func testTransactionFetcher(t *testing.T, tt txFetcherTest) {
 			}
 
 		case doDrop:
-			if err := fetcher.Drop(string(step)); err != nil {
+			if err := fetcher.Drop(enode.ID(step)); err != nil {
 				t.Errorf("step %d: %v", i, err)
 			}
 			<-wait // Fetcher needs to process this, wait until it's done

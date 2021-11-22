@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -22,7 +23,7 @@ import (
 type BodiesCfg struct {
 	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
-	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
+	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool)
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
@@ -33,7 +34,7 @@ type BodiesCfg struct {
 func StageBodiesCfg(
 	db kv.RwDB,
 	bd *bodydownload.BodyDownload,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
+	bodyReqSend func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool),
 	penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator,
 	timeout int,
@@ -102,7 +103,8 @@ func BodiesForward(
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
 	var req *bodydownload.BodyRequest
-	var peer []byte
+	var peer enode.ID
+	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
 	noProgressCount := 0 // How many time the progress was printed without actual progress
@@ -118,19 +120,20 @@ Loop:
 			}
 			d1 += time.Since(start)
 		}
-		peer = nil
+		peer = enode.ID{}
+		sentToPeer = false
 		if req != nil {
 			start := time.Now()
-			peer = cfg.bodyReqSend(ctx, req)
+			peer, sentToPeer = cfg.bodyReqSend(ctx, req)
 			d2 += time.Since(start)
 		}
-		if req != nil && peer != nil {
+		if req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
 		}
-		for req != nil && peer != nil {
+		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
@@ -138,13 +141,14 @@ Loop:
 				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
-			peer = nil
+			peer = enode.ID{}
+			sentToPeer = false
 			if req != nil {
 				start = time.Now()
-				peer = cfg.bodyReqSend(ctx, req)
+				peer, sentToPeer = cfg.bodyReqSend(ctx, req)
 				d2 += time.Since(start)
 			}
-			if req != nil && peer != nil {
+			if req != nil && sentToPeer {
 				start = time.Now()
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
