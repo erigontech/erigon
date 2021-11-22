@@ -21,7 +21,7 @@ func (r *Report) reset(size int, header *types.Header) {
 	r.header = header
 }
 
-func (r *Report) Write() {
+func (r *Report) write() {
 }
 
 func (r *Report) add(tx_idx int, analysis minievm.Analysis) {

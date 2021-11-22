@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"context"
@@ -6,10 +6,13 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
 	"time"
 
-	"github.com/gorilla/websocket"
-	"github.com/ledgerwatch/erigon/tx_analysis/manager"
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/tx_analysis/utils"
 )
 
 var indexTemplate = template.Must(template.New("index").Parse(`
@@ -32,24 +35,17 @@ var indexTemplate = template.Must(template.New("index").Parse(`
 `))
 
 var address = "localhost:12345"
-
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		return origin == fmt.Sprintf("http://%s", address) || origin == "http://localhost:5500" // for dev purposes
-	},
-}
+var devAddr = "http://localhost:5500"
 
 type Server struct {
 	httpServer *http.Server
-	reports    <-chan *manager.Report
-	conn       *websocket.Conn
+	rpcClient  utils.HTTPClient
 }
 
-func NewServer(reports <-chan *manager.Report) *Server {
+func newServer() *Server {
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleHTTP)
+	mux.HandleFunc("/", handleIndex)
 
 	httpServer := &http.Server{
 		Addr:    address,
@@ -58,77 +54,80 @@ func NewServer(reports <-chan *manager.Report) *Server {
 
 	srv := &Server{
 		httpServer: httpServer,
-		reports:    reports,
+		rpcClient:  utils.NewHTTPClient("http://127.0.0.1:8545"),
 	}
 
-	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(w, r, srv)
-	})
+	mux.HandleFunc("/blocks", srv.handleBlocks)
 
 	return srv
 }
 
-func (s *Server) Run(stop chan bool) {
+func (s *Server) run() {
 	go func() {
+		fmt.Println("Starting server...")
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
 	}()
-
-	// for report := range s.reports {
-	// 	fmt.Println("report received: ", report)
-	// }
-
-	is_stop := false
-	for {
-		select {
-		case report := <-s.reports:
-			fmt.Println("WS: received report", report)
-
-		case <-stop:
-			is_stop = true
-			s.stop()
-			return
-		default:
-			if s.conn != nil && !is_stop {
-				mt, message, err := s.conn.ReadMessage()
-				if err != nil {
-					log.Println("read:", err)
-					break
-				}
-				log.Printf("recv: %s", message)
-				err = s.conn.WriteMessage(mt, message)
-				if err != nil {
-					log.Println("write:", err)
-					return
-				}
-			}
-		}
-
-	}
 }
 
-func (s *Server) stop() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *Server) stop() error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
-	if s.conn != nil {
-		s.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
-			websocket.CloseNormalClosure, ""))
-		s.conn.Close()
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		return err
 	}
-	s.httpServer.Shutdown(ctx)
+	return nil
 }
 
-func handleHTTP(w http.ResponseWriter, r *http.Request) {
+func handleIndex(w http.ResponseWriter, r *http.Request) {
 	indexTemplate.Execute(w, nil)
 }
 
-func handleWS(w http.ResponseWriter, r *http.Request, srv *Server) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Print("upgrade:", err)
+func (s *Server) handleBlocks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", "text/plain")
+
+	query, ok := r.URL.Query()["block"]
+
+	if !ok || len(query) < 1 {
+		w.Write([]byte("len < 1"))
+		// json.NewEncoder(w).Encode()
 		return
 	}
 
-	srv.conn = conn
+	blockNstr := query[0]
+	w.Write([]byte(blockNstr))
+
+	blockN, err := strconv.ParseUint(blockNstr, 10, 64)
+	if err != nil {
+		w.Write([]byte("Error: ERRORROROR"))
+	}
+	fmt.Println(blockN)
+	var t rpctest.EthBlockByNumber
+	err = utils.GetBlockByNumber(&s.rpcClient, blockN, &t)
+	if err != nil {
+		fmt.Println("error block by number: ", err)
+		return
+	}
+	fmt.Println(t)
+
+	// json.NewEncoder(w).Encode()
+}
+
+func main() {
+
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	defer signal.Stop(interrupt)
+
+	srv := newServer()
+
+	srv.run()
+
+	<-interrupt
+	err := srv.stop()
+	if err != nil {
+		fmt.Println(err)
+	}
 }

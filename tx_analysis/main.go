@@ -12,7 +12,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/tx_analysis/manager"
-	"github.com/ledgerwatch/erigon/tx_analysis/server"
 	"github.com/ledgerwatch/erigon/tx_analysis/utils"
 )
 
@@ -55,19 +54,12 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 	defer signal.Stop(interrupt)
 
-	reports := make(chan *manager.Report, 10)
-
-	stopSrv := make(chan bool)
-	defer close(stopSrv)
-	srv := server.NewServer(reports) // receive
-	go srv.Run(stopSrv)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	stopMng := make(chan bool)
 	defer close(stopMng)
 	ready := make(chan bool)
 
-	mng := manager.New(reports) // send
+	mng := manager.New() // send
 	go mng.Start(cancel, stopMng, ready, *WORKERS)
 
 	<-ready
@@ -90,7 +82,6 @@ func main() {
 			}
 
 			stopMng <- true
-			stopSrv <- true
 		case <-ctx.Done():
 			fmt.Println("Done...")
 			return

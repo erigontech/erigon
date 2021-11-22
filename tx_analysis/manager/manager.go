@@ -54,16 +54,14 @@ type Manager struct {
 	workers []*worker
 	rr      *roundRobin
 	report  *Report
-	reports chan<- *Report
 }
 
-func New(reports chan<- *Report) *Manager {
+func New() *Manager {
 	return &Manager{
 		mu:      sync.Mutex{},
 		supply:  make(chan *supply, 10),
 		workers: make([]*worker, 0),
 		report:  newReport(),
-		reports: reports,
 	}
 }
 
@@ -141,8 +139,8 @@ func (m *Manager) Start(cancel context.CancelFunc, stop chan bool, ready chan bo
 				}
 			}
 
-			// m.report.write()
-			m.reports <- m.report
+			m.report.write()
+
 		}
 	}
 }
