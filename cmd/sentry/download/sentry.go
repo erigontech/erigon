@@ -785,6 +785,7 @@ func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_s
 	}
 	return reply, nil
 }
+
 func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
@@ -806,15 +807,19 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 			}
 		}
 
-		ss.P2pServer, err = makeP2PServer(*ss.p2p, genesisHash, ss.Protocol)
+		srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocol)
 		if err != nil {
 			return reply, err
 		}
+
 		// Add protocol
-		if err := ss.P2pServer.Start(); err != nil {
+		if err = srv.Start(); err != nil {
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}
+
+		ss.P2pServer = srv
 	}
+
 	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
 	if ss.statusData == nil || statusData.MaxBlock != 0 {
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)

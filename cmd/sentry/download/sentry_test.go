@@ -148,3 +148,32 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		}
 	}
 }
+
+func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("panic during server initialization")
+		}
+	}()
+
+	configNoFork := &params.ChainConfig{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
+	dbNoFork := memdb.NewTestDB(t)
+	gspecNoFork := &core.Genesis{Config: configNoFork}
+	genesisNoFork := gspecNoFork.MustCommit(dbNoFork)
+	ss := &SentryServerImpl{p2p: &p2p.Config{}}
+
+	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
+		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
+	})
+	if err == nil {
+		t.Fatalf("error expected")
+	}
+
+	// Should not panic here.
+	_, err = ss.SetStatus(context.Background(), &proto_sentry.StatusData{
+		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
+	})
+	if err == nil {
+		t.Fatalf("error expected")
+	}
+}

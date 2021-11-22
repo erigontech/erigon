@@ -142,8 +142,18 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		hi = h.GasLimit
 	}
 
+	var feeCap *big.Int
+	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
+	} else if args.GasPrice != nil {
+		feeCap = args.GasPrice.ToInt()
+	} else if args.MaxFeePerGas != nil {
+		feeCap = args.MaxFeePerGas.ToInt()
+	} else {
+		feeCap = common.Big0
+	}
 	// Recap the highest gas limit with account's available balance.
-	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
+	if feeCap.BitLen() != 0 {
 		cacheView, err := api.stateCache.View(ctx, dbtx)
 		if err != nil {
 			return 0, err
@@ -162,17 +172,20 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 			}
 			available.Sub(available, args.Value.ToInt())
 		}
-		allowance := new(big.Int).Div(available, args.GasPrice.ToInt())
-		if hi > allowance.Uint64() {
+		allowance := new(big.Int).Div(available, feeCap)
+
+		// If the allowance is larger than maximum uint64, skip checking
+		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
 				transfer = new(hexutil.Big)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
-				"sent", transfer.ToInt(), "gasprice", args.GasPrice.ToInt(), "fundable", allowance)
+				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
 			hi = allowance.Uint64()
 		}
 	}
+
 	// Recap the highest gas allowance with specified gascap.
 	if hi > api.GasCap {
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
