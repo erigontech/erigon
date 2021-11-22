@@ -192,5 +192,11 @@ func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 }
 
 func enable3860(jt *JumpTable) {
-	// Do nothing.
+	createOp := *jt[CREATE]
+	createOp.dynamicGas = gasCreateEip3860
+	jt[CREATE] = &createOp
+
+	create2Op := *jt[CREATE2]
+	create2Op.dynamicGas = gasCreate2Eip3860
+	jt[CREATE2] = &create2Op
 }
