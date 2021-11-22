@@ -8,13 +8,13 @@ import (
 
 func main() {
 	var (
-		to string
-		value uint64
-		blockNum string
-		getBalance bool
-		sendTx bool
+		to            string
+		value         uint64
+		blockNum      string
+		getBalance    bool
+		sendTx        bool
 		txPoolContent bool
-		clearDev bool
+		clearDev      bool
 	)
 
 	flag.StringVar(&to, "to", "", "String Address to send to")
