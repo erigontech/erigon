@@ -186,7 +186,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
 		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
 		req.Transactions == nil || s.config.TerminalTotalDifficulty == nil {
-		fmt.Println("lol")
 
 		return &remote.EngineExecutePayloadReply{
 			Status:          Invalid,
