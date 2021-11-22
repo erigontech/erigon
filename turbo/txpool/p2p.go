@@ -15,10 +15,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/txpropagate"
 	"github.com/ledgerwatch/log/v3"
@@ -53,7 +55,7 @@ func (tp *P2PServer) newPooledTransactionHashes66(ctx context.Context, inreq *pr
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding newPooledTransactionHashes66: %w, data: %x", err, inreq.Data)
 	}
-	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
+	return tp.TxFetcher.Notify(download.ConvertH256ToPeerID(inreq.PeerId), query)
 }
 
 func (tp *P2PServer) newPooledTransactionHashes65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
@@ -61,7 +63,7 @@ func (tp *P2PServer) newPooledTransactionHashes65(ctx context.Context, inreq *pr
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding newPooledTransactionHashes65: %w, data: %x", err, inreq.Data)
 	}
-	return tp.TxFetcher.Notify(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query)
+	return tp.TxFetcher.Notify(download.ConvertH256ToPeerID(inreq.PeerId), query)
 }
 
 func (tp *P2PServer) pooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
@@ -70,7 +72,7 @@ func (tp *P2PServer) pooledTransactions66(ctx context.Context, inreq *proto_sent
 		return fmt.Errorf("decoding pooledTransactions66: %w, data: %x", err, inreq.Data)
 	}
 
-	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), txs.PooledTransactionsPacket, true)
+	return tp.TxFetcher.Enqueue(download.ConvertH256ToPeerID(inreq.PeerId), txs.PooledTransactionsPacket, true)
 }
 
 func (tp *P2PServer) pooledTransactions65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
@@ -79,7 +81,7 @@ func (tp *P2PServer) pooledTransactions65(ctx context.Context, inreq *proto_sent
 		return fmt.Errorf("decoding pooledTransactions65: %w, data: %x", err, inreq.Data)
 	}
 
-	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), *txs, true)
+	return tp.TxFetcher.Enqueue(download.ConvertH256ToPeerID(inreq.PeerId), *txs, true)
 }
 
 func (tp *P2PServer) transactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
@@ -94,7 +96,7 @@ func (tp *P2PServer) transactions65(ctx context.Context, inreq *proto_sentry.Inb
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding TransactionsPacket: %w, data: %x", err, inreq.Data)
 	}
-	return tp.TxFetcher.Enqueue(string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query, false)
+	return tp.TxFetcher.Enqueue(download.ConvertH256ToPeerID(inreq.PeerId), query, false)
 }
 
 func (tp *P2PServer) getPooledTransactions66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
@@ -150,7 +152,7 @@ func (tp *P2PServer) getPooledTransactions65(ctx context.Context, inreq *proto_s
 	return nil
 }
 
-func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes []common.Hash) []byte {
+func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID enode.ID, hashes []common.Hash) (_ enode.ID, ok bool) {
 	var outreq66 *proto_sentry.SendMessageByIdRequest
 
 	// if sentry not found peers to send such message, try next one. stop if found.
@@ -168,11 +170,11 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 				})
 				if err != nil {
 					log.Error("Could not encode transactions request", "err", err)
-					return nil
+					return enode.ID{}, false
 				}
 
 				outreq66 = &proto_sentry.SendMessageByIdRequest{
-					PeerId: gointerfaces.ConvertBytesToH512([]byte(peerID)),
+					PeerId: gointerfaces.ConvertHashToH256(peerID),
 					Data:   &proto_sentry.OutboundMessageData{Id: proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66, Data: data66},
 				}
 			}
@@ -184,11 +186,11 @@ func (tp *P2PServer) SendTxsRequest(ctx context.Context, peerID string, hashes [
 				log.Error("[SendTxsRequest]", "err", err1)
 
 			} else if sentPeers != nil && len(sentPeers.Peers) != 0 {
-				return gointerfaces.ConvertH512ToBytes(sentPeers.Peers[0])
+				return download.ConvertH256ToPeerID(sentPeers.Peers[0]), true
 			}
 		}
 	}
-	return nil
+	return enode.ID{}, false
 }
 
 func (tp *P2PServer) randSentryIndex() (int, bool, func() (int, bool)) {
