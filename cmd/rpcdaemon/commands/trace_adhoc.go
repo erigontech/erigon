@@ -959,7 +959,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
+		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
@@ -1182,18 +1182,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			sdMap := make(map[common.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd := &StateDiff{sdMap: sdMap}
-			if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 				return nil, err
 			}
 			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = ibs.FinalizeTx(evm.ChainRules, noop); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 				return nil, err
 			}
-			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
 				return nil, err
 			}
 		}

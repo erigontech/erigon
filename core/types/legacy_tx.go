@@ -59,6 +59,10 @@ func (ct CommonTx) GetData() []byte {
 	return ct.Data
 }
 
+func (ct CommonTx) IsContractDeploy() bool {
+	return ct.GetTo() == nil
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx

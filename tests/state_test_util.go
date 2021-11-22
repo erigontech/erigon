@@ -237,10 +237,10 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
-	if err = statedb.FinalizeTx(evm.ChainRules, w); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules, w); err != nil {
+	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state

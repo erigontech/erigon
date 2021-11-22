@@ -84,7 +84,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm *vm.EVM, cfg vm.Config) (*types.Receipt, []byte, error) {
+func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
 	if err != nil {
 		return nil, nil, err
@@ -103,7 +103,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = statedb.FinalizeTx(evm.ChainRules, stateWriter); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules(), stateWriter); err != nil {
 		return nil, nil, err
 	}
 
@@ -124,7 +124,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
 		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.GetNonce())
+			receipt.ContractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = statedb.GetLogs(tx.Hash())
@@ -141,6 +141,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, contractHasTEVM func(contractHash common.Hash) (bool, error)) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
+
 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, contractHasTEVM)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
 	// Add addresses to access list if applicable

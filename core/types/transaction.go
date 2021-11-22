@@ -44,6 +44,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
+	DeployContractType
 )
 
 // Transaction is an Ethereum transaction.
@@ -81,6 +82,7 @@ type Transaction interface {
 	Sender(Signer) (common.Address, error)
 	GetSender() (common.Address, bool)
 	SetSender(common.Address)
+	IsContractDeploy() bool
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -133,6 +135,12 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		}
 		tx = t
 	case DynamicFeeTxType:
+		t := &DynamicFeeTransaction{}
+		if err = t.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		tx = t
+	case DeployContractType:
 		t := &DynamicFeeTransaction{}
 		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
