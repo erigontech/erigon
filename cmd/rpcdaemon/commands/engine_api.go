@@ -2,12 +2,18 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // The following code follows the Proof-of-stake specifications: https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.2/src/engine/interop/specification.md
@@ -24,20 +30,20 @@ const (
 
 // ExecutionPayload represents an execution payload (aka slot/block)
 type ExecutionPayload struct {
-	ParentHash    *rpc.BlockNumberOrHash `json:"parentHash"`
-	StateRoot     *rpc.BlockNumberOrHash `json:"stateRoot"`
-	ReceiptRoot   *rpc.BlockNumberOrHash `json:"receiptRoot"`
-	LogsBloom     *hexutil.Bytes         `json:"logsBloom"`
-	Random        *rpc.BlockNumberOrHash `json:"random"`
-	BlockNumber   *hexutil.Uint64        `json:"blockNumber"`
-	GasLimit      *hexutil.Uint64        `json:"gasLimit"`
-	GasUsed       *hexutil.Uint64        `json:"gasUsed"`
-	Extra         *hexutil.Bytes         `json:"extraData"`
-	BaseFeePerGas *hexutil.Big           `json:"baseFeePerGas"`
-	BlockHash     *rpc.BlockNumberOrHash `json:"blockHash"`
-	Timestamp     *hexutil.Uint64        `json:"timestamp"`
-	Coinbase      *common.Address        `json:"coinbase"`
-	Transactions  *[]hexutil.Bytes       `json:"transactions"`
+	ParentHash    common.Hash    `json:"parentHash"`
+	StateRoot     common.Hash    `json:"stateRoot"`
+	ReceiptRoot   common.Hash    `json:"receiptRoot"`
+	LogsBloom     hexutil.Bytes  `json:"logsBloom"`
+	Random        common.Hash    `json:"random"`
+	BlockNumber   hexutil.Uint64 `json:"blockNumber"`
+	GasLimit      hexutil.Uint64 `json:"gasLimit"`
+	GasUsed       hexutil.Uint64 `json:"gasUsed"`
+	Extra         hexutil.Bytes  `json:"extraData"`
+	BaseFeePerGas *hexutil.Big   `json:"baseFeePerGas"`
+	BlockHash     common.Hash    `json:"blockHash"`
+	Timestamp     hexutil.Uint64 `json:"timestamp"`
+	Coinbase      common.Address `json:"coinbase"`
+	//	Transactions  hexutil.Bytes         `json:"transactions"`
 }
 
 // PreparePayloadArgs represents a request to assemble a payload from the beacon chain
@@ -65,8 +71,8 @@ type EngineAPI interface {
 // EngineImpl is implementation of the EngineAPI interface
 type EngineImpl struct {
 	*BaseAPI
-	remoteEthBackend remote.ETHBACKENDClient
-	db               kv.RoDB
+	db  kv.RoDB
+	api services.ApiBackend
 }
 
 // PreparePayload is executed only if we running a beacon Validator so it
@@ -88,10 +94,40 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ ForkchoiceArgs, bu
 // - Stageloop the block just received if we have the payload's parent hash already
 // - Start the reverse sync process otherwise, and return "Syncing"
 func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload ExecutionPayload) (map[string]interface{}, error) {
-	res, err := e.remoteEthBackend.EngineExecutePayloadV1(ctx, payload)
+	var baseFee *uint256.Int
+	if payload.BaseFeePerGas != nil {
+		baseFee, _ = uint256.FromBig((*big.Int)(payload.BaseFeePerGas))
+	}
+	// Maximum length of extra is 32 bytes so we can use the hash datatype
+	extra := common.BytesToHash(payload.Extra)
+
+	log.Info("Received Payload from beacon-chain")
+
+	res, err := e.api.EngineExecutePayloadV1(ctx, &types.ExecutionPayload{
+		ParentHash:  gointerfaces.ConvertHashToH256(payload.ParentHash),
+		BlockHash:   gointerfaces.ConvertHashToH256(payload.BlockHash),
+		StateRoot:   gointerfaces.ConvertHashToH256(payload.StateRoot),
+		Coinbase:    gointerfaces.ConvertAddressToH160(payload.Coinbase),
+		ReceiptRoot: gointerfaces.ConvertHashToH256(payload.ReceiptRoot),
+		//		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
+		Random:        gointerfaces.ConvertHashToH256(payload.Random),
+		BlockNumber:   (uint64)(payload.BlockNumber),
+		GasLimit:      (uint64)(payload.GasLimit),
+		GasUsed:       (uint64)(payload.GasUsed),
+		Timestamp:     (uint64)(payload.Timestamp),
+		ExtraData:     gointerfaces.ConvertHashToH256(extra),
+		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
+		// Transactions:  [][]byte{payload.Transactions},
+	})
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println(res)
+	var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
+	return map[string]interface{}{
+		"status":          res.Status,
+		"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+	}, nil
 }
 
 func (e *EngineImpl) GetPayloadV1(context.Context, hexutil.Uint64) (ExecutionPayload, error) {
@@ -99,9 +135,10 @@ func (e *EngineImpl) GetPayloadV1(context.Context, hexutil.Uint64) (ExecutionPay
 }
 
 // NewEngineAPI returns EngineImpl instance
-func NewEngineAPI(base *BaseAPI, db kv.RoDB) *EngineImpl {
+func NewEngineAPI(base *BaseAPI, db kv.RoDB, api services.ApiBackend) *EngineImpl {
 	return &EngineImpl{
 		BaseAPI: base,
 		db:      db,
+		api:     api,
 	}
 }

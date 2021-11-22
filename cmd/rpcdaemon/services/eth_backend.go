@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -30,6 +31,7 @@ type ApiBackend interface {
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 	BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
+	EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EngineExecutePayloadReply, err error)
 }
 
 type RemoteBackend struct {
@@ -152,4 +154,8 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
+}
+
+func (back *RemoteBackend) EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EngineExecutePayloadReply, err error) {
+	return back.remoteEthBackend.EngineExecutePayloadV1(ctx, payload)
 }

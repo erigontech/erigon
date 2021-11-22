@@ -3,6 +3,7 @@ package privateapi
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -172,27 +173,29 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
-	// Check mandatory fields
-	if req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
-		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
-		s.config.TerminalTotalDifficulty == nil {
-
-		return &remote.EngineExecutePayloadReply{
-			Status: Invalid,
-		}, nil
-	}
-
 	tx, err := s.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
 	}
+	currentHead := rawdb.ReadHeadBlockHash(tx)
+	// Check mandatory fields
+	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
+		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
+		req.Transactions == nil || s.config.TerminalTotalDifficulty == nil {
+		fmt.Println("lol")
+
+		return &remote.EngineExecutePayloadReply{
+			Status:          Invalid,
+			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+		}, nil
+	}
+
 	// If another payload is already commissioned then we just reply with syncing
 	_, _, found, err := rawdb.ReadPayload(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	currentHead := rawdb.ReadHeadBlockHash(tx)
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
 	if found {
@@ -256,6 +259,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
 		}, nil
 	}
+	log.Info("Received Payload from beacon-chain", "hash", blockHash)
 	// Check if current block is next for execution, if not, commission it and start
 	// Reverse-download the chain from its block number and hash.
 	if header.ParentHash != currentHead {
