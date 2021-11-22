@@ -71,8 +71,15 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 func (pi *PeerInfo) Height() uint64 {
 	return atomic.LoadUint64(&pi.height)
 }
-func (pi *PeerInfo) SetHeight(h uint64) {
-	atomic.StoreUint64(&pi.height, h)
+
+// SetIncreasedHeight atomically updates PeerInfo.height only if newHeight is higher
+func (pi *PeerInfo) SetIncreasedHeight(newHeight uint64) {
+	for {
+		oldHeight := atomic.LoadUint64(&pi.height)
+		if oldHeight >= newHeight || atomic.CompareAndSwapUint64(&pi.height, oldHeight, newHeight) {
+			break
+		}
+	}
 }
 
 // ClearDeadlines goes through the deadlines of
@@ -626,9 +633,7 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH256ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		if req.MinBlock > peerInfo.Height() {
-			peerInfo.SetHeight(req.MinBlock)
-		}
+		peerInfo.SetIncreasedHeight(req.MinBlock)
 	}
 	return &emptypb.Empty{}, nil
 }
