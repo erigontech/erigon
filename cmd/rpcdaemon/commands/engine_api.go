@@ -65,7 +65,7 @@ type ForkchoiceArgs struct {
 type EngineAPI interface {
 	ForkchoiceUpdatedV1(context.Context, ForkchoiceArgs, PreparePayloadArgs) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, ExecutionPayload) (map[string]interface{}, error)
-	GetPayloadV1(context.Context, hexutil.Uint64) (*ExecutionPayload, error)
+	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -135,7 +135,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload ExecutionPayl
 	}, nil
 }
 
-func (e *EngineImpl) EngineGetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error) {
+func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error) {
 	payload, err := e.api.EngineGetPayloadV1(ctx, (uint64)(payloadID))
 	if err != nil {
 		return nil, err

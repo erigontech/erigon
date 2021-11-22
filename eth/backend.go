@@ -385,8 +385,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB,
-		backend.notifications.Events, blockReader, chainConfig, backend.notifications.Accumulator, config.StateStream,
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
+		blockReader, chainConfig, backend.notifications.Accumulator, config.StateStream,
 		vm.Config{EnableTEMV: config.Prune.Experiments.TEVM})
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
