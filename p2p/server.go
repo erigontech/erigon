@@ -245,8 +245,8 @@ type transport interface {
 	// handshake has completed. The code uses conn.id to track this
 	// by setting it to a non-nil value after the encryption handshake.
 	MsgReadWriter
-	// transports must provide Close because we use MsgPipe in some of
-	// the tests. Closing the actual network connection doesn't do
+	// transports must provide Close because we use MsgPipe in some
+	// tests. Closing the actual network connection doesn't do
 	// anything in those tests because MsgPipe doesn't use it.
 	close(err error)
 }
@@ -383,7 +383,7 @@ func (srv *Server) RemoveTrustedPeer(node *enode.Node) {
 	}
 }
 
-// SubscribePeers subscribes the given channel to peer events
+// SubscribeEvents subscribes the given channel to peer events.
 func (srv *Server) SubscribeEvents(ch chan *PeerEvent) event.Subscription {
 	return srv.peerFeed.Subscribe(ch)
 }
@@ -451,13 +451,13 @@ func (srv *Server) Running() bool {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start() (err error) {
+func (srv *Server) Start() error {
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
 	if srv.running {
 		return errors.New("server already running")
 	}
-	srv.running = true
+
 	srv.log = srv.Config.Logger
 	if srv.log == nil {
 		srv.log = log.Root()
@@ -501,6 +501,7 @@ func (srv *Server) Start() (err error) {
 	}
 	srv.setupDialScheduler()
 
+	srv.running = true
 	srv.loopWG.Add(1)
 	go srv.run()
 	return nil
