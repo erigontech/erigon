@@ -44,15 +44,16 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	ctx         context.Context
-	eth         EthBackend
-	events      *Events
-	db          kv.RwDB
-	blockReader interfaces.BlockReader
-	config      *params.ChainConfig
-	accumulator *shards.Accumulator
-	stateStream bool
-	vmConfig    vm.Config
+	ctx             context.Context
+	eth             EthBackend
+	events          *Events
+	db              kv.RwDB
+	blockReader     interfaces.BlockReader
+	config          *params.ChainConfig
+	accumulator     *shards.Accumulator
+	stateStream     bool
+	vmConfig        vm.Config
+	pendingPayloads map[uint64]types2.ExecutionPayload
 }
 
 type EthBackend interface {
@@ -61,8 +62,11 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader}
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
+	config *params.ChainConfig, accumulator *shards.Accumulator, stateStream bool, vmConfig vm.Config,
+) *EthBackendServer {
+	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
+		accumulator: accumulator, stateStream: stateStream, vmConfig: vmConfig}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -390,4 +394,13 @@ func (s *EthBackendServer) executePayload(
 	}
 
 	return callTracer.WriteToDb(tx, block, s.vmConfig)
+}
+
+// EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
+func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
+	payload, ok := s.pendingPayloads[req.PayloadId]
+	if ok {
+		return &payload, nil
+	}
+	return nil, fmt.Errorf("unknown payload")
 }

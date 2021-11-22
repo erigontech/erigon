@@ -31,7 +31,8 @@ type ApiBackend interface {
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 	BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
-	EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EngineExecutePayloadReply, err error)
+	EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error)
+	EngineGetPayloadV1(ctx context.Context, payloadId uint64) (*types2.ExecutionPayload, error)
 }
 
 type RemoteBackend struct {
@@ -158,4 +159,10 @@ func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Tx, hash 
 
 func (back *RemoteBackend) EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EngineExecutePayloadReply, err error) {
 	return back.remoteEthBackend.EngineExecutePayloadV1(ctx, payload)
+}
+
+func (back *RemoteBackend) EngineGetPayloadV1(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayload, err error) {
+	return back.remoteEthBackend.EngineGetPayloadV1(ctx, &remote.EngineGetPayloadRequest{
+		PayloadId: payloadId,
+	})
 }
