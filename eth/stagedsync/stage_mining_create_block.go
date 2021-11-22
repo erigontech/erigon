@@ -55,28 +55,17 @@ type MiningCreateBlockCfg struct {
 	miner       MiningState
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
-	txPool      *core.TxPool
 	txPool2     *txpool.TxPool
 	txPool2DB   kv.RoDB
 	tmpdir      string
 }
 
-func StageMiningCreateBlockCfg(
-	db kv.RwDB,
-	miner MiningState,
-	chainConfig params.ChainConfig,
-	engine consensus.Engine,
-	txPool *core.TxPool,
-	txPool2 *txpool.TxPool,
-	txPool2DB kv.RoDB,
-	tmpdir string,
-) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:          db,
 		miner:       miner,
 		chainConfig: chainConfig,
 		engine:      engine,
-		txPool:      txPool,
 		txPool2:     txPool2,
 		txPool2DB:   txPool2DB,
 		tmpdir:      tmpdir,
@@ -88,7 +77,7 @@ func StageMiningCreateBlockCfg(
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
 	current := cfg.miner.MiningBlock
-	txPoolLocals := cfg.txPool.Locals()
+	txPoolLocals := []common.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
 
 	const (
@@ -111,64 +100,31 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	blockNum := executionAt + 1
-	if cfg.txPool2 != nil {
-		var txs []types.Transaction
-		if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-			txSlots := txpool.TxsRlp{}
-			if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
-				return err
-			}
-
-			txs, err = types.DecodeTransactions(txSlots.Txs)
-			if err != nil {
-				return fmt.Errorf("decode rlp of pending txs: %w", err)
-			}
-			var sender common.Address
-			for i := range txs {
-				copy(sender[:], txSlots.Senders.At(i))
-				txs[i].SetSender(sender)
-			}
-
-			return nil
-		}); err != nil {
+	var txs []types.Transaction
+	if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
+		txSlots := txpool.TxsRlp{}
+		if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
 			return err
 		}
-		current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
-		// txpool v2 - doesn't prioritise local txs over remote
-		current.LocalTxs = types.NewTransactionsFixedOrder(nil)
-		log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
-	} else {
-		pendingTxs, err := cfg.txPool.Pending()
+
+		txs, err = types.DecodeTransactions(txSlots.Txs)
 		if err != nil {
-			return err
+			return fmt.Errorf("decode rlp of pending txs: %w", err)
 		}
-		// Split the pending transactions into locals and remotes
-		localTxs, remoteTxs := types.TransactionsGroupedBySender{}, types.TransactionsGroupedBySender{}
-		signer := types.MakeSigner(&cfg.chainConfig, blockNum)
-		for _, txs := range pendingTxs {
-			if len(txs) == 0 {
-				continue
-			}
-			from, _ := txs[0].Sender(*signer)
-			isLocal := false
-			for _, local := range txPoolLocals {
-				if local == from {
-					isLocal = true
-					break
-				}
-			}
-
-			if isLocal {
-				localTxs = append(localTxs, txs)
-			} else {
-				remoteTxs = append(remoteTxs, txs)
-			}
+		var sender common.Address
+		for i := range txs {
+			copy(sender[:], txSlots.Senders.At(i))
+			txs[i].SetSender(sender)
 		}
 
-		current.LocalTxs = types.NewTransactionsByPriceAndNonce(*signer, localTxs)
-		current.RemoteTxs = types.NewTransactionsByPriceAndNonce(*signer, remoteTxs)
-		log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "local", len(localTxs), "remote", len(remoteTxs))
+		return nil
+	}); err != nil {
+		return err
 	}
+	current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
+	// txpool v2 - doesn't prioritise local txs over remote
+	current.LocalTxs = types.NewTransactionsFixedOrder(nil)
+	log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
@@ -281,6 +237,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		})
 		return uncles
 	}
+
 	// when 08 is processed ancestors contain 07 (quick block)
 	for _, ancestor := range GetBlocksFromHash(parent.Hash(), 7) {
 		for _, uncle := range ancestor.Uncles() {
