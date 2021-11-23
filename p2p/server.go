@@ -518,7 +518,6 @@ func (srv *Server) setupLocalNode() error {
 	// Create the local node
 	db, err := enode.OpenDB(srv.Config.NodeDatabase)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	srv.nodedb = db
