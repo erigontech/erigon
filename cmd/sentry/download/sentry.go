@@ -524,6 +524,7 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
+	fmt.Printf("debug: %s, %s\n", datadir, path.Join(datadir, "erigon"))
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
