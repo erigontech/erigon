@@ -796,13 +796,11 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 
 		srv, err := makeP2PServer(*ss.p2p, genesisHash, ss.Protocol)
 		if err != nil {
-			panic(err)
 			return reply, err
 		}
 
 		// Add protocol
 		if err = srv.Start(); err != nil {
-			panic(err)
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}
 
