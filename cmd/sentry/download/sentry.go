@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -521,11 +520,9 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint) error {
-	fmt.Printf("debug: %s\n", datadir)
-	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
+	if err := os.MkdirAll(datadir, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
-	fmt.Printf("debug: %s, %s\n", datadir, path.Join(datadir, "erigon"))
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
