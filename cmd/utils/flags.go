@@ -1282,6 +1282,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
+	case params.BSCChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 56
+		}
+		cfg.Genesis = core.DefaultBSCGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
 	case params.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
@@ -1372,6 +1378,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case params.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
+	case params.BSCChainName:
+		genesis = core.DefaultBSCGenesisBlock()
 	case params.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
 	case params.SokolChainName:
