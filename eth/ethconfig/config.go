@@ -41,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -120,7 +119,6 @@ func init() {
 
 type Snapshot struct {
 	Enabled bool
-	Mode    snapshotsync.SnapshotMode
 	Dir     string
 	Seeding bool
 }

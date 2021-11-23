@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/fetcher"
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -33,7 +32,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -475,7 +473,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	_, _, chainConfig, _, _, sync, _, _ := newSync(ctx, db, nil)
+	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	must(sync.SetCurrentStage(stages.Senders))
 
@@ -554,7 +552,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
-	pm, engine, chainConfig, vmConfig, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, engine, chainConfig, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))
 
 	if reset {
@@ -613,7 +611,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
-	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
@@ -669,7 +667,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 func stageHashState(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
 
 	tx, err := db.BeginRw(ctx)
@@ -723,7 +721,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -778,7 +776,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	pm, _, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
+	pm, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
 	tx, err := kv.BeginRw(ctx)
 	if err != nil {
@@ -838,7 +836,7 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 
 func stageHistory(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
-	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
 	tx, err := db.BeginRw(ctx)
@@ -909,7 +907,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	pm, _, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.TxLookup))
 
 	tx, err := db.BeginRw(ctx)
@@ -942,7 +940,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	} else if pruneTo > 0 {
-		p, err := sync.PruneStageState(stages.TxPool, s.BlockNumber, tx, nil)
+		p, err := sync.PruneStageState(stages.TxLookup, s.BlockNumber, tx, nil)
 		if err != nil {
 			return err
 		}
@@ -1020,7 +1018,7 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	return genesis, chainConfig
 }
 
-func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *core.TxPool, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
+func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	logger := log.New()
 
@@ -1064,8 +1062,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	events := privateapi.NewEvents()
 
-	txPool := core.NewTxPool(ethconfig.Defaults.TxPool, chainConfig, db)
-
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
@@ -1081,17 +1077,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	txPoolP2PServer, err := txpool.NewP2PServer(context.Background(), nil, txPool)
-	if err != nil {
-		panic(err)
-	}
-	fetchTx := func(peerID string, hashes []common.Hash) error {
-		txPoolP2PServer.SendTxsRequest(context.TODO(), peerID, hashes)
-		return nil
-	}
-
-	txPoolP2PServer.TxFetcher = fetcher.NewTxFetcher(txPool.Has, txPool.AddRemotes, fetchTx)
-
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
@@ -1100,7 +1085,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, chainConfig.TerminalTotalDifficulty, downloadServer, tmpdir, txPool, txPoolP2PServer, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, chainConfig.TerminalTotalDifficulty, downloadServer, tmpdir, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -1108,7 +1093,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
-			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, txPool, nil, nil, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
 			stagedsync.StageTrieCfg(db, false, true, tmpdir),
@@ -1118,7 +1103,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		stagedsync.MiningPruneOrder,
 	)
 
-	return pm, engine, chainConfig, vmConfig, txPool, sync, miningSync, miner
+	return pm, engine, chainConfig, vmConfig, sync, miningSync, miner
 }
 
 func progress(tx kv.Getter, stage stages.SyncStage) uint64 {

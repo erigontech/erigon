@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -55,10 +56,10 @@ type Flags struct {
 	RpcAllowListFilePath string
 	RpcBatchConcurrency  uint
 	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolV2             bool
 	TxPoolApiAddr        string
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
+	Snapshot             ethconfig.Snapshot
 }
 
 var rootCmd = &cobra.Command{
@@ -91,6 +92,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
+	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, "experimental.snapshot", false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
@@ -115,8 +117,8 @@ func RootCommand() (*cobra.Command, *Flags) {
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
 			}
+			cfg.Snapshot.Dir = path.Join(cfg.Datadir, "snapshots")
 		}
-		cfg.TxPoolV2 = true
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
@@ -233,7 +235,6 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
-		blockReader = snapshotsync.NewBlockReader()
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -243,6 +244,17 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
+	if cfg.SingleNodeMode {
+		if cfg.Snapshot.Enabled {
+			allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, err
+			}
+			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+		} else {
+			blockReader = snapshotsync.NewBlockReader()
+		}
+	}
 	if cfg.PrivateApiAddr == "" {
 		return db, eth, txPool, mining, stateCache, blockReader, nil
 	}
@@ -264,16 +276,20 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	remoteEth := services.NewRemoteBackend(conn, db)
+	if !cfg.SingleNodeMode {
+		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
+	}
+	remoteEth := services.NewRemoteBackend(conn, db, blockReader)
 	blockReader = remoteEth
 
 	txpoolConn := conn
-	if cfg.TxPoolV2 {
+	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
+
 	mining = services.NewMiningService(txpoolConn)
 	txPool = services.NewTxPoolService(txpoolConn)
 	if db == nil {

@@ -46,11 +46,11 @@ const ProtocolName = "eth"
 
 // ProtocolVersions are the supported versions of the `eth` protocol (first
 // is primary).
-var ProtocolVersions = []uint{ETH66}
+var ProtocolVersions = []uint{ETH66} //nolint
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{ETH66: 17}
+var protocolLengths = map[uint]uint64{ETH66: 17} //nolint
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
@@ -582,7 +582,7 @@ func (rb BlockRawBody) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range rb.Transactions {
 		txsLen++
-		var txLen int = len(tx)
+		var txLen = len(tx)
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}

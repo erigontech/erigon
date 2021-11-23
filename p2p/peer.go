@@ -64,7 +64,7 @@ type protoHandshake struct {
 	Name       string
 	Caps       []Cap
 	ListenPort uint64
-	ID         []byte // secp256k1 public key
+	Pubkey     []byte // secp256k1 public key
 
 	// Ignore additional fields (for forward compatibility).
 	Rest []rlp.RawValue `rlp:"tail"`
@@ -130,7 +130,7 @@ func NewPeer(id enode.ID, name string, caps []Cap) *Peer {
 	return peer
 }
 
-// ID returns the node's public key.
+// ID returns the node's unique identifier.
 func (p *Peer) ID() enode.ID {
 	return p.rw.node.ID()
 }

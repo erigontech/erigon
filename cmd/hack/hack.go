@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -1188,11 +1187,6 @@ func dumpState(chaindata string, block int, name string) error {
 		return err
 	}
 	defer cc.Close()
-	var hc kv.Cursor
-	if hc, err = tx.Cursor(kv.Code); err != nil {
-		return err
-	}
-	defer hc.Close()
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	k, v, e := sc.First()
@@ -1221,8 +1215,8 @@ func dumpState(chaindata string, block int, name string) error {
 				return err
 			}
 			if a.CodeHash != trie.EmptyCodeHash {
-				var code []byte
-				if _, code, err = hc.SeekExact(a.CodeHash[:]); err != nil {
+				code, err := tx.GetOne(kv.Code, a.CodeHash[:])
+				if err != nil {
 					return err
 				}
 				if len(code) != 0 {
@@ -1624,7 +1618,7 @@ func compress1(chaindata string, fileName, segmentFileName string) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
+			log.Info("Dictionary preprocessing", "processed", fmt.Sprintf("%dK", i/1_000))
 		}
 		return nil
 	}); err != nil {
@@ -1874,7 +1868,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize atomic2.Uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -2163,7 +2157,7 @@ func reducedict(name string, segmentFileName string) error {
 	log.Info("dictionary file parsed", "entries", len(code2pattern))
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
-	var inputSize, outputSize atomic2.Uint64
+	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var wg sync.WaitGroup
 	workers := runtime.NumCPU() / 2
 	var collectors []*etl.Collector
@@ -2188,7 +2182,7 @@ func reducedict(name string, segmentFileName string) error {
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Replacement preprocessing", "processed", fmt.Sprintf("%dK", i/1_000), "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
 		return nil
 	}); err != nil {
@@ -2564,11 +2558,12 @@ func recsplitWholeChain(chaindata string) error {
 			return 0, err
 		}
 		last := binary.BigEndian.Uint64(k)
-		if last > params.FullImmutabilityThreshold {
-			last -= params.FullImmutabilityThreshold
-		} else {
-			last = 0
-		}
+		// TODO: enable next condition (disabled for tests)
+		//if last > params.FullImmutabilityThreshold {
+		//	last -= params.FullImmutabilityThreshold
+		//} else {
+		//	last = 0
+		//}
 		last = last - last%blocksPerFile
 		return last, nil
 	}
@@ -2604,7 +2599,7 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.TransactionsIdx(*chainID, snapshotDir, fileName); err != nil {
+		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2620,7 +2615,8 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.BodiesIdx(snapshotDir, fileName); err != nil {
+
+		if err := snapshotsync.HeadersIdx(segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2636,161 +2632,17 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.BodiesIdx(snapshotDir, fileName); err != nil {
-			return err
+		if err := snapshotsync.BodiesIdx(segmentFile); err != nil {
+			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
+
+		//nolint
+		break // TODO: remove me - useful for tests
 	}
 	return nil
 }
 
-func recsplitLookup(chaindata, name string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
-	chainConfig := tool.ChainConfigFromDB(database)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	d, err := compress.NewDecompressor(name + ".seg")
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	idx := recsplit.MustOpen(name + ".idx")
-	defer idx.Close()
-
-	var word, word2 = make([]byte, 0, 4096), make([]byte, 0, 4096)
-	wc := 0
-	g := d.MakeGetter()
-	dataGetter := d.MakeGetter()
-
-	parseCtx := txpool.NewTxParseContext(*chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	var sender [20]byte
-	var l1, l2, total time.Duration
-	start := time.Now()
-	var prev []byte
-	var prevOffset uint64
-	for g.HasNext() {
-		word, _ = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
-			return err
-		}
-		wc++
-
-		t := time.Now()
-		recID := idx.Lookup(slot.IdHash[:])
-		l1 += time.Since(t)
-		t = time.Now()
-		offset := idx.Lookup2(recID)
-		l2 += time.Since(t)
-		if ASSERT {
-			var dataP uint64
-			if prev != nil {
-				dataGetter.Reset(prevOffset)
-				word2, dataP = dataGetter.Next(word2[:0])
-				if !bytes.Equal(word, word2) {
-					fmt.Printf("wc=%d, %d,%d\n", wc, offset, dataP-uint64(len(word2)))
-					fmt.Printf("word: %x,%x\n\n", word, word2)
-					panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
-				}
-			}
-			prev = common.CopyBytes(word)
-			prevOffset = offset
-		}
-
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Checked", "millions", float64(wc)/1_000_000,
-				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
-			)
-		}
-	}
-
-	total = time.Since(start)
-	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
-	return nil
-}
-
-func createIdx(chaindata string, name string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
-	chainConfig := tool.ChainConfigFromDB(database)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	d, err := compress.NewDecompressor(name + ".seg")
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return _createIdx(*chainID, name, d.Count())
-}
-func _createIdx(chainID uint256.Int, name string, count int) error {
-	d, err := compress.NewDecompressor(name + ".seg")
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   int(count),
-		Enums:      true,
-		BucketSize: 2000,
-		Salt:       0,
-		LeafSize:   8,
-		TmpDir:     "",
-		IndexFile:  name + ".idx",
-	})
-	if err != nil {
-		return err
-	}
-
-RETRY:
-
-	var word = make([]byte, 0, 256)
-	g := d.MakeGetter()
-	wc := 0
-	var pos uint64
-	parseCtx := txpool.NewTxParseContext(chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	var sender [20]byte
-
-	for g.HasNext() {
-		word, pos = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
-			return err
-		}
-		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
-			return err
-		}
-		wc++
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
-		}
-	}
-	log.Info("Building recsplit...")
-
-	if err = rs.Build(); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			log.Info("Building recsplit. Collision happened. It's ok. Restarting...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
-}
 func decompress(name string) error {
 	d, err := compress.NewDecompressor(name + ".seg")
 	if err != nil {
@@ -4072,12 +3924,8 @@ func main() {
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
 		err = compress1(*chaindata, *name, *name)
-	case "createIdx":
-		err = createIdx(*chaindata, *name)
 	case "recsplitWholeChain":
 		err = recsplitWholeChain(*chaindata)
-	case "recsplitLookup":
-		err = recsplitLookup(*chaindata, *name)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":

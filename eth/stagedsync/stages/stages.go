@@ -43,7 +43,6 @@ var (
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
-	TxPool              SyncStage = "TxPool"              // Starts Backend
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
@@ -65,7 +64,6 @@ var AllStages = []SyncStage{
 	LogIndex,
 	CallTraces,
 	TxLookup,
-	TxPool,
 	Finish,
 }
 
