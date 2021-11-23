@@ -516,9 +516,9 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	fmt.Printf("alex: %s\n", srv.Config.NodeDatabase)
 	db, err := enode.OpenDB(srv.Config.NodeDatabase)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	srv.nodedb = db
