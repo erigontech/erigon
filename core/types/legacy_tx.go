@@ -543,3 +543,7 @@ func (tx LegacyTx) GetSender() (common.Address, bool) {
 func (tx *LegacyTx) SetSender(addr common.Address) {
 	tx.from.Store(addr)
 }
+
+func (tx LegacyTx) IsCairo() bool {
+	return false
+}

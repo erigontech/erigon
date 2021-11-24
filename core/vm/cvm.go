@@ -4,17 +4,17 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-type CVM struct {
-	config          Config
-	intraBlockState IntraBlockState
-}
-
 func NewCVM(state IntraBlockState) *CVM {
 	cvm := &CVM{
 		intraBlockState: state,
 	}
 
 	return cvm
+}
+
+type CVM struct {
+	config          Config
+	intraBlockState IntraBlockState
 }
 
 func (cvm *CVM) Create(code []byte) ([]byte, common.Address, error) {

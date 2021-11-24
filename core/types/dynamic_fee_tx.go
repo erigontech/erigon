@@ -453,7 +453,6 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.S.SetBytes(b)
 	return s.ListEnd()
-
 }
 
 // AsMessage returns the transaction as a core.Message.
@@ -554,6 +553,10 @@ func (tx DynamicFeeTransaction) GetSender() (common.Address, bool) {
 
 func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
 	tx.from.Store(addr)
+}
+
+func (tx DynamicFeeTransaction) IsCairo() bool {
+	return false
 }
 
 // NewTransaction creates an unsigned eip1559 transaction.

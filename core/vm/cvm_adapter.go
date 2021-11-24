@@ -10,19 +10,17 @@ import (
 const CairoNotImplemented = "the method is currently not implemented for cvm: %s"
 
 type CVMAdapter struct {
-	cvm *CVM
+	Cvm *CVM
 }
 
-//IntraBlockState() IntraBlockState
-
 func (c *CVMAdapter) Reset(txCtx TxContext, ibs IntraBlockState) {
-
+	panic("implement me")
 }
 
 func (c *CVMAdapter) Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	leftOverGas = 0
 
-	ret, contractAddr, err = c.cvm.Create(code)
+	ret, contractAddr, err = c.Cvm.Create(code)
 
 	return ret, contractAddr, leftOverGas, err
 }
@@ -32,7 +30,7 @@ func (cvm *CVMAdapter) Call(caller ContractRef, addr common.Address, input []byt
 }
 
 func (cvm *CVMAdapter) Config() Config {
-	return cvm.cvm.Config()
+	return cvm.Cvm.Config()
 }
 
 func (cvm *CVMAdapter) ChainRules() params.Rules {
@@ -44,7 +42,7 @@ func (cvm *CVMAdapter) Context() BlockContext {
 }
 
 func (cvm *CVMAdapter) IntraBlockState() IntraBlockState {
-	return cvm.cvm.IntraBlockState()
+	return cvm.Cvm.IntraBlockState()
 }
 
 func (cvm *CVMAdapter) TxContext() TxContext {
