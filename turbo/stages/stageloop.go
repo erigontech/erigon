@@ -272,7 +272,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			controlServer.ChainConfig,
 		), stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),

@@ -585,12 +585,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	var blockReader interfaces.BlockReader
-	blockReader = snapshotsync.NewBlockReader()
-	if sn := allSnapshots(); sn != nil {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)
-	}
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, blockReader)
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, getBlockReader())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -649,7 +644,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("Stage4", "progress", execStage.BlockNumber)
 	log.Info("Stage5", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir)
+	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader())
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx); err != nil {
@@ -1039,6 +1034,14 @@ func allSnapshots() *snapshotsync.AllSnapshots {
 	return _allSnapshotsSingleton
 }
 
+func getBlockReader() (blockReader interfaces.BlockReader) {
+	blockReader = snapshotsync.NewBlockReader()
+	if sn := allSnapshots(); sn != nil {
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)
+	}
+	return blockReader
+}
+
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 	logger := log.New()
@@ -1103,7 +1106,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, false, true, tmpdir),
+			stagedsync.StageTrieCfg(db, false, true, tmpdir, getBlockReader()),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

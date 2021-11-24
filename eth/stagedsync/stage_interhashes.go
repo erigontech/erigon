@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -26,14 +27,16 @@ type TrieCfg struct {
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
+	blockReader       interfaces.BlockReader
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader interfaces.BlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
 		tmpDir:            tmpDir,
 		saveNewHashesToDB: saveNewHashesToDB,
+		blockReader:       blockReader,
 	}
 }
 
@@ -68,11 +71,19 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
-		syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
-		expectedRootHash = syncHeadHeader.Root
-		headerHash = syncHeadHeader.Hash()
+		//todo: read only header, not whole block
+		block, _, err := cfg.blockReader.BlockWithSenders(ctx, tx, hash, to)
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+		expectedRootHash = block.Root()
+		headerHash = block.Hash()
+		//syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
+		//fmt.Printf("alex: %d, %x, %d,%x\n", block.NumberU64(), expectedRootHash, syncHeadHeader.Number.Uint64(), syncHeadHeader.Root)
+		//panic(1)
+		//expectedRootHash = syncHeadHeader.Root
+		//headerHash = syncHeadHeader.Hash()
 	}
-
 	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
