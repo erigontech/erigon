@@ -1033,8 +1033,8 @@ func allSnapshots() *snapshotsync.AllSnapshots {
 		if enableSnapshot {
 			snapshotCfg.Enabled = true
 			snapshotCfg.Dir = path.Join(datadir, "snapshots")
+			_allSnapshotsSingleton = snapshotsync.MustOpenAll(snapshotCfg.Dir)
 		}
-		_allSnapshotsSingleton = snapshotsync.MustOpenAll(snapshotCfg.Dir)
 	})
 	return _allSnapshotsSingleton
 }

@@ -80,6 +80,7 @@ func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapsh
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
+		fmt.Printf("no\n")
 		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 		if err != nil {
 			return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
@@ -93,6 +94,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		}
 		return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 	}
+	fmt.Printf("yes\n")
 
 	buf := make([]byte, 16)
 
