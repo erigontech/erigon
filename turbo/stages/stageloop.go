@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -21,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -223,6 +225,17 @@ func NewStagedSync(
 	tmpdir string,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
+	var blockReader interfaces.BlockReader
+	if cfg.Snapshot.Enabled {
+		allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
+		if err != nil {
+			return nil, err
+		}
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
 			db,
@@ -253,6 +266,7 @@ func NewStagedSync(
 			accumulator,
 			cfg.StateStream,
 			tmpdir,
+			blockReader,
 		), stagedsync.StageTranspileCfg(
 			db,
 			cfg.BatchSize,

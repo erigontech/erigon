@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -53,6 +54,7 @@ type ExecuteBlockCfg struct {
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
+	blockReader   interfaces.BlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -66,6 +68,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
+	blockReader interfaces.BlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -78,16 +81,8 @@ func StageExecuteBlocksCfg(
 		tmpdir:        tmpdir,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
+		blockReader:   blockReader,
 	}
-}
-
-func readBlock(blockNum uint64, tx kv.Tx) (*types.Block, error) {
-	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	b, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
-	return b, err
 }
 
 func executeBlock(
@@ -269,9 +264,13 @@ Loop:
 		if stoppedErr = libcommon.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		var err error
-		var block *types.Block
-		if block, err = readBlock(blockNum, tx); err != nil {
+
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		block, _, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+		if err != nil {
 			return err
 		}
 		if block == nil {

@@ -7,11 +7,13 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -30,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -446,19 +449,21 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
+	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		s := stage(sync, tx, nil, stages.Bodies)
+
 		if unwind > 0 {
-			progress, err := stages.GetStageProgress(tx, stages.Bodies)
-			if err != nil {
-				return fmt.Errorf("read Bodies progress: %w", err)
-			}
-			if unwind > progress {
+			if unwind > s.BlockNumber {
 				return fmt.Errorf("cannot unwind past 0")
 			}
-			if err = stages.SaveStageProgress(tx, stages.Bodies, progress-unwind); err != nil {
-				return fmt.Errorf("saving Bodies progress failed: %w", err)
+
+			u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
+			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0), ctx); err != nil {
+				return err
 			}
-			progress, err = stages.GetStageProgress(tx, stages.Bodies)
+
+			progress, err := stages.GetStageProgress(tx, stages.Bodies)
 			if err != nil {
 				return fmt.Errorf("re-read Bodies progress: %w", err)
 			}
@@ -580,7 +585,12 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
+	var blockReader interfaces.BlockReader
+	blockReader = snapshotsync.NewBlockReader()
+	if sn := allSnapshots(); sn != nil {
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)
+	}
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, blockReader)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -1012,6 +1022,21 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 		genesis = core.DefaultFermionGenesisBlock()
 	}
 	return genesis, chainConfig
+}
+
+var openSnapshotOnce sync.Once
+var _allSnapshotsSingleton *snapshotsync.AllSnapshots
+
+func allSnapshots() *snapshotsync.AllSnapshots {
+	openSnapshotOnce.Do(func() {
+		snapshotCfg := ethconfig.Snapshot{}
+		if enableSnapshot {
+			snapshotCfg.Enabled = true
+			snapshotCfg.Dir = path.Join(datadir, "snapshots")
+		}
+		_allSnapshotsSingleton = snapshotsync.MustOpenAll(snapshotCfg.Dir)
+	})
+	return _allSnapshotsSingleton
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {

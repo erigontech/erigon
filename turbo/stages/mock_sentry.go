@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -297,6 +298,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			mock.Notifications.Accumulator,
 			cfg.StateStream,
 			mock.tmpdir,
+			snapshotsync.NewBlockReader(),
 		), stagedsync.StageTranspileCfg(
 			mock.DB,
 			cfg.BatchSize,
