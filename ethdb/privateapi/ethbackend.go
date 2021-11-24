@@ -224,7 +224,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		if transactions[i], err = types.DecodeTransaction(stream); err != nil {
 			return nil, err
 		}
-		i++
 	}
 
 	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
@@ -258,33 +257,30 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		}, nil
 	}
 	log.Info("Received Payload from beacon-chain", "hash", blockHash)
-	// Send the header over
+	// Send the block over
 	s.numberSent = req.BlockNumber
 	s.reverseDownloadCh <- *types.NewBlock(&header, transactions, nil, nil)
 	// Check if current block is next for execution, if not, commission it and start
 	// Reverse-download the chain from its block number and hash.
 	if header.ParentHash != currentHead {
-		// We commissioned a payload and now we are syncing
 		return &remote.EngineExecutePayloadReply{
 			Status:          Syncing,
 			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
 		}, nil
 	}
 	for {
-		select {
-		case executedStatus := <-s.statusCh:
-			if executedStatus.Hash == blockHash {
-				if executedStatus.Valid {
-					return &remote.EngineExecutePayloadReply{
-						Status:          Valid,
-						LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-					}, nil
-				} else {
-					return &remote.EngineExecutePayloadReply{
-						Status:          Invalid,
-						LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-					}, nil
-				}
+		executedStatus := <-s.statusCh
+		if executedStatus.Hash == blockHash {
+			if executedStatus.Valid {
+				return &remote.EngineExecutePayloadReply{
+					Status:          Valid,
+					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+				}, nil
+			} else {
+				return &remote.EngineExecutePayloadReply{
+					Status:          Invalid,
+					LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+				}, nil
 			}
 		}
 	}
