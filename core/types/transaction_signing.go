@@ -68,6 +68,8 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	return &signer
 }
 
+
+
 func MakeFrontierSigner() *Signer {
 	var signer Signer
 	signer.maleable = true
@@ -102,6 +104,16 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 			signer.protected = true
 		}
 	}
+	return &signer
+}
+
+func NewEIP155Signer(chainId *big.Int) *Signer {
+	var signer Signer
+	signer.unprotected = true
+	signer.protected = true
+	chainInt := uint256.NewInt(chainId.Uint64())
+	signer.chainID.Set(chainInt)
+	signer.chainIDMul.Set(chainInt.Mul(chainInt, u256.Num2))
 	return &signer
 }
 

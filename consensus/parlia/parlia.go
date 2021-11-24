@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -13,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/sha3"
 	"io"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 )
@@ -194,12 +195,12 @@ type Parlia struct {
 	chainConfig *params.ChainConfig  // Chain config
 	config      *params.ParliaConfig // Consensus engine configuration parameters for parlia consensus
 	genesisHash common.Hash
-	db          ethdb.Database // Database to store and retrieve snapshot checkpoints
+	db          kv.RwDB // Database to store and retrieve snapshot checkpoints
 
 	recentSnaps *lru.ARCCache // Snapshots for recent block to speed up
 	signatures  *lru.ARCCache // Signatures of recent blocks to speed up mining
 
-	signer types.Signer
+	signer *types.Signer
 
 	val      common.Address // Ethereum address of the signing key
 	signFn   SignerFn       // Signer function to authorize hashes with
@@ -212,6 +213,50 @@ type Parlia struct {
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
+}
+
+// New creates a Parlia consensus engine.
+func New(
+	chainConfig *params.ChainConfig,
+	db kv.RwDB,
+) *Parlia {
+	// get parlia config
+	parliaConfig := chainConfig.Parlia
+
+	// Set any missing consensus parameters to their defaults
+	if parliaConfig != nil && parliaConfig.Epoch == 0 {
+		parliaConfig.Epoch = defaultEpochLength
+	}
+
+	// Allocate the snapshot caches and create the engine
+	recentSnaps, err := lru.NewARC(inMemorySnapshots)
+	if err != nil {
+		panic(err)
+	}
+	signatures, err := lru.NewARC(inMemorySignatures)
+	if err != nil {
+		panic(err)
+	}
+	vABI, err := abi.JSON(strings.NewReader(validatorSetABI))
+	if err != nil {
+		panic(err)
+	}
+	sABI, err := abi.JSON(strings.NewReader(slashABI))
+	if err != nil {
+		panic(err)
+	}
+	c := &Parlia{
+		chainConfig:     chainConfig,
+		config:          parliaConfig,
+		db:              db,
+		recentSnaps:     recentSnaps,
+		signatures:      signatures,
+		validatorSetABI: vABI,
+		slashABI:        sABI,
+		signer:          types.NewEIP155Signer(chainConfig.ChainID),
+	}
+
+	return c
 }
 
 // Author retrieves the Ethereum address of the account that minted the given
@@ -425,7 +470,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(p.config, p.signatures, p.db, hash); err == nil {
+			if s, err := loadSnapshot(p.config, p.db, number, hash); err == nil {
 				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break

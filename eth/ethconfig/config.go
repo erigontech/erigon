@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"math/big"
 	"os"
 	"os/user"
@@ -158,6 +159,7 @@ type Config struct {
 
 	Clique params.SnapshotConfig
 	Aura   params.AuRaConfig
+	Parlia params.ParliaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -216,6 +218,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			if err != nil {
 				panic(err)
 			}
+		}
+	case *params.ParliaConfig:
+		if chainConfig.Parlia != nil {
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
 		}
 	}
 

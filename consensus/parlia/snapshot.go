@@ -18,9 +18,12 @@ package parlia
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"math/big"
 	"sort"
 
@@ -28,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -76,9 +78,28 @@ func (s validatorsAscending) Len() int           { return len(s) }
 func (s validatorsAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
 func (s validatorsAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
+const NumberLength = 8
+
+// EncodeBlockNumber encodes a block number as big endian uint64
+func EncodeBlockNumber(number uint64) []byte {
+	enc := make([]byte, NumberLength)
+	binary.BigEndian.PutUint64(enc, number)
+	return enc
+}
+
+// SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
+func SnapshotFullKey(number uint64, hash common.Hash) []byte {
+	return append(EncodeBlockNumber(number), hash.Bytes()...)
+}
+
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db ethdb.Database, hash common.Hash) (*Snapshot, error) {
-	blob, err := db.Get("Parlia", hash[:])
+func loadSnapshot(config *params.ParliaConfig, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
+	tx, err := db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blob, err := tx.GetOne("Parlia", SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
@@ -87,18 +108,18 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db ethdb.
 		return nil, err
 	}
 	snap.config = config
-	snap.sigCache = sigCache
-
 	return snap, nil
 }
 
 // store inserts the snapshot into the database.
-func (s *Snapshot) store(db ethdb.Database) error {
+func (s *Snapshot) store(db kv.RwDB) error {
 	blob, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	return db.Put("Parlia", s.Hash[:], blob)
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put("Parlia", SnapshotFullKey(s.Number, s.Hash), blob)
+	})
 }
 
 // copy creates a deep copy of the snapshot

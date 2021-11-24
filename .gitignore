@@ -75,3 +75,4 @@ config.toml
 genesis.json
 datadir/
 erigon.exe
+erigon

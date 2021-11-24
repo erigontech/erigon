@@ -1043,6 +1043,13 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	switch chain {
 	case params.SokolChainName, params.KovanChainName:
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+	case params.BSCChainName:
+		config := &ethconfig.Defaults
+		var consensusConfig interface{}
+		if chainConfig.Parlia != nil {
+			consensusConfig = &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
+		}
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 	}
 
 	events := privateapi.NewEvents()
