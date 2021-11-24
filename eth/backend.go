@@ -339,20 +339,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
 
-	mining := stagedsync.New(
-		stagedsync.MiningStages(backend.downloadCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
-			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
-
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
 	var blockReader interfaces.BlockReader
 	if config.Snapshot.Enabled {
 		allSnapshots, err := snapshotsync.OpenAll(config.Snapshot.Dir)
@@ -362,6 +348,20 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
+	}
+
+	mining := stagedsync.New(
+		stagedsync.MiningStages(backend.downloadCtx,
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, tmpdir),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
+			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
+		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+
+	var ethashApi *ethash.API
+	if casted, ok := backend.engine.(*ethash.Ethash); ok {
+		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
