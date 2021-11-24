@@ -172,6 +172,9 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -180,12 +183,9 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	// Check mandatory fields
 	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
 		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
-		req.Transactions == nil || s.config.TerminalTotalDifficulty == nil {
+		req.Transactions == nil {
 
-		return &remote.EngineExecutePayloadReply{
-			Status:          Invalid,
-			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-		}, nil
+		return nil, fmt.Errorf("invalid execution payload")
 	}
 
 	// If another payload is already commissioned then we just reply with syncing
@@ -292,6 +292,10 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
 	payload, ok := s.pendingPayloads[req.PayloadId]
 	if ok {
 		return &payload, nil

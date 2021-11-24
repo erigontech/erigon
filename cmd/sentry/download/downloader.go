@@ -384,7 +384,7 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
 		return nil
 	}
-	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
+	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
 		return fmt.Errorf("decode NewBlockHashes66: %w", err)
@@ -429,7 +429,7 @@ func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_se
 	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
 		return nil
 	}
-	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", gointerfaces.ConvertH512ToBytes(req.PeerId)))
+	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
 	var request eth.NewBlockHashesPacket
 	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
 		return fmt.Errorf("decode newBlockHashes65: %w", err)
@@ -508,7 +508,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(in.PeerId))
 				canRequestMore = canRequestMore || requestMore
 				if len(penalties) > 0 {
 					cs.Penalize(ctx, penalties)
@@ -519,7 +519,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 				currentTime := uint64(time.Now().Unix())
 				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 				if req != nil {
-					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
+					if _, ok := cs.SendHeaderRequest(ctx, req); ok {
 						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
 						log.Trace("Sent request", "height", req.Number)
 					}
@@ -583,7 +583,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, string(gointerfaces.ConvertH512ToBytes(in.PeerId)))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(in.PeerId))
 				canRequestMore = canRequestMore || requestMore
 				if len(penalties) > 0 {
 					cs.Penalize(ctx, penalties)
@@ -594,7 +594,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 				currentTime := uint64(time.Now().Unix())
 				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 				if req != nil {
-					if peer := cs.SendHeaderRequest(ctx, req); peer != nil {
+					if _, ok := cs.SendHeaderRequest(ctx, req); ok {
 						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
 						log.Trace("Sent request", "height", req.Number)
 					}
@@ -649,7 +649,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	}
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, string(gointerfaces.ConvertH512ToBytes(inreq.PeerId))) // There is only one segment in this case
+			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH256ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -675,7 +675,7 @@ func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH256ToPeerID(inreq.PeerId)))
 	return nil
 }
 
@@ -685,7 +685,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH256ToPeerID(inreq.PeerId))
 	return nil
 }
 
@@ -695,7 +695,7 @@ func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, s
 		return fmt.Errorf("decode blockBodies65: %w", err)
 	}
 	txs, uncles := request.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)))
+	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH256ToPeerID(inreq.PeerId))
 	return nil
 }
 
@@ -743,7 +743,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH256ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -780,7 +780,7 @@ func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto
 			return fmt.Errorf("send header response 65: %w", err)
 		}
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH256ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -817,7 +817,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -851,7 +851,7 @@ func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -891,7 +891,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -928,7 +928,7 @@ func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sen
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", string(gointerfaces.ConvertH512ToBytes(inreq.PeerId)), len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 

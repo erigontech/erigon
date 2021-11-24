@@ -38,8 +38,7 @@ import (
 )
 
 var (
-	blockExecutionTimer     = metrics2.GetOrCreateSummary("chain_execution_seconds")
-	blockReorgInvalidatedTx = metrics2.GetOrCreateCounter("chain_reorg_invalidTx")
+	blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 )
 
 const (

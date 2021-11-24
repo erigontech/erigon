@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/erigon/turbo/txpool"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -224,8 +223,6 @@ func NewStagedSync(
 	terminalTotalDifficulty *big.Int,
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
-	txPool *core.TxPool,
-	txPoolServer *txpool.P2PServer,
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan types.Block,
 	statusCh chan core.ExecutionStatus,
@@ -264,20 +261,13 @@ func NewStagedSync(
 			db,
 			cfg.BatchSize,
 			controlServer.ChainConfig,
-		), stagedsync.StageHashStateCfg(db, tmpdir), stagedsync.StageTrieCfg(db, true, true, tmpdir), stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir), stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir), stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir), stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir), stagedsync.StageTxPoolCfg(db, txPool, cfg.TxPool, func() {
-			if cfg.TxPool.V2 {
-			} else {
-				for i := range txPoolServer.Sentries {
-					go func(i int) {
-						txpool.RecvTxMessageLoop(ctx, txPoolServer.Sentries[i], txPoolServer.HandleInboundMessage, nil)
-					}(i)
-					go func(i int) {
-						txpool.RecvPeersLoop(ctx, txPoolServer.Sentries[i], txPoolServer.RecentPeers, nil)
-					}(i)
-				}
-				txPoolServer.TxFetcher.Start()
-			}
-		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
+		), stagedsync.StageHashStateCfg(db, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir),
+			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 		reverseDownloadCh,
