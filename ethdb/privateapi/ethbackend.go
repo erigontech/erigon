@@ -15,18 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/calltracer"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -47,13 +39,16 @@ type EthBackendServer struct {
 	ctx             context.Context
 	eth             EthBackend
 	events          *Events
-	db              kv.RwDB
+	db              kv.RoDB
 	blockReader     interfaces.BlockReader
 	config          *params.ChainConfig
-	accumulator     *shards.Accumulator
-	stateStream     bool
-	vmConfig        vm.Config
 	pendingPayloads map[uint64]types2.ExecutionPayload
+	// Send reverse sync starting point to staged sync
+	reverseDownloadCh chan types.Block
+	// Notify whether the current block being processed is Valid or not
+	statusCh chan core.ExecutionStatus
+	// Last block number sent over via reverseDownloadCh
+	numberSent uint64
 }
 
 type EthBackend interface {
@@ -63,10 +58,10 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, accumulator *shards.Accumulator, stateStream bool, vmConfig vm.Config,
+	config *params.ChainConfig, reverseDownloadCh chan types.Block, statusCh chan core.ExecutionStatus,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		accumulator: accumulator, stateStream: stateStream, vmConfig: vmConfig}
+		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -177,7 +172,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
-	tx, err := s.db.BeginRw(ctx)
+	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -194,14 +189,14 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 
 	// If another payload is already commissioned then we just reply with syncing
-	_, _, found, err := rawdb.ReadPayload(tx)
-	if err != nil {
-		return nil, err
+	headNumber := rawdb.ReadHeaderNumber(tx, currentHead)
+	if headNumber == nil {
+		return nil, fmt.Errorf("cannot find latest block number")
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
-	if found {
+	if s.numberSent > *headNumber {
 		// We are still syncing a commisioned payload
 		return &remote.EngineExecutePayloadReply{
 			Status:          Syncing,
@@ -263,6 +258,9 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		}, nil
 	}
 	log.Info("Received Payload from beacon-chain", "hash", blockHash)
+	// Send the header over
+	s.numberSent = req.BlockNumber
+	s.reverseDownloadCh <- *types.NewBlock(&header, transactions, nil, nil)
 	// Check if current block is next for execution, if not, commission it and start
 	// Reverse-download the chain from its block number and hash.
 	if header.ParentHash != currentHead {
@@ -270,129 +268,26 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return &remote.EngineExecutePayloadReply{
 			Status:          Syncing,
 			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-		}, rawdb.CommissionPayload(tx, req.BlockNumber, blockHash)
-	}
-
-	// Create batch
-	batch := olddb.NewBatch(tx, ctx.Done())
-	defer batch.Rollback()
-	// Write Header(we do not need to add difficulty after "The merge")
-	rawdb.WriteHeader(batch, &header)
-	if err := rawdb.WriteCanonicalHash(tx, blockHash, req.BlockNumber); err != nil {
-		return nil, err
-	}
-	rawdb.WriteHeaderNumber(batch, blockHash, req.BlockNumber)
-	// Write Body
-	if err := rawdb.WriteRawBody(batch, blockHash, req.BlockNumber, &types.RawBody{
-		Transactions: req.Transactions,
-	}); err != nil {
-		return nil, err
-	}
-	// Senders recovery
-	signer := types.MakeSigner(s.config, req.BlockNumber)
-	senders := make([]common.Address, len(req.Transactions))
-	for i, tx := range transactions {
-		senders[i], err = signer.SenderWithContext(secp256k1.NewContext(), tx)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := rawdb.WriteSenders(batch, blockHash, req.BlockNumber, senders); err != nil {
-		return nil, err
-	}
-	block := types.NewBlock(&header, transactions, []*types.Header{}, []*types.Receipt{})
-	// TEVM handler
-	var contractHasTEVM func(contractHash common.Hash) (bool, error)
-
-	if s.vmConfig.EnableTEMV {
-		contractHasTEVM = ethdb.GetHasTEVM(tx)
-	}
-	// Execute the payload
-	if err := s.executePayload(block, tx, batch, s.vmConfig, s.config, contractHasTEVM); err != nil {
-		return &remote.EngineExecutePayloadReply{
-			Status: Invalid,
 		}, nil
 	}
-
-	// Update Progress
-	if err := stages.SaveStageProgress(batch, stages.Headers, req.BlockNumber); err != nil {
-		return nil, err
-	}
-	if err := stages.SaveStageProgress(batch, stages.BlockHashes, req.BlockNumber); err != nil {
-		return nil, err
-	}
-	if err := stages.SaveStageProgress(batch, stages.Bodies, req.BlockNumber); err != nil {
-		return nil, err
-	}
-	if err := stages.SaveStageProgress(batch, stages.Senders, req.BlockNumber); err != nil {
-		return nil, err
-	}
-	if err := stages.SaveStageProgress(batch, stages.Execution, req.BlockNumber); err != nil {
-		return nil, err
-	}
-
-	if err := batch.Commit(); err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
-func newStateReaderWriter(
-	batch ethdb.Database,
-	tx kv.RwTx,
-	block *types.Block,
-	accumulator *shards.Accumulator,
-	stateStream bool,
-) (state.StateReader, state.WriterWithChangeSets, error) {
-
-	var stateReader state.StateReader
-	var stateWriter state.WriterWithChangeSets
-
-	stateReader = state.NewPlainStateReader(batch)
-
-	if stateStream {
-		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
-		if err != nil {
-			return nil, nil, err
+	for {
+		select {
+		case executedStatus := <-s.statusCh:
+			if executedStatus.Hash == blockHash {
+				if executedStatus.Valid {
+					return &remote.EngineExecutePayloadReply{
+						Status:          Valid,
+						LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+					}, nil
+				} else {
+					return &remote.EngineExecutePayloadReply{
+						Status:          Invalid,
+						LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+					}, nil
+				}
+			}
 		}
-		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, false)
-	} else {
-		accumulator = nil
 	}
-	stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
-
-	return stateReader, stateWriter, nil
-}
-
-func (s *EthBackendServer) executePayload(
-	block *types.Block,
-	tx kv.RwTx,
-	batch ethdb.Database,
-	vmConfig vm.Config, // emit copy, because will modify it
-	chainConfig *params.ChainConfig,
-	contractHasTEVM func(contractHash common.Hash) (bool, error)) error {
-	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, s.accumulator, s.stateStream)
-	if err != nil {
-		return err
-	}
-
-	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-
-	callTracer := calltracer.NewCallTracer(contractHasTEVM)
-	vmConfig.Debug = true
-	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHeader, serenity.New(), block, stateReader, stateWriter, nil, nil, contractHasTEVM)
-	if err != nil {
-		return err
-	}
-
-	if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
-		return err
-	}
-
-	return callTracer.WriteToDb(tx, block, s.vmConfig)
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)

@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -226,6 +227,8 @@ func NewStagedSync(
 	txPool *core.TxPool,
 	txPoolServer *txpool.P2PServer,
 	accumulator *shards.Accumulator,
+	reverseDownloadCh chan types.Block,
+	statusCh chan core.ExecutionStatus,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
@@ -277,5 +280,7 @@ func NewStagedSync(
 		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
+		reverseDownloadCh,
+		statusCh,
 	), nil
 }
