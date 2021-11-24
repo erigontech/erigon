@@ -23,6 +23,10 @@ func NewBlockReader() *BlockReader {
 	return &BlockReader{}
 }
 
+func (back *BlockReader) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	h := rawdb.ReadHeader(tx, hash, blockHeight)
+	return h, nil
+}
 func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
@@ -68,6 +72,17 @@ func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Tx, ha
 	return block, senders, nil
 }
 
+func (back *RemoteBlockReader) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	block, _, err := back.BlockWithSenders(ctx, tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	return block.Header(), nil
+}
+
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
 	sn *AllSnapshots
@@ -75,6 +90,27 @@ type BlockReaderWithSnapshots struct {
 
 func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
+}
+
+func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		h := rawdb.ReadHeader(tx, hash, blockHeight)
+		return h, nil
+	}
+
+	buf := make([]byte, 16)
+
+	n := binary.PutUvarint(buf, blockHeight)
+	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
+	gg := sn.Headers.Segment.MakeGetter()
+	gg.Reset(headerOffset)
+	buf, _ = gg.Next(buf[:0])
+	h := &types.Header{}
+	if err := rlp.DecodeBytes(buf, h); err != nil {
+		return nil, err
+	}
+	return h, nil
 }
 
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {

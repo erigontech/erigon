@@ -71,18 +71,12 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
-		//todo: read only header, not whole block
-		block, _, err := cfg.blockReader.BlockWithSenders(ctx, tx, hash, to)
+		syncHeadHeader, err := cfg.blockReader.Header(ctx, tx, hash, to)
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
-		expectedRootHash = block.Root()
-		headerHash = block.Hash()
-		//syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
-		//fmt.Printf("alex: %d, %x, %d,%x\n", block.NumberU64(), expectedRootHash, syncHeadHeader.Number.Uint64(), syncHeadHeader.Root)
-		//panic(1)
-		//expectedRootHash = syncHeadHeader.Root
-		//headerHash = syncHeadHeader.Hash()
+		expectedRootHash = syncHeadHeader.Root
+		headerHash = syncHeadHeader.Hash()
 	}
 	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
