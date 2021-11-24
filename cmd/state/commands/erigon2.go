@@ -8,10 +8,13 @@ import (
 	"path"
 	"syscall"
 
+	"github.com/holiman/uint256"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -83,5 +86,49 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		}
 
 	}
+	return nil
+}
+
+// Implements StateReader and StateWriter
+type RW struct {
+}
+
+func (rw *RW) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+
+func (rw *RW) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	return nil, nil
+}
+
+func (rw *RW) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	return nil, nil
+}
+
+func (rw *RW) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	return 0, nil
+}
+
+func (rw *RW) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+func (rw *RW) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	return nil
+}
+
+func (rw *RW) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	return nil
+}
+
+func (rw *RW) DeleteAccount(address common.Address, original *accounts.Account) error {
+	return nil
+}
+
+func (rw *RW) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	return nil
+}
+
+func (rw *RW) CreateContract(address common.Address) error {
 	return nil
 }
