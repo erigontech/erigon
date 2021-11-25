@@ -93,7 +93,7 @@ func SnapshotFullKey(number uint64, hash common.Hash) []byte {
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.ParliaConfig, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -108,6 +108,7 @@ func loadSnapshot(config *params.ParliaConfig, db kv.RwDB, num uint64, hash comm
 		return nil, err
 	}
 	snap.config = config
+	snap.sigCache = sigCache
 	return snap, nil
 }
 

@@ -596,11 +596,14 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
+Loop:
 	for len(hd.insertList) > 0 {
 		// Make sure long insertions do not appear as a stuck stage 1
 		select {
 		case <-logChannel:
 			log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
+			// TODO "for testing only, delete me"
+			break Loop
 		default:
 		}
 		link := hd.insertList[len(hd.insertList)-1]

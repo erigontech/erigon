@@ -184,6 +184,10 @@ Loop:
 			if inSync {
 				break
 			}
+			// TODO "for testing only, delete me"
+			if cfg.hd.Progress() > 1000 {
+				break Loop
+			}
 		}
 		if test {
 			break

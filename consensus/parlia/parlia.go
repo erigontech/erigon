@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -51,6 +52,18 @@ var (
 	diffNoTurn = big.NewInt(1)            // Block difficulty for out-of-turn signatures
 	// 100 native token
 	maxSystemBalance = new(big.Int).Mul(big.NewInt(100), big.NewInt(params.Ether))
+
+	systemContracts = map[common.Address]bool{
+		common.HexToAddress(systemcontracts.ValidatorContract):          true,
+		common.HexToAddress(systemcontracts.SlashContract):              true,
+		common.HexToAddress(systemcontracts.SystemRewardContract):       true,
+		common.HexToAddress(systemcontracts.LightClientContract):        true,
+		common.HexToAddress(systemcontracts.RelayerHubContract):         true,
+		common.HexToAddress(systemcontracts.GovHubContract):             true,
+		common.HexToAddress(systemcontracts.TokenHubContract):           true,
+		common.HexToAddress(systemcontracts.RelayerIncentivizeContract): true,
+		common.HexToAddress(systemcontracts.CrossChainContract):         true,
+	}
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -470,7 +483,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(p.config, p.db, number, hash); err == nil {
+			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -630,6 +643,55 @@ func (p *Parlia) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 		Service:   &API{chain: chain, parlia: p},
 		Public:    false,
 	}}
+}
+
+func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	// deploy a contract
+	if tx.GetTo() == nil {
+		return false, nil
+	}
+	sender, err := tx.Sender(*p.signer)
+	if err != nil {
+		return false, errors.New("UnAuthorized transaction")
+	}
+	if sender == header.Coinbase && isToSystemContract(*tx.GetTo()) && tx.GetPrice().IsZero() {
+		return true, nil
+	}
+	return false, nil
+}
+
+func isToSystemContract(to common.Address) bool {
+	return systemContracts[to]
+}
+
+func (p *Parlia) IsSystemContract(to *common.Address) bool {
+	if to == nil {
+		return false
+	}
+	return isToSystemContract(*to)
+}
+
+func (p *Parlia) EnoughDistance(chain consensus.ChainReader, header *types.Header) bool {
+	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	if err != nil {
+		return true
+	}
+	return snap.enoughDistance(p.val, header)
+}
+
+func (p *Parlia) IsLocalBlock(header *types.Header) bool {
+	return p.val == header.Coinbase
+}
+
+func (p *Parlia) AllowLightProcess(chain consensus.ChainReader, currentHeader *types.Header) bool {
+	snap, err := p.snapshot(chain, currentHeader.Number.Uint64()-1, currentHeader.ParentHash, nil)
+	if err != nil {
+		return true
+	}
+
+	idx := snap.indexOfVal(p.val)
+	// validator is not allowed to diff sync
+	return idx < 0
 }
 
 // Close terminates any background threads maintained by the consensus engine.
