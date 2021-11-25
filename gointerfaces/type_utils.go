@@ -29,6 +29,19 @@ func ConvertH2048ToBloom(h2048 *types.H2048) [256]byte {
 	return bloom
 }
 
+func ConvertBytesToH2048(data []byte) *types.H2048 {
+	return &types.H2048{
+		Lo: &types.H1024{
+			Lo: ConvertBytesToH512(data),
+			Hi: ConvertBytesToH512(data[64:]),
+		},
+		Hi: &types.H1024{
+			Lo: ConvertBytesToH512(data[128:]),
+			Hi: ConvertBytesToH512(data[192:]),
+		},
+	}
+}
+
 func ConvertH256ToHash(h256 *types.H256) [32]byte {
 	var hash [32]byte
 	binary.BigEndian.PutUint64(hash[0:], h256.Hi.Hi)
