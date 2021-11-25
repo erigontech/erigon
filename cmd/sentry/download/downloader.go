@@ -508,22 +508,19 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 		return fmt.Errorf("decode 2 BlockHeadersPacket65: %w", err)
 	}
 	// Extract headers from the block
+	var highestBlock uint64
 	var headersRaw [][]byte
-	for headerRaw, err := rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
+	headers := pkt
+	for _, h := range headers {
+		headerRaw, err := rlpStream.Raw()
 		if err != nil {
-			if !errors.Is(err, rlp.EOL) {
-				return fmt.Errorf("decode 3 BlockHeadersPacket65: %w", err)
-			}
-			break
+			return fmt.Errorf("decode 3 BlockHeadersPacket65: %w", err)
 		}
 		headersRaw = append(headersRaw, headerRaw)
-	}
 
-	headers := pkt
-	var heighestBlock uint64
-	for _, h := range headers {
-		if h.Number.Uint64() > heighestBlock {
-			heighestBlock = h.Number.Uint64()
+		number := h.Number.Uint64()
+		if number > highestBlock {
+			highestBlock = number
 		}
 	}
 
@@ -563,7 +560,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   peerID,
-		MinBlock: heighestBlock,
+		MinBlock: highestBlock,
 	}
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
