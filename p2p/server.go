@@ -23,10 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
-	"os"
-	"path"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -67,8 +64,6 @@ const (
 	// Maximum amount of time allowed for writing a complete message.
 	frameWriteTimeout = 20 * time.Second
 )
-
-var EnodeAddressFileName = path.Join(os.TempDir(), "enode_address.tmp")
 
 var errServerStopped = errors.New("server stopped")
 
@@ -718,12 +713,6 @@ func (srv *Server) doPeerOp(fn peerOpFunc) {
 // run is the main loop of the server.
 func (srv *Server) run() {
 	defer debug.LogPanic()
-	if srv.localnode.Node().TCP() > 0 {
-		err := ioutil.WriteFile(EnodeAddressFileName, []byte(srv.localnode.Node().URLv4()), 0600)
-		if err != nil {
-			srv.log.Error("Write enode to file failed", "self", srv.localnode.Node().URLv4())
-		}
-	}
 	if len(srv.Config.Protocols) > 0 {
 		srv.log.Info("Started P2P networking", "version", srv.Config.Protocols[0].Version, "self", srv.localnode.Node().URLv4(), "name", srv.Name)
 	}
