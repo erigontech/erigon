@@ -1065,9 +1065,13 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	genesis, chainConfig := byChain()
 	var engine consensus.Engine
 	engine = ethash.NewFaker()
-	switch chain {
-	case params.SokolChainName, params.KovanChainName:
+
+	if chainConfig.Clique != nil {
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.SnapshotConfig{DBPath: path.Join(datadir, "clique/db")}, nil, false)
+	} else if chainConfig.Aura != nil {
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+	} else { //ethash
+		engine = ethash.NewFaker()
 	}
 
 	events := privateapi.NewEvents()
