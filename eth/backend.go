@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"math/big"
 	"os"
 	"path"
@@ -544,6 +545,13 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
+	}
+	if _, ok := s.engine.(*parlia.Parlia); ok {
+		if cfg.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %w", err)
+		}
+		// TODO: "add wallet"
 	}
 
 	if s.chainConfig.ChainID.Uint64() > 10 {

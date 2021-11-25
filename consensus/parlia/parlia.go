@@ -2,14 +2,21 @@ package parlia
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -22,6 +29,7 @@ import (
 	"golang.org/x/crypto/sha3"
 	"io"
 	"math/big"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +59,7 @@ var (
 	diffInTurn = big.NewInt(2)            // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1)            // Block difficulty for out-of-turn signatures
 	// 100 native token
-	maxSystemBalance = new(big.Int).Mul(big.NewInt(100), big.NewInt(params.Ether))
+	maxSystemBalance = new(uint256.Int).Mul(uint256.NewInt(100), uint256.NewInt(params.Ether))
 
 	systemContracts = map[common.Address]bool{
 		common.HexToAddress(systemcontracts.ValidatorContract):          true,
@@ -579,13 +587,96 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
+func (p *Parlia) splitTxs(txs []types.Transaction, header *types.Header) (userTxs []types.Transaction, systemTxs []types.Transaction, err error) {
+	for _, tx := range txs {
+		isSystemTx, err2 := p.IsSystemTransaction(tx, header)
+		if err2 != nil {
+			err = err2
+			return
+		}
+		if isSystemTx {
+			systemTxs = append(systemTxs, tx)
+		} else {
+			userTxs = append(userTxs, tx)
+		}
+	}
+	return
+}
+
 // Finalize runs any post-transaction state modifications (e.g. block rewards)
 // but does not assemble the block.
 //
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
-func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
-	return errNotSupported
+func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+	txs, systemTxs, err := p.splitTxs(txs, header)
+	if err != nil {
+		return err
+	}
+	// warn if not in majority fork
+	number := header.Number.Uint64()
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	if err != nil {
+		return err
+	}
+	nextForkHash := forkid.NextForkHash(p.chainConfig, p.genesisHash, number)
+	if !snap.isMajorityFork(hex.EncodeToString(nextForkHash[:])) {
+		log.Debug("there is a possible fork, and your client is not the majority. Please check...", "nextForkHash", hex.EncodeToString(nextForkHash[:]))
+	}
+	// If the block is an epoch end block, verify the validator list
+	// The verification can only be done when the state is ready, it can't be done in VerifyHeader.
+	if header.Number.Uint64()%p.config.Epoch == 0 {
+		parentHeader := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		newValidators, err := p.getCurrentValidators(parentHeader, state)
+		if err != nil {
+			return err
+		}
+		// sort validator by address
+		sort.Sort(validatorsAscending(newValidators))
+		validatorsBytes := make([]byte, len(newValidators)*validatorBytesLength)
+		for i, validator := range newValidators {
+			copy(validatorsBytes[i*validatorBytesLength:], validator.Bytes())
+		}
+
+		extraSuffix := len(header.Extra) - extraSeal
+		if !bytes.Equal(header.Extra[extraVanity:extraSuffix], validatorsBytes) {
+			return errMismatchingEpochValidators
+		}
+	}
+	// No block rewards in PoA, so the state remains as is and uncles are dropped
+	if header.Number.Cmp(common.Big1) == 0 {
+		err := p.initContract(state, header, &txs, &receipts, &systemTxs, &header.GasUsed, false)
+		if err != nil {
+			log.Error("init contract failed")
+		}
+	}
+	if header.Difficulty.Cmp(diffInTurn) != 0 {
+		spoiledVal := snap.supposeValidator()
+		signedRecently := false
+		for _, recent := range snap.Recents {
+			if recent == spoiledVal {
+				signedRecently = true
+				break
+			}
+		}
+		if !signedRecently {
+			log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
+			err = p.slash(spoiledVal, state, header, &txs, &receipts, &systemTxs, &header.GasUsed, false)
+			if err != nil {
+				// it is possible that slash validator failed because of the slash channel is disabled.
+				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+			}
+		}
+	}
+	val := header.Coinbase
+	err = p.distributeIncoming(val, state, header, &txs, &receipts, &systemTxs, &header.GasUsed, false)
+	if err != nil {
+		return err
+	}
+	if len(systemTxs) > 0 {
+		return errors.New("the length of systemTxs do not match")
+	}
+	return nil
 }
 
 // FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -595,6 +686,17 @@ func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, stat
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 	return nil, errNotSupported
+}
+
+// Authorize injects a private key into the consensus engine to mint new blocks
+// with.
+func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerTxFn) {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	p.val = val
+	p.signFn = signFn
+	p.signTxFn = signTxFn
 }
 
 // Seal generates a new sealing request for the given input block and pushes
@@ -631,7 +733,7 @@ func CalcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 	return new(big.Int).Set(diffNoTurn)
 }
 
-func (p *Parlia) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []rlp.RawValue {
+func (p *Parlia) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *types.Header, call consensus.Call) []rlp.RawValue {
 	return nil
 }
 
@@ -697,4 +799,218 @@ func (p *Parlia) AllowLightProcess(chain consensus.ChainReader, currentHeader *t
 // Close terminates any background threads maintained by the consensus engine.
 func (p *Parlia) Close() error {
 	return nil
+}
+
+// ==========================  interaction with contract/account =========
+
+// getCurrentValidators get current validators
+func (p *Parlia) getCurrentValidators(header *types.Header, state *state.IntraBlockState) ([]common.Address, error) {
+	// method
+	method := "getValidators"
+	data, err := p.validatorSetABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for getValidators", "error", err)
+		return nil, err
+	}
+	// call
+	msgData := (hexutil.Bytes)(data)
+	toAddress := common.HexToAddress(systemcontracts.ValidatorContract)
+	result, err := core.SysCallContractReadonly(toAddress, msgData[:], *p.chainConfig, state, header, p)
+	if err != nil {
+		return nil, err
+	}
+	var ret0 = new([]common.Address)
+	out := ret0
+	if err := p.validatorSetABI.UnpackIntoInterface(out, method, result.ReturnData); err != nil {
+		return nil, err
+	}
+	valz := make([]common.Address, len(*ret0))
+	for i, a := range *ret0 {
+		valz[i] = a
+	}
+	return valz, nil
+}
+
+// slash spoiled validators
+func (p *Parlia) distributeIncoming(val common.Address, state *state.IntraBlockState, header *types.Header, txs *[]types.Transaction, receipts *types.Receipts, receivedTxs *[]types.Transaction, usedGas *uint64, mining bool) error {
+	coinbase := header.Coinbase
+	balance := state.GetBalance(consensus.SystemAddress)
+	if balance.Cmp(u256.Num0) <= 0 {
+		return nil
+	}
+	state.SetBalance(consensus.SystemAddress, u256.Num0)
+	state.AddBalance(coinbase, balance)
+
+	doDistributeSysReward := state.GetBalance(common.HexToAddress(systemcontracts.SystemRewardContract)).Cmp(maxSystemBalance) < 0
+	if doDistributeSysReward {
+		var rewards = new(uint256.Int)
+		rewards = rewards.Rsh(balance, systemRewardPercent)
+		if rewards.Cmp(u256.Num0) > 0 {
+			err := p.distributeToSystem(rewards, state, header, txs, receipts, receivedTxs, usedGas, mining)
+			if err != nil {
+				return err
+			}
+			log.Trace("distribute to system reward pool", "block hash", header.Hash(), "amount", rewards)
+			balance = balance.Sub(balance, rewards)
+		}
+	}
+	log.Trace("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
+	return p.distributeToValidator(balance, val, state, header, txs, receipts, receivedTxs, usedGas, mining)
+}
+
+// slash spoiled validators
+func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, header *types.Header, txs *[]types.Transaction, receipts *types.Receipts, receivedTxs *[]types.Transaction, usedGas *uint64, mining bool) error {
+	// method
+	method := "slash"
+
+	// get packed data
+	data, err := p.slashABI.Pack(method,
+		spoiledVal,
+	)
+	if err != nil {
+		log.Error("Unable to pack tx for slash", "error", err)
+		return err
+	}
+	// apply message
+	return p.applyTransaction(header.Coinbase, common.HexToAddress(systemcontracts.SlashContract), u256.Num0, data, state, header, txs, receipts, receivedTxs, usedGas, mining)
+}
+
+// init contract
+func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header, txs *[]types.Transaction, receipts *types.Receipts, receivedTxs *[]types.Transaction, usedGas *uint64, mining bool) error {
+	// method
+	method := "init"
+	// contracts
+	contracts := []string{
+		systemcontracts.ValidatorContract,
+		systemcontracts.SlashContract,
+		systemcontracts.LightClientContract,
+		systemcontracts.RelayerHubContract,
+		systemcontracts.TokenHubContract,
+		systemcontracts.RelayerIncentivizeContract,
+		systemcontracts.CrossChainContract,
+	}
+	// get packed data
+	data, err := p.validatorSetABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for init validator set", "error", err)
+		return err
+	}
+	for _, c := range contracts {
+		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
+		err = p.applyTransaction(header.Coinbase, common.HexToAddress(c), u256.Num0, data,
+			state, header, txs, receipts, receivedTxs, usedGas, mining)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Parlia) distributeToSystem(amount *uint256.Int, state *state.IntraBlockState, header *types.Header, txs *[]types.Transaction, receipts *types.Receipts, receivedTxs *[]types.Transaction, usedGas *uint64, mining bool) error {
+	// apply message
+	return p.applyTransaction(
+		header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), amount, nil,
+		state, header, txs, receipts, receivedTxs, usedGas, mining)
+}
+
+// slash spoiled validators
+func (p *Parlia) distributeToValidator(amount *uint256.Int, validator common.Address, state *state.IntraBlockState, header *types.Header, txs *[]types.Transaction, receipts *types.Receipts, receivedTxs *[]types.Transaction, usedGas *uint64, mining bool) error {
+	// method
+	method := "deposit"
+
+	// get packed data
+	data, err := p.validatorSetABI.Pack(method,
+		validator,
+	)
+	if err != nil {
+		log.Error("Unable to pack tx for deposit", "error", err)
+		return err
+	}
+	// apply message
+	return p.applyTransaction(
+		header.Coinbase,
+		common.HexToAddress(systemcontracts.ValidatorContract),
+		amount,
+		data,
+		state,
+		header,
+		txs,
+		receipts,
+		receivedTxs,
+		usedGas,
+		mining)
+}
+
+func (p *Parlia) applyTransaction(
+	from common.Address,
+	to common.Address,
+	value *uint256.Int,
+	data []byte,
+	state *state.IntraBlockState,
+	header *types.Header,
+	txs *[]types.Transaction,
+	receipts *types.Receipts,
+	receivedTxs *[]types.Transaction,
+	usedGas *uint64,
+	mining bool,
+) (err error) {
+	nonce := state.GetNonce(from)
+	expectedTx := types.Transaction(types.NewTransaction(nonce, to, value, math.MaxUint64/2, u256.Num0, data))
+	expectedHash := expectedTx.SigningHash(p.chainConfig.ChainID)
+	if from == p.val && mining {
+		return errNotSupported
+		//expectedTx, err = p.signTxFn(accounts.Account{Address: msg.From()}, expectedTx, p.chainConfig.ChainID)
+		//if err != nil {
+		//	return err
+		//}
+	} else {
+		if receivedTxs == nil || len(*receivedTxs) == 0 || (*receivedTxs)[0] == nil {
+			return errors.New("supposed to get a actual transaction, but get none")
+		}
+		actualTx := (*receivedTxs)[0]
+		if !bytes.Equal(actualTx.SigningHash(p.chainConfig.ChainID).Bytes(), expectedHash.Bytes()) {
+			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
+				expectedTx.GetNonce(),
+				expectedTx.GetTo().String(),
+				expectedTx.GetValue().String(),
+				expectedTx.GetGas(),
+				expectedTx.GetPrice().String(),
+				hex.EncodeToString(expectedTx.GetData()),
+			)
+		}
+		expectedTx = actualTx
+		// move to next
+		*receivedTxs = (*receivedTxs)[1:]
+	}
+	state.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
+	gasUsed, _, err := core.SysCallContract(to, data, *p.chainConfig, state, header, p)
+	*txs = append(*txs, expectedTx)
+	*usedGas += gasUsed
+	receipt := types.NewReceipt(false, *usedGas)
+	receipt.TxHash = expectedTx.Hash()
+	receipt.GasUsed = gasUsed
+
+	// Set the receipt logs and create a bloom for filtering
+	receipt.Logs = state.GetLogs(expectedTx.Hash())
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	receipt.BlockHash = header.Hash()
+	receipt.BlockNumber = header.Number
+	receipt.TransactionIndex = uint(state.TxIndex())
+	*receipts = append(*receipts, receipt)
+	state.SetNonce(from, nonce+1)
+	return nil
+}
+
+// chain context
+type chainContext struct {
+	Chain  consensus.ChainHeaderReader
+	parlia consensus.Engine
+}
+
+func (c chainContext) Engine() consensus.Engine {
+	return c.parlia
+}
+
+func (c chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return c.Chain.GetHeader(hash, number)
 }

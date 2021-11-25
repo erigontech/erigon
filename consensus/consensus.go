@@ -67,7 +67,7 @@ type EpochReader interface {
 	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error)
 }
 
-type SystemCall func(contract common.Address, data []byte) ([]byte, error)
+type SystemCall func(contract common.Address, data []byte) (gasUsed uint64, returnData []byte, err error)
 type Call func(contract common.Address, data []byte) ([]byte, error)
 
 // Engine is an algorithm agnostic consensus engine.
@@ -144,6 +144,10 @@ type PoW interface {
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
 }
+
+var (
+	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+)
 
 type PoSA interface {
 	Engine
