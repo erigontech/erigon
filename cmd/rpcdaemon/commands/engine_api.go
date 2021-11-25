@@ -109,12 +109,12 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload ExecutionPayl
 		transactions[i] = ([]byte)(transaction)
 	}
 	res, err := e.api.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
-		ParentHash:  gointerfaces.ConvertHashToH256(payload.ParentHash),
-		BlockHash:   gointerfaces.ConvertHashToH256(payload.BlockHash),
-		StateRoot:   gointerfaces.ConvertHashToH256(payload.StateRoot),
-		Coinbase:    gointerfaces.ConvertAddressToH160(payload.Coinbase),
-		ReceiptRoot: gointerfaces.ConvertHashToH256(payload.ReceiptRoot),
-		//		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
+		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
+		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
+		Coinbase:      gointerfaces.ConvertAddressToH160(payload.Coinbase),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptRoot),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
 		Random:        gointerfaces.ConvertHashToH256(payload.Random),
 		BlockNumber:   (uint64)(payload.BlockNumber),
 		GasLimit:      (uint64)(payload.GasLimit),
