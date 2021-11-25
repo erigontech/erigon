@@ -42,6 +42,7 @@ SyncStageUnwind = {}
 CliqueSeparate = {}
 CliqueSnapshot = {}
 CliqueLastSnapshot = {}
+ParliaSnapshot = {}
 TxSender = {}
 LastBlock = {}
 Migration = {}

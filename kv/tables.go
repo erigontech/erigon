@@ -260,6 +260,19 @@ const (
 	CliqueSnapshot     = "CliqueSnapshot"
 	CliqueLastSnapshot = "CliqueLastSnapshot"
 
+	// Snapshot table used for Binance Smart Chain's consensus engine Parlia
+	// Schema of key/value pairs containing:
+	// Key (string): SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
+	// Value (JSON blob):
+	// {
+	//     "number"             // Block number where the snapshot was created
+	//     "hash"               // Block hash where the snapshot was created
+	//     "validators"         // Set of authorized validators at this moment
+	//     "recents"            // Set of recent validators for spam protections
+	//     "recent_fork_hashes" // Set of recent forkHash
+	// }
+	ParliaSnapshot = "ParliaSnapshot"
+
 	// Proof-of-stake
 	// Beacon chain head that is been executed at the current time
 	CurrentExecutionPayload = "CurrentExecutionPayload"
@@ -337,6 +350,7 @@ var ChaindataTables = []string{
 	CliqueSeparate,
 	CliqueLastSnapshot,
 	CliqueSnapshot,
+	ParliaSnapshot,
 	SyncStageProgress,
 	PlainState,
 	PlainContractCode,
