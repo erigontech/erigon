@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -85,7 +86,8 @@ func (back *RemoteBlockReader) Header(ctx context.Context, tx kv.Tx, hash common
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
-	sn *AllSnapshots
+	sn   *AllSnapshots
+	lock sync.RWMutex
 }
 
 func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
@@ -133,6 +135,10 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	buf := make([]byte, 16)
 
 	n := binary.PutUvarint(buf, blockHeight)
+
+	back.lock.Lock()
+	defer back.lock.Unlock()
+
 	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
 	bodyOffset := sn.Bodies.Idx.Lookup2(sn.Bodies.Idx.Lookup(buf[:n]))
 
