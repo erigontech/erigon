@@ -658,7 +658,17 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 }
 
 func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
-	cfg.StaticNodes, _ = appendCfgUrlListNodes(cfg.StaticNodes, ctx, StaticPeersFlag.Name, log.Error)
+	var urls []string
+	if ctx.GlobalIsSet(StaticPeersFlag.Name) {
+		urls = SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
+	} else {
+		chain := ctx.GlobalString(ChainFlag.Name)
+		switch chain {
+		case params.BSCChainName:
+			urls = params.BscStaticPeers
+		}
+	}
+	cfg.StaticNodes, _ = GetUrlListNodes(urls, StaticPeersFlag.Name, log.Error)
 }
 
 func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {

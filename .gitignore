@@ -74,5 +74,5 @@ tests/testdata/*
 config.toml
 genesis.json
 datadir/
-erigon.exe
 erigon
+integration
