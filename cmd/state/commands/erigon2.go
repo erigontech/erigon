@@ -149,9 +149,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		if w, err = agg.MakeStateWriter(rwTx, block); err != nil {
 			return err
 		}
-		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR})
+		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if _, err = runBlock(intraBlockState, noOpWriter, &WriterWrapper{w: w}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+		if _, err = runBlock(intraBlockState, noOpWriter, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
 		if block%1000 == 0 {
@@ -176,22 +176,24 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 
 // Implements StateReader and StateWriter
 type ReaderWrapper struct {
-	r      *aggregator.Reader
-	checkR state.StateReader
+	blockNum uint64
+	r        *aggregator.Reader
+	checkR   state.StateReader
 }
 
 type WriterWrapper struct {
-	w *aggregator.Writer
+	blockNum uint64
+	w        *aggregator.Writer
 }
 
 func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := rw.r.ReadAccountData(address.Bytes())
+	enc, err := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
 	if err != nil {
 		return nil, err
 	}
 	checkA, checkErr := rw.checkR.ReadAccountData(address)
 	if checkErr != nil {
-		fmt.Printf("readAccountData %x checkR: %w\n", address, checkErr)
+		fmt.Printf("readAccountData %x checkR: %v\n", address, checkErr)
 		return nil, fmt.Errorf("readAccountData %x checkR: %w", address, checkErr)
 	}
 	if len(enc) == 0 {
@@ -213,37 +215,38 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes())
+	trace := address == common.HexToAddress("0x30b561304a4cd1f9941ab99be06d53a6cb341167") && *key == common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000106")
+	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
 	if err != nil {
 		return nil, err
 	}
 	checkEnc, checkErr := rw.checkR.ReadAccountStorage(address, incarnation, key)
 	if checkErr != nil {
-		fmt.Printf("readAccountStorage %x %x checkR: %w\n", address, *key, checkErr)
+		fmt.Printf("block %d ReadAccountStorage %x %x checkR: %v\n", rw.blockNum, address, *key, checkErr)
 		return nil, fmt.Errorf("readAccountStorage %x %x checkR: %w", address, *key, checkErr)
 	}
 	if enc == nil {
 		if len(checkEnc) != 0 {
-			fmt.Printf("readAccountStorage %x %x enc [%x], checkEnc [%x]\n", address, *key, enc, checkEnc)
+			fmt.Printf("block %d ReadAccountStorage %x %x enc [%x], checkEnc [%x]\n", rw.blockNum, address, *key, enc, checkEnc)
 			return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
 		}
 		return nil, nil
 	}
 	if !bytes.Equal(enc.Bytes(), checkEnc) {
-		fmt.Printf("readAccountStorage %x %x enc [%x], checkEnc [%x]\n", address, *key, enc, checkEnc)
+		fmt.Printf("block %d ReadAccountStorage %x %x enc [%x], checkEnc [%x]\n", rw.blockNum, address, *key, enc, checkEnc)
 		return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
 	}
 	return enc.Bytes(), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes())
+	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
 	if err != nil {
 		return nil, err
 	}
 	checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
 	if checkErr != nil {
-		fmt.Printf("readAccountCode %x checkR: %w\n", address, checkErr)
+		fmt.Printf("readAccountCode %x checkR: %v\n", address, checkErr)
 		return nil, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
 	}
 	if !bytes.Equal(enc, checkEnc) {
@@ -254,13 +257,13 @@ func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uin
 }
 
 func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes())
+	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
 	if err != nil {
 		return 0, err
 	}
 	checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
 	if checkErr != nil {
-		fmt.Printf("readAccountCode %x checkR: %w\n", address, checkErr)
+		fmt.Printf("readAccountCode %x checkR: %v\n", address, checkErr)
 		return 0, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
 	}
 	if !bytes.Equal(enc, checkEnc) {
@@ -277,14 +280,14 @@ func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64,
 func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
-	if err := ww.w.UpdateAccountData(address.Bytes(), value); err != nil {
+	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
+	if err := ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */); err != nil {
 		return err
 	}
 	return nil
@@ -294,14 +297,18 @@ func (ww *WriterWrapper) DeleteAccount(address common.Address, original *account
 	if original == nil || !original.Initialised {
 		return nil
 	}
-	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
+	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value); err != nil {
+	trace := address == common.HexToAddress("0x30b561304a4cd1f9941ab99be06d53a6cb341167") && *key == common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000106")
+	if trace {
+		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
+	}
+	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace); err != nil {
 		return err
 	}
 	return nil
