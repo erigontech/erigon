@@ -44,7 +44,7 @@ type EthTransaction struct {
 
 type EthSendRawTransaction struct {
 	CommonResponse
-	TxHash common.Hash `json:"result"`
+	TxnHash common.Hash `json:"result"`
 }
 
 type EthTxPool struct {

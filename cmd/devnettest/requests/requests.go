@@ -12,7 +12,7 @@ import (
 func parseResponse(resp interface{}) string {
 	result, err := json.Marshal(resp)
 	if err != nil {
-		panic("invalid response")
+		panic(err)
 	}
 
 	return string(result)
@@ -38,7 +38,7 @@ func SendTx(signedTx *types.Transaction) {
 	var buf bytes.Buffer
 	err := (*signedTx).MarshalBinary(&buf)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Error trying to marshal binary: %v\n", err)
 		return
 	}
 
