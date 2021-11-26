@@ -16,16 +16,75 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMockValidExecution(t *testing.T) {
+// Hashes
+var (
+	startingHeadHash = common.HexToHash("0x1")
+	payload1Hash     = common.HexToHash("9c344b6c65e0293dd3d45510fef3b6e957a1058c124d88ff607aa59fbd1293a7")
+	payload2Hash     = common.HexToHash("99937164b496a50595aa445a587200fd8a84024e63078871ab3508b6483a8c53")
+	payload3Hash     = common.HexToHash("34f005ca6dee15d637b2c45c3fca124a479daa7bc25c781bba6782ce90aac566")
+)
+
+// Payloads
+var (
+	mockPayload1 *types2.ExecutionPayload = &types2.ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertHashToH256(common.HexToHash("0x2")),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload1Hash),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
+		StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
+		Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
+		ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
+		BlockNumber:   100,
+		GasLimit:      52,
+		GasUsed:       4,
+		Timestamp:     4,
+		Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
+		Transactions:  make([][]byte, 0),
+	}
+	mockPayload2 *types2.ExecutionPayload = &types2.ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertHashToH256(payload1Hash),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload2Hash),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
+		StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
+		Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
+		ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
+		BlockNumber:   101,
+		GasLimit:      52,
+		GasUsed:       4,
+		Timestamp:     4,
+		Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
+		Transactions:  make([][]byte, 0),
+	}
+	mockPayload3 = &types2.ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertHashToH256(startingHeadHash),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload3Hash),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
+		StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
+		Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
+		ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
+		BlockNumber:   51,
+		GasLimit:      52,
+		GasUsed:       4,
+		Timestamp:     4,
+		Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
+		Transactions:  make([][]byte, 0),
+	}
+)
+
+func TestMockDownloadRequest(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
 
 	tx, _ := db.BeginRw(ctx)
 
 	require := require.New(t)
-	head := common.HexToHash("0x1")
-	rawdb.WriteHeadBlockHash(tx, head)
-	rawdb.WriteHeaderNumber(tx, head, 50)
+	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
+	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -38,29 +97,86 @@ func TestMockValidExecution(t *testing.T) {
 
 	_ = tx.Commit()
 	go func() {
-		reply, err = backend.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
-			ParentHash:    gointerfaces.ConvertHashToH256(head),
-			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("f828f16f055129d0b0850c5c463b19e3c0c09c7b1a64a597b3bc00c0abb49346")),
-			ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
-			StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
-			Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-			ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
-			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			BlockNumber:   2,
-			GasLimit:      52,
-			GasUsed:       4,
-			Timestamp:     4,
-			Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
-			Transactions:  make([][]byte, 0),
-		})
+		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload1)
+		done <- true
+	}()
+
+	<-reverseDownloadCh
+
+	<-done
+
+	require.NoError(err)
+	require.Equal(reply.Status, Syncing)
+	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
+	require.Equal(replyHash[:], startingHeadHash[:])
+
+	// If we get another request we dont need to process it with processDownloadCh and ignore it and return Syncing status
+	go func() {
+		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload2)
+		done <- true
+	}()
+
+	<-done
+	// Same result as before
+	require.NoError(err)
+	require.Equal(reply.Status, Syncing)
+	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
+	require.Equal(replyHash[:], startingHeadHash[:])
+
+	// However if we simulate that we finish reverse downloading the chain by updating the head, we just execute 1:1
+	tx, _ = db.BeginRw(ctx)
+	rawdb.WriteHeadBlockHash(tx, payload1Hash)
+	rawdb.WriteHeaderNumber(tx, payload1Hash, 100)
+	_ = tx.Commit()
+	// Now we try to sync the next payload again
+	go func() {
+		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload2)
 		done <- true
 	}()
 
 	<-reverseDownloadCh
 
 	statusCh <- core.ExecutionStatus{
-		Hash:  common.HexToHash("7088846e2055286ec5a95ce9f79b5d8877d228313e19ff936b4ebdfae393e3c5"),
+		Hash:  payload2Hash,
+		Valid: true,
+	}
+	<-done
+
+	require.NoError(err)
+	require.Equal(reply.Status, Valid)
+	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
+	require.Equal(replyHash[:], payload2Hash[:])
+}
+
+func TestMockValidExecution(t *testing.T) {
+	db := memdb.New()
+	ctx := context.Background()
+
+	tx, _ := db.BeginRw(ctx)
+
+	require := require.New(t)
+	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
+	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
+
+	reverseDownloadCh := make(chan types.Block)
+	statusCh := make(chan core.ExecutionStatus)
+
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh)
+
+	var err error
+	var reply *remote.EngineExecutePayloadReply
+	done := make(chan bool)
+
+	_ = tx.Commit()
+	go func() {
+		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload3)
+		done <- true
+	}()
+
+	<-reverseDownloadCh
+
+	statusCh <- core.ExecutionStatus{
+		Hash:  payload3Hash,
 		Valid: true,
 	}
 	<-done
@@ -68,7 +184,7 @@ func TestMockValidExecution(t *testing.T) {
 	require.NoError(err)
 	require.Equal(reply.Status, Valid)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	require.Equal(replyHash[:], common.HexToHash("f828f16f055129d0b0850c5c463b19e3c0c09c7b1a64a597b3bc00c0abb49346").Bytes())
+	require.Equal(replyHash[:], payload3Hash[:])
 }
 
 func TestMockInvalidExecution(t *testing.T) {
@@ -78,9 +194,8 @@ func TestMockInvalidExecution(t *testing.T) {
 	tx, _ := db.BeginRw(ctx)
 
 	require := require.New(t)
-	head := common.HexToHash("0x1")
-	rawdb.WriteHeadBlockHash(tx, head)
-	rawdb.WriteHeaderNumber(tx, head, 50)
+	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
+	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -93,29 +208,14 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	_ = tx.Commit()
 	go func() {
-		reply, err = backend.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
-			ParentHash:    gointerfaces.ConvertHashToH256(head),
-			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("f828f16f055129d0b0850c5c463b19e3c0c09c7b1a64a597b3bc00c0abb49346")),
-			ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
-			StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
-			Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-			ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
-			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			BlockNumber:   2,
-			GasLimit:      52,
-			GasUsed:       4,
-			Timestamp:     4,
-			Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
-			Transactions:  make([][]byte, 0),
-		})
+		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload3)
 		done <- true
 	}()
 
 	<-reverseDownloadCh
 
 	statusCh <- core.ExecutionStatus{
-		Hash:  common.HexToHash("7088846e2055286ec5a95ce9f79b5d8877d228313e19ff936b4ebdfae393e3c5"),
+		Hash:  payload3Hash,
 		Valid: false,
 	}
 	<-done
@@ -123,7 +223,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	require.NoError(err)
 	require.Equal(reply.Status, Invalid)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	require.Equal(replyHash[:], head.Bytes())
+	require.Equal(replyHash[:], startingHeadHash[:])
 }
 
 func TestInvalidRequest(t *testing.T) {
@@ -133,9 +233,8 @@ func TestInvalidRequest(t *testing.T) {
 	tx, _ := db.BeginRw(ctx)
 
 	require := require.New(t)
-	head := common.HexToHash("0x1")
-	rawdb.WriteHeadBlockHash(tx, head)
-	rawdb.WriteHeaderNumber(tx, head, 50)
+	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
+	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -156,7 +255,7 @@ func TestInvalidRequest(t *testing.T) {
 			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
 			ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
 			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			BlockNumber:   2,
+			BlockNumber:   51,
 			GasLimit:      52,
 			GasUsed:       4,
 			Timestamp:     4,
@@ -178,9 +277,8 @@ func TestNoTTD(t *testing.T) {
 	tx, _ := db.BeginRw(ctx)
 
 	require := require.New(t)
-	head := common.HexToHash("0x1")
-	rawdb.WriteHeadBlockHash(tx, head)
-	rawdb.WriteHeaderNumber(tx, head, 50)
+	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
+	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -202,7 +300,7 @@ func TestNoTTD(t *testing.T) {
 			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
 			ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
 			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			BlockNumber:   2,
+			BlockNumber:   51,
 			GasLimit:      52,
 			GasUsed:       4,
 			Timestamp:     4,
