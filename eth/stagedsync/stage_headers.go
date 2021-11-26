@@ -185,7 +185,7 @@ Loop:
 				break
 			}
 			// TODO "for testing only, delete me"
-			if cfg.hd.Progress() > 1000 {
+			if cfg.hd.Progress() > 100_000 {
 				break Loop
 			}
 		}
