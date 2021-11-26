@@ -196,6 +196,18 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, fmt.Errorf("cannot find latest block number")
 	}
 
+	isTrans, err := rawdb.Transitioned(tx, *headNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isTrans {
+		// We are still syncing proof-of-work chain
+		return &remote.EngineExecutePayloadReply{
+			Status:          Syncing,
+			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+		}, nil
+	}
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
 	if s.numberSent > *headNumber {

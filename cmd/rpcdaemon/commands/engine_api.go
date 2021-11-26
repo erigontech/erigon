@@ -61,7 +61,8 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, buildPay
 	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
 	if buildPayloadArgs == nil {
 		return map[string]interface{}{
-			"status": "SUCCESS",
+			"status":    "SUCCESS",
+			"payloadId": nil,
 		}, nil
 	}
 	// Request for assembling payload
