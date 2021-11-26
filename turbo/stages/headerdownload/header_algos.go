@@ -1024,11 +1024,12 @@ func (hd *HeaderDownload) Fetching() bool {
 }
 
 func (hd *HeaderDownload) AddMinedBlock(block *types.Block) error {
+	header := block.Header()
 	buf := bytes.NewBuffer(nil)
-	if err := block.Header().EncodeRLP(buf); err != nil {
+	if err := header.EncodeRLP(buf); err != nil {
 		return err
 	}
-	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), block.Header())
+	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), header)
 	if err != nil {
 		return err
 	}

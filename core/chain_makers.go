@@ -185,12 +185,21 @@ func (b *BlockGen) PrevBlock(index int) *types.Block {
 // tied to chain length directly.
 func (b *BlockGen) OffsetTime(seconds int64) {
 	b.header.Time += uint64(seconds)
-	if b.header.Time <= b.parent.Header().Time {
+	parent := b.parent
+	if b.header.Time <= parent.Time() {
 		panic("block time out of range")
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
-	parent := b.parent.Header()
-	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.Seal)
+	b.header.Difficulty = b.engine.CalcDifficulty(
+		chainreader,
+		b.header.Time,
+		parent.Time(),
+		parent.Difficulty(),
+		parent.NumberU64(),
+		parent.Hash(),
+		parent.UncleHash(),
+		parent.Seal(),
+	)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -402,7 +411,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			parent.Number().Uint64(),
 			parent.Hash(),
 			parent.UncleHash(),
-			parent.Header().Seal,
+			parent.Seal(),
 		),
 		GasLimit: CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),

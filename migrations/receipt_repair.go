@@ -123,8 +123,8 @@ var ReceiptRepair = Migration{
 			fix := true
 			if chainConfig.IsByzantium(block.Number().Uint64()) {
 				receiptSha := types.DeriveSha(receipts1)
-				if receiptSha != block.Header().ReceiptHash {
-					fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
+				if receiptSha != block.ReceiptHash() {
+					fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.ReceiptHash())
 					fix = false
 				}
 			}
