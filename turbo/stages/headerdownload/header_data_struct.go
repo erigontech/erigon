@@ -118,12 +118,16 @@ func (aq *AnchorQueue) Pop() interface{} {
 	return x
 }
 
+type ChainSegmentHeader struct {
+	HeaderRaw []byte
+	Header    *types.Header
+	Hash      common.Hash
+	Number    uint64
+}
+
 // First item in ChainSegment is the anchor
 // ChainSegment must be contigous and must not include bad headers
-type ChainSegment struct {
-	HeadersRaw [][]byte
-	Headers    []*types.Header
-}
+type ChainSegment []ChainSegmentHeader
 
 type PeerHandle int // This is int just for the PoC phase - will be replaced by more appropriate type to find a peer
 

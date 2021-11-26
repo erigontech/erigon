@@ -28,7 +28,7 @@ import (
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
-type HeadersByBlockHeight []*types.Header
+type HeadersByBlockHeight []ChainSegmentHeader
 
 func (h HeadersByBlockHeight) Len() int {
 	return len(h)
@@ -36,7 +36,7 @@ func (h HeadersByBlockHeight) Len() int {
 
 func (h HeadersByBlockHeight) Less(i, j int) bool {
 	// Note - the ordering is the inverse ordering of the block heights
-	return h[i].Number.Cmp(h[j].Number) > 0
+	return h[i].Number > h[j].Number
 }
 
 func (h HeadersByBlockHeight) Swap(i, j int) {
@@ -44,17 +44,17 @@ func (h HeadersByBlockHeight) Swap(i, j int) {
 }
 
 // SplitIntoSegments converts message containing headers into a collection of chain segments
-func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.Header) ([]*ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SplitIntoSegments(csHeaders []ChainSegmentHeader) ([]ChainSegment, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	sort.Sort(HeadersByBlockHeight(msg))
+	sort.Sort(HeadersByBlockHeight(csHeaders))
 	// Now all headers are order from the highest block height to the lowest
-	var segments []*ChainSegment                         // Segments being built
+	var segments []ChainSegment                          // Segments being built
 	segmentMap := make(map[common.Hash]int)              // Mapping of the header hash to the index of the chain segment it belongs
 	childrenMap := make(map[common.Hash][]*types.Header) // Mapping parent hash to the children
 	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
-	for i, header := range msg {
-		headerHash := header.Hash()
+	for _, h := range csHeaders {
+		headerHash := h.Hash
 		if _, bad := hd.badHeaders[headerHash]; bad {
 			return nil, BadBlockPenalty, nil
 		}
@@ -65,7 +65,7 @@ func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.He
 		var segmentIdx int
 		children := childrenMap[headerHash]
 		for _, child := range children {
-			if valid, penalty := hd.childParentValid(child, header); !valid {
+			if valid, penalty := hd.childParentValid(child, h.Header); !valid {
 				return nil, penalty, nil
 			}
 		}
@@ -75,14 +75,13 @@ func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.He
 		} else {
 			// No children, or more than one child, create new segment
 			segmentIdx = len(segments)
-			segments = append(segments, &ChainSegment{})
+			segments = append(segments, ChainSegment{})
 		}
-		segments[segmentIdx].Headers = append(segments[segmentIdx].Headers, header)
-		segments[segmentIdx].HeadersRaw = append(segments[segmentIdx].HeadersRaw, headersRaw[i])
-		segmentMap[header.ParentHash] = segmentIdx
-		siblings := childrenMap[header.ParentHash]
-		siblings = append(siblings, header)
-		childrenMap[header.ParentHash] = siblings
+		segments[segmentIdx] = append(segments[segmentIdx], h)
+		segmentMap[h.Header.ParentHash] = segmentIdx
+		siblings := childrenMap[h.Header.ParentHash]
+		siblings = append(siblings, h.Header)
+		childrenMap[h.Header.ParentHash] = siblings
 	}
 	return segments, NoPenalty, nil
 }
@@ -97,14 +96,21 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 }
 
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]*ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]ChainSegment, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
+
 	headerHash := header.Hash()
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
-	return []*ChainSegment{{HeadersRaw: [][]byte{headerRaw}, Headers: []*types.Header{header}}}, NoPenalty, nil
+	h := ChainSegmentHeader{
+		Header:    header,
+		HeaderRaw: headerRaw,
+		Hash:      headerHash,
+		Number:    header.Number.Uint64(),
+	}
+	return []ChainSegment{{h}}, NoPenalty, nil
 }
 
 // ReportBadHeader -
@@ -122,11 +128,11 @@ func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
 }
 
 // FindAnchors attempts to find anchors to which given chain segment can be attached to
-func (hd *HeaderDownload) findAnchors(segment *ChainSegment) (found bool, start int) {
+func (hd *HeaderDownload) findAnchors(segment ChainSegment) (found bool, start int) {
 	// Walk the segment from children towards parents
-	for i, header := range segment.Headers {
+	for i, h := range segment {
 		// Check if the header can be attached to an anchor of a working tree
-		if _, attaching := hd.anchors[header.Hash()]; attaching {
+		if _, attaching := hd.anchors[h.Hash]; attaching {
 			return true, i
 		}
 	}
@@ -134,18 +140,18 @@ func (hd *HeaderDownload) findAnchors(segment *ChainSegment) (found bool, start 
 }
 
 // FindLink attempts to find a non-persisted link that given chain segment can be attached to.
-func (hd *HeaderDownload) findLink(segment *ChainSegment, start int) (found bool, end int) {
-	if _, duplicate := hd.getLink(segment.Headers[start].Hash()); duplicate {
+func (hd *HeaderDownload) findLink(segment ChainSegment, start int) (found bool, end int) {
+	if _, duplicate := hd.getLink(segment[start].Hash); duplicate {
 		return false, 0
 	}
 	// Walk the segment from children towards parents
-	for i, header := range segment.Headers[start:] {
+	for i, h := range segment[start:] {
 		// Check if the header can be attached to any links
-		if _, attaching := hd.getLink(header.ParentHash); attaching {
+		if _, attaching := hd.getLink(h.Header.ParentHash); attaching {
 			return true, start + i + 1
 		}
 	}
-	return false, len(segment.Headers)
+	return false, len(segment)
 }
 
 func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
@@ -167,12 +173,12 @@ func (hd *HeaderDownload) markPreverified(link *Link) {
 }
 
 // ExtendUp extends a working tree up from the link, using given chain segment
-func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error {
+func (hd *HeaderDownload) extendUp(segment ChainSegment, start, end int) error {
 	// Find attachment link again
-	linkHeader := segment.Headers[end-1]
-	attachmentLink, attaching := hd.getLink(linkHeader.ParentHash)
+	linkH := segment[end-1]
+	attachmentLink, attaching := hd.getLink(linkH.Header.ParentHash)
 	if !attaching {
-		return fmt.Errorf("extendUp attachment link not found for %x", linkHeader.ParentHash)
+		return fmt.Errorf("extendUp attachment link not found for %x", linkH.Header.ParentHash)
 	}
 	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
 		return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
@@ -180,7 +186,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
-		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
+		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
 		if _, ok := hd.preverifiedHashes[link.hash]; ok {
@@ -189,7 +195,7 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	}
 
 	if _, bad := hd.badHeaders[attachmentLink.hash]; !bad && attachmentLink.persisted {
-		link := hd.links[linkHeader.Hash()]
+		link := hd.links[linkH.Hash]
 		hd.insertList = append(hd.insertList, link)
 	}
 	return nil
@@ -197,10 +203,10 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
-func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (bool, error) {
+func (hd *HeaderDownload) extendDown(segment ChainSegment, start, end int) (bool, error) {
 	// Find attachment anchor again
-	anchorHeader := segment.Headers[start]
-	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
+	anchorHash := segment[start].Hash
+	if anchor, attaching := hd.anchors[anchorHash]; attaching {
 		anchorPreverified := false
 		for _, link := range anchor.links {
 			if link.preverified {
@@ -208,7 +214,8 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 				break
 			}
 		}
-		newAnchorHeader := segment.Headers[end-1]
+		newAnchorH := segment[end-1]
+		newAnchorHeader := newAnchorH.Header
 		var newAnchor *Anchor
 		newAnchor, preExisting := hd.anchors[newAnchorHeader.ParentHash]
 		if !preExisting {
@@ -216,7 +223,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 				parentHash:  newAnchorHeader.ParentHash,
 				timestamp:   0,
 				peerID:      anchor.peerID,
-				blockHeight: newAnchorHeader.Number.Uint64(),
+				blockHeight: newAnchorH.Number,
 			}
 			if newAnchor.blockHeight > 0 {
 				hd.anchors[newAnchorHeader.ParentHash] = newAnchor
@@ -231,7 +238,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 		// Add all headers in the segments as links to this anchor
 		var prevLink *Link
 		for i := end - 1; i >= start; i-- {
-			link := hd.addHeaderAsLink(segment.Headers[i], false /* pesisted */)
+			link := hd.addHeaderAsLink(segment[i], false /* pesisted */)
 			if prevLink == nil {
 				newAnchor.links = append(newAnchor.links, link)
 			} else {
@@ -250,25 +257,25 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 		}
 		return !preExisting, nil
 	}
-	return false, fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
+	return false, fmt.Errorf("extendDown attachment anchors not found for %x", anchorHash)
 }
 
 // Connect connects some working trees using anchors of some, and a link of another
-func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]PenaltyItem, error) {
+func (hd *HeaderDownload) connect(segment ChainSegment, start, end int) ([]PenaltyItem, error) {
 	// Find attachment link again
-	linkHeader := segment.Headers[end-1]
+	linkH := segment[end-1]
 	// Find attachement anchors again
-	anchorHeader := segment.Headers[start]
-	attachmentLink, ok1 := hd.getLink(linkHeader.ParentHash)
+	anchorHash := segment[start].Hash
+	attachmentLink, ok1 := hd.getLink(linkH.Header.ParentHash)
 	if !ok1 {
-		return nil, fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
+		return nil, fmt.Errorf("connect attachment link not found for %x", linkH.Header.ParentHash)
 	}
 	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
 		return nil, fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
 	}
-	anchor, ok2 := hd.anchors[anchorHeader.Hash()]
+	anchor, ok2 := hd.anchors[anchorHash]
 	if !ok2 {
-		return nil, fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+		return nil, fmt.Errorf("connect attachment anchors not found for %x", anchorHash)
 	}
 	anchorPreverified := false
 	for _, link := range anchor.links {
@@ -284,7 +291,7 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
-		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
+		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
 		if _, ok := hd.preverifiedHashes[link.hash]; ok {
@@ -302,18 +309,18 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 		hd.invalidateAnchor(anchor)
 		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 	} else if attachmentLink.persisted {
-		link := hd.links[linkHeader.Hash()]
+		link := hd.links[linkH.Hash]
 		hd.insertList = append(hd.insertList, link)
 	}
 	return penalties, nil
 }
 
-func (hd *HeaderDownload) removeAnchor(segment *ChainSegment, start int) error {
+func (hd *HeaderDownload) removeAnchor(segment ChainSegment, start int) error {
 	// Find attachement anchors again
-	anchorHeader := segment.Headers[start]
-	anchor, ok := hd.anchors[anchorHeader.Hash()]
+	anchorHash := segment[start].Hash
+	anchor, ok := hd.anchors[anchorHash]
 	if !ok {
-		return fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+		return fmt.Errorf("connect attachment anchors not found for %x", anchorHash)
 	}
 	// Anchor is removed from the map, but not from the anchorQueue
 	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
@@ -323,14 +330,15 @@ func (hd *HeaderDownload) removeAnchor(segment *ChainSegment, start int) error {
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
-func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerID enode.ID) (bool, error) {
-	anchorHeader := segment.Headers[end-1]
+func (hd *HeaderDownload) newAnchor(segment ChainSegment, start, end int, peerID enode.ID) (bool, error) {
+	anchorH := segment[end-1]
+	anchorHeader := anchorH.Header
 
 	var anchor *Anchor
 	anchor, preExisting := hd.anchors[anchorHeader.ParentHash]
 	if !preExisting {
-		if anchorHeader.Number.Uint64() < hd.highestInDb {
-			return false, fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorHeader.Number.Uint64(), hd.highestInDb)
+		if anchorH.Number < hd.highestInDb {
+			return false, fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorH.Number, hd.highestInDb)
 		}
 		if len(hd.anchors) >= hd.anchorLimit {
 			return false, fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
@@ -339,7 +347,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerI
 			parentHash:  anchorHeader.ParentHash,
 			peerID:      peerID,
 			timestamp:   0,
-			blockHeight: anchorHeader.Number.Uint64(),
+			blockHeight: anchorH.Number,
 		}
 		hd.anchors[anchorHeader.ParentHash] = anchor
 		heap.Push(hd.anchorQueue, anchor)
@@ -347,8 +355,7 @@ func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerI
 	// Iterate over headers backwards (from parents towards children)
 	var prevLink *Link
 	for i := end - 1; i >= start; i-- {
-		header := segment.Headers[i]
-		link := hd.addHeaderAsLink(header, false /* persisted */)
+		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		if prevLink == nil {
 			anchor.links = append(anchor.links, link)
 		} else {
@@ -483,11 +490,17 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			if err != nil {
 				return err
 			}
-			var h types.Header
-			if err = rlp.DecodeBytes(v, &h); err != nil {
+			var header types.Header
+			if err = rlp.DecodeBytes(v, &header); err != nil {
 				return err
 			}
-			hd.addHeaderAsLink(&h, true /* persisted */)
+			h := ChainSegmentHeader{
+				HeaderRaw: v,
+				Header:    &header,
+				Hash:      header.Hash(),
+				Number:    header.Number.Uint64(),
+			}
+			hd.addHeaderAsLink(h, true /* persisted */)
 
 			select {
 			case <-logEvery.C:
@@ -702,16 +715,14 @@ func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
 }
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
-func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) *Link {
-	height := header.Number.Uint64()
-	linkHash := header.Hash()
+func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) *Link {
 	link := &Link{
-		blockHeight: height,
-		hash:        linkHash,
-		header:      header,
+		blockHeight: h.Number,
+		hash:        h.Hash,
+		header:      h.Header,
 		persisted:   persisted,
 	}
-	hd.links[linkHash] = link
+	hd.links[h.Hash] = link
 	if persisted {
 		heap.Push(hd.persistedLinkQueue, link)
 	} else {
@@ -860,8 +871,8 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // it allows higher-level algo immediately request more headers without waiting all stages precessing,
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID enode.ID) (requestMore bool, penalties []PenaltyItem) {
-	log.Trace("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID enode.ID) (requestMore bool, penalties []PenaltyItem) {
+	log.Trace("processSegment", "from", segment[0].Number, "to", segment[len(segment)-1].Number)
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	foundAnchor, start := hd.findAnchors(segment)
@@ -877,15 +888,15 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		}
 		return
 	}
-	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	hash := segment.Headers[len(segment.Headers)-1].Hash()
+	height := segment[len(segment)-1].Number
+	hash := segment[len(segment)-1].Hash
 	if newBlock || hd.seenAnnounces.Seen(hash) {
 		if height > hd.topSeenHeight {
 			hd.topSeenHeight = height
 		}
 	}
-	startNum := segment.Headers[start].Number.Uint64()
-	endNum := segment.Headers[end-1].Number.Uint64()
+	startNum := segment[start].Number
+	endNum := segment[end-1].Number
 	// There are 4 cases
 	if foundAnchor {
 		if foundTip {

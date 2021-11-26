@@ -509,22 +509,25 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 	}
 	// Extract headers from the block
 	var highestBlock uint64
-	var headersRaw [][]byte
-	headers := pkt
-	for _, h := range headers {
+	csHeaders := make([]headerdownload.ChainSegmentHeader, 0, len(pkt))
+	for _, header := range pkt {
 		headerRaw, err := rlpStream.Raw()
 		if err != nil {
 			return fmt.Errorf("decode 3 BlockHeadersPacket65: %w", err)
 		}
-		headersRaw = append(headersRaw, headerRaw)
-
-		number := h.Number.Uint64()
+		number := header.Number.Uint64()
 		if number > highestBlock {
 			highestBlock = number
 		}
+		csHeaders = append(csHeaders, headerdownload.ChainSegmentHeader{
+			Header:    header,
+			HeaderRaw: headerRaw,
+			Hash:      header.Hash(),
+			Number:    number,
+		})
 	}
 
-	if segments, penalty, err := cs.Hd.SplitIntoSegments(headersRaw, headers); err == nil {
+	if segments, penalty, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
