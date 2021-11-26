@@ -629,6 +629,17 @@ func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
 }
 
+func (h *Header) copySeal() []rlp.RawValue {
+	seal := h.Seal
+	if len(seal) > 0 {
+		seal = make([]rlp.RawValue, len(seal))
+		for i, s := range h.Seal {
+			seal[i] = common.CopyBytes(s)
+		}
+	}
+	return seal
+}
+
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
@@ -1016,12 +1027,7 @@ func CopyHeader(h *Header) *Header {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
-	if len(h.Seal) > 0 {
-		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
-		for i := range h.Seal {
-			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
-		}
-	}
+	cpy.Seal = h.copySeal()
 	return &cpy
 }
 
@@ -1219,6 +1225,7 @@ func (b *Block) BaseFee() *big.Int {
 	}
 	return new(big.Int).Set(b.header.BaseFee)
 }
+func (b *Block) Seal() (seal []rlp.RawValue) { return b.header.copySeal() }
 
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
