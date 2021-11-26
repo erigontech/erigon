@@ -638,8 +638,8 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	}
 	fmt.Printf("distance: %d\n", pm.History)
 
-	log.Info("Stage4", "progress", execStage.BlockNumber)
-	log.Info("Stage5", "progress", s.BlockNumber)
+	log.Info("StageExec", "progress", execStage.BlockNumber)
+	log.Info("StageTrie", "progress", s.BlockNumber)
 	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
