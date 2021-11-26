@@ -367,7 +367,7 @@ func (so *stateObject) CodeHash() []byte {
 }
 
 func (so *stateObject) Balance() *uint256.Int {
-	return &so.data.Balance
+	return so.data.Balance.Clone()
 }
 
 func (so *stateObject) Nonce() uint64 {

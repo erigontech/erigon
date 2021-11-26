@@ -46,6 +46,7 @@ const (
 	AuRaConsensus   ConsensusType = "aura"
 	EtHashConsensus ConsensusType = "ethash"
 	CliqueConsensus ConsensusType = "clique"
+	ParliaConsensus ConsensusType = "parlia"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -169,7 +170,9 @@ var (
 	}
 
 	BSCChainConfig = &ChainConfig{
+		ChainName:           BSCChainName,
 		ChainID:             big.NewInt(56),
+		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -532,10 +535,10 @@ func (c *CliqueConfig) String() string {
 
 // ParliaConfig is the consensus engine configs for proof-of-staked-authority based sealing.
 type ParliaConfig struct {
-	DBPath string
-	InMemory  bool
-	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
-	Epoch  uint64 `json:"epoch"`  // Epoch length to update validatorSet
+	DBPath   string
+	InMemory bool
+	Period   uint64 `json:"period"` // Number of seconds between blocks to enforce
+	Epoch    uint64 `json:"epoch"`  // Epoch length to update validatorSet
 }
 
 // String implements the stringer interface, returning the consensus engine details.

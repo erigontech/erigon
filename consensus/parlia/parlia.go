@@ -684,8 +684,71 @@ func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *st
 //
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
-func (p *Parlia) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
+func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 	return nil, errNotSupported
+	//// No block rewards in PoA, so the state remains as is and uncles are dropped
+	//if txs == nil {
+	//	txs = make([]types.Transaction, 0)
+	//}
+	//if receipts == nil {
+	//	receipts = make([]*types.Receipt, 0)
+	//}
+	//if header.Number.Cmp(common.Big1) == 0 {
+	//	err := p.initContract(state, header, &txs, &receipts, nil, &header.GasUsed, true)
+	//	if err != nil {
+	//		log.Error("init contract failed")
+	//	}
+	//}
+	//if header.Difficulty.Cmp(diffInTurn) != 0 {
+	//	number := header.Number.Uint64()
+	//	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	spoiledVal := snap.supposeValidator()
+	//	signedRecently := false
+	//	for _, recent := range snap.Recents {
+	//		if recent == spoiledVal {
+	//			signedRecently = true
+	//			break
+	//		}
+	//	}
+	//	if !signedRecently {
+	//		err = p.slash(spoiledVal, state, header, &txs, &receipts, nil, &header.GasUsed, true)
+	//		if err != nil {
+	//			// it is possible that slash validator failed because of the slash channel is disabled.
+	//			log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+	//		}
+	//	}
+	//}
+	//err := p.distributeIncoming(p.val, state, header, &txs, &receipts, nil, &header.GasUsed, true)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//// should not happen. Once happen, stop the node is better than broadcast the block
+	//if header.GasLimit < header.GasUsed {
+	//	return nil, errors.New("gas consumption of system txs exceed the gas limit")
+	//}
+	//header.UncleHash = types.CalcUncleHash(nil)
+	//blk := types.NewBlock(header, txs, nil, receipts)
+	//rootHash, err := trie.CalcRoot("GenerateChain", tx)
+	//
+	//state.CommitBlock()
+	//
+	//wg := sync.WaitGroup{}
+	//wg.Add(2)
+	//go func() {
+	//	rootHash = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
+	//	wg.Done()
+	//}()
+	//go func() {
+	//	blk = types.NewBlock(header, txs, nil, receipts)
+	//	wg.Done()
+	//}()
+	//wg.Wait()
+	//blk.SetRoot(rootHash)
+	//// Assemble and return the final block for sealing
+	//return blk, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -987,8 +1050,10 @@ func (p *Parlia) applyTransaction(
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
+
 	receipt.TxHash = expectedTx.Hash()
 	receipt.GasUsed = gasUsed
+	receipt.PostState = []byte{}
 
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = state.GetLogs(expectedTx.Hash())
