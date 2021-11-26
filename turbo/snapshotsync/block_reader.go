@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -181,8 +180,12 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, err
 	}
 
-	n = binary.PutUvarint(buf, b.BaseTxId)
-	txnOffset := sn.Transactions.Idx.Lookup2(sn.Transactions.Idx.Lookup(buf[:n]))
+	//n = binary.PutUvarint(buf, b.BaseTxId)
+	//txnOffset := sn.Transactions.Idx.Lookup2(sn.Transactions.Idx.Lookup(buf[:n]))
+	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d\n", b.BaseTxId, sn.Transactions.Idx.BaseDataID())
+	}
+	txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
 	gg = sn.Transactions.Segment.MakeGetter()
 	gg.Reset(txnOffset)
 	reader := bytes.NewReader(nil)
