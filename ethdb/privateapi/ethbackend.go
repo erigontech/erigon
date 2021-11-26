@@ -172,9 +172,11 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -251,10 +253,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
-		return &remote.EngineExecutePayloadReply{
-			Status:          Invalid,
-			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-		}, nil
+		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
 	log.Info("Received Payload from beacon-chain", "hash", blockHash)
 	// Send the block over
@@ -268,22 +267,19 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
 		}, nil
 	}
-	for {
-		executedStatus := <-s.statusCh
-		if executedStatus.Hash == blockHash {
-			if executedStatus.Valid {
-				return &remote.EngineExecutePayloadReply{
-					Status:          Valid,
-					LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-				}, nil
-			} else {
-				return &remote.EngineExecutePayloadReply{
-					Status:          Invalid,
-					LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-				}, nil
-			}
-		}
+	executedStatus := <-s.statusCh
+	if executedStatus.Valid {
+		return &remote.EngineExecutePayloadReply{
+			Status:          Valid,
+			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
+		}, nil
 	}
+
+	return &remote.EngineExecutePayloadReply{
+		Status:          Invalid,
+		LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+	}, nil
+
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
