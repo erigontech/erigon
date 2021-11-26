@@ -44,9 +44,9 @@ type EthBackendServer struct {
 	config          *params.ChainConfig
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send reverse sync starting point to staged sync
-	reverseDownloadCh chan types.Block
+	reverseDownloadCh chan<- types.Block
 	// Notify whether the current block being processed is Valid or not
-	statusCh chan core.ExecutionStatus
+	statusCh <-chan core.ExecutionStatus
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 }
@@ -58,7 +58,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan types.Block, statusCh chan core.ExecutionStatus,
+	config *params.ChainConfig, reverseDownloadCh chan<- types.Block, statusCh <-chan core.ExecutionStatus,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh}
