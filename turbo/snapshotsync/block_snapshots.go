@@ -483,7 +483,7 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 	return nil
 }
 
-func TransactionsIdx(chainID uint256.Int, firstTxID uint64, segmentFileName string) error {
+func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName string) error {
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
@@ -497,13 +497,13 @@ func TransactionsIdx(chainID uint256.Int, firstTxID uint64, segmentFileName stri
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("TransactionsIdx: %w", err)
+		return fmt.Errorf("TransactionsHashIdx: %w", err)
 	}
 	return nil
 }
 
-// HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
+// HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
+func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word, &h); err != nil {
@@ -511,7 +511,7 @@ func HeadersIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 		}
 		return idx.AddKey(h.Hash().Bytes(), offset)
 	}); err != nil {
-		return fmt.Errorf("HeadersIdx: %w", err)
+		return fmt.Errorf("HeadersHashIdx: %w", err)
 	}
 	return nil
 }

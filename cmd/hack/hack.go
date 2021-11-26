@@ -2601,7 +2601,7 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.TransactionsIdx(*chainID, firstTxID, segmentFile); err != nil {
+		if err := snapshotsync.TransactionsHashIdx(*chainID, firstTxID, segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2618,7 +2618,7 @@ func recsplitWholeChain(chaindata string) error {
 			panic(err)
 		}
 
-		if err := snapshotsync.HeadersIdx(segmentFile, i); err != nil {
+		if err := snapshotsync.HeadersHashIdx(segmentFile, i); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
