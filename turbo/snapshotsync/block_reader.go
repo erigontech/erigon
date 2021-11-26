@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -114,18 +113,7 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash
 		return h, nil
 	}
 
-	buf := make([]byte, 16)
-
-	n := binary.PutUvarint(buf, blockHeight)
-	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
-	gg := sn.Headers.Segment.MakeGetter()
-	gg.Reset(headerOffset)
-	buf, _ = gg.Next(buf[:0])
-	h := &types.Header{}
-	if err := rlp.DecodeBytes(buf, h); err != nil {
-		return nil, err
-	}
-	return h, nil
+	return back.headerFromSnapshot(blockHeight, sn)
 }
 
 func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
@@ -157,13 +145,11 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 
 	buf := make([]byte, 16)
 
-	n := binary.PutUvarint(buf, blockHeight)
-
 	back.lock.Lock()
 	defer back.lock.Unlock()
 
-	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
-	bodyOffset := sn.Bodies.Idx.Lookup2(sn.Bodies.Idx.Lookup(buf[:n]))
+	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.Idx.BaseDataID())
+	bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Bodies.Idx.BaseDataID())
 
 	gg := sn.Headers.Segment.MakeGetter()
 	gg.Reset(headerOffset)
@@ -181,8 +167,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, err
 	}
 
-	//n = binary.PutUvarint(buf, b.BaseTxId)
-	//txnOffset := sn.Transactions.Idx.Lookup2(sn.Transactions.Idx.Lookup(buf[:n]))
 	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
 		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d\n", b.BaseTxId, sn.Transactions.Idx.BaseDataID())
 	}
@@ -216,8 +200,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn *BlocksSnapshot) (*types.Header, error) {
 	buf := make([]byte, 16)
 
-	n := binary.PutUvarint(buf, blockHeight)
-	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
+	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.Idx.BaseDataID())
 	gg := sn.Headers.Segment.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
