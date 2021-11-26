@@ -158,7 +158,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
-		delete(hd.links, removal.header.Hash())
+		delete(hd.links, removal.hash)
 		heap.Remove(hd.linkQueue, removal.idx)
 		toRemove = append(toRemove, removal.next...)
 	}
@@ -627,11 +627,11 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
 			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
-				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
+				log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					linksInFuture = append(linksInFuture, link)
-					log.Warn("Added future link", "hash", link.header.Hash(), "height", link.blockHeight, "timestamp", link.header.Time)
+					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
 					continue // prevent removal of the link from the hd.linkQueue
 				} else {
 					skip = true
