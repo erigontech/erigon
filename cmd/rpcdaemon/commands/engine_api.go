@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -53,17 +52,9 @@ type PreparePayloadArgs struct {
 	FeeRecipient *common.Address `json:"feeRecipients"`
 }
 
-// PreparePayloadArgs represents a request to execute POS_FORKCHOICE_UPDATED.
-// specs: https://github.com/ethereum/EIPs/blob/504954e3bba2b58712d84865966ebc17bd4875f5/EIPS/eip-3675.md
-type ForkchoiceArgs struct {
-	HeadBlockHash      *rpc.BlockNumberOrHash `json:"headBlockHash"`
-	SafeBlockHash      *rpc.BlockNumberOrHash `json:"safeBlockHash"`
-	FinalizedBlockHash *rpc.BlockNumberOrHash `json:"finalizedBlockHash"`
-}
-
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
-	ForkchoiceUpdatedV1(context.Context, ForkchoiceArgs, PreparePayloadArgs) (map[string]interface{}, error)
+	ForkchoiceUpdatedV1(context.Context, struct{}, *PreparePayloadArgs) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
 }
@@ -75,19 +66,18 @@ type EngineImpl struct {
 	api services.ApiBackend
 }
 
-// PreparePayload is executed only if we running a beacon Validator so it
-// has relatively low priority
-func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ ForkchoiceArgs, buildPayloadArgs PreparePayloadArgs) (map[string]interface{}, error) {
-	if buildPayloadArgs.Timestamp == nil {
+// ForkchoiceUpdatedV1 is executed only if we are running a beacon validator,
+// in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
+// if the buildPayloadArgs is different than null, we return
+func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, buildPayloadArgs *PreparePayloadArgs) (map[string]interface{}, error) {
+	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
+	if buildPayloadArgs == nil {
 		return map[string]interface{}{
-			"status": engineSyncingCode,
-		}, nil
-	} else {
-		return map[string]interface{}{
-			"status":    engineSuccessCode,
-			"payloadId": 0,
+			"status": "SUCCESS",
 		}, nil
 	}
+	// Request for assembling payload
+	return nil, nil
 }
 
 // ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things
