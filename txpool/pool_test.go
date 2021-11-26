@@ -157,7 +157,7 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  6,
 		}
-		txSlot3.IdHash[0] = 2
+		txSlot3.IdHash[0] = 3
 		txSlots.Append(txSlot2, addr[:], true)
 		txSlots.Append(txSlot3, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -167,7 +167,7 @@ func TestNonceFromAddress(t *testing.T) {
 		}
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
-		assert.Equal(uint64(4), nonce)
+		assert.Equal(uint64(6), nonce)
 	}
 	// test too expencive tx
 	{
@@ -178,7 +178,7 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot1.IdHash[0] = 1
+		txSlot1.IdHash[0] = 4
 		txSlots.Append(txSlot1, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -196,12 +196,112 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  1,
 		}
-		txSlot1.IdHash[0] = 1
+		txSlot1.IdHash[0] = 5
 		txSlots.Append(txSlot1, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
 		for _, reason := range reasons {
 			assert.Equal(NonceTooLow, reason, reason.String())
 		}
+	}
+}
+
+func TestReplaceWithHigherFee(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan Hashes, 100)
+	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+
+	cfg := DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1)
+	assert.NoError(err)
+	require.True(pool != nil)
+	ctx := context.Background()
+	var txID uint64
+	_ = coreDB.View(ctx, func(tx kv.Tx) error {
+		txID = tx.ViewID()
+		return nil
+	})
+	pendingBaseFee := uint64(200000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		DatabaseViewID:      txID,
+		PendingBlockBaseFee: pendingBaseFee,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+	addr[0] = 1
+	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	assert.NoError(err)
+
+	{
+		var txSlots TxSlots
+		txSlot := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot.IdHash[0] = 1
+		txSlots.Append(txSlot, addr[:], true)
+
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+	}
+	// Bumped only feeCap, transaction not accepted
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    300000,
+			feeCap: 3000000,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot.IdHash[0] = 2
+		txSlots.Append(txSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(NotReplaced, reason, reason.String())
+		}
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(3), nonce)
+	}
+	// Bumped only tip and feeCap by 10%, tx accepted
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    330001,
+			feeCap: 330001,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot.IdHash[0] = 3
+		txSlots.Append(txSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(3), nonce)
 	}
 }

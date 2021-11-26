@@ -75,6 +75,7 @@ type Config struct {
 
 	MinFeeCap    uint64
 	AccountSlots uint64 // Number of executable transaction slots guaranteed per account
+	PriceBump    uint64 // Price bump percentage to replace an already existing transaction
 }
 
 var DefaultConfig = Config{
@@ -89,6 +90,7 @@ var DefaultConfig = Config{
 
 	MinFeeCap:    1,
 	AccountSlots: 16, //TODO: to choose right value (16 to be compat with Geth)
+	PriceBump:    10, // Price bump percentage to replace an already existing transaction
 }
 
 // Pool is interface for the transaction pool
@@ -151,6 +153,8 @@ const (
 	RLPTooLong          DiscardReason = 17
 	NonceTooLow         DiscardReason = 18
 	InsufficientFunds   DiscardReason = 19
+	NotReplaced         DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
+	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
 )
 
 func (r DiscardReason) String() string {
@@ -193,6 +197,10 @@ func (r DiscardReason) String() string {
 		return "nonce too low"
 	case InsufficientFunds:
 		return "insufficient funds"
+	case NotReplaced:
+		return "could not replace existing tx"
+	case DuplicateHash:
+		return "existing tx with same hash"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -454,7 +462,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
-	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if _, err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
 	p.pending.added = nil
@@ -736,7 +744,13 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 	}
 
 	p.pending.captureAddedHashes(&p.promoted)
-	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if addReasons, err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, newTxs, p.pendingBaseFee.Load(), p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err == nil {
+		for i, reason := range addReasons {
+			if reason != NotSet {
+				reasons[i] = reason
+			}
+		}
+	} else {
 		return nil, err
 	}
 	p.pending.added = nil
@@ -770,7 +784,7 @@ func (p *TxPool) cache() kvcache.Cache {
 func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxs TxSlots, pendingBaseFee uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx) bool, discard func(*metaTx, DiscardReason)) error {
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx) DiscardReason, discard func(*metaTx, DiscardReason)) ([]DiscardReason, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if ASSERT {
 		for _, txn := range newTxs.txs {
@@ -789,21 +803,25 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	// somehow the fact that certain transactions were local, needs to be remembered for some
 	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
+	discardReasons := make([]DiscardReason, len(newTxs.txs))
 	for i, txn := range newTxs.txs {
 		if _, ok := byHash[string(txn.IdHash[:])]; ok {
+			discardReasons[i] = DuplicateHash
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i], blockNum)
-		if !add(mt) {
+		if reason := add(mt); reason != NotSet {
+			discardReasons[i] = reason
 			continue
 		}
+		discardReasons[i] = NotSet
 		sendersWithChangedState[mt.Tx.senderID] = struct{}{}
 	}
 
 	for senderID := range sendersWithChangedState {
 		nonce, balance, err := senders.info(cacheView, senderID)
 		if err != nil {
-			return err
+			return discardReasons, err
 		}
 		onSenderStateChange(senderID, nonce, balance, byNonce, protocolBaseFee, pendingBaseFee, pending, baseFee, queued, false)
 	}
@@ -815,12 +833,12 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	//pending.EnforceWorstInvariants()
 	pending.EnforceBestInvariants()
 
-	return nil
+	return discardReasons, nil
 }
 func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remote.StateChangeBatch,
 	senders *sendersBatch, newTxs TxSlots, pendingBaseFee uint64, baseFeeChanged bool,
 	pending *PendingPool, baseFee, queued *SubPool,
-	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx) bool, discard func(*metaTx, DiscardReason)) error {
+	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx) DiscardReason, discard func(*metaTx, DiscardReason)) error {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
 	if ASSERT {
 		for _, txn := range newTxs.txs {
@@ -844,7 +862,8 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i], blockNum)
-		if !add(mt) {
+		if reason := add(mt); reason != NotSet {
+			discard(mt, reason)
 			continue
 		}
 		sendersWithChangedState[mt.Tx.senderID] = struct{}{}
@@ -897,12 +916,15 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 	return p.pendingBaseFee.Load(), changed
 }
 
-func (p *TxPool) addLocked(mt *metaTx) bool {
+func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.Tx.senderID, mt.Tx.nonce)
 	if found != nil {
-		if mt.Tx.tip <= found.Tx.tip {
-			return false
+		tipThreshold := found.Tx.tip * (100 + p.cfg.PriceBump) / 100
+		feecapThreshold := found.Tx.feeCap * (100 + p.cfg.PriceBump) / 100
+		if mt.Tx.tip <= tipThreshold || mt.Tx.feeCap <= feecapThreshold {
+			// Both tip and feecap need to be larger than previously to replace the transaction
+			return NotReplaced
 		}
 
 		switch found.currentSubPool {
@@ -931,7 +953,7 @@ func (p *TxPool) addLocked(mt *metaTx) bool {
 		p.isLocalLRU.Add(string(mt.Tx.IdHash[:]), struct{}{})
 	}
 	p.queued.Add(mt)
-	return true
+	return NotSet
 }
 
 // dropping transaction from all sub-structures and from db
@@ -1481,7 +1503,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs, pendingBaseFee, p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
+	if _, err := addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs, pendingBaseFee, p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
