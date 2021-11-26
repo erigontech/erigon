@@ -186,7 +186,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	readBlockNr := block.Number().Uint64()
+	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
 	_, err = MakePreState(params.Rules{}, tx, t.json.Pre, readBlockNr)

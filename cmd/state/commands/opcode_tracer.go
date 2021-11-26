@@ -555,7 +555,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		if err1 != nil {
 			return err1
 		}
-		if chainConfig.IsByzantium(block.Number().Uint64()) {
+		if chainConfig.IsByzantium(block.NumberU64()) {
 			receiptSha := types.DeriveSha(receipts)
 			if receiptSha != block.ReceiptHash() {
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
