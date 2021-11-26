@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -19,13 +20,15 @@ type DifficultyCfg struct {
 	tmpDir                  string
 	terminalTotalDifficulty *big.Int
 	db                      kv.RwDB
+	blockReader             interfaces.FullBlockReader
 }
 
-func StageDifficultyCfg(db kv.RwDB, tmpDir string, terminalTotalDifficulty *big.Int) DifficultyCfg {
+func StageDifficultyCfg(db kv.RwDB, tmpDir string, terminalTotalDifficulty *big.Int, blockReader interfaces.FullBlockReader) DifficultyCfg {
 	return DifficultyCfg{
 		db:                      db,
 		tmpDir:                  tmpDir,
 		terminalTotalDifficulty: terminalTotalDifficulty,
+		blockReader:             blockReader,
 	}
 }
 

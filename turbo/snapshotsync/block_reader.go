@@ -28,6 +28,12 @@ func (back *BlockReader) Header(ctx context.Context, tx kv.Tx, hash common.Hash,
 	h := rawdb.ReadHeader(tx, hash, blockHeight)
 	return h, nil
 }
+
+func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error) {
+	h := rawdb.ReadHeaderByNumber(tx, blockHeight)
+	return h, nil
+}
+
 func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
@@ -93,7 +99,14 @@ type BlockReaderWithSnapshots struct {
 func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
 }
-
+func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		h := rawdb.ReadHeaderByNumber(tx, blockHeight)
+		return h, nil
+	}
+	return back.headerFromSnapshot(blockHeight, sn)
+}
 func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
@@ -113,6 +126,16 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash
 		return nil, err
 	}
 	return h, nil
+}
+
+func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		h := rawdb.ReadHeader(tx, hash, blockHeight)
+		return h, nil
+	}
+
+	return back.headerFromSnapshot(blockHeight, sn)
 }
 
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
@@ -184,4 +207,19 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	}
 	block.SendersToTxs(senders)
 	return block, senders, nil
+}
+
+func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn *BlocksSnapshot) (*types.Header, error) {
+	buf := make([]byte, 16)
+
+	n := binary.PutUvarint(buf, blockHeight)
+	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
+	gg := sn.Headers.Segment.MakeGetter()
+	gg.Reset(headerOffset)
+	buf, _ = gg.Next(buf[:0])
+	h := &types.Header{}
+	if err := rlp.DecodeBytes(buf, h); err != nil {
+		return nil, err
+	}
+	return h, nil
 }

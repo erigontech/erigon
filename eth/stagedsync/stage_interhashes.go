@@ -27,10 +27,10 @@ type TrieCfg struct {
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
-	blockReader       interfaces.BlockReader
+	blockReader       interfaces.FullBlockReader
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader interfaces.BlockReader) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader interfaces.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -399,13 +399,11 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 		defer tx.Rollback()
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, u.UnwindPoint)
 	if err != nil {
-		return fmt.Errorf("read canonical hash: %w", err)
+		return err
 	}
-	syncHeadHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
 
 	logPrefix := s.LogPrefix()
 	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cfg, expectedRootHash, quit); err != nil {

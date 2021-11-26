@@ -225,7 +225,7 @@ func NewStagedSync(
 	tmpdir string,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
-	var blockReader interfaces.BlockReader
+	var blockReader interfaces.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
 		if err != nil {
@@ -255,7 +255,7 @@ func NewStagedSync(
 			cfg.BodyDownloadTimeoutSeconds,
 			*controlServer.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,

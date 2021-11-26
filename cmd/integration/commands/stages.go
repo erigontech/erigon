@@ -1034,7 +1034,7 @@ func allSnapshots() *snapshotsync.AllSnapshots {
 	return _allSnapshotsSingleton
 }
 
-func getBlockReader() (blockReader interfaces.BlockReader) {
+func getBlockReader() (blockReader interfaces.FullBlockReader) {
 	blockReader = snapshotsync.NewBlockReader()
 	if sn := allSnapshots(); sn != nil {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)

@@ -54,7 +54,7 @@ type ExecuteBlockCfg struct {
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
-	blockReader   interfaces.BlockReader
+	blockReader   interfaces.FullBlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -68,7 +68,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
-	blockReader interfaces.BlockReader,
+	blockReader interfaces.FullBlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -104,7 +104,10 @@ func executeBlock(
 	}
 
 	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
+		return h
+	}
 
 	callTracer := NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true

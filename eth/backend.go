@@ -339,7 +339,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
 
-	var blockReader interfaces.BlockReader
+	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
 		allSnapshots, err := snapshotsync.OpenAll(config.Snapshot.Dir)
 		if err != nil {

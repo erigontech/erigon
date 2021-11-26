@@ -153,7 +153,3 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }
-
-func (back *RemoteBackend) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
-	return back.blockReader.Header(ctx, tx, hash, blockHeight)
-}
