@@ -15,18 +15,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-// The following code follows the Proof-of-stake specifications: https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.2/src/engine/interop/specification.md
-
-// Status codes returned by the engine_ API
-// - "SUCCESS": Operation ended successfully
-// - "INVALID": Block could not be execute properly (Bad block)
-// - "SYNCING": Execution layer is still syncing and trying to catch up to the block head.
-const (
-	engineSuccessCode = "SUCCESS"
-	//	engineInvalidCode = "INVALID"
-	engineSyncingCode = "SYNCING"
-)
-
 // ExecutionPayload represents an execution payload (aka slot/block)
 type ExecutionPayload struct {
 	ParentHash    common.Hash     `json:"parentHash"`
