@@ -215,7 +215,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 }
 
 func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	trace := address == common.HexToAddress("0x30b561304a4cd1f9941ab99be06d53a6cb341167") && *key == common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000106")
+	trace := false
 	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
 	if err != nil {
 		return nil, err
@@ -304,7 +304,7 @@ func (ww *WriterWrapper) DeleteAccount(address common.Address, original *account
 }
 
 func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	trace := address == common.HexToAddress("0x30b561304a4cd1f9941ab99be06d53a6cb341167") && *key == common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000106")
+	trace := false
 	if trace {
 		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
 	}
