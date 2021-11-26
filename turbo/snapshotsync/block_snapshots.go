@@ -494,11 +494,14 @@ func TransactionsIdx(chainID uint256.Int, segmentFileName string) error {
 	return nil
 }
 
+// HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
 func HeadersIdx(segmentFileName string) error {
-	num := make([]byte, 8)
 	if err := Idx(segmentFileName, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		n := binary.PutUvarint(num, i)
-		return idx.AddKey(num[:n], offset)
+		h := types.Header{}
+		if err := rlp.DecodeBytes(word, &h); err != nil {
+			return err
+		}
+		return idx.AddKey(h.Hash().Bytes(), offset)
 	}); err != nil {
 		return fmt.Errorf("HeadersIdx: %w", err)
 	}
