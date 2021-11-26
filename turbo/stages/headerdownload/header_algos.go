@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -28,18 +29,21 @@ import (
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
-type HeadersByBlockHeight []ChainSegmentHeader
+type HeadersByHeightAndHash []ChainSegmentHeader
 
-func (h HeadersByBlockHeight) Len() int {
+func (h HeadersByHeightAndHash) Len() int {
 	return len(h)
 }
 
-func (h HeadersByBlockHeight) Less(i, j int) bool {
+func (h HeadersByHeightAndHash) Less(i, j int) bool {
 	// Note - the ordering is the inverse ordering of the block heights
-	return h[i].Number > h[j].Number
+	if h[i].Number != h[j].Number {
+		return h[i].Number > h[j].Number
+	}
+	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) > 0
 }
 
-func (h HeadersByBlockHeight) Swap(i, j int) {
+func (h HeadersByHeightAndHash) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
@@ -47,23 +51,27 @@ func (h HeadersByBlockHeight) Swap(i, j int) {
 func (hd *HeaderDownload) SplitIntoSegments(csHeaders []ChainSegmentHeader) ([]ChainSegment, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	sort.Sort(HeadersByBlockHeight(csHeaders))
+	sort.Sort(HeadersByHeightAndHash(csHeaders))
 	// Now all headers are order from the highest block height to the lowest
 	var segments []ChainSegment                          // Segments being built
 	segmentMap := make(map[common.Hash]int)              // Mapping of the header hash to the index of the chain segment it belongs
 	childrenMap := make(map[common.Hash][]*types.Header) // Mapping parent hash to the children
-	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
+
+	number := uint64(math.MaxUint64)
+	var hash common.Hash
 	for _, h := range csHeaders {
-		headerHash := h.Hash
-		if _, bad := hd.badHeaders[headerHash]; bad {
-			return nil, BadBlockPenalty, nil
-		}
-		if _, duplicate := dedupMap[headerHash]; duplicate {
+		// Headers are sorted by number, then by hash, so any dups will be consecutive
+		if h.Number == number && h.Hash == hash {
 			return nil, DuplicateHeaderPenalty, nil
 		}
-		dedupMap[headerHash] = struct{}{}
+		number = h.Number
+		hash = h.Hash
+
+		if _, bad := hd.badHeaders[hash]; bad {
+			return nil, BadBlockPenalty, nil
+		}
 		var segmentIdx int
-		children := childrenMap[headerHash]
+		children := childrenMap[hash]
 		for _, child := range children {
 			if valid, penalty := hd.childParentValid(child, h.Header); !valid {
 				return nil, penalty, nil
@@ -71,7 +79,7 @@ func (hd *HeaderDownload) SplitIntoSegments(csHeaders []ChainSegmentHeader) ([]C
 		}
 		if len(children) == 1 {
 			// Single child, extract segmentIdx
-			segmentIdx = segmentMap[headerHash]
+			segmentIdx = segmentMap[hash]
 		} else {
 			// No children, or more than one child, create new segment
 			segmentIdx = len(segments)
