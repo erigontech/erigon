@@ -6,16 +6,18 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 func newCSHeaders(headers ...*types.Header) []ChainSegmentHeader {
 	csHeaders := make([]ChainSegmentHeader, 0, len(headers))
 	for _, header := range headers {
+		headerRaw, _ := rlp.EncodeToBytes(header)
 		h := ChainSegmentHeader{
-			// HeaderRaw: headerRaw, // Not needed for these tests
-			Header: header,
-			Hash:   header.Hash(),
-			Number: header.Number.Uint64(),
+			HeaderRaw: headerRaw,
+			Header:    header,
+			Hash:      header.Hash(),
+			Number:    header.Number.Uint64(),
 		}
 		csHeaders = append(csHeaders, h)
 	}
@@ -162,7 +164,8 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 	hd := NewHeaderDownload(100, 100, engine)
 	var h types.Header
 	h.Number = big.NewInt(5)
-	if chainSegments, penalty, err := hd.SingleHeaderAsSegment([]byte{}, &h); err == nil {
+	headerRaw, _ := rlp.EncodeToBytes(h)
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(headerRaw, &h); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -181,7 +184,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 
 	// Same header with a bad hash
 	hd.ReportBadHeader(h.Hash())
-	if chainSegments, penalty, err := hd.SingleHeaderAsSegment([]byte{}, &h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(headerRaw, &h); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}

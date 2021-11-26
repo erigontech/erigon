@@ -522,7 +522,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 		csHeaders = append(csHeaders, headerdownload.ChainSegmentHeader{
 			Header:    header,
 			HeaderRaw: headerRaw,
-			Hash:      header.Hash(),
+			Hash:      types.RawRlpHash(headerRaw),
 			Number:    number,
 		})
 	}

@@ -100,7 +100,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 
-	headerHash := header.Hash()
+	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
@@ -497,7 +497,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			h := ChainSegmentHeader{
 				HeaderRaw: v,
 				Header:    &header,
-				Hash:      header.Hash(),
+				Hash:      types.RawRlpHash(v),
 				Number:    header.Number.Uint64(),
 			}
 			hd.addHeaderAsLink(h, true /* persisted */)
@@ -1063,7 +1063,8 @@ func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
 			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
 		}
 
-		hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+		headerHash := types.RawRlpHash(res)
+		hardTips[headerHash] = HeaderRecord{Raw: b, Header: &h}
 
 		buf.Reset()
 	}
