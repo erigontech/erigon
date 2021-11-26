@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -143,11 +144,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 			return err
 		}
 		r := agg.MakeStateReader(tx, block)
+		checkR := state.NewPlainState(historyTx, block-1)
 		var w *aggregator.Writer
 		if w, err = agg.MakeStateWriter(rwTx, block); err != nil {
 			return err
 		}
-		intraBlockState := state.New(&ReaderWrapper{r: r})
+		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR})
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
 		if _, err = runBlock(intraBlockState, noOpWriter, &WriterWrapper{w: w}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
@@ -174,7 +176,8 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 
 // Implements StateReader and StateWriter
 type ReaderWrapper struct {
-	r *aggregator.Reader
+	r      *aggregator.Reader
+	checkR state.StateReader
 }
 
 type WriterWrapper struct {
@@ -186,12 +189,25 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil {
 		return nil, err
 	}
+	checkA, checkErr := rw.checkR.ReadAccountData(address)
+	if checkErr != nil {
+		fmt.Printf("readAccountData %x checkR: %w\n", address, checkErr)
+		return nil, fmt.Errorf("readAccountData %x checkR: %w", address, checkErr)
+	}
 	if len(enc) == 0 {
+		if checkA != nil {
+			fmt.Printf("readAccountData %x enc [%x], checkEnc [%+v]\n", address, enc, checkA)
+			return nil, fmt.Errorf("readAccountData %x enc [%x], checkEnc [%+v]", address, enc, checkA)
+		}
 		return nil, nil
 	}
 	var a accounts.Account
 	if err = a.DecodeForStorage(enc); err != nil {
 		return nil, err
+	}
+	if !a.Equals(checkA) {
+		fmt.Printf("readAccountData %x enc [%+v], checkEnc [%+v]\n", address, a, checkA)
+		return nil, fmt.Errorf("readAccountData %x enc [%+v], checkEnc [%+v]", address, a, checkA)
 	}
 	return &a, nil
 }
@@ -201,8 +217,21 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 	if err != nil {
 		return nil, err
 	}
+	checkEnc, checkErr := rw.checkR.ReadAccountStorage(address, incarnation, key)
+	if checkErr != nil {
+		fmt.Printf("readAccountStorage %x %x checkR: %w\n", address, *key, checkErr)
+		return nil, fmt.Errorf("readAccountStorage %x %x checkR: %w", address, *key, checkErr)
+	}
 	if enc == nil {
+		if len(checkEnc) != 0 {
+			fmt.Printf("readAccountStorage %x %x enc [%x], checkEnc [%x]\n", address, *key, enc, checkEnc)
+			return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
+		}
 		return nil, nil
+	}
+	if !bytes.Equal(enc.Bytes(), checkEnc) {
+		fmt.Printf("readAccountStorage %x %x enc [%x], checkEnc [%x]\n", address, *key, enc, checkEnc)
+		return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
 	}
 	return enc.Bytes(), nil
 }
@@ -212,6 +241,15 @@ func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uin
 	if err != nil {
 		return nil, err
 	}
+	checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
+	if checkErr != nil {
+		fmt.Printf("readAccountCode %x checkR: %w\n", address, checkErr)
+		return nil, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
+	}
+	if !bytes.Equal(enc, checkEnc) {
+		fmt.Printf("readAccountCode %x enc [%x], checkEnc [%x]\n", address, enc, checkEnc)
+		return nil, fmt.Errorf("readAccountCode %x enc [%x], checkEnc [%x]", address, enc, checkEnc)
+	}
 	return enc, nil
 }
 
@@ -219,6 +257,15 @@ func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation
 	enc, err := rw.r.ReadAccountCode(address.Bytes())
 	if err != nil {
 		return 0, err
+	}
+	checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
+	if checkErr != nil {
+		fmt.Printf("readAccountCode %x checkR: %w\n", address, checkErr)
+		return 0, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
+	}
+	if !bytes.Equal(enc, checkEnc) {
+		fmt.Printf("readAccountCode %x enc [%x], checkEnc [%x]\n", address, enc, checkEnc)
+		return 0, fmt.Errorf("readAccountCode %x enc [%x], checkEnc [%x]", address, enc, checkEnc)
 	}
 	return len(enc), nil
 }
