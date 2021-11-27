@@ -69,7 +69,9 @@ type Aggregator struct {
 	accountChanges  Changes
 	codeChanges     Changes
 	storageChanges  Changes
-	changesBtree    *btree.BTree // btree of ChangesItem
+	changesBtree    *btree.BTree        // btree of ChangesItem
+	trace           bool                // Turns on tracing for specific accounts and locations
+	tracedKeys      map[string]struct{} // Set of keys being traced during aggregations
 }
 
 type ChangeFile struct {
@@ -606,6 +608,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		diffDir:         diffDir,
 		unwindLimit:     unwindLimit,
 		aggregationStep: aggregationStep,
+		tracedKeys:      make(map[string]struct{}),
 	}
 	byEndBlock := btree.New(32)
 	var closeBtree bool = true // It will be set to false in case of success at the end of the function
@@ -819,10 +822,13 @@ func (a *Aggregator) Close() {
 	closeFiles(a.byEndBlock)
 }
 
-func (a *Aggregator) readAccount(blockNum uint64, addr []byte) []byte {
+func (a *Aggregator) readAccount(blockNum uint64, addr []byte, trace bool) []byte {
 	var val []byte
 	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
+		if trace {
+			fmt.Printf("readAccount %x: search in file [%d-%d]\n", addr, item.startBlock, item.endBlock)
+		}
 		if item.accountsIdx.Empty() {
 			return true
 		}
@@ -833,6 +839,9 @@ func (a *Aggregator) readAccount(blockNum uint64, addr []byte) []byte {
 			key, _ := g.Next(nil) // Add special function that just checks the key
 			if bytes.Equal(key, addr) {
 				val, _ = g.Next(nil)
+				if trace {
+					fmt.Printf("readAccount %x: found [%x] in file [%d-%d]\n", addr, val, item.startBlock, item.endBlock)
+				}
 				return false
 			}
 		}
@@ -844,10 +853,13 @@ func (a *Aggregator) readAccount(blockNum uint64, addr []byte) []byte {
 	return nil
 }
 
-func (a *Aggregator) readCode(blockNum uint64, addr []byte) []byte {
+func (a *Aggregator) readCode(blockNum uint64, addr []byte, trace bool) []byte {
 	var val []byte
 	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
+		if trace {
+			fmt.Printf("readCode %x: search in file [%d-%d]\n", addr, item.startBlock, item.endBlock)
+		}
 		if item.codeIdx.Empty() {
 			return true
 		}
@@ -858,6 +870,9 @@ func (a *Aggregator) readCode(blockNum uint64, addr []byte) []byte {
 			key, _ := g.Next(nil) // Add special function that just checks the key
 			if bytes.Equal(key, addr) {
 				val, _ = g.Next(nil)
+				if trace {
+					fmt.Printf("readCode %x: found [%x] in file [%d-%d]\n", addr, val, item.startBlock, item.endBlock)
+				}
 				return false
 			}
 		}
@@ -869,10 +884,13 @@ func (a *Aggregator) readCode(blockNum uint64, addr []byte) []byte {
 	return nil
 }
 
-func (a *Aggregator) readStorage(blockNum uint64, filekey []byte) []byte {
+func (a *Aggregator) readStorage(blockNum uint64, filekey []byte, trace bool) []byte {
 	var val []byte
 	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
+		if trace {
+			fmt.Printf("readStorage %x: search in file [%d-%d]\n", filekey, item.startBlock, item.endBlock)
+		}
 		if item.storageIdx.Empty() {
 			return true
 		}
@@ -883,6 +901,9 @@ func (a *Aggregator) readStorage(blockNum uint64, filekey []byte) []byte {
 			key, _ := g.Next(nil) // Add special function that just checks the key
 			if bytes.Equal(key, filekey) {
 				val, _ = g.Next(nil)
+				if trace {
+					fmt.Printf("readStorage %x: found [%x] in file [%d-%d]\n", filekey, val, item.startBlock, item.endBlock)
+				}
 				return false
 			}
 		}
@@ -909,7 +930,7 @@ type Reader struct {
 	blockNum uint64
 }
 
-func (r *Reader) ReadAccountData(addr []byte) ([]byte, error) {
+func (r *Reader) ReadAccountData(addr []byte, trace bool) ([]byte, error) {
 	// Look in the summary table first
 	v, err := r.tx.GetOne(kv.StateAccounts, addr)
 	if err != nil {
@@ -917,14 +938,17 @@ func (r *Reader) ReadAccountData(addr []byte) ([]byte, error) {
 	}
 	if v != nil {
 		// First 4 bytes is the number of 1-block state diffs containing the key
+		if trace {
+			fmt.Printf("ReadAccountData %x, found in DB: %x, number of diffs: %d\n", addr, v[4:], binary.BigEndian.Uint32(v[:4]))
+		}
 		return v[4:], nil
 	}
 	// Look in the files
-	val := r.a.readAccount(r.blockNum, addr)
+	val := r.a.readAccount(r.blockNum, addr, trace)
 	return val, nil
 }
 
-func (r *Reader) ReadAccountStorage(addr []byte, loc []byte) (*uint256.Int, error) {
+func (r *Reader) ReadAccountStorage(addr []byte, loc []byte, trace bool) (*uint256.Int, error) {
 	// Look in the summary table first
 	dbkey := make([]byte, len(addr)+len(loc))
 	copy(dbkey[0:], addr)
@@ -934,6 +958,9 @@ func (r *Reader) ReadAccountStorage(addr []byte, loc []byte) (*uint256.Int, erro
 		return nil, err
 	}
 	if v != nil {
+		if trace {
+			fmt.Printf("ReadAccountStorage %x %x, found in DB: %x, number of diffs: %d\n", addr, loc, v[4:], binary.BigEndian.Uint32(v[:4]))
+		}
 		if len(v) == 4 {
 			return nil, nil
 		}
@@ -941,14 +968,14 @@ func (r *Reader) ReadAccountStorage(addr []byte, loc []byte) (*uint256.Int, erro
 		return new(uint256.Int).SetBytes(v[4:]), nil
 	}
 	// Look in the files
-	val := r.a.readStorage(r.blockNum, dbkey)
+	val := r.a.readStorage(r.blockNum, dbkey, trace)
 	if val != nil {
 		return new(uint256.Int).SetBytes(val), nil
 	}
 	return nil, nil
 }
 
-func (r *Reader) ReadAccountCode(addr []byte) ([]byte, error) {
+func (r *Reader) ReadAccountCode(addr []byte, trace bool) ([]byte, error) {
 	// Look in the summary table first
 	v, err := r.tx.GetOne(kv.StateCode, addr)
 	if err != nil {
@@ -956,10 +983,13 @@ func (r *Reader) ReadAccountCode(addr []byte) ([]byte, error) {
 	}
 	if v != nil {
 		// First 4 bytes is the number of 1-block state diffs containing the key
+		if trace {
+			fmt.Printf("ReadAccountCode %x, found in DB: %x, number of diffs: %d\n", addr, v[4:], binary.BigEndian.Uint32(v[:4]))
+		}
 		return v[4:], nil
 	}
 	// Look in the files
-	val := r.a.readCode(r.blockNum, addr)
+	val := r.a.readCode(r.blockNum, addr, trace)
 	return val, nil
 }
 
@@ -1027,7 +1057,7 @@ func (w *Writer) Finish() error {
 	return nil
 }
 
-func (w *Writer) UpdateAccountData(addr []byte, account []byte) error {
+func (w *Writer) UpdateAccountData(addr []byte, account []byte, trace bool) error {
 	prevV, err := w.tx.GetOne(kv.StateAccounts, addr)
 	if err != nil {
 		return err
@@ -1035,7 +1065,7 @@ func (w *Writer) UpdateAccountData(addr []byte, account []byte) error {
 	var prevNum uint32
 	var original []byte
 	if prevV == nil {
-		original = w.a.readAccount(w.blockNum, addr)
+		original = w.a.readAccount(w.blockNum, addr, trace)
 	} else {
 		prevNum = binary.BigEndian.Uint32(prevV[:4])
 	}
@@ -1057,10 +1087,14 @@ func (w *Writer) UpdateAccountData(addr []byte, account []byte) error {
 			return err
 		}
 	}
+	if trace {
+		w.a.trace = true
+		w.a.tracedKeys[string(addr)] = struct{}{}
+	}
 	return nil
 }
 
-func (w *Writer) UpdateAccountCode(addr []byte, code []byte) error {
+func (w *Writer) UpdateAccountCode(addr []byte, code []byte, trace bool) error {
 	prevV, err := w.tx.GetOne(kv.StateCode, addr)
 	if err != nil {
 		return err
@@ -1068,7 +1102,7 @@ func (w *Writer) UpdateAccountCode(addr []byte, code []byte) error {
 	var prevNum uint32
 	var original []byte
 	if prevV == nil {
-		original = w.a.readCode(w.blockNum, addr)
+		original = w.a.readCode(w.blockNum, addr, trace)
 	} else {
 		prevNum = binary.BigEndian.Uint32(prevV[:4])
 	}
@@ -1089,6 +1123,10 @@ func (w *Writer) UpdateAccountCode(addr []byte, code []byte) error {
 		if err = w.a.codeChanges.update(addr, original, code); err != nil {
 			return err
 		}
+	}
+	if trace {
+		w.a.trace = true
+		w.a.tracedKeys[string(addr)] = struct{}{}
 	}
 	return nil
 }
@@ -1134,7 +1172,7 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
-func (w *Writer) deleteAccount(addr []byte) error {
+func (w *Writer) deleteAccount(addr []byte, trace bool) error {
 	prevV, err := w.tx.GetOne(kv.StateAccounts, addr)
 	if err != nil {
 		return err
@@ -1142,7 +1180,7 @@ func (w *Writer) deleteAccount(addr []byte) error {
 	var prevNum uint32
 	var original []byte
 	if prevV == nil {
-		original = w.a.readAccount(w.blockNum, addr)
+		original = w.a.readAccount(w.blockNum, addr, trace)
 	} else {
 		prevNum = binary.BigEndian.Uint32(prevV[:4])
 	}
@@ -1162,7 +1200,7 @@ func (w *Writer) deleteAccount(addr []byte) error {
 	return nil
 }
 
-func (w *Writer) deleteCode(addr []byte) error {
+func (w *Writer) deleteCode(addr []byte, trace bool) error {
 	prevV, err := w.tx.GetOne(kv.StateCode, addr)
 	if err != nil {
 		return err
@@ -1170,7 +1208,7 @@ func (w *Writer) deleteCode(addr []byte) error {
 	var prevNum uint32
 	var original []byte
 	if prevV == nil {
-		original = w.a.readCode(w.blockNum, addr)
+		original = w.a.readCode(w.blockNum, addr, trace)
 	} else {
 		prevNum = binary.BigEndian.Uint32(prevV[:4])
 	}
@@ -1191,11 +1229,11 @@ func (w *Writer) deleteCode(addr []byte) error {
 	return nil
 }
 
-func (w *Writer) DeleteAccount(addr []byte) error {
-	if err := w.deleteAccount(addr); err != nil {
+func (w *Writer) DeleteAccount(addr []byte, trace bool) error {
+	if err := w.deleteAccount(addr, trace); err != nil {
 		return err
 	}
-	if err := w.deleteCode(addr); err != nil {
+	if err := w.deleteCode(addr, trace); err != nil {
 		return err
 	}
 	// Find all storage items for this address
@@ -1286,10 +1324,14 @@ func (w *Writer) DeleteAccount(addr []byte) error {
 			return err
 		}
 	}
+	if trace {
+		w.a.trace = true
+		w.a.tracedKeys[string(addr)] = struct{}{}
+	}
 	return nil
 }
 
-func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int) error {
+func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int, trace bool) error {
 	dbkey := make([]byte, len(addr)+len(loc))
 	copy(dbkey[0:], addr)
 	copy(dbkey[len(addr):], loc)
@@ -1300,7 +1342,7 @@ func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int
 	var prevNum uint32
 	var original []byte
 	if prevV == nil {
-		original = w.a.readStorage(w.blockNum, dbkey)
+		original = w.a.readStorage(w.blockNum, dbkey, trace)
 	} else {
 		prevNum = binary.BigEndian.Uint32(prevV[:4])
 	}
@@ -1322,6 +1364,10 @@ func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int
 		if err = w.a.storageChanges.update(dbkey, original, v[4:]); err != nil {
 			return err
 		}
+	}
+	if trace {
+		w.a.trace = true
+		w.a.tracedKeys[string(dbkey)] = struct{}{}
 	}
 	return nil
 }
@@ -1418,7 +1464,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
 		}
 	}
-	if item2.accountsD, item2.accountsIdx, err = mergeIntoStateFile(&cp, 0, "accounts", lastStart, blockTo, w.a.diffDir); err != nil {
+	if item2.accountsD, item2.accountsIdx, err = w.a.mergeIntoStateFile(&cp, 0, "accounts", lastStart, blockTo, w.a.diffDir); err != nil {
 		return fmt.Errorf("mergeIntoStateFile accounts [%d-%d]: %w", lastStart, blockTo, err)
 	}
 	cp = cp[:0]
@@ -1431,7 +1477,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
 		}
 	}
-	if item2.codeD, item2.codeIdx, err = mergeIntoStateFile(&cp, 0, "code", lastStart, blockTo, w.a.diffDir); err != nil {
+	if item2.codeD, item2.codeIdx, err = w.a.mergeIntoStateFile(&cp, 0, "code", lastStart, blockTo, w.a.diffDir); err != nil {
 		return fmt.Errorf("mergeIntoStateFile code [%d-%d]: %w", lastStart, blockTo, err)
 	}
 	cp = cp[:0]
@@ -1446,7 +1492,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 			//fmt.Printf("starting with %x => %x\n", key, val)
 		}
 	}
-	if item2.storageD, item2.storageIdx, err = mergeIntoStateFile(&cp, 20, "storage", lastStart, blockTo, w.a.diffDir); err != nil {
+	if item2.storageD, item2.storageIdx, err = w.a.mergeIntoStateFile(&cp, 20, "storage", lastStart, blockTo, w.a.diffDir); err != nil {
 		return fmt.Errorf("mergeIntoStateFile storage [%d-%d]: %w", lastStart, blockTo, err)
 	}
 	// Remove all items in toAggregate and insert item2 instead
@@ -1503,7 +1549,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	return nil
 }
 
-func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlock, endBlock uint64, dir string) (*compress.Decompressor, *recsplit.Index, error) {
+func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlock, endBlock uint64, dir string) (*compress.Decompressor, *recsplit.Index, error) {
 	datPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
 	idxPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.idx", basename, startBlock, endBlock))
 	var comp *compress.Compressor
@@ -1515,12 +1561,21 @@ func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlo
 	var keyBuf, valBuf []byte
 	for cp.Len() > 0 {
 		lastKey := common.Copy((*cp)[0].key)
-		//fmt.Printf("looking at key %x to merge into [%d-%d]\n", lastKey, startBlock, endBlock)
 		lastVal := common.Copy((*cp)[0].val)
+		if a.trace {
+			if _, ok := a.tracedKeys[string(lastKey)]; ok {
+				fmt.Printf("looking at key %x val [%x] endBlock %d to merge into [%d-%d]\n", lastKey, lastVal, (*cp)[0].endBlock, startBlock, endBlock)
+			}
+		}
 		var first, firstDelete, firstInsert bool
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal((*cp)[0].key, lastKey) {
 			ci1 := (*cp)[0]
+			if a.trace {
+				if _, ok := a.tracedKeys[string(ci1.key)]; ok {
+					fmt.Printf("skipping same key %x val [%x] endBlock %d to merge into [%d-%d]\n", ci1.key, ci1.val, ci1.endBlock, startBlock, endBlock)
+				}
+			}
 			first = true
 			firstDelete = len(ci1.val) == 0
 			firstInsert = !firstDelete && ci1.val[0] != 0
@@ -1553,12 +1608,16 @@ func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlo
 				}
 			}
 		}
-		if !skip {
+		if startBlock != 0 || !skip {
 			if keyBuf != nil && (prefixLen == 0 || len(keyBuf) != prefixLen || bytes.HasPrefix(lastKey, keyBuf)) {
 				if err = comp.AddWord(keyBuf); err != nil {
 					return nil, nil, err
 				}
-				//fmt.Printf("merge key %x into [%d-%d]\n", keyBuf, startBlock, endBlock)
+				if a.trace {
+					if _, ok := a.tracedKeys[string(keyBuf)]; ok {
+						fmt.Printf("merge key %x val [%x] into [%d-%d]\n", keyBuf, valBuf, startBlock, endBlock)
+					}
+				}
 				count++ // Only counting keys, not values
 				if err = comp.AddWord(valBuf); err != nil {
 					return nil, nil, err
@@ -1566,15 +1625,21 @@ func mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlo
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
-			//} else {
-			//	fmt.Printf("skipped key %x for [%d-%d]\n", keyBuf, startBlock, endBlock)
+		} else if a.trace {
+			if _, ok := a.tracedKeys[string(keyBuf)]; ok {
+				fmt.Printf("skipped key %x for [%d-%d]\n", keyBuf, startBlock, endBlock)
+			}
 		}
 	}
 	if keyBuf != nil {
 		if err = comp.AddWord(keyBuf); err != nil {
 			return nil, nil, err
 		}
-		//fmt.Printf("merge key %x into [%d-%d]\n", keyBuf, startBlock, endBlock)
+		if a.trace {
+			if _, ok := a.tracedKeys[string(keyBuf)]; ok {
+				fmt.Printf("merge key %x val [%x] into [%d-%d]\n", keyBuf, valBuf, startBlock, endBlock)
+			}
+		}
 		count++ // Only counting keys, not values
 		if err = comp.AddWord(valBuf); err != nil {
 			return nil, nil, err

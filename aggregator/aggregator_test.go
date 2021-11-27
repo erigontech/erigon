@@ -58,7 +58,7 @@ func TestSimpleAggregator(t *testing.T) {
 		t.Fatal(err)
 	}
 	var account1 = int256(1)
-	if err = w.UpdateAccountData(int160(1), account1); err != nil {
+	if err = w.UpdateAccountData(int160(1), account1, false /* trace */); err != nil {
 		t.Fatal(err)
 	}
 	if err = w.Finish(); err != nil {
@@ -74,7 +74,7 @@ func TestSimpleAggregator(t *testing.T) {
 	defer tx.Rollback()
 	r := a.MakeStateReader(tx, 2)
 	var acc []byte
-	if acc, err = r.ReadAccountData(int160(1)); err != nil {
+	if acc, err = r.ReadAccountData(int160(1), false /* trace */); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(acc, account1) {
@@ -111,7 +111,7 @@ func TestLoopAggregator(t *testing.T) {
 		if w, err = a.MakeStateWriter(rwTx, blockNum); err != nil {
 			t.Fatal(err)
 		}
-		if err = w.UpdateAccountData(accountKey, account1); err != nil {
+		if err = w.UpdateAccountData(accountKey, account1, false /* trace */); err != nil {
 			t.Fatal(err)
 		}
 		if err = w.Finish(); err != nil {
@@ -125,7 +125,7 @@ func TestLoopAggregator(t *testing.T) {
 		}
 		r := a.MakeStateReader(tx, blockNum+1)
 		var acc []byte
-		if acc, err = r.ReadAccountData(accountKey); err != nil {
+		if acc, err = r.ReadAccountData(accountKey, false /* trace */); err != nil {
 			t.Fatal(err)
 		}
 		tx.Rollback()
@@ -146,7 +146,7 @@ func TestLoopAggregator(t *testing.T) {
 			expected = int256(i * 10)
 		}
 		var acc []byte
-		if acc, err = r.ReadAccountData(accountKey); err != nil {
+		if acc, err = r.ReadAccountData(accountKey, false /* trace */); err != nil {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(acc, expected) {
@@ -187,24 +187,24 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 		}
 		switch blockNum {
 		case 1:
-			if err = w.UpdateAccountData(accountKey, account1); err != nil {
+			if err = w.UpdateAccountData(accountKey, account1, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			for s := uint64(0); s < 100; s++ {
-				if err = w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(s+1)); err != nil {
+				if err = w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(s+1), false /* trace */); err != nil {
 					t.Fatal(err)
 				}
 			}
 		case 22:
-			if err = w.DeleteAccount(accountKey); err != nil {
+			if err = w.DeleteAccount(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 		case 45:
-			if err = w.UpdateAccountData(accountKey, account2); err != nil {
+			if err = w.UpdateAccountData(accountKey, account2, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			for s := uint64(50); s < 150; s++ {
-				if err = w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(2*s+1)); err != nil {
+				if err = w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(2*s+1), false /* trace */); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -222,7 +222,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 		switch blockNum {
 		case 1:
 			var acc []byte
-			if acc, err = r.ReadAccountData(accountKey); err != nil {
+			if acc, err = r.ReadAccountData(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(account1, acc) {
@@ -230,7 +230,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 			for s := uint64(0); s < 100; s++ {
 				var v *uint256.Int
-				if v, err = r.ReadAccountStorage(accountKey, int256(s)); err != nil {
+				if v, err = r.ReadAccountStorage(accountKey, int256(s), false /* trace */); err != nil {
 					t.Fatal(err)
 				}
 				if !uint256.NewInt(s + 1).Eq(v) {
@@ -239,7 +239,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 		case 22, 44:
 			var acc []byte
-			if acc, err = r.ReadAccountData(accountKey); err != nil {
+			if acc, err = r.ReadAccountData(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			if len(acc) > 0 {
@@ -247,7 +247,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 			for s := uint64(0); s < 100; s++ {
 				var v *uint256.Int
-				if v, err = r.ReadAccountStorage(accountKey, int256(s)); err != nil {
+				if v, err = r.ReadAccountStorage(accountKey, int256(s), false /* trace */); err != nil {
 					t.Fatal(err)
 				}
 				if v != nil {
@@ -256,7 +256,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 		case 66:
 			var acc []byte
-			if acc, err = r.ReadAccountData(accountKey); err != nil {
+			if acc, err = r.ReadAccountData(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(account2, acc) {
@@ -264,7 +264,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 			}
 			for s := uint64(0); s < 150; s++ {
 				var v *uint256.Int
-				if v, err = r.ReadAccountStorage(accountKey, int256(s)); err != nil {
+				if v, err = r.ReadAccountStorage(accountKey, int256(s), false /* trace */); err != nil {
 					t.Fatal(err)
 				}
 				if s < 50 {
@@ -313,14 +313,14 @@ func TestChangeCode(t *testing.T) {
 		}
 		switch blockNum {
 		case 1:
-			if err = w.UpdateAccountData(accountKey, account1); err != nil {
+			if err = w.UpdateAccountData(accountKey, account1, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
-			if err = w.UpdateAccountCode(accountKey, code1); err != nil {
+			if err = w.UpdateAccountCode(accountKey, code1, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 		case 25:
-			if err = w.DeleteAccount(accountKey); err != nil {
+			if err = w.DeleteAccount(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -337,14 +337,14 @@ func TestChangeCode(t *testing.T) {
 		switch blockNum {
 		case 22:
 			var acc []byte
-			if acc, err = r.ReadAccountData(accountKey); err != nil {
+			if acc, err = r.ReadAccountData(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(account1, acc) {
 				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
 			}
 			var code []byte
-			if code, err = r.ReadAccountCode(accountKey); err != nil {
+			if code, err = r.ReadAccountCode(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(code1, code) {
@@ -352,7 +352,7 @@ func TestChangeCode(t *testing.T) {
 			}
 		case 47:
 			var code []byte
-			if code, err = r.ReadAccountCode(accountKey); err != nil {
+			if code, err = r.ReadAccountCode(accountKey, false /* trace */); err != nil {
 				t.Fatal(err)
 			}
 			if code != nil {
