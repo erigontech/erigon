@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -86,7 +87,7 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBlocks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Type", "application/json")
 
 	query, ok := r.URL.Query()["block"]
 
@@ -97,22 +98,23 @@ func (s *Server) handleBlocks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	blockNstr := query[0]
-	w.Write([]byte(blockNstr))
 
 	blockN, err := strconv.ParseUint(blockNstr, 10, 64)
 	if err != nil {
+		fmt.Println("ERROROR")
 		w.Write([]byte("Error: ERRORROROR"))
 	}
-	fmt.Println(blockN)
+
 	var t rpctest.EthBlockByNumber
 	err = utils.GetBlockByNumber(&s.rpcClient, blockN, &t)
 	if err != nil {
 		fmt.Println("error block by number: ", err)
 		return
 	}
-	fmt.Println(t)
 
-	// json.NewEncoder(w).Encode()
+	if err := json.NewEncoder(w).Encode(&t); err != nil {
+		fmt.Println(err)
+	}
 }
 
 func main() {
