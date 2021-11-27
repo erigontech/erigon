@@ -40,6 +40,7 @@ var (
 	queuedPoolLimit  int
 
 	priceLimit uint64
+	priceBump  uint64
 )
 
 func init() {
@@ -60,6 +61,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&queuedPoolLimit, "txpool.globalqueue", txpool.DefaultConfig.QueuedSubPoolLimit, "Maximum number of non-executable transaction slots for all accounts")
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
+	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpool.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 }
 
 var rootCmd = &cobra.Command{
@@ -112,6 +114,7 @@ var rootCmd = &cobra.Command{
 		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 		cfg.QueuedSubPoolLimit = queuedPoolLimit
 		cfg.MinFeeCap = priceLimit
+		cfg.PriceBump = priceBump
 
 		cacheConfig := kvcache.DefaultCoherentConfig
 		cacheConfig.MetricsLabel = "txpool"
