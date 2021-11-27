@@ -377,6 +377,37 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, start, end int, peerID
 	return !preExisting, nil
 }
 
+func (hd *HeaderDownload) pruneLinkQueue() {
+	for hd.linkQueue.Len() > hd.linkLimit {
+		link := heap.Pop(hd.linkQueue).(*Link)
+		delete(hd.links, link.hash)
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			for i, n := range parentLink.next {
+				if n == link {
+					if i == len(parentLink.next)-1 {
+						parentLink.next = parentLink.next[:i]
+					} else {
+						parentLink.next = append(parentLink.next[:i], parentLink.next[i+1:]...)
+					}
+					break
+				}
+			}
+		}
+		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
+			for i, n := range anchor.links {
+				if n == link {
+					if i == len(anchor.links)-1 {
+						anchor.links = anchor.links[:i]
+					} else {
+						anchor.links = append(anchor.links[:i], anchor.links[i+1:]...)
+					}
+					break
+				}
+			}
+		}
+	}
+}
+
 func (hd *HeaderDownload) AnchorState() string {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
@@ -943,34 +974,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
 		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.linkLimit)
-	}
-	for hd.linkQueue.Len() > hd.linkLimit {
-		link := heap.Pop(hd.linkQueue).(*Link)
-		delete(hd.links, link.hash)
-		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-			for i, n := range parentLink.next {
-				if n == link {
-					if i == len(parentLink.next)-1 {
-						parentLink.next = parentLink.next[:i]
-					} else {
-						parentLink.next = append(parentLink.next[:i], parentLink.next[i+1:]...)
-					}
-					break
-				}
-			}
-		}
-		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
-			for i, n := range anchor.links {
-				if n == link {
-					if i == len(anchor.links)-1 {
-						anchor.links = anchor.links[:i]
-					} else {
-						anchor.links = append(anchor.links[:i], anchor.links[i+1:]...)
-					}
-					break
-				}
-			}
-		}
+		hd.pruneLinkQueue()
 	}
 	select {
 	case hd.DeliveryNotify <- struct{}{}:
