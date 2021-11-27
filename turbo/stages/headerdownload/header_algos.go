@@ -924,14 +924,12 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 			log.Trace("Extended Down", "start", startNum, "end", endNum)
 		}
 	} else if foundTip {
-		if end > 0 {
-			// ExtendUp
-			if err := hd.extendUp(segment, start, end); err != nil {
-				log.Debug("ExtendUp failed", "error", err)
-				return
-			}
-			log.Trace("Extended Up", "start", startNum, "end", endNum)
+		// ExtendUp
+		if err := hd.extendUp(segment, start, end); err != nil {
+			log.Debug("ExtendUp failed", "error", err)
+			return
 		}
+		log.Trace("Extended Up", "start", startNum, "end", endNum)
 	} else {
 		// NewAnchor
 		var err error
