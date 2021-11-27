@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -119,7 +120,7 @@ func (aq *AnchorQueue) Pop() interface{} {
 }
 
 type ChainSegmentHeader struct {
-	HeaderRaw []byte
+	HeaderRaw rlp.RawValue
 	Header    *types.Header
 	Hash      common.Hash
 	Number    uint64

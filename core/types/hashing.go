@@ -167,7 +167,7 @@ var hasherPool = sync.Pool{
 	},
 }
 
-func RawRlpHash(rawRlpData []byte) (h common.Hash) {
+func RawRlpHash(rawRlpData rlp.RawValue) (h common.Hash) {
 	sha := hasherPool.Get().(crypto.KeccakState)
 	defer hasherPool.Put(sha)
 	sha.Reset()
