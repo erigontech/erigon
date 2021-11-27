@@ -896,11 +896,10 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		}
 		return
 	}
-	height := segment[len(segment)-1].Number
-	hash := segment[len(segment)-1].Hash
-	if newBlock || hd.seenAnnounces.Seen(hash) {
-		if height > hd.topSeenHeight {
-			hd.topSeenHeight = height
+	highest := segment[len(segment)-1]
+	if highest.Number > hd.topSeenHeight {
+		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
+			hd.topSeenHeight = highest.Number
 		}
 	}
 	startNum := segment[start].Number
