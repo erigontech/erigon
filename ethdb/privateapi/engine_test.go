@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -76,16 +77,20 @@ var (
 	}
 )
 
+func makeTestDb(ctx context.Context, db kv.RwDB) {
+	tx, _ := db.BeginRw(ctx)
+	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
+	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
+	rawdb.MarkTransition(tx, 0)
+	_ = tx.Commit()
+}
+
 func TestMockDownloadRequest(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
-
-	tx, _ := db.BeginRw(ctx)
-
 	require := require.New(t)
-	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
-	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
 
+	makeTestDb(ctx, db)
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
 
@@ -95,7 +100,6 @@ func TestMockDownloadRequest(t *testing.T) {
 	var reply *remote.EngineExecutePayloadReply
 	done := make(chan bool)
 
-	_ = tx.Commit()
 	go func() {
 		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload1)
 		done <- true
@@ -124,7 +128,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	require.Equal(replyHash[:], startingHeadHash[:])
 
 	// However if we simulate that we finish reverse downloading the chain by updating the head, we just execute 1:1
-	tx, _ = db.BeginRw(ctx)
+	tx, _ := db.BeginRw(ctx)
 	rawdb.WriteHeadBlockHash(tx, payload1Hash)
 	rawdb.WriteHeaderNumber(tx, payload1Hash, 100)
 	_ = tx.Commit()
@@ -151,12 +155,9 @@ func TestMockDownloadRequest(t *testing.T) {
 func TestMockValidExecution(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
-
-	tx, _ := db.BeginRw(ctx)
-
 	require := require.New(t)
-	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
-	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
+
+	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -167,7 +168,6 @@ func TestMockValidExecution(t *testing.T) {
 	var reply *remote.EngineExecutePayloadReply
 	done := make(chan bool)
 
-	_ = tx.Commit()
 	go func() {
 		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload3)
 		done <- true
@@ -190,12 +190,9 @@ func TestMockValidExecution(t *testing.T) {
 func TestMockInvalidExecution(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
-
-	tx, _ := db.BeginRw(ctx)
-
 	require := require.New(t)
-	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
-	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
+
+	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -206,7 +203,6 @@ func TestMockInvalidExecution(t *testing.T) {
 	var reply *remote.EngineExecutePayloadReply
 	done := make(chan bool)
 
-	_ = tx.Commit()
 	go func() {
 		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload3)
 		done <- true
@@ -229,12 +225,9 @@ func TestMockInvalidExecution(t *testing.T) {
 func TestInvalidRequest(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
-
-	tx, _ := db.BeginRw(ctx)
-
 	require := require.New(t)
-	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
-	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
+
+	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -245,7 +238,6 @@ func TestInvalidRequest(t *testing.T) {
 
 	done := make(chan bool)
 
-	_ = tx.Commit()
 	go func() {
 		_, err = backend.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
 			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
@@ -273,12 +265,9 @@ func TestInvalidRequest(t *testing.T) {
 func TestNoTTD(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
-
-	tx, _ := db.BeginRw(ctx)
-
 	require := require.New(t)
-	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
-	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
+
+	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
 	statusCh := make(chan core.ExecutionStatus)
@@ -289,7 +278,6 @@ func TestNoTTD(t *testing.T) {
 
 	done := make(chan bool)
 
-	_ = tx.Commit()
 	go func() {
 		_, err = backend.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
 			ParentHash:    gointerfaces.ConvertHashToH256(common.HexToHash("0x2")),
