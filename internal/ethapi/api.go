@@ -41,6 +41,7 @@ type CallArgs struct {
 	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
 	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
 	Value                *hexutil.Big      `json:"value"`
+	Nonce                *hexutil.Uint64   `json:"nonce"`
 	Data                 *hexutil.Bytes    `json:"data"`
 	AccessList           *types.AccessList `json:"accessList"`
 	ChainID              *hexutil.Big      `json:"chainId,omitempty"`
