@@ -276,3 +276,8 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	var stub interface{}
 	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
 }
+
+// CreateAccessList implements eth_createAccessList
+func (api *APIImpl) CreateAccessList(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, args ethapi.CallArgs) (map[string]interface{}, error) {
+	return nil, nil
+}
