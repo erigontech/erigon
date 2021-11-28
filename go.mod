@@ -65,3 +65,5 @@ require (
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
 	pgregory.net/rapid v0.4.7
 )
+
+replace github.com/ledgerwatch/erigon-lib => github.com/dsavelev/erigon-lib v0.0.1-alpha

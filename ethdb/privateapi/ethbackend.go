@@ -60,6 +60,7 @@ type EthBackend interface {
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
+	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 }
 
 // This is the status of a newly execute block.
@@ -287,4 +288,12 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return &payload, nil
 	}
 	return nil, fmt.Errorf("unknown payload")
+}
+
+func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {
+	nodesInfo, err := s.eth.NodesInfo(int(r.Limit))
+	if err != nil {
+		return nil, err
+	}
+	return nodesInfo, nil
 }
