@@ -877,7 +877,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 					continue
 				}
 				addr := gointerfaces.ConvertH160toAddress(change.Address)
-				id, ok := senders.id(string(addr[:]))
+				id, ok := senders.getID(addr[:])
 				if !ok {
 					continue
 				}
@@ -968,7 +968,7 @@ func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
 func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	senderId, found := p.senders.id(string(addr[:]))
+	senderId, found := p.senders.getID(addr[:])
 	if !found {
 		return 0, false
 	}
@@ -1354,21 +1354,23 @@ func (p *TxPool) flush(db kv.RwDB) (written uint64, err error) {
 	return written, nil
 }
 func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
-	for i := 0; i < len(p.deletedTxs); i++ {
-		if !p.all.hasTxs(p.deletedTxs[i].Tx.senderID) {
-			addr, ok := p.senders.senderID2Addr[p.deletedTxs[i].Tx.senderID]
+	for i, mt := range p.deletedTxs {
+		id := mt.Tx.senderID
+		idHash := mt.Tx.IdHash[:]
+		if !p.all.hasTxs(id) {
+			addr, ok := p.senders.senderID2Addr[id]
 			if ok {
-				delete(p.senders.senderID2Addr, p.deletedTxs[i].Tx.senderID)
-				delete(p.senders.senderIDs, string(addr))
+				delete(p.senders.senderID2Addr, id)
+				delete(p.senders.senderIDs, addr)
 			}
 		}
-		//fmt.Printf("del:%d,%d,%d\n", p.deletedTxs[i].Tx.senderID, p.deletedTxs[i].Tx.nonce, p.deletedTxs[i].Tx.tip)
-		has, err := tx.Has(kv.PoolTransaction, p.deletedTxs[i].Tx.IdHash[:])
+		//fmt.Printf("del:%d,%d,%d\n", mt.Tx.senderID, mt.Tx.nonce, mt.Tx.tip)
+		has, err := tx.Has(kv.PoolTransaction, idHash)
 		if err != nil {
 			return err
 		}
 		if has {
-			if err := tx.Delete(kv.PoolTransaction, p.deletedTxs[i].Tx.IdHash[:], nil); err != nil {
+			if err := tx.Delete(kv.PoolTransaction, idHash, nil); err != nil {
 				return err
 			}
 		}
@@ -1464,14 +1466,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		}
 		txn.rlp = nil // means that we don't need store it in db anymore
 
-		id, ok := p.senders.senderIDs[string(addr)]
-		if !ok {
-			p.senders.senderID++
-			id = p.senders.senderID
-			p.senders.senderIDs[string(addr)] = id
-			p.senders.senderID2Addr[id] = string(addr)
-		}
-		txn.senderID = id
+		txn.senderID = p.senders.getOrCreateID(addr)
 		binary.BigEndian.Uint64(v)
 
 		isLocalTx := p.isLocalLRU.Contains(string(k))
@@ -1738,9 +1733,20 @@ func newSendersCache() *sendersBatch {
 	return &sendersBatch{senderIDs: map[string]uint64{}, senderID2Addr: map[uint64]string{}}
 }
 
-func (sc *sendersBatch) id(addr string) (uint64, bool) {
-	id, ok := sc.senderIDs[addr]
+func (sc *sendersBatch) getID(addr []byte) (uint64, bool) {
+	id, ok := sc.senderIDs[string(addr)]
 	return id, ok
+}
+func (sc *sendersBatch) getOrCreateID(addr []byte) uint64 {
+	addrS := string(addr)
+	id, ok := sc.senderIDs[addrS]
+	if !ok {
+		sc.senderID++
+		id = sc.senderID
+		sc.senderIDs[addrS] = id
+		sc.senderID2Addr[id] = addrS
+	}
+	return id
 }
 func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint64, balance uint256.Int, err error) {
 	addr, ok := sc.senderID2Addr[id]
@@ -1762,19 +1768,8 @@ func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (nonce uint
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxs TxSlots) (err error) {
-	for i := 0; i < len(newTxs.txs); i++ {
-		addr := newTxs.senders.At(i)
-		addrS := string(addr)
-		id, ok := sc.id(addrS)
-		if ok {
-			newTxs.txs[i].senderID = id
-			continue
-		}
-		sc.senderID++
-		sc.senderIDs[string(newTxs.senders.At(i))] = sc.senderID
-		sc.senderID2Addr[sc.senderID] = addrS
-
-		newTxs.txs[i].senderID = sc.senderID
+	for i, txn := range newTxs.txs {
+		txn.senderID = sc.getOrCreateID(newTxs.senders.At(i))
 	}
 	return nil
 }
@@ -1782,39 +1777,15 @@ func (sc *sendersBatch) onNewBlock(stateChanges *remote.StateChangeBatch, unwind
 	for _, diff := range stateChanges.ChangeBatch {
 		for _, change := range diff.Changes { // merge state changes
 			addrB := gointerfaces.ConvertH160toAddress(change.Address)
-			addr := string(addrB[:])
-			_, ok := sc.id(addr)
-			if !ok {
-				sc.senderID++
-				sc.senderIDs[addr] = sc.senderID
-				sc.senderID2Addr[sc.senderID] = addr
-			}
+			sc.getOrCreateID(addrB[:])
 		}
 
-		for i := 0; i < unwindTxs.senders.Len(); i++ {
-			addr := unwindTxs.senders.At(i)
-			addrS := string(addr)
-			id, ok := sc.id(addrS)
-			if !ok {
-				sc.senderID++
-				id = sc.senderID
-				sc.senderIDs[addrS] = sc.senderID
-				sc.senderID2Addr[sc.senderID] = addrS
-			}
-			unwindTxs.txs[i].senderID = id
+		for i, txn := range unwindTxs.txs {
+			txn.senderID = sc.getOrCreateID(unwindTxs.senders.At(i))
 		}
 
-		for i := 0; i < len(minedTxs.txs); i++ {
-			addr := minedTxs.senders.At(i)
-			addrS := string(addr)
-			id, ok := sc.id(addrS)
-			if !ok {
-				sc.senderID++
-				id = sc.senderID
-				sc.senderIDs[addrS] = sc.senderID
-				sc.senderID2Addr[sc.senderID] = addrS
-			}
-			minedTxs.txs[i].senderID = id
+		for i, txn := range minedTxs.txs {
+			txn.senderID = sc.getOrCreateID(minedTxs.senders.At(i))
 		}
 	}
 	return nil
