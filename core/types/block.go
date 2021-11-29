@@ -170,6 +170,10 @@ func (h Header) EncodingSize() int {
 		encodingSize += baseFeeLen
 	}
 
+	if h.Eip3675 {
+		encodingSize += common.HashLength + 1
+	}
+
 	return encodingSize
 }
 
