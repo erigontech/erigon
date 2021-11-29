@@ -32,14 +32,6 @@ import (
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
 
-// This is the status of a newly execute block.
-// Hash: Block hash
-// Valid: if the block's execution happened without major problems
-type ExecutionStatus struct {
-	Hash  common.Hash
-	Valid bool
-}
-
 /*
 The State Transitioning Model
 

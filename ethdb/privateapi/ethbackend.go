@@ -13,8 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -46,9 +44,12 @@ type EthBackendServer struct {
 	// Send reverse sync starting point to staged sync
 	reverseDownloadCh chan<- types.Block
 	// Notify whether the current block being processed is Valid or not
-	statusCh <-chan core.ExecutionStatus
+	statusCh <-chan ExecutionStatus
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
+	latestHead common.Hash // The last head processed through ethbackend
+	// Determines wheter stageloop is processing a block or not
+	waitingForPOSHeaders *bool
 }
 
 type EthBackend interface {
@@ -57,11 +58,20 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 }
 
+// This is the status of a newly execute block.
+// Hash: Block hash
+// Status: block's status
+type ExecutionStatus struct {
+	HeadHash common.Hash
+	Status   string
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- types.Block, statusCh <-chan core.ExecutionStatus,
+	config *params.ChainConfig, reverseDownloadCh chan<- types.Block, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh}
+		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForPOSHeaders: waitingForPOSHeaders,
+	}
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -176,12 +186,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
-
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	currentHead := rawdb.ReadHeadBlockHash(tx)
 	// Check mandatory fields
 	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
 		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
@@ -190,31 +194,15 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, fmt.Errorf("invalid execution payload")
 	}
 
-	// If another payload is already commissioned then we just reply with syncing
-	headNumber := rawdb.ReadHeaderNumber(tx, currentHead)
-	if headNumber == nil {
-		return nil, fmt.Errorf("cannot find latest block number")
-	}
-
-	isTrans, err := rawdb.Transitioned(tx, *headNumber)
-	if err != nil {
-		return nil, err
-	}
-
-	if !isTrans {
-		// We are still syncing proof-of-work chain
-		return &remote.EngineExecutePayloadReply{
-			Status:          Syncing,
-			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-		}, nil
-	}
+	var err error
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
-	if s.numberSent > *headNumber {
+	// If another payload is already commissioned then we just reply with syncing
+	if !(*s.waitingForPOSHeaders) {
 		// We are still syncing a commisioned payload
 		return &remote.EngineExecutePayloadReply{
 			Status:          Syncing,
-			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+			LatestValidHash: gointerfaces.ConvertHashToH256(s.latestHead),
 		}, nil
 	}
 	// Let's check if we have parent hash, if we have it we can process the payload right now.
@@ -271,27 +259,14 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	// Send the block over
 	s.numberSent = req.BlockNumber
 	s.reverseDownloadCh <- *types.NewBlock(&header, transactions, nil, nil)
-	// Check if current block is next for execution, if not, commission it and start
-	// Reverse-download the chain from its block number and hash.
-	if header.ParentHash != currentHead {
-		return &remote.EngineExecutePayloadReply{
-			Status:          Syncing,
-			LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
-		}, nil
-	}
+
 	executedStatus := <-s.statusCh
-	if executedStatus.Valid {
-		return &remote.EngineExecutePayloadReply{
-			Status:          Valid,
-			LatestValidHash: gointerfaces.ConvertHashToH256(blockHash),
-		}, nil
-	}
 
+	s.latestHead = executedStatus.HeadHash
 	return &remote.EngineExecutePayloadReply{
-		Status:          Invalid,
-		LatestValidHash: gointerfaces.ConvertHashToH256(currentHead),
+		Status:          executedStatus.Status,
+		LatestValidHash: gointerfaces.ConvertHashToH256(executedStatus.HeadHash),
 	}, nil
-
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)

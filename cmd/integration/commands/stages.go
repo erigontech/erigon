@@ -1099,7 +1099,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, chainConfig.TerminalTotalDifficulty, downloadServer, tmpdir, nil, nil, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, chainConfig.TerminalTotalDifficulty, downloadServer, tmpdir, nil, nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}

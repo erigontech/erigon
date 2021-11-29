@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -92,9 +91,10 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	makeTestDb(ctx, db)
 	reverseDownloadCh := make(chan types.Block)
-	statusCh := make(chan core.ExecutionStatus)
+	statusCh := make(chan ExecutionStatus)
+	waitingForHeaders := true
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -106,9 +106,12 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	<-reverseDownloadCh
-
+	statusCh <- ExecutionStatus{
+		HeadHash: startingHeadHash,
+		Status:   Syncing,
+	}
+	waitingForHeaders = false
 	<-done
-
 	require.NoError(err)
 	require.Equal(reply.Status, Syncing)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
@@ -138,18 +141,12 @@ func TestMockDownloadRequest(t *testing.T) {
 		done <- true
 	}()
 
-	<-reverseDownloadCh
-
-	statusCh <- core.ExecutionStatus{
-		Hash:  payload2Hash,
-		Valid: true,
-	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, Valid)
+	require.Equal(reply.Status, Syncing)
 	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	require.Equal(replyHash[:], payload2Hash[:])
+	require.Equal(replyHash[:], startingHeadHash[:])
 }
 
 func TestMockValidExecution(t *testing.T) {
@@ -160,9 +157,10 @@ func TestMockValidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
-	statusCh := make(chan core.ExecutionStatus)
+	statusCh := make(chan ExecutionStatus)
+	waitingForHeaders := true
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -175,9 +173,9 @@ func TestMockValidExecution(t *testing.T) {
 
 	<-reverseDownloadCh
 
-	statusCh <- core.ExecutionStatus{
-		Hash:  payload3Hash,
-		Valid: true,
+	statusCh <- ExecutionStatus{
+		HeadHash: payload3Hash,
+		Status:   Valid,
 	}
 	<-done
 
@@ -195,9 +193,10 @@ func TestMockInvalidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
-	statusCh := make(chan core.ExecutionStatus)
+	statusCh := make(chan ExecutionStatus)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh)
+	waitingForHeaders := true
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -210,9 +209,9 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	<-reverseDownloadCh
 
-	statusCh <- core.ExecutionStatus{
-		Hash:  payload3Hash,
-		Valid: false,
+	statusCh <- ExecutionStatus{
+		HeadHash: startingHeadHash,
+		Status:   Invalid,
 	}
 	<-done
 
@@ -230,9 +229,10 @@ func TestInvalidRequest(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
-	statusCh := make(chan core.ExecutionStatus)
+	statusCh := make(chan ExecutionStatus)
+	waitingForHeaders := true
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
 	var err error
 
@@ -270,9 +270,10 @@ func TestNoTTD(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	reverseDownloadCh := make(chan types.Block)
-	statusCh := make(chan core.ExecutionStatus)
+	statusCh := make(chan ExecutionStatus)
+	waitingForHeaders := true
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
 	var err error
 
