@@ -104,18 +104,29 @@ func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig {
 
 func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
 func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
+func (s *AllSnapshots) BlocksAvailable() uint64        { return s.blocksAvailable }
+func (s *AllSnapshots) IndicesAvailable() uint64       { return s.blocks[len(s.blocks)-1].Transactions.To }
 
 func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
-	headers, err = latestSegment(s.dir, Headers)
-	if err != nil {
+	if headers, err = latestSegment(s.dir, Headers); err != nil {
 		return
 	}
-	bodies, err = latestSegment(s.dir, Bodies)
-	if err != nil {
+	if bodies, err = latestSegment(s.dir, Bodies); err != nil {
 		return
 	}
-	txs, err = latestSegment(s.dir, Transactions)
-	if err != nil {
+	if txs, err = latestSegment(s.dir, Transactions); err != nil {
+		return
+	}
+	return
+}
+func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error) {
+	if headers, err = latestIdx(s.dir, Headers); err != nil {
+		return
+	}
+	if bodies, err = latestIdx(s.dir, Bodies); err != nil {
+		return
+	}
+	if txs, err = latestIdx(s.dir, Transactions); err != nil {
 		return
 	}
 	return
@@ -164,7 +175,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 	}
 	var prevTo uint64
 	for _, f := range files {
-		from, to, _, err := ParseCompressedFileName(f)
+		from, to, _, err := ParseFileName(f, ".seg")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
@@ -244,6 +255,26 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 	return snapshot, false
 }
 
+func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
+	for _, sn := range s.blocks {
+		f := SegmentFileName(sn.Headers.From, sn.Headers.To, Headers)
+		if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
+			return err
+		}
+
+		f = SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies)
+		if err := BodiesIdx(f, sn.Bodies.From); err != nil {
+			return err
+		}
+
+		f = SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions)
+		if err := TransactionsHashIdx(chainID, sn.Transactions.From*1_000_000, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 	files, err := segments(dir, ofType)
 	if err != nil {
@@ -251,7 +282,27 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 	}
 	maxBlock := uint64(0)
 	for _, f := range files {
-		_, to, _, err := ParseCompressedFileName(f)
+		_, to, _, err := ParseFileName(f, ".seg")
+		if err != nil {
+			if errors.Is(ErrInvalidCompressedFileName, err) {
+				continue
+			}
+			return 0, err
+		}
+		if maxBlock < to {
+			maxBlock = to
+		}
+	}
+	return maxBlock, nil
+}
+func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
+	files, err := idxFiles(dir, ofType)
+	if err != nil {
+		return 0, err
+	}
+	maxBlock := uint64(0)
+	for _, f := range files {
+		_, to, _, err := ParseFileName(f, ".idx")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
@@ -289,16 +340,40 @@ func segments(dir string, ofType SnapshotType) ([]string, error) {
 	sort.Strings(res)
 	return res, nil
 }
+func idxFiles(dir string, ofType SnapshotType) ([]string, error) {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range files {
+		if !IsCorrectFileName(f.Name()) {
+			continue
+		}
+		if f.Size() == 0 {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ".idx" { // filter out only compressed files
+			continue
+		}
+		if !strings.Contains(f.Name(), string(ofType)) {
+			continue
+		}
+		res = append(res, f.Name())
+	}
+	sort.Strings(res)
+	return res, nil
+}
 
 func IsCorrectFileName(name string) bool {
 	parts := strings.Split(name, "-")
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
-func ParseCompressedFileName(name string) (from, to uint64, snapshotType SnapshotType, err error) {
+func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType SnapshotType, err error) {
 	_, fileName := filepath.Split(name)
 	ext := filepath.Ext(fileName)
-	if ext != ".seg" {
+	if ext != expectedExt {
 		return 0, 0, "", fmt.Errorf("%w. Ext: %s", ErrInvalidCompressedFileName, ext)
 	}
 	onlyName := fileName[:len(fileName)-len(ext)]

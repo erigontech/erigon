@@ -71,6 +71,7 @@ func HeadersForward(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
+
 	if cfg.snapshots != nil && !cfg.snapshots.AllSegmentsAvailable() {
 		// wait for Downloader service to download all expected snapshots
 		logEvery := time.NewTicker(logInterval)
@@ -82,6 +83,12 @@ func HeadersForward(
 			}
 			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
 			if expect <= headers && expect <= bodies && expect <= txs {
+				if err := cfg.snapshots.ReopenSegments(); err != nil {
+					return err
+				}
+				if expect > cfg.snapshots.BlocksAvailable() {
+					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+				}
 				cfg.snapshots.SetAllSegmentsAvailable(true)
 				break
 			}

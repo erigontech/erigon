@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -22,18 +25,48 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 }
 
 type BlockHashesCfg struct {
-	db     kv.RwDB
-	tmpDir string
+	db        kv.RwDB
+	tmpDir    string
+	snapshots *snapshotsync.AllSnapshots
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string, snapshots *snapshotsync.AllSnapshots) BlockHashesCfg {
 	return BlockHashesCfg{
-		db:     db,
-		tmpDir: tmpDir,
+		db:        db,
+		tmpDir:    tmpDir,
+		snapshots: snapshots,
 	}
 }
 
 func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+	if cfg.snapshots != nil {
+		if !cfg.snapshots.AllSegmentsAvailable() {
+			return fmt.Errorf("not all snapshot segments are available")
+		}
+
+		// wait for Downloader service to download all expected snapshots
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		headers, bodies, txs, err := cfg.snapshots.IdxAvailability()
+		if err != nil {
+			return err
+		}
+		expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+		if expect > headers || expect > bodies || expect > txs {
+			if err := cfg.snapshots.BuildIndices(*u256.Num1); err != nil {
+				return err
+			}
+		}
+
+		if err := cfg.snapshots.ReopenIndices(); err != nil {
+			return err
+		}
+		if expect > cfg.snapshots.BlocksAvailable() {
+			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+		}
+		cfg.snapshots.SetAllSegmentsAvailable(true)
+	}
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
