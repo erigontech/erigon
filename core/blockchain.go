@@ -162,27 +162,27 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	//var newBlock *types.Block
+	var newBlock *types.Block
 	if !vmConfig.ReadOnly {
 		var err error
-		if _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, usedGas); err != nil {
+		if newBlock, err = FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, usedGas); err != nil {
 			return nil, err
 		}
 	}
 
-	//if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-	//	if newBlock.ReceiptHash() != block.Header().ReceiptHash {
-	//		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
-	//	}
-	//}
-	//if newBlock.GasUsed() != header.GasUsed {
-	//	return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
-	//}
-	//if !vmConfig.NoReceipts {
-	//	if newBlock.Bloom() != header.Bloom {
-	//		return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
-	//	}
-	//}
+	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
+		if newBlock.ReceiptHash() != block.Header().ReceiptHash {
+			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
+		}
+	}
+	if newBlock.GasUsed() != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	}
+	if !vmConfig.NoReceipts {
+		if newBlock.Bloom() != header.Bloom {
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
+		}
+	}
 
 	return receipts, nil
 }
