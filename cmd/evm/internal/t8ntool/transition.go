@@ -285,7 +285,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 		tx := txWithKey.tx
 		key := txWithKey.key
 		v, r, s := tx.RawSignatureValues()
-		if key != nil && v.BitLen()+r.BitLen()+s.BitLen() == 0 {
+		if key != nil && v.IsZero() && r.IsZero() && s.IsZero() {
 			// This transaction needs to be signed
 			signed, err := types.SignTx(tx, signer, key)
 			if err != nil {

@@ -120,7 +120,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
-			if gasFeeCap.BitLen() > 0 || gasTipCap.BitLen() > 0 {
+			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
 				gasPrice = math.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
 			}
 		}
