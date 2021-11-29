@@ -189,7 +189,6 @@ func ExecuteBlockEphemerally(
 }
 
 func SysCallContract(from, contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (gasUsed uint64, returnData []byte, err error) {
-	gp := new(GasPool).AddGas(math.MaxUint64 / 2)
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -203,40 +202,23 @@ func SysCallContract(from, contract common.Address, data []byte, chainConfig par
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
+	blockContext := NewEVMBlockContext(header, nil, engine, &from, nil)
+
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	ret, leftOverGas, err := evm.Call(
+		vm.AccountRef(msg.From()),
+		*msg.To(),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		false,
+	)
+
+	//res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return 0, nil, err
 	}
-	return res.UsedGas, res.ReturnData, nil
-}
-
-func SysCallContractReadonly(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result *ExecutionResult, err error) {
-	gp := new(GasPool).AddGas(math.MaxUint64 / 2)
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	msg := types.NewMessage(
-		state.SystemAddress,
-		&contract,
-		0, u256.Num0,
-		math.MaxUint64/2, u256.Num0,
-		nil, nil,
-		data, nil, false,
-	)
-	vmConfig := vm.Config{
-		ReadOnly:   true,
-		NoReceipts: true,
-	}
-	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
-	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
+	return msg.Gas() - leftOverGas, ret, nil
 }
 
 // from the null sender, with 50M gas.
