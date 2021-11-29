@@ -50,11 +50,7 @@ type operation struct {
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
 
-	halts   bool // indicates whether the operation should halt further execution
-	jumps   bool // indicates whether the program counter should not increment
-	writes  bool // determines whether this a state modifying operation
-	reverts bool // determines whether the operation reverts state (implicitly halts)
-	returns bool // determines whether the operations sets the return data content
+	writes bool // determines whether this a state modifying operation
 }
 
 var (
@@ -188,7 +184,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush:     1,
 		memorySize:  memoryCreate2,
 		writes:      true,
-		returns:     true,
 	}
 	validate(&instructionSet)
 	return instructionSet
@@ -207,7 +202,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryStaticCall,
-		returns:     true,
 	}
 	instructionSet[RETURNDATASIZE] = &operation{
 		execute:     opReturnDataSize,
@@ -235,8 +229,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPop:     2,
 		numPush:    0,
 		memorySize: memoryRevert,
-		reverts:    true,
-		returns:    true,
 	}
 	validate(&instructionSet)
 	return instructionSet
@@ -278,7 +270,6 @@ func newHomesteadInstructionSet() JumpTable {
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryDelegateCall,
-		returns:     true,
 	}
 	validate(&instructionSet)
 	return instructionSet
@@ -295,7 +286,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(0, 0),
 			numPop:      0,
 			numPush:     0,
-			halts:       true,
 		},
 		ADD: {
 			execute:     opAdd,
@@ -704,7 +694,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(1, 0),
 			numPop:      1,
 			numPush:     0,
-			jumps:       true,
 		},
 		JUMPI: {
 			execute:     opJumpi,
@@ -713,7 +702,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:    maxStack(2, 0),
 			numPop:      2,
 			numPush:     0,
-			jumps:       true,
 		},
 		PC: {
 			execute:     opPc,
@@ -1447,7 +1435,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 			memorySize:  memoryCreate,
 			writes:      true,
-			returns:     true,
 		},
 		CALL: {
 			execute:     opCall,
@@ -1458,7 +1445,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
-			returns:     true,
 		},
 		CALLCODE: {
 			execute:     opCallCode,
@@ -1469,7 +1455,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
-			returns:     true,
 		},
 		RETURN: {
 			execute:    opReturn,
@@ -1479,7 +1464,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryReturn,
-			halts:      true,
 		},
 		SELFDESTRUCT: {
 			execute:    opSuicide,
@@ -1488,7 +1472,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:   maxStack(1, 0),
 			numPop:     1,
 			numPush:    0,
-			halts:      true,
 			writes:     true,
 		},
 	}
