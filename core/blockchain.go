@@ -177,8 +177,6 @@ func ExecuteBlockEphemerally(
 }
 
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
-	gp := new(GasPool).AddGas(50_000_000)
-
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -191,15 +189,23 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		nil, nil,
 		data, nil, false,
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
-	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	evm := vm.NewEVM(blockContext, vm.TxContext{}, ibs, &chainConfig, vm.Config{})
+	res, _, err := evm.Call(
+		vm.AccountRef(msg.From()),
+		*msg.To(),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		false,
+	)
+	// res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
-	return res.ReturnData, nil
+
+	return res, nil
 }
 
 // from the null sender, with 50M gas.
