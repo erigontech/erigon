@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -50,6 +51,7 @@ type EthBackendServer struct {
 	latestHead common.Hash // The last head processed through ethbackend
 	// Determines wheter stageloop is processing a block or not
 	waitingForPOSHeaders *bool
+	mu                   sync.Mutex
 }
 
 type EthBackend interface {
@@ -271,6 +273,9 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
