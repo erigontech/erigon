@@ -2,6 +2,7 @@ package snapshotsync
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -80,29 +82,85 @@ type BlocksSnapshot struct {
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type AllSnapshots struct {
-	dir             string
-	blocksAvailable uint64
-	blocks          []*BlocksSnapshot
+	dir                  string
+	allSegmentsAvailable bool
+	blocksAvailable      uint64
+	blocks               []*BlocksSnapshot
+	cfg                  *params.SnapshotsConfig
 }
 
-func MustOpenAll(dir string) *AllSnapshots {
-	res, err := OpenAll(dir)
-	if err != nil {
-		panic(err)
-	}
-	return res
-}
-
-// OpenAll - opens all snapshots. But to simplify everything:
+// NewAllSnapshots - opens all snapshots. But to simplify everything:
 //  - it opens snapshots only on App start and immutable after
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func OpenAll(dir string) (*AllSnapshots, error) {
-	all := &AllSnapshots{dir: dir}
-	files, err := headersSegments(dir)
+func NewAllSnapshots(dir string, cfg *params.SnapshotsConfig) *AllSnapshots {
+	return &AllSnapshots{dir: dir, cfg: cfg}
+}
+
+func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig {
+	return s.cfg
+}
+
+func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
+func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
+
+func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
+	headers, err = latestSegment(s.dir, Headers)
 	if err != nil {
-		return nil, err
+		return
+	}
+	bodies, err = latestSegment(s.dir, Bodies)
+	if err != nil {
+		return
+	}
+	txs, err = latestSegment(s.dir, Transactions)
+	if err != nil {
+		return
+	}
+	return
+}
+
+func (s *AllSnapshots) ReopenIndices() error {
+	for _, bs := range s.blocks {
+		if bs.Headers.Idx != nil {
+			bs.Headers.Idx.Close()
+			bs.Headers.Idx = nil
+		}
+		idx, err := recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Headers.From, bs.Headers.To, Headers)))
+		if err != nil {
+			return err
+		}
+		bs.Headers.Idx = idx
+
+		if bs.Bodies.Idx != nil {
+			bs.Bodies.Idx.Close()
+			bs.Bodies.Idx = nil
+		}
+		idx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Bodies.From, bs.Bodies.To, Bodies)))
+		if err != nil {
+			return err
+		}
+		bs.Bodies.Idx = idx
+
+		if bs.Transactions.Idx != nil {
+			bs.Transactions.Idx.Close()
+			bs.Transactions.Idx = nil
+		}
+		idx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Transactions.From, bs.Transactions.To, Transactions)))
+		if err != nil {
+			return err
+		}
+		bs.Transactions.Idx = idx
+	}
+	return nil
+}
+
+func (s *AllSnapshots) ReopenSegments() error {
+	dir := s.dir
+	files, err := segments(dir, Headers)
+	if err != nil {
+		return err
 	}
 	var prevTo uint64
 	for _, f := range files {
@@ -111,7 +169,7 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
 			}
-			return nil, err
+			return err
 		}
 		if to == prevTo {
 			continue
@@ -130,17 +188,9 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 				if errors.Is(err, os.ErrNotExist) {
 					break
 				}
-				return nil, err
+				return err
 			}
-
-			idx, err := recsplit.OpenIndex(path.Join(dir, IdxFileName(from, to, Bodies)))
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					break
-				}
-				return nil, err
-			}
-			blocksSnapshot.Bodies = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d, Idx: idx}
+			blocksSnapshot.Bodies = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d}
 		}
 		{
 			fileName := SegmentFileName(from, to, Headers)
@@ -149,17 +199,9 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 				if errors.Is(err, os.ErrNotExist) {
 					break
 				}
-				return nil, err
+				return err
 			}
-			idx, err := recsplit.OpenIndex(path.Join(dir, IdxFileName(from, to, Headers)))
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					break
-				}
-				return nil, err
-			}
-
-			blocksSnapshot.Headers = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d, Idx: idx}
+			blocksSnapshot.Headers = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d}
 		}
 		{
 			fileName := SegmentFileName(from, to, Transactions)
@@ -168,25 +210,18 @@ func OpenAll(dir string) (*AllSnapshots, error) {
 				if errors.Is(err, os.ErrNotExist) {
 					break
 				}
-				return nil, err
+				return err
 			}
-			idx, err := recsplit.OpenIndex(path.Join(dir, IdxFileName(from, to, Transactions)))
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					break
-				}
-				return nil, err
-			}
-			blocksSnapshot.Transactions = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d, Idx: idx}
+			blocksSnapshot.Transactions = &Snapshot{From: from, To: to, File: path.Join(dir, fileName), Segment: d}
 		}
 
-		all.blocks = append(all.blocks, blocksSnapshot)
-		all.blocksAvailable = blocksSnapshot.To
+		s.blocks = append(s.blocks, blocksSnapshot)
+		s.blocksAvailable = blocksSnapshot.To
 	}
-	return all, nil
+	return nil
 }
 
-func (s AllSnapshots) Close() {
+func (s *AllSnapshots) Close() {
 	for _, s := range s.blocks {
 		s.Headers.Idx.Close()
 		s.Headers.Segment.Close()
@@ -197,7 +232,7 @@ func (s AllSnapshots) Close() {
 	}
 }
 
-func (s AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
+func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
 	if blockNumber > s.blocksAvailable {
 		return snapshot, false
 	}
@@ -209,7 +244,28 @@ func (s AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, foun
 	return snapshot, false
 }
 
-func headersSegments(dir string) ([]string, error) {
+func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
+	files, err := segments(dir, ofType)
+	if err != nil {
+		return 0, err
+	}
+	maxBlock := uint64(0)
+	for _, f := range files {
+		_, to, _, err := ParseCompressedFileName(f)
+		if err != nil {
+			if errors.Is(ErrInvalidCompressedFileName, err) {
+				continue
+			}
+			return 0, err
+		}
+		if maxBlock < to {
+			maxBlock = to
+		}
+	}
+	return maxBlock, nil
+}
+
+func segments(dir string, ofType SnapshotType) ([]string, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -225,7 +281,7 @@ func headersSegments(dir string) ([]string, error) {
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
 			continue
 		}
-		if !strings.Contains(f.Name(), string(Headers)) {
+		if !strings.Contains(f.Name(), string(ofType)) {
 			continue
 		}
 		res = append(res, f.Name())
@@ -644,4 +700,23 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return e
 	}
 	return nil
+}
+
+type SnapshotInfo struct {
+	MinimumAvailability uint64
+}
+
+func FileCheckSum(file string) (common.Hash, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return common.Hash{}, err
+	}
+
+	hash := h.Sum(nil)
+	return common.BytesToHash(hash), nil
 }

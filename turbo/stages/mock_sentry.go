@@ -270,6 +270,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	blockReader := snapshotsync.NewBlockReader()
+	var allSnapshots *snapshotsync.AllSnapshots
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
@@ -280,6 +281,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			penalize,
 			cfg.BatchSize,
 			false,
+			allSnapshots,
 		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,

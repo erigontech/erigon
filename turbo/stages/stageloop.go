@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -226,11 +227,9 @@ func NewStagedSync(
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
+	var allSnapshots *snapshotsync.AllSnapshots
 	if cfg.Snapshot.Enabled {
-		allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
-		if err != nil {
-			return nil, err
-		}
+		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, params.KnownSnapshots(controlServer.ChainConfig.ChainName))
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
@@ -246,6 +245,7 @@ func NewStagedSync(
 			controlServer.Penalize,
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
+			allSnapshots,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,

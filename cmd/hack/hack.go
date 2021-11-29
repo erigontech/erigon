@@ -2559,12 +2559,13 @@ func recsplitWholeChain(chaindata string) error {
 			return 0, err
 		}
 		last := binary.BigEndian.Uint64(k)
+
 		// TODO: enable next condition (disabled for tests)
-		//if last > params.FullImmutabilityThreshold {
-		//	last -= params.FullImmutabilityThreshold
-		//} else {
-		//	last = 0
-		//}
+		if last > params.FullImmutabilityThreshold {
+			last -= params.FullImmutabilityThreshold
+		} else {
+			last = 0
+		}
 		last = last - last%blocksPerFile
 		return last, nil
 	}
@@ -2640,7 +2641,7 @@ func recsplitWholeChain(chaindata string) error {
 		_ = os.Remove(fileName + ".dat")
 
 		//nolint
-		break // TODO: remove me - useful for tests
+		//break // TODO: remove me - useful for tests
 	}
 	return nil
 }

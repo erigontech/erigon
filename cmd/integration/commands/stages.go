@@ -585,7 +585,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, getBlockReader())
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, getBlockReader(chainConfig))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)
@@ -615,7 +615,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
-	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
@@ -644,7 +644,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 
 	log.Info("StageExec", "progress", execStage.BlockNumber)
 	log.Info("StageTrie", "progress", s.BlockNumber)
-	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader())
+	cfg := stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader(chainConfig))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.IntermediateHashes, s.BlockNumber-unwind, s.BlockNumber)
 		if err := stagedsync.UnwindIntermediateHashesStage(u, s, tx, cfg, ctx); err != nil {
@@ -1022,21 +1022,24 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *snapshotsync.AllSnapshots
 
-func allSnapshots() *snapshotsync.AllSnapshots {
+func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 	openSnapshotOnce.Do(func() {
 		snapshotCfg := ethconfig.Snapshot{}
 		if enableSnapshot {
 			snapshotCfg.Enabled = true
 			snapshotCfg.Dir = path.Join(datadir, "snapshots")
-			_allSnapshotsSingleton = snapshotsync.MustOpenAll(snapshotCfg.Dir)
+			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, params.KnownSnapshots(cc.ChainName))
+			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
+				panic(err)
+			}
 		}
 	})
 	return _allSnapshotsSingleton
 }
 
-func getBlockReader() (blockReader interfaces.FullBlockReader) {
+func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockReader) {
 	blockReader = snapshotsync.NewBlockReader()
-	if sn := allSnapshots(); sn != nil {
+	if sn := allSnapshots(cc); sn != nil {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)
 	}
 	return blockReader
@@ -1110,7 +1113,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, false, true, tmpdir, getBlockReader()),
+			stagedsync.StageTrieCfg(db, false, true, tmpdir, getBlockReader(chainConfig)),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

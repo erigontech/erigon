@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 
 	"github.com/ledgerwatch/log/v3"
@@ -33,6 +34,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	snapshots         *snapshotsync.AllSnapshots
 }
 
 func StageHeadersCfg(
@@ -44,6 +46,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
+	snapshots *snapshotsync.AllSnapshots,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -54,6 +57,7 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		batchSize:         batchSize,
 		noP2PDiscovery:    noP2PDiscovery,
+		snapshots:         snapshots,
 	}
 }
 
@@ -67,6 +71,31 @@ func HeadersForward(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
+	if cfg.snapshots != nil && !cfg.snapshots.AllSegmentsAvailable() {
+		// wait for Downloader service to download all expected snapshots
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		for {
+			headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
+			if err != nil {
+				return err
+			}
+			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+			if expect <= headers && expect <= bodies && expect <= txs {
+				cfg.snapshots.SetAllSegmentsAvailable(true)
+				break
+			}
+			time.Sleep(10 * time.Second)
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+			}
+		}
+	}
+
 	var headerProgress uint64
 	var err error
 	useExternalTx := tx != nil
