@@ -11,13 +11,17 @@ import (
 
 type CairoTransaction struct {
 	CommonTx
+
+	Tip        *uint256.Int
+	FeeCap     *uint256.Int
+	AccessList AccessList
 }
 
 func (tx CairoTransaction) Type() byte {
 	return CairoType
 }
 
-func (tx CairoTransaction) IsCairo() bool {
+func (tx CairoTransaction) IsStarkNet() bool {
 	return true
 }
 
@@ -43,14 +47,14 @@ func (tx *CairoTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
-	//tx.Tip = new(uint256.Int).SetBytes(b)
+	tx.Tip = new(uint256.Int).SetBytes(b)
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
-	//tx.FeeCap = new(uint256.Int).SetBytes(b)
+	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
 		return err
 	}
@@ -75,10 +79,10 @@ func (tx *CairoTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	//tx.AccessList = AccessList{}
-	//if err = decodeAccessList(&tx.AccessList, s); err != nil {
-	//	return err
-	//}
+	tx.AccessList = AccessList{}
+	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+		return err
+	}
 	// decode V
 	if b, err = s.Bytes(); err != nil {
 		return err
@@ -169,10 +173,6 @@ func (tx CairoTransaction) MarshalBinary(w io.Writer) error {
 }
 
 func (tx CairoTransaction) Sender(signer Signer) (common.Address, error) {
-	panic("implement me")
-}
-
-func (tx CairoTransaction) GetSender() (common.Address, bool) {
 	panic("implement me")
 }
 

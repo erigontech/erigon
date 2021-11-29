@@ -83,7 +83,7 @@ type Transaction interface {
 	GetSender() (common.Address, bool)
 	SetSender(common.Address)
 	IsContractDeploy() bool
-	IsCairo() bool
+	IsStarkNet() bool
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -103,6 +103,13 @@ func (tm TransactionMisc) Time() time.Time {
 
 func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
+}
+
+func (tm TransactionMisc) GetSender() (common.Address, bool) {
+	if sc := tm.from.Load(); sc != nil {
+		return sc.(common.Address), true
+	}
+	return common.Address{}, false
 }
 
 func DecodeTransaction(s *rlp.Stream) (Transaction, error) {

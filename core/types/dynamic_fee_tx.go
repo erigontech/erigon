@@ -555,7 +555,7 @@ func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
 	tx.from.Store(addr)
 }
 
-func (tx DynamicFeeTransaction) IsCairo() bool {
+func (tx DynamicFeeTransaction) IsStarkNet() bool {
 	return false
 }
 

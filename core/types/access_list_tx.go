@@ -647,6 +647,6 @@ func (tx *AccessListTx) SetSender(addr common.Address) {
 	tx.from.Store(addr)
 }
 
-func (tx AccessListTx) IsCairo() bool {
+func (tx AccessListTx) IsStarkNet() bool {
 	return false
 }

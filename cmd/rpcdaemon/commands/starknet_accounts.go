@@ -28,6 +28,9 @@ func (api *StarknetImpl) GetCode(ctx context.Context, address common.Address, bl
 		return hexutil.Bytes(""), nil
 	}
 	res, _ := reader.ReadAccountCode(address, acc.Incarnation, acc.CodeHash)
+	if res == nil || err != nil {
+		return hexutil.Bytes(""), nil
+	}
 	if res == nil {
 		return hexutil.Bytes(""), nil
 	}

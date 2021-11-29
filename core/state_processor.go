@@ -144,7 +144,7 @@ func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Has
 
 	var vmenv vm.VMInterface
 
-	if tx.IsCairo() {
+	if tx.IsStarkNet() {
 		vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
 	} else {
 		blockContext := NewEVMBlockContext(header, getHeader, engine, author, contractHasTEVM)
