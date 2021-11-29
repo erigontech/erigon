@@ -17,20 +17,20 @@ import (
 
 // ExecutionPayload represents an execution payload (aka slot/block)
 type ExecutionPayload struct {
-	ParentHash    common.Hash     `json:"parentHash"`
-	StateRoot     common.Hash     `json:"stateRoot"`
-	ReceiptRoot   common.Hash     `json:"receiptRoot"`
-	LogsBloom     hexutil.Bytes   `json:"logsBloom"`
-	Random        common.Hash     `json:"random"`
-	BlockNumber   hexutil.Uint64  `json:"blockNumber"`
-	GasLimit      hexutil.Uint64  `json:"gasLimit"`
-	GasUsed       hexutil.Uint64  `json:"gasUsed"`
-	Extra         hexutil.Bytes   `json:"extraData"`
-	BaseFeePerGas *hexutil.Big    `json:"baseFeePerGas"`
-	BlockHash     common.Hash     `json:"blockHash"`
-	Timestamp     hexutil.Uint64  `json:"timestamp"`
-	Coinbase      common.Address  `json:"coinbase"`
-	Transactions  []hexutil.Bytes `json:"transactions"`
+	ParentHash    common.Hash     `json:"parentHash"    gencodec:"required"`
+	StateRoot     common.Hash     `json:"stateRoot"     gencodec:"required"`
+	ReceiptRoot   common.Hash     `json:"receiptRoot"   gencodec:"required"`
+	LogsBloom     hexutil.Bytes   `json:"logsBloom"     gencodec:"required"`
+	Random        common.Hash     `json:"random"        gencodec:"required"`
+	BlockNumber   hexutil.Uint64  `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64  `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64  `json:"gasUsed"       gencodec:"required"`
+	Extra         hexutil.Bytes   `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big    `json:"baseFeePerGas" gencodec:"required"`
+	BlockHash     common.Hash     `json:"blockHash"     gencodec:"required"`
+	Timestamp     hexutil.Uint64  `json:"timestamp"     gencodec:"required"`
+	Coinbase      common.Address  `json:"coinbase"      gencodec:"required"`
+	Transactions  []hexutil.Bytes `json:"transactions"  gencodec:"required"`
 }
 
 // PreparePayloadArgs represents a request to assemble a payload from the beacon chain
