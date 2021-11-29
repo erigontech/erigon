@@ -180,7 +180,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders,
 		stages.Finish)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir)
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir, getBlockReader())
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
 		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
@@ -303,9 +303,9 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			panic(err)
 		}
 
-		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Header().Coinbase != (common.Address{}) {
-			miner.MiningConfig.Etherbase = nextBlock.Header().Coinbase
-			miner.MiningConfig.ExtraData = nextBlock.Header().Extra
+		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
+			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
+			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx) error {
 				err = stagedsync.SpawnMiningCreateBlockStage(s, tx,
 					stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, tmpDir),
@@ -314,10 +314,10 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 					return err
 				}
 				miner.MiningBlock.Uncles = nextBlock.Uncles()
-				miner.MiningBlock.Header.Time = nextBlock.Header().Time
-				miner.MiningBlock.Header.GasLimit = nextBlock.Header().GasLimit
-				miner.MiningBlock.Header.Difficulty = nextBlock.Header().Difficulty
-				miner.MiningBlock.Header.Nonce = nextBlock.Header().Nonce
+				miner.MiningBlock.Header.Time = nextBlock.Time()
+				miner.MiningBlock.Header.GasLimit = nextBlock.GasLimit()
+				miner.MiningBlock.Header.Difficulty = nextBlock.Difficulty()
+				miner.MiningBlock.Header.Nonce = nextBlock.Nonce()
 				miner.MiningBlock.LocalTxs = types.NewTransactionsFixedOrder(nextBlock.Transactions())
 				miner.MiningBlock.RemoteTxs = types.NewTransactionsFixedOrder(nil)
 				//debugprint.Headers(miningWorld.Block.Header, nextBlock.Header())
@@ -390,16 +390,15 @@ func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, tx kv.
 }
 
 func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
-	h1 := b1.Header()
-	h2 := b2.Header()
-	if h1.Root != h2.Root ||
-		(chainConfig.IsByzantium(b1.NumberU64()) && h1.ReceiptHash != h2.ReceiptHash) ||
-		h1.TxHash != h2.TxHash ||
-		h1.ParentHash != h2.ParentHash ||
-		h1.UncleHash != h2.UncleHash ||
-		h1.GasUsed != h2.GasUsed ||
-		!bytes.Equal(h1.Extra, h2.Extra) {
-		debugprint.Headers(h1, h2)
+	if b1.Root() != b2.Root() ||
+		(chainConfig.IsByzantium(b1.NumberU64()) && b1.ReceiptHash() != b2.ReceiptHash()) ||
+		b1.TxHash() != b2.TxHash() ||
+		b1.ParentHash() != b2.ParentHash() ||
+		b1.UncleHash() != b2.UncleHash() ||
+		b1.GasUsed() != b2.GasUsed() ||
+		!bytes.Equal(b1.Extra(), b2.Extra()) { // TODO: Extra() doesn't need to be a copy for a read-only compare
+		// Header()'s deep-copy doesn't matter here since it will panic anyway
+		debugprint.Headers(b1.Header(), b2.Header())
 		panic("blocks are not same")
 	}
 }
@@ -426,7 +425,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	}
 	_ = sync.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, tmpdir), ctx); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader()), ctx); err != nil {
 		return err
 	}
 	must(tx.Commit())
@@ -489,7 +488,8 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 	from := progress(tx, stages.Execution)
 	to := from + unwind
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath)
+
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, getBlockReader())
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {

@@ -987,7 +987,8 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, ""), expectedRootHash, nil)
+	blockReader := snapshotsync.NewBlockReader()
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, "", blockReader), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return tx.Commit()
@@ -2592,14 +2593,15 @@ func recsplitWholeChain(chaindata string) error {
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName+".seg")
 		db := mdbx.MustOpen(chaindata)
-		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
+		firstTxID, err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile))
+		if err != nil {
 			panic(err)
 		}
 		db.Close()
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
+		if err := snapshotsync.TransactionsHashIdx(*chainID, firstTxID, segmentFile); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2616,7 +2618,7 @@ func recsplitWholeChain(chaindata string) error {
 			panic(err)
 		}
 
-		if err := snapshotsync.HeadersIdx(segmentFile); err != nil {
+		if err := snapshotsync.HeadersHashIdx(segmentFile, i); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2632,7 +2634,7 @@ func recsplitWholeChain(chaindata string) error {
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.BodiesIdx(segmentFile); err != nil {
+		if err := snapshotsync.BodiesIdx(segmentFile, i); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -3677,8 +3679,8 @@ func scanReceipts(chaindata string, block uint64) error {
 		fix := true
 		if chainConfig.IsByzantium(blockNum) {
 			receiptSha := types.DeriveSha(receipts1)
-			if receiptSha != block.Header().ReceiptHash {
-				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
+			if receiptSha != block.ReceiptHash() {
+				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.ReceiptHash())
 				fix = false
 			}
 		}

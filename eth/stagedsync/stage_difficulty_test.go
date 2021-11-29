@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -41,7 +42,7 @@ func TestDifficultyComputation(t *testing.T) {
 	// save progress for headers
 	_ = stages.SaveStageProgress(tx, stages.Headers, 3)
 	// Code
-	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000)), ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000), snapshotsync.NewBlockReader()), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -90,7 +91,7 @@ func TestDifficultyComputationNonCanonical(t *testing.T) {
 	// save progress for headers
 	_ = stages.SaveStageProgress(tx, stages.Headers, 3)
 	// Code
-	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000)), ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000), snapshotsync.NewBlockReader()), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -140,7 +141,7 @@ func TestDifficultyProgress(t *testing.T) {
 	_ = stages.SaveStageProgress(tx, stages.Headers, 3)
 	_ = stages.SaveStageProgress(tx, stages.TotalDifficulty, 1)
 	// Code
-	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000)), ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000), snapshotsync.NewBlockReader()), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -184,7 +185,7 @@ func TestDifficultyNoTerminalDifficulty(t *testing.T) {
 	rawdb.WriteCanonicalHash(tx, header2.Hash(), header2.Number.Uint64())
 	rawdb.WriteCanonicalHash(tx, header3.Hash(), header3.Number.Uint64())
 	// Code
-	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", nil), ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", nil, snapshotsync.NewBlockReader()), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())
@@ -228,7 +229,7 @@ func TestDifficultyGreaterThanTerminalDifficulty(t *testing.T) {
 	rawdb.WriteCanonicalHash(tx, header2.Hash(), header2.Number.Uint64())
 	rawdb.WriteCanonicalHash(tx, header3.Hash(), header3.Number.Uint64())
 	// Code
-	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000)), ctx)
+	err := SpawnDifficultyStage(&StageState{BlockNumber: 0, ID: stages.TotalDifficulty}, tx, StageDifficultyCfg(db, "", big.NewInt(1000), snapshotsync.NewBlockReader()), ctx)
 	assert.NoError(err)
 	// Asserts
 	actual_td, err := rawdb.ReadTd(tx, header1.Hash(), header1.Number.Uint64())

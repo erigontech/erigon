@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 )
 
@@ -26,18 +25,7 @@ func main() {
 	flag.BoolVar(&clearDev, "clear-dev", false, "Boolean Flag to determine if service should clear /dev after this call")
 	flag.Parse()
 
-	//fmt.Printf("to: %v\n", to)
-	//fmt.Printf("value: %v\n", value)
-	//fmt.Printf("blockNum: %v\n", blockNum)
-	//fmt.Printf("getBalance: %v\n", getBalance)
-	//fmt.Printf("sendTx: %v\n", sendTx)
-	//fmt.Printf("txPoolContent: %v\n", txPoolContent)
-	//fmt.Printf("clearDev: %v\n", clearDev)
+	services.ValidateInputs(getBalance, sendTx, txPoolContent, blockNum, value, to)
 
-	services.ValidateInputs(&getBalance, &sendTx, &txPoolContent, &blockNum, &value, &to)
-
-	services.ParseRequests(&getBalance, &sendTx, &txPoolContent, &clearDev, &blockNum, &value, &to)
-
-	fmt.Print("\n")
-	fmt.Print("Finished processing\n")
+	services.ParseRequests(getBalance, sendTx, txPoolContent, clearDev, blockNum, value, to)
 }

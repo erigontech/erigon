@@ -629,6 +629,17 @@ func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
 }
 
+func (h *Header) copySeal() []rlp.RawValue {
+	seal := h.Seal
+	if len(seal) > 0 {
+		seal = make([]rlp.RawValue, len(seal))
+		for i, s := range h.Seal {
+			seal[i] = common.CopyBytes(s)
+		}
+	}
+	return seal
+}
+
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
@@ -1016,12 +1027,7 @@ func CopyHeader(h *Header) *Header {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
-	if len(h.Seal) > 0 {
-		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
-		for i := range h.Seal {
-			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
-		}
-	}
+	cpy.Seal = h.copySeal()
 	return &cpy
 }
 
@@ -1203,7 +1209,8 @@ func (b *Block) Time() uint64         { return b.header.Time }
 
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }
-func (b *Block) Nonce() uint64            { return binary.BigEndian.Uint64(b.header.Nonce[:]) }
+func (b *Block) Nonce() BlockNonce        { return b.header.Nonce }
+func (b *Block) NonceU64() uint64         { return b.header.Nonce.Uint64() }
 func (b *Block) Bloom() Bloom             { return b.header.Bloom }
 func (b *Block) Coinbase() common.Address { return b.header.Coinbase }
 func (b *Block) Root() common.Hash        { return b.header.Root }
@@ -1218,7 +1225,9 @@ func (b *Block) BaseFee() *big.Int {
 	}
 	return new(big.Int).Set(b.header.BaseFee)
 }
+func (b *Block) Seal() (seal []rlp.RawValue) { return b.header.copySeal() }
 
+// Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
 // Body returns the non-header content of the block.

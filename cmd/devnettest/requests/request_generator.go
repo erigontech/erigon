@@ -51,3 +51,13 @@ func (req *RequestGenerator) getBalance(address common.Address, blockNum string)
 	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, address, blockNum, req.reqID)
 }
+
+func (req *RequestGenerator) sendRawTransaction(signedTx []byte) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_sendRawTransaction","params":["0x%x"],"id":%d}`
+	return fmt.Sprintf(template, signedTx, req.reqID)
+}
+
+func (req *RequestGenerator) txpoolContent() string {
+	const template = `{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":%d}`
+	return fmt.Sprintf(template, req.reqID)
+}
