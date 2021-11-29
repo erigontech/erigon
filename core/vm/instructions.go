@@ -586,7 +586,7 @@ func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		}
 		return nil, ErrInvalidJump
 	}
-	*pc = pos.Uint64()
+	*pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
 	return nil, nil
 }
 
@@ -609,9 +609,7 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 			}
 			return nil, ErrInvalidJump
 		}
-		*pc = pos.Uint64()
-	} else {
-		*pc++
+		*pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
 	}
 	return nil, nil
 }
@@ -667,8 +665,10 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	scope.Contract.Gas += returnGas
 
 	if suberr == ErrExecutionReverted {
+		interpreter.returnData = res // set REVERT data to return data buffer
 		return res, nil
 	}
+	interpreter.returnData = nil // clear dirty return data buffer
 	return nil, nil
 }
 
@@ -699,8 +699,10 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	scope.Contract.Gas += returnGas
 
 	if suberr == ErrExecutionReverted {
+		interpreter.returnData = res // set REVERT data to return data buffer
 		return res, nil
 	}
+	interpreter.returnData = nil // clear dirty return data buffer
 	return nil, nil
 }
 
@@ -735,6 +737,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 
 	scope.Contract.Gas += returnGas
 
+	interpreter.returnData = ret
 	return ret, nil
 }
 
@@ -769,6 +772,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 
 	scope.Contract.Gas += returnGas
 
+	interpreter.returnData = ret
 	return ret, nil
 }
 
@@ -798,6 +802,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 
 	scope.Contract.Gas += returnGas
 
+	interpreter.returnData = ret
 	return ret, nil
 }
 
@@ -827,19 +832,22 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 
 	scope.Contract.Gas += returnGas
 
+	interpreter.returnData = ret
 	return ret, nil
 }
 
 func opReturn(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Pop()
 	ret := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
-	return ret, nil
+	return ret, errStopToken
 }
 
 func opRevert(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	offset, size := scope.Stack.Pop(), scope.Stack.Pop()
 	ret := scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
-	return ret, nil
+
+	interpreter.returnData = ret
+	return ret, ErrExecutionReverted
 }
 
 func opUndefined(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -847,7 +855,7 @@ func opUndefined(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 }
 
 func opStop(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	return nil, nil
+	return nil, errStopToken
 }
 
 func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -860,7 +868,7 @@ func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	}
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
 	interpreter.evm.IntraBlockState().Suicide(callerAddr)
-	return nil, nil
+	return nil, errStopToken
 }
 
 // following functions are used by the instruction jump  table
