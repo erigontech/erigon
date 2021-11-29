@@ -159,7 +159,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		feeCap = common.Big0
 	}
 	// Recap the highest gas limit with account's available balance.
-	if feeCap.BitLen() != 0 {
+	if feeCap.Sign() != 0 {
 		cacheView, err := api.stateCache.View(ctx, dbtx)
 		if err != nil {
 			return 0, err
