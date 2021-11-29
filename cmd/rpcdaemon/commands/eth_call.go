@@ -344,6 +344,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, blockNrOrHash rpc.Bloc
 	} else {
 		// Require nonce to calculate address of created contract
 		if args.Nonce == nil {
+			var nonce uint64
 			reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
 				Address: gointerfaces.ConvertAddressToH160(*args.From),
 			}, &grpc.EmptyCallOption{})
@@ -351,9 +352,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, blockNrOrHash rpc.Bloc
 				return nil, err
 			}
 			if reply.Found {
-				reply.Nonce++
-				args.Nonce = (*hexutil.Uint64)(&reply.Nonce)
+				nonce = reply.Nonce + 1
 			}
+			args.Nonce = (*hexutil.Uint64)(&nonce)
 		}
 		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
 	}
@@ -396,7 +397,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, blockNrOrHash rpc.Bloc
 			return nil, err
 		}
 		if tracer.Equal(prevTracer) {
-			return &accessListResult{Accesslist: &accessList, Error: res.Err.Error(), GasUsed: (hexutil.Uint64)(res.UsedGas)}, nil
+			var errString string
+			if res.Err != nil {
+				errString = res.Err.Error()
+			}
+			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: (hexutil.Uint64)(res.UsedGas)}, nil
 		}
 		prevTracer = tracer
 	}
