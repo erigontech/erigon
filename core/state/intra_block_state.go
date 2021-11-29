@@ -19,7 +19,6 @@ package state
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -189,7 +188,7 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	for i := 1; i < len(log2.Topics); i++ {
 		dataString += log2.Topics[i].Hex()[2:]
 	}
-	log.Info("add log", "topic", log2.Topics[0].Hex(), "data", dataString+hexutil.Encode(log2.Data))
+	//log.Info("add log", "topic", log2.Topics[0].Hex(), "data", dataString+hexutil.Encode(log2.Data))
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 	log2.TxHash = sdb.thash
 	log2.BlockHash = sdb.bhash
@@ -780,6 +779,10 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	// Invalidate journal because reverting across transactions is not allowed.
 	sdb.clearJournalAndRefund()
 	return nil
+}
+
+func (sdb *IntraBlockState) GetStateWriter() StateWriter {
+	return sdb.stateReader.(StateWriter)
 }
 
 func (sdb *IntraBlockState) Print(chainRules params.Rules) {

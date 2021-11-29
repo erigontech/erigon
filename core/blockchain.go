@@ -20,6 +20,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"os"
@@ -161,41 +162,39 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	var newBlock *types.Block
+	//var newBlock *types.Block
 	if !vmConfig.ReadOnly {
-		block.Header().GasUsed = *usedGas
 		var err error
-		if newBlock, err = FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader); err != nil {
+		if _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, usedGas); err != nil {
 			return nil, err
 		}
-		*usedGas = block.Header().GasUsed
 	}
 
-	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		if newBlock.ReceiptHash() != block.Header().ReceiptHash {
-			return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
-		}
-	}
-	if newBlock.GasUsed() != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
-	}
-	if !vmConfig.NoReceipts {
-		if newBlock.Bloom() != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
-		}
-	}
+	//if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
+	//	if newBlock.ReceiptHash() != block.Header().ReceiptHash {
+	//		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), newBlock.ReceiptHash().Hex(), block.Header().ReceiptHash.Hex())
+	//	}
+	//}
+	//if newBlock.GasUsed() != header.GasUsed {
+	//	return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	//}
+	//if !vmConfig.NoReceipts {
+	//	if newBlock.Bloom() != header.Bloom {
+	//		return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
+	//	}
+	//}
 
 	return receipts, nil
 }
 
-func SysCallContract(from, contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (gasUsed uint64, returnData []byte, err error) {
+func SysCallContract(from, contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine, value *uint256.Int) (gasUsed uint64, returnData []byte, err error) {
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
 	msg := types.NewMessage(
 		from,
 		&contract,
-		0, u256.Num0,
+		0, value,
 		math.MaxUint64/2, u256.Num0,
 		nil, nil,
 		data, nil, false,
@@ -203,7 +202,6 @@ func SysCallContract(from, contract common.Address, data []byte, chainConfig par
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, nil, engine, &from, nil)
-
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
 	ret, leftOverGas, err := evm.Call(
 		vm.AccountRef(msg.From()),
@@ -257,18 +255,19 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader) (*types.Block, error) {
+func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, gasUsed *uint64) (*types.Block, error) {
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====tx processing end====\n")
 	//if posa := engine.(consensus.PoSA); posa != nil {
 	//	posa.FinalizeAndAssemble()
 	//}
 
+	header.GasUsed = *gasUsed
 	block, err := engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, *receipts, e, headerReader, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-
+	*gasUsed = header.GasUsed
 	//fmt.Printf("====finalize start %d====\n", header.Number.Uint64())
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====finalize end====\n")

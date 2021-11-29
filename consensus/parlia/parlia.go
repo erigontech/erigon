@@ -647,7 +647,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			for j, l := range r.Logs {
 				log.Info(" * Log", "idx", j, "t0", l.Topics[0])
 				for z, t := range l.Topics[1:] {
-					log.Info("   - topic", "idx", z + 1, "value", t.String())
+					log.Info("   - topic", "idx", z+1, "value", t.String())
 				}
 			}
 		}
@@ -732,23 +732,23 @@ func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header
 	if err != nil {
 		return nil, err
 	}
-	for _, r := range receipts {
-		var tx types.Transaction
-		for _, tx2 := range txs {
-			if r.TxHash == tx2.Hash() {
-				tx = tx2
-				break
-			}
-		}
-		if tx == nil {
-			panic("not possible")
-		}
-		//txJson, _ := json2.Marshal(txs[i])
-		//json, _ := r.MarshalJSON()
-		//sender, _ := txs[i].GetSender()
-		//log.Info("receipt", "sender", sender.Hex(), "tx", string(txJson), "receipt", string(json))
-	}
-	// TODO: "calc block root"
+	//for _, r := range receipts {
+	//	var tx types.Transaction
+	//	for _, tx2 := range txs {
+	//		if r.TxHash == tx2.Hash() {
+	//			tx = tx2
+	//			break
+	//		}
+	//	}
+	//	if tx == nil {
+	//		panic("not possible")
+	//	}
+	//	txJson, _ := json2.Marshal(txs[i])
+	//	json, _ := r.MarshalJSON()
+	//	sender, _ := txs[i].GetSender()
+	//	log.Info("receipt", "sender", sender.Hex(), "tx", string(txJson), "receipt", string(json))
+	//}
+	// TODO: "calc block root?"
 	return types.NewBlock(header, txs, nil, receipts), nil
 
 	//// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -943,7 +943,7 @@ func (p *Parlia) getCurrentValidators(header *types.Header, state *state.IntraBl
 	// call
 	msgData := (hexutil.Bytes)(data)
 	toAddress := common.HexToAddress(systemcontracts.ValidatorContract)
-	_, returnData, err := core.SysCallContract(header.Coinbase, toAddress, msgData[:], *p.chainConfig, state, header, p)
+	_, returnData, err := core.SysCallContract(header.Coinbase, toAddress, msgData[:], *p.chainConfig, state, header, p, u256.Num0)
 	if err != nil {
 		return nil, err
 	}
@@ -1128,15 +1128,12 @@ func (p *Parlia) applyTransaction(
 		*receivedTxs = (*receivedTxs)[1:]
 	}
 	state.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
-	gasUsed, _, err := core.SysCallContract(from, to, data, *p.chainConfig, state, header, p)
+	gasUsed, _, err := core.SysCallContract(from, to, data, *p.chainConfig, state, header, p, value)
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
-
 	receipt.TxHash = expectedTx.Hash()
 	receipt.GasUsed = gasUsed
-	receipt.PostState = []byte{}
-
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = state.GetLogs(expectedTx.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
