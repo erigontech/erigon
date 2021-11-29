@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -118,12 +119,16 @@ func (aq *AnchorQueue) Pop() interface{} {
 	return x
 }
 
+type ChainSegmentHeader struct {
+	HeaderRaw rlp.RawValue
+	Header    *types.Header
+	Hash      common.Hash
+	Number    uint64
+}
+
 // First item in ChainSegment is the anchor
 // ChainSegment must be contigous and must not include bad headers
-type ChainSegment struct {
-	HeadersRaw [][]byte
-	Headers    []*types.Header
-}
+type ChainSegment []ChainSegmentHeader
 
 type PeerHandle int // This is int just for the PoC phase - will be replaced by more appropriate type to find a peer
 
