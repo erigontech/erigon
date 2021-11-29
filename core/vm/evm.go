@@ -18,6 +18,8 @@ package vm
 
 import (
 	"errors"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/log/v3"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -209,6 +211,7 @@ func (evm *EVM) Interpreter() Interpreter {
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+	hadGas := gas
 	if evm.Config.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
@@ -283,6 +286,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
 	}
+	hexInput := "0x"
+	if len(input) >= 4 {
+		hexInput = hexutil.Encode(input[:4])
+	}
+	log.Info("evm call", "address", addr.Hex(), "input", hexInput, "gas", hadGas-gas, "input", hexutil.Encode(input))
 	return ret, gas, err
 }
 
@@ -410,6 +418,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
+	hadGas := gas
 	if evm.Config.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
@@ -471,6 +480,11 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 			gas = 0
 		}
 	}
+	hexInput := "0x"
+	if len(input) >= 4 {
+		hexInput = hexutil.Encode(input[:4])
+	}
+	log.Info("evm static call", "address", addr.Hex(), "input", hexInput, "gas", hadGas-gas)
 	return ret, gas, err
 }
 

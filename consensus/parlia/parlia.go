@@ -3,6 +3,7 @@ package parlia
 import (
 	"bytes"
 	"encoding/hex"
+	json2 "encoding/json"
 	"errors"
 	"fmt"
 	lru "github.com/hashicorp/golang-lru"
@@ -609,6 +610,10 @@ func (p *Parlia) splitTxs(txs []types.Transaction, header *types.Header) (userTx
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+	return p.finalize(header, state, txs, &receipts, chain)
+}
+
+func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, txs []types.Transaction, receipts *types.Receipts, chain consensus.ChainHeaderReader) error {
 	txs, systemTxs, err := p.splitTxs(txs, header)
 	if err != nil {
 		return err
@@ -645,7 +650,7 @@ func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *st
 	}
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	if header.Number.Cmp(common.Big1) == 0 {
-		err := p.initContract(state, header, &txs, &receipts, &systemTxs, &header.GasUsed, false)
+		err := p.initContract(state, header, &txs, receipts, &systemTxs, &header.GasUsed, false)
 		if err != nil {
 			log.Error("init contract failed")
 		}
@@ -661,7 +666,7 @@ func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *st
 		}
 		if !signedRecently {
 			log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
-			err = p.slash(spoiledVal, state, header, &txs, &receipts, &systemTxs, &header.GasUsed, false)
+			err = p.slash(spoiledVal, state, header, &txs, receipts, &systemTxs, &header.GasUsed, false)
 			if err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
 				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
@@ -669,7 +674,7 @@ func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *st
 		}
 	}
 	val := header.Coinbase
-	err = p.distributeIncoming(val, state, header, &txs, &receipts, &systemTxs, &header.GasUsed, false)
+	err = p.distributeIncoming(val, state, header, &txs, receipts, &systemTxs, &header.GasUsed, false)
 	if err != nil {
 		return err
 	}
@@ -685,7 +690,29 @@ func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *st
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
-	return nil, errNotSupported
+	err := p.finalize(header, state, txs, &receipts, chain)
+	if err != nil {
+		return nil, err
+	}
+	for i, r := range receipts {
+		var tx types.Transaction
+		for _, tx2 := range txs {
+			if r.TxHash == tx2.Hash() {
+				tx = tx2
+				break
+			}
+		}
+		if tx == nil {
+			panic("not possible")
+		}
+		txJson, _ := json2.Marshal(txs[i])
+		json, _ := r.MarshalJSON()
+		sender, _ := txs[i].GetSender()
+		log.Info("receipt", "sender", sender.Hex(), "tx", string(txJson), "receipt", string(json))
+	}
+	// TODO: "calc block root"
+	return types.NewBlock(header, txs, nil, receipts), nil
+
 	//// No block rewards in PoA, so the state remains as is and uncles are dropped
 	//if txs == nil {
 	//	txs = make([]types.Transaction, 0)
@@ -1032,6 +1059,14 @@ func (p *Parlia) applyTransaction(
 		}
 		actualTx := (*receivedTxs)[0]
 		if !bytes.Equal(actualTx.SigningHash(p.chainConfig.ChainID).Bytes(), expectedHash.Bytes()) {
+			log.Error(fmt.Sprintf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
+				expectedTx.GetNonce(),
+				expectedTx.GetTo().String(),
+				expectedTx.GetValue().String(),
+				expectedTx.GetGas(),
+				expectedTx.GetPrice().String(),
+				hex.EncodeToString(expectedTx.GetData()),
+			))
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
 				expectedTx.GetNonce(),
 				expectedTx.GetTo().String(),
@@ -1046,7 +1081,7 @@ func (p *Parlia) applyTransaction(
 		*receivedTxs = (*receivedTxs)[1:]
 	}
 	state.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
-	gasUsed, _, err := core.SysCallContract(to, data, *p.chainConfig, state, header, p)
+	gasUsed, _, err := core.SysCallContract(from, to, data, *p.chainConfig, state, header, p)
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
