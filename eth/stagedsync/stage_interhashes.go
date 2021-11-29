@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -26,14 +27,16 @@ type TrieCfg struct {
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
+	blockReader       interfaces.FullBlockReader
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader interfaces.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
 		tmpDir:            tmpDir,
 		saveNewHashesToDB: saveNewHashesToDB,
+		blockReader:       blockReader,
 	}
 }
 
@@ -68,11 +71,13 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
-		syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
+		syncHeadHeader, err := cfg.blockReader.Header(ctx, tx, hash, to)
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
 		expectedRootHash = syncHeadHeader.Root
 		headerHash = syncHeadHeader.Hash()
 	}
-
 	logPrefix := s.LogPrefix()
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
@@ -394,13 +399,11 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 		defer tx.Rollback()
 	}
 
-	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, u.UnwindPoint)
 	if err != nil {
-		return fmt.Errorf("read canonical hash: %w", err)
+		return err
 	}
-	syncHeadHeader := rawdb.ReadHeader(tx, hash, u.UnwindPoint)
 	expectedRootHash := syncHeadHeader.Root
-	//fmt.Printf("\n\nu: %d->%d\n", s.BlockNumber, u.UnwindPoint)
 
 	logPrefix := s.LogPrefix()
 	if err := unwindIntermediateHashesStageImpl(logPrefix, u, s, tx, cfg, expectedRootHash, quit); err != nil {

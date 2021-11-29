@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -267,6 +268,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
+
+	blockReader := snapshotsync.NewBlockReader()
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
@@ -286,22 +289,25 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BodyDownloadTimeoutSeconds,
 			*mock.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageDifficultyCfg(mock.DB, mock.tmpdir, nil), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune), stagedsync.StageExecuteBlocksCfg(
-			mock.DB,
-			prune,
-			cfg.BatchSize,
-			nil,
-			mock.ChainConfig,
-			mock.Engine,
-			&vm.Config{},
-			mock.Notifications.Accumulator,
-			cfg.StateStream,
-			mock.tmpdir,
-		), stagedsync.StageTranspileCfg(
-			mock.DB,
-			cfg.BatchSize,
-			mock.ChainConfig,
-		), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
+		), stagedsync.StageDifficultyCfg(mock.DB, mock.tmpdir, nil, blockReader),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune),
+			stagedsync.StageExecuteBlocksCfg(
+				mock.DB,
+				prune,
+				cfg.BatchSize,
+				nil,
+				mock.ChainConfig,
+				mock.Engine,
+				&vm.Config{},
+				mock.Notifications.Accumulator,
+				cfg.StateStream,
+				mock.tmpdir,
+				blockReader,
+			), stagedsync.StageTranspileCfg(
+				mock.DB,
+				cfg.BatchSize,
+				mock.ChainConfig,
+			), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir, blockReader), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -321,7 +327,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, mock.tmpdir),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
+			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -21,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -223,6 +225,17 @@ func NewStagedSync(
 	tmpdir string,
 	accumulator *shards.Accumulator,
 ) (*stagedsync.Sync, error) {
+	var blockReader interfaces.FullBlockReader
+	if cfg.Snapshot.Enabled {
+		allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
+		if err != nil {
+			return nil, err
+		}
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
 			db,
@@ -242,7 +255,7 @@ func NewStagedSync(
 			cfg.BodyDownloadTimeoutSeconds,
 			*controlServer.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,
@@ -253,12 +266,13 @@ func NewStagedSync(
 			accumulator,
 			cfg.StateStream,
 			tmpdir,
+			blockReader,
 		), stagedsync.StageTranspileCfg(
 			db,
 			cfg.BatchSize,
 			controlServer.ChainConfig,
 		), stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
