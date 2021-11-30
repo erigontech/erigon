@@ -57,6 +57,50 @@ func StageHeadersCfg(
 	}
 }
 
+func SpawnStageHeaders(
+	s *StageState,
+	u Unwinder,
+	ctx context.Context,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	initialCycle bool,
+	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err := cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	isTrans, err := rawdb.Transitioned(tx, cfg.hd.Progress())
+	if err != nil {
+		return err
+	}
+
+	if isTrans {
+		return HeadersDownward(s, u, ctx, tx, cfg, initialCycle, test)
+	} else {
+		return HeadersForward(s, u, ctx, tx, cfg, initialCycle, test)
+	}
+}
+
+// HeadersForward progresses Headers stage in the downward direction
+func HeadersDownward(
+	s *StageState,
+	u Unwinder,
+	ctx context.Context,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	initialCycle bool,
+	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+) error {
+	// Add code for downward sync
+	return nil
+}
+
 // HeadersForward progresses Headers stage in the forward direction
 func HeadersForward(
 	s *StageState,

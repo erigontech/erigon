@@ -16,10 +16,12 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -224,6 +226,9 @@ func NewStagedSync(
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
+	reverseDownloadCh chan types.Block,
+	statusCh chan privateapi.ExecutionStatus,
+	waitingForPOSHeaders *bool,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
 	if cfg.Snapshot.Enabled {
@@ -280,5 +285,7 @@ func NewStagedSync(
 			stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
+		reverseDownloadCh,
+		statusCh,
 	), nil
 }
