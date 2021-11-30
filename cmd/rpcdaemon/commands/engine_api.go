@@ -37,7 +37,7 @@ type ExecutionPayload struct {
 type PreparePayloadArgs struct {
 	Random       *common.Hash    `json:"random"`
 	Timestamp    *hexutil.Uint64 `json:"timestamp"`
-	FeeRecipient *common.Address `json:"feeRecipients"`
+	FeeRecipient *common.Address `json:"feeRecipient"`
 }
 
 // EngineAPI Beacon chain communication endpoint
