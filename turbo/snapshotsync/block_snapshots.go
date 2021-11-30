@@ -271,17 +271,17 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 
 func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 	for _, sn := range s.blocks {
-		f := SegmentFileName(sn.Headers.From, sn.Headers.To, Headers)
+		f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
 		if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
 			return err
 		}
 
-		f = SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies)
+		f = path.Join(s.dir, SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies))
 		if err := BodiesIdx(f, sn.Bodies.From); err != nil {
 			return err
 		}
 
-		f = SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions)
+		f = path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, sn.Transactions.From*1_000_000, f); err != nil {
 			return err
 		}
