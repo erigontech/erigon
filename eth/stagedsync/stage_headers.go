@@ -71,7 +71,6 @@ func HeadersForward(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
-
 	if cfg.snapshots != nil && !cfg.snapshots.AllSegmentsAvailable() {
 		// wait for Downloader service to download all expected snapshots
 		logEvery := time.NewTicker(logInterval)

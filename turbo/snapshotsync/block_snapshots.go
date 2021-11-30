@@ -234,12 +234,24 @@ func (s *AllSnapshots) ReopenSegments() error {
 
 func (s *AllSnapshots) Close() {
 	for _, s := range s.blocks {
-		s.Headers.Idx.Close()
-		s.Headers.Segment.Close()
-		s.Bodies.Idx.Close()
-		s.Bodies.Segment.Close()
-		s.Transactions.Idx.Close()
-		s.Transactions.Segment.Close()
+		if s.Headers.Idx != nil {
+			s.Headers.Idx.Close()
+		}
+		if s.Headers.Segment != nil {
+			s.Headers.Segment.Close()
+		}
+		if s.Bodies.Idx != nil {
+			s.Bodies.Idx.Close()
+		}
+		if s.Bodies.Segment != nil {
+			s.Bodies.Segment.Close()
+		}
+		if s.Transactions.Idx != nil {
+			s.Transactions.Idx.Close()
+		}
+		if s.Transactions.Segment != nil {
+			s.Transactions.Segment.Close()
+		}
 	}
 }
 
