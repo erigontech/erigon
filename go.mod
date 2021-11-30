@@ -63,5 +63,6 @@ require (
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
+	modernc.org/sortutil v1.1.0 // indirect
 	pgregory.net/rapid v0.4.7
 )

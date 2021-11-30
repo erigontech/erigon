@@ -25,7 +25,6 @@ import (
 	"os"
 	"path"
 	"reflect"
-	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -72,6 +71,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"modernc.org/sortutil"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -641,16 +641,16 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 	for i := 0; i < limit; i++ {
 		sc := s.sentries[i]
 
-		node, err := sc.NodeInfo(context.Background(), nil)
+		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
 			log.Error("sentry nodeInfo", "err", err)
 		}
 
-		nodes = append(nodes, node)
+		nodes = append(nodes, nodeInfo)
 	}
 
 	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
-	sort.Sort(nodesInfo)
+	nodesInfo.NodesInfo = nodesInfo.NodesInfo[:sortutil.Dedupe(nodesInfo)]
 
 	return nodesInfo, nil
 }
