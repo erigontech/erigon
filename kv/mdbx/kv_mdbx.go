@@ -154,7 +154,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		if opts.inMem {
 			opts.mapSize = 64 * datasize.MB
 		} else {
-			opts.mapSize = 2 * datasize.TB
+			opts.mapSize = 3 * datasize.TB
 		}
 	}
 	if opts.flags&mdbx.Accede == 0 {
