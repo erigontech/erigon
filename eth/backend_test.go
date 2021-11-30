@@ -27,8 +27,8 @@ func TestNodesInfo_Deduplication(t *testing.T) {
 		{
 			name: "two different nodes",
 			nodes: []*types.NodeInfoReply{
-				{Name: "name", Enode: "enode"},
 				{Name: "name1", Enode: "enode1"},
+				{Name: "name", Enode: "enode"},
 			},
 			want: []*types.NodeInfoReply{
 				{Name: "name", Enode: "enode"},
@@ -48,9 +48,9 @@ func TestNodesInfo_Deduplication(t *testing.T) {
 		{
 			name: "three nodes",
 			nodes: []*types.NodeInfoReply{
+				{Name: "name2", Enode: "enode2"},
 				{Name: "name", Enode: "enode"},
 				{Name: "name1", Enode: "enode1"},
-				{Name: "name2", Enode: "enode2"},
 			},
 			want: []*types.NodeInfoReply{
 				{Name: "name", Enode: "enode"},
@@ -62,8 +62,8 @@ func TestNodesInfo_Deduplication(t *testing.T) {
 			name: "three nodes with repeats",
 			nodes: []*types.NodeInfoReply{
 				{Name: "name", Enode: "enode"},
-				{Name: "name", Enode: "enode"},
 				{Name: "name1", Enode: "enode1"},
+				{Name: "name", Enode: "enode"},
 			},
 			want: []*types.NodeInfoReply{
 				{Name: "name", Enode: "enode"},
