@@ -25,8 +25,8 @@ type PayloadStatus string
 
 const (
 	Syncing PayloadStatus = "SYNCING"
-	Valid                 = "VALID"
-	Invalid               = "INVALID"
+	Valid   PayloadStatus = "VALID"
+	Invalid PayloadStatus = "INVALID"
 )
 
 // EthBackendAPIVersion
