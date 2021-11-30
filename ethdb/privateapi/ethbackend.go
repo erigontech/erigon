@@ -21,10 +21,12 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+type PayloadStatus string
+
 const (
-	Syncing = "SYNCING"
-	Valid   = "VALID"
-	Invalid = "INVALID"
+	Syncing PayloadStatus = "SYNCING"
+	Valid                 = "VALID"
+	Invalid               = "INVALID"
 )
 
 // EthBackendAPIVersion
@@ -65,7 +67,7 @@ type EthBackend interface {
 // Status: block's status
 type ExecutionStatus struct {
 	HeadHash common.Hash
-	Status   string
+	Status   PayloadStatus
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
@@ -203,7 +205,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if !(*s.waitingForPOSHeaders) {
 		// We are still syncing a commisioned payload
 		return &remote.EngineExecutePayloadReply{
-			Status:          Syncing,
+			Status:          string(Syncing),
 			LatestValidHash: gointerfaces.ConvertHashToH256(s.latestHead),
 		}, nil
 	}
@@ -266,7 +268,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 	s.latestHead = executedStatus.HeadHash
 	return &remote.EngineExecutePayloadReply{
-		Status:          executedStatus.Status,
+		Status:          string(executedStatus.Status),
 		LatestValidHash: gointerfaces.ConvertHashToH256(executedStatus.HeadHash),
 	}, nil
 }
