@@ -2592,17 +2592,33 @@ func recsplitWholeChain(chaindata string) error {
 	for i := uint64(*block); i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
+		//log.Info("Creating", "file", fileName+".seg")
+		//db := mdbx.MustOpen(chaindata)
+		//firstTxID, err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile))
+		//if err != nil {
+		//	panic(err)
+		//}
+		//db.Close()
+		//if err := compress1(chaindata, fileName, segmentFile); err != nil {
+		//	panic(err)
+		//}
+		//if err := snapshotsync.TransactionsHashIdx(*chainID, firstTxID, segmentFile); err != nil {
+		//	panic(err)
+		//}
+		//_ = os.Remove(fileName + ".dat")
+
+		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName+".seg")
 		db := mdbx.MustOpen(chaindata)
-		firstTxID, err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile))
-		if err != nil {
+		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
 		db.Close()
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.TransactionsHashIdx(*chainID, firstTxID, segmentFile); err != nil {
+		if err := snapshotsync.BodiesIdx(segmentFile, i); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -2620,22 +2636,6 @@ func recsplitWholeChain(chaindata string) error {
 		}
 
 		if err := snapshotsync.HeadersHashIdx(segmentFile, i); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(fileName + ".dat")
-
-		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		log.Info("Creating", "file", fileName+".seg")
-		db = mdbx.MustOpen(chaindata)
-		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		db.Close()
-		if err := compress1(chaindata, fileName, segmentFile); err != nil {
-			panic(err)
-		}
-		if err := snapshotsync.BodiesIdx(segmentFile, i); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")

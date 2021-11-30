@@ -85,7 +85,8 @@ type AllSnapshots struct {
 	dir                  string
 	allSegmentsAvailable bool
 	allIdxAvailable      bool
-	blocksAvailable      uint64
+	segmentsAvailable    uint64
+	idxAvailable         uint64
 	blocks               []*BlocksSnapshot
 	cfg                  *params.SnapshotsConfig
 }
@@ -99,16 +100,13 @@ func NewAllSnapshots(dir string, cfg *params.SnapshotsConfig) *AllSnapshots {
 	return &AllSnapshots{dir: dir, cfg: cfg}
 }
 
-func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig {
-	return s.cfg
-}
-
-func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
-func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
-func (s *AllSnapshots) BlocksAvailable() uint64        { return s.blocksAvailable }
-func (s *AllSnapshots) AllIdxAvailable() bool          { return s.allIdxAvailable }
-func (s *AllSnapshots) SetAllIdxAvailable(v bool)      { s.allIdxAvailable = v }
-func (s *AllSnapshots) IndicesAvailable() uint64       { return s.blocks[len(s.blocks)-1].Transactions.To }
+func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig { return s.cfg }
+func (s *AllSnapshots) AllSegmentsAvailable() bool                   { return s.allSegmentsAvailable }
+func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)               { s.allSegmentsAvailable = v }
+func (s *AllSnapshots) BlocksAvailable() uint64                      { return s.segmentsAvailable }
+func (s *AllSnapshots) AllIdxAvailable() bool                        { return s.allIdxAvailable }
+func (s *AllSnapshots) SetAllIdxAvailable(v bool)                    { s.allIdxAvailable = v }
+func (s *AllSnapshots) IndicesAvailable() uint64                     { return s.idxAvailable }
 
 func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
 	if headers, err = latestSegment(s.dir, Headers); err != nil {
@@ -165,6 +163,7 @@ func (s *AllSnapshots) ReopenIndices() error {
 			return err
 		}
 		bs.Transactions.Idx = idx
+		s.idxAvailable = bs.Transactions.To
 	}
 	return nil
 }
@@ -229,7 +228,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 		}
 
 		s.blocks = append(s.blocks, blocksSnapshot)
-		s.blocksAvailable = blocksSnapshot.To
+		s.segmentsAvailable = blocksSnapshot.To
 	}
 	return nil
 }
@@ -258,7 +257,7 @@ func (s *AllSnapshots) Close() {
 }
 
 func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
-	if blockNumber > s.blocksAvailable {
+	if blockNumber > s.segmentsAvailable {
 		return snapshot, false
 	}
 	for _, blocksSnapshot := range s.blocks {
@@ -293,7 +292,7 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 			return err
 		}
 
-		fmt.Printf("b.BaseTxId: %d\n", b.BaseTxId)
+		fmt.Printf("b.BaseTxId: %d, %s, %d, %d\n", b.BaseTxId, sn.Bodies.File, sn.Transactions.From, sn.Bodies.From)
 
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
@@ -600,6 +599,7 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 
 	key := make([]byte, 8+32)
 	from := dbutils.EncodeBlockNumber(fromBlock)
+	i := 0
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= fromBlock+uint64(blocksAmount) {
@@ -615,6 +615,14 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
 			return true, nil
 		}
+		if i == 0 {
+			b := &types.BodyForStorage{}
+			if err = rlp.DecodeBytes(dataRLP, b); err != nil {
+				panic(err)
+			}
+			fmt.Printf("body: %d, %x\n", b.BaseTxId, k)
+		}
+		i++
 
 		numBuf := make([]byte, binary.MaxVarintLen64)
 		n := binary.PutUvarint(numBuf, uint64(len(dataRLP)))
