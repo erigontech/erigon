@@ -168,7 +168,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	}
 
 	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
-		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d\n", b.BaseTxId, sn.Transactions.Idx.BaseDataID())
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s\n", b.BaseTxId, sn.Transactions.Idx.BaseDataID(), sn.Transactions.File)
 	}
 	txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
 	gg = sn.Transactions.Segment.MakeGetter()

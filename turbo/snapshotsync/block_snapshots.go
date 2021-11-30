@@ -281,10 +281,9 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 			return err
 		}
 	}
-	_ = s.ReopenIndices()
+	_ = s.ReopenIndices() // hack to read block body
 	for _, sn := range s.blocks {
-		blockHeight := sn.Transactions.From
-		bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Bodies.Idx.BaseDataID())
+		bodyOffset := sn.Bodies.Idx.Lookup2(0)
 
 		gg := sn.Bodies.Segment.MakeGetter()
 		gg.Reset(bodyOffset)
@@ -293,6 +292,8 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 		if err := rlp.DecodeBytes(buf, b); err != nil {
 			return err
 		}
+
+		fmt.Printf("b.BaseTxId: %d\n", b.BaseTxId)
 
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
