@@ -66,7 +66,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, buildPay
 		}, nil
 	}
 	// Request for assembling payload
-	return nil, nil
+	return nil, fmt.Errorf("invalid request")
 }
 
 // ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things
