@@ -208,7 +208,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	}()
 
 	<-reverseDownloadCh
-
+	// Simulate invalid status
 	statusCh <- ExecutionStatus{
 		HeadHash: startingHeadHash,
 		Status:   Invalid,
