@@ -113,7 +113,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	waitingForHeaders = false
 	<-done
 	require.NoError(err)
-	require.Equal(reply.Status, Syncing)
+	require.Equal(reply.Status, string(Syncing))
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], startingHeadHash[:])
 
@@ -126,7 +126,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	<-done
 	// Same result as before
 	require.NoError(err)
-	require.Equal(reply.Status, Syncing)
+	require.Equal(reply.Status, string(Syncing))
 	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], startingHeadHash[:])
 
@@ -144,7 +144,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, Syncing)
+	require.Equal(reply.Status, string(Syncing))
 	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], startingHeadHash[:])
 }
@@ -180,7 +180,7 @@ func TestMockValidExecution(t *testing.T) {
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, Valid)
+	require.Equal(reply.Status, string(Valid))
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], payload3Hash[:])
 }
@@ -216,7 +216,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, Invalid)
+	require.Equal(reply.Status, string(Invalid))
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], startingHeadHash[:])
 }
@@ -239,13 +239,8 @@ func TestInvalidRequest(t *testing.T) {
 	done := make(chan bool)
 
 	go func() {
+		// The payload is malformed, some fields are not set
 		_, err = backend.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
-			BlockHash:     gointerfaces.ConvertHashToH256(common.HexToHash("0x3")),
-			ReceiptRoot:   gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
-			StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
-			Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-			ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
 			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 			BlockNumber:   51,
 			GasLimit:      52,
