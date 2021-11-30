@@ -101,10 +101,25 @@ func HeadersDownward(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 	// Waiting for the beacon chain
+	block := <-cfg.reverseDownloadCh
+	header := block.Header()
+	// Do we need to unwind? (TODO)
 
-	// Do we need to unwind?
+	// Write current payload
+	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+		return err
+	}
+	// if we have the parent then we can go on
+	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	if err != nil {
+		return err
+	}
+	if parent != nil && parent.Hash() == header.ParentHash {
+		return s.Update(tx, header.Number.Uint64())
+	}
 
-	// downward sync if we need to process more
+	// Downward sync if we need to process more (TODO)
 
 	return nil
 }
