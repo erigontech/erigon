@@ -280,12 +280,26 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 		if err := BodiesIdx(f, sn.Bodies.From); err != nil {
 			return err
 		}
+	}
+	_ = s.ReopenIndices()
+	for _, sn := range s.blocks {
+		blockHeight := sn.Transactions.From
+		bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Bodies.Idx.BaseDataID())
 
-		f = path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
-		if err := TransactionsHashIdx(chainID, sn.Transactions.From*1_000_000, f); err != nil {
+		gg := sn.Bodies.Segment.MakeGetter()
+		gg.Reset(bodyOffset)
+		buf, _ := gg.Next(nil)
+		b := &types.BodyForStorage{}
+		if err := rlp.DecodeBytes(buf, b); err != nil {
+			return err
+		}
+
+		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
+		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
