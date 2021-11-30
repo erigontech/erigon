@@ -74,3 +74,18 @@ message ExecutionPayload {
   */
   repeated bytes transactions = 14;
 }
+
+message NodeInfoPorts {
+  uint32 discovery = 1;
+  uint32 listener = 2;
+}
+
+message NodeInfoReply {
+  string id = 1;
+  string name = 2;
+  string enode = 3;
+  string enr = 4;
+  NodeInfoPorts ports = 5;
+  string listenerAddr = 6;
+  bytes protocols = 7;
+}

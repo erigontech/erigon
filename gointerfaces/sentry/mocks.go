@@ -5,6 +5,7 @@ package sentry
 
 import (
 	context "context"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	sync "sync"
@@ -25,6 +26,9 @@ var _ SentryServer = &SentryServerMock{}
 // 			},
 // 			MessagesFunc: func(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error {
 // 				panic("mock out the Messages method")
+// 			},
+// 			NodeInfoFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error) {
+// 				panic("mock out the NodeInfo method")
 // 			},
 // 			PeerCountFunc: func(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error) {
 // 				panic("mock out the PeerCount method")
@@ -68,6 +72,9 @@ type SentryServerMock struct {
 
 	// MessagesFunc mocks the Messages method.
 	MessagesFunc func(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error
+
+	// NodeInfoFunc mocks the NodeInfo method.
+	NodeInfoFunc func(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error)
 
 	// PeerCountFunc mocks the PeerCount method.
 	PeerCountFunc func(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error)
@@ -114,6 +121,13 @@ type SentryServerMock struct {
 			MessagesRequest *MessagesRequest
 			// Sentry_MessagesServer is the sentry_MessagesServer argument value.
 			Sentry_MessagesServer Sentry_MessagesServer
+		}
+		// NodeInfo holds details about calls to the NodeInfo method.
+		NodeInfo []struct {
+			// ContextMoqParam is the contextMoqParam argument value.
+			ContextMoqParam context.Context
+			// Empty is the empty argument value.
+			Empty *emptypb.Empty
 		}
 		// PeerCount holds details about calls to the PeerCount method.
 		PeerCount []struct {
@@ -184,6 +198,7 @@ type SentryServerMock struct {
 	}
 	lockHandShake                          sync.RWMutex
 	lockMessages                           sync.RWMutex
+	lockNodeInfo                           sync.RWMutex
 	lockPeerCount                          sync.RWMutex
 	lockPeerMinBlock                       sync.RWMutex
 	lockPeers                              sync.RWMutex
@@ -270,6 +285,45 @@ func (mock *SentryServerMock) MessagesCalls() []struct {
 	mock.lockMessages.RLock()
 	calls = mock.calls.Messages
 	mock.lockMessages.RUnlock()
+	return calls
+}
+
+// NodeInfo calls NodeInfoFunc.
+func (mock *SentryServerMock) NodeInfo(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error) {
+	callInfo := struct {
+		ContextMoqParam context.Context
+		Empty           *emptypb.Empty
+	}{
+		ContextMoqParam: contextMoqParam,
+		Empty:           empty,
+	}
+	mock.lockNodeInfo.Lock()
+	mock.calls.NodeInfo = append(mock.calls.NodeInfo, callInfo)
+	mock.lockNodeInfo.Unlock()
+	if mock.NodeInfoFunc == nil {
+		var (
+			nodeInfoReplyOut *types.NodeInfoReply
+			errOut           error
+		)
+		return nodeInfoReplyOut, errOut
+	}
+	return mock.NodeInfoFunc(contextMoqParam, empty)
+}
+
+// NodeInfoCalls gets all the calls that were made to NodeInfo.
+// Check the length with:
+//     len(mockedSentryServer.NodeInfoCalls())
+func (mock *SentryServerMock) NodeInfoCalls() []struct {
+	ContextMoqParam context.Context
+	Empty           *emptypb.Empty
+} {
+	var calls []struct {
+		ContextMoqParam context.Context
+		Empty           *emptypb.Empty
+	}
+	mock.lockNodeInfo.RLock()
+	calls = mock.calls.NodeInfo
+	mock.lockNodeInfo.RUnlock()
 	return calls
 }
 
@@ -665,6 +719,9 @@ var _ SentryClient = &SentryClientMock{}
 // 			MessagesFunc: func(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error) {
 // 				panic("mock out the Messages method")
 // 			},
+// 			NodeInfoFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
+// 				panic("mock out the NodeInfo method")
+// 			},
 // 			PeerCountFunc: func(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
 // 				panic("mock out the PeerCount method")
 // 			},
@@ -704,6 +761,9 @@ type SentryClientMock struct {
 
 	// MessagesFunc mocks the Messages method.
 	MessagesFunc func(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error)
+
+	// NodeInfoFunc mocks the NodeInfo method.
+	NodeInfoFunc func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error)
 
 	// PeerCountFunc mocks the PeerCount method.
 	PeerCountFunc func(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error)
@@ -749,6 +809,15 @@ type SentryClientMock struct {
 			Ctx context.Context
 			// In is the in argument value.
 			In *MessagesRequest
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
+		// NodeInfo holds details about calls to the NodeInfo method.
+		NodeInfo []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *emptypb.Empty
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
@@ -836,6 +905,7 @@ type SentryClientMock struct {
 	}
 	lockHandShake                sync.RWMutex
 	lockMessages                 sync.RWMutex
+	lockNodeInfo                 sync.RWMutex
 	lockPeerCount                sync.RWMutex
 	lockPeerMinBlock             sync.RWMutex
 	lockPeers                    sync.RWMutex
@@ -930,6 +1000,49 @@ func (mock *SentryClientMock) MessagesCalls() []struct {
 	mock.lockMessages.RLock()
 	calls = mock.calls.Messages
 	mock.lockMessages.RUnlock()
+	return calls
+}
+
+// NodeInfo calls NodeInfoFunc.
+func (mock *SentryClientMock) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *emptypb.Empty
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockNodeInfo.Lock()
+	mock.calls.NodeInfo = append(mock.calls.NodeInfo, callInfo)
+	mock.lockNodeInfo.Unlock()
+	if mock.NodeInfoFunc == nil {
+		var (
+			nodeInfoReplyOut *types.NodeInfoReply
+			errOut           error
+		)
+		return nodeInfoReplyOut, errOut
+	}
+	return mock.NodeInfoFunc(ctx, in, opts...)
+}
+
+// NodeInfoCalls gets all the calls that were made to NodeInfo.
+// Check the length with:
+//     len(mockedSentryClient.NodeInfoCalls())
+func (mock *SentryClientMock) NodeInfoCalls() []struct {
+	Ctx  context.Context
+	In   *emptypb.Empty
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *emptypb.Empty
+		Opts []grpc.CallOption
+	}
+	mock.lockNodeInfo.RLock()
+	calls = mock.calls.NodeInfo
+	mock.lockNodeInfo.RUnlock()
 	return calls
 }
 

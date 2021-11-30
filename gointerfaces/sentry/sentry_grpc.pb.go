@@ -4,6 +4,7 @@ package sentry
 
 import (
 	context "context"
+	types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -37,6 +38,8 @@ type SentryClient interface {
 	PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error)
 	// Notifications about connected (after sub-protocol handshake) or lost peer
 	Peers(ctx context.Context, in *PeersRequest, opts ...grpc.CallOption) (Sentry_PeersClient, error)
+	// NodeInfo returns a collection of metadata known about the host.
+	NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error)
 }
 
 type sentryClient struct {
@@ -192,6 +195,15 @@ func (x *sentryPeersClient) Recv() (*PeersReply, error) {
 	return m, nil
 }
 
+func (c *sentryClient) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
+	out := new(types.NodeInfoReply)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/NodeInfo", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SentryServer is the server API for Sentry service.
 // All implementations must embed UnimplementedSentryServer
 // for forward compatibility
@@ -214,6 +226,8 @@ type SentryServer interface {
 	PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error)
 	// Notifications about connected (after sub-protocol handshake) or lost peer
 	Peers(*PeersRequest, Sentry_PeersServer) error
+	// NodeInfo returns a collection of metadata known about the host.
+	NodeInfo(context.Context, *emptypb.Empty) (*types.NodeInfoReply, error)
 	mustEmbedUnimplementedSentryServer()
 }
 
@@ -253,6 +267,9 @@ func (UnimplementedSentryServer) PeerCount(context.Context, *PeerCountRequest) (
 }
 func (UnimplementedSentryServer) Peers(*PeersRequest, Sentry_PeersServer) error {
 	return status.Errorf(codes.Unimplemented, "method Peers not implemented")
+}
+func (UnimplementedSentryServer) NodeInfo(context.Context, *emptypb.Empty) (*types.NodeInfoReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method NodeInfo not implemented")
 }
 func (UnimplementedSentryServer) mustEmbedUnimplementedSentryServer() {}
 
@@ -471,6 +488,24 @@ func (x *sentryPeersServer) Send(m *PeersReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Sentry_NodeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).NodeInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/NodeInfo",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).NodeInfo(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Sentry_ServiceDesc is the grpc.ServiceDesc for Sentry service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -513,6 +548,10 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PeerCount",
 			Handler:    _Sentry_PeerCount_Handler,
+		},
+		{
+			MethodName: "NodeInfo",
+			Handler:    _Sentry_NodeInfo_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

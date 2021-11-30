@@ -38,6 +38,8 @@ service ETHBACKEND {
   // High-level method - can read block from db, snapshots or apply any other logic
   // it doesn't provide consistency
   rpc Block(BlockRequest) returns (BlockReply);
+  // NodeInfo collects and returns NodeInfo from all running celery instances.
+  rpc NodeInfo(NodesInfoRequest) returns(NodesInfoReply);
 }
 
 enum Event {
@@ -116,4 +118,12 @@ message BlockRequest {
 message BlockReply {
   bytes blockRlp = 1;
   bytes senders = 2;
+}
+
+message NodesInfoRequest {
+  uint32 limit = 1;
+}
+
+message NodesInfoReply {
+  repeated types.NodeInfoReply nodesInfo = 1;
 }

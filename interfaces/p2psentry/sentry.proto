@@ -162,4 +162,6 @@ service Sentry {
 
   // Notifications about connected (after sub-protocol handshake) or lost peer
   rpc Peers(PeersRequest) returns (stream PeersReply);
+  // NodeInfo returns a collection of metadata known about the host.
+  rpc NodeInfo(google.protobuf.Empty) returns(types.NodeInfoReply);
 }

@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -278,6 +279,10 @@ func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest,
 		close(messageCh)
 	}()
 	return &SentryReceivePeersClientDirect{ch: messageCh, ctx: ctx}, nil
+}
+
+func (c *SentryClientDirect) NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
+	return c.server.NodeInfo(ctx, in)
 }
 
 func filterIds(in []sentry.MessageId, protocol uint) (filtered []sentry.MessageId) {
