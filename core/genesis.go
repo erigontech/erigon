@@ -186,11 +186,6 @@ func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *typ
 	return c, b, nil
 }
 
-func OverrideGenesisState(db kv.RwTx, genesis *Genesis) error {
-	_, _, err := genesis.WriteGenesisState(db)
-	return err
-}
-
 func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig

@@ -145,7 +145,7 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	if err := core.OverrideGenesisState(tx, g); err != nil {
+	if _, _, err := g.WriteGenesisState(tx); err != nil {
 		return err
 	}
 	return nil
