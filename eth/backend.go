@@ -34,8 +34,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
@@ -71,6 +73,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"modernc.org/sortutil"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -660,6 +663,29 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	}
 
 	return sentryPc, nil
+}
+
+func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
+	if limit == 0 || limit > len(s.sentries) {
+		limit = len(s.sentries)
+	}
+
+	nodes := make([]*prototypes.NodeInfoReply, 0, limit)
+	for i := 0; i < limit; i++ {
+		sc := s.sentries[i]
+
+		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
+		if err != nil {
+			log.Error("sentry nodeInfo", "err", err)
+		}
+
+		nodes = append(nodes, nodeInfo)
+	}
+
+	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
+	nodesInfo.NodesInfo = nodesInfo.NodesInfo[:sortutil.Dedupe(nodesInfo)]
+
+	return nodesInfo, nil
 }
 
 // Protocols returns all the currently configured

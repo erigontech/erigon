@@ -18,6 +18,7 @@ import (
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 // 2.1.0 - add NetPeerCount function
+// 2.2.0 - add NodesInfo function
 var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
@@ -32,6 +33,7 @@ type EthBackend interface {
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
+	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, events *Events) *EthBackendServer {
@@ -120,4 +122,12 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
 	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
+}
+
+func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {
+	nodesInfo, err := s.eth.NodesInfo(int(r.Limit))
+	if err != nil {
+		return nil, err
+	}
+	return nodesInfo, nil
 }

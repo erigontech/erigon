@@ -24,13 +24,14 @@ func APIList(ctx context.Context, db kv.RoDB,
 		base.EnableTevmExperiment()
 	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
-	erigonImpl := NewErigonAPI(base, db)
+	erigonImpl := NewErigonAPI(base, db, eth)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
 	traceImpl := NewTraceAPI(base, db, &cfg)
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl() /* deprecated */
+	adminImpl := NewAdminAPI(eth)
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -88,6 +89,13 @@ func APIList(ctx context.Context, db kv.RoDB,
 				Namespace: "erigon",
 				Public:    true,
 				Service:   ErigonAPI(erigonImpl),
+				Version:   "1.0",
+			})
+		case "admin":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "admin",
+				Public:    false,
+				Service:   AdminAPI(adminImpl),
 				Version:   "1.0",
 			})
 		}
