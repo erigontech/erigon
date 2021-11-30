@@ -33,6 +33,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	reverseDownloadCh chan types.Block
 }
 
 func StageHeadersCfg(
@@ -44,6 +45,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
+	reverseDownloadCh chan types.Block,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -54,6 +56,7 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		batchSize:         batchSize,
 		noP2PDiscovery:    noP2PDiscovery,
+		reverseDownloadCh: reverseDownloadCh,
 	}
 }
 
@@ -97,7 +100,12 @@ func HeadersDownward(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
-	// Add code for downward sync
+	// Waiting for the beacon chain
+
+	// Do we need to unwind?
+
+	// downward sync if we need to process more
+
 	return nil
 }
 
