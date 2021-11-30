@@ -3680,8 +3680,8 @@ func scanReceipts(chaindata string, block uint64) error {
 		fix := true
 		if chainConfig.IsByzantium(blockNum) {
 			receiptSha := types.DeriveSha(receipts1)
-			if receiptSha != block.Header().ReceiptHash {
-				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
+			if receiptSha != block.ReceiptHash() {
+				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.ReceiptHash())
 				fix = false
 			}
 		}

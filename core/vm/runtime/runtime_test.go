@@ -310,7 +310,7 @@ func TestBlockhash(t *testing.T) {
 	zero := new(big.Int).SetBytes(ret[0:32])
 	first := new(big.Int).SetBytes(ret[32:64])
 	last := new(big.Int).SetBytes(ret[64:96])
-	if zero.BitLen() != 0 {
+	if zero.Sign() != 0 {
 		t.Fatalf("expected zeroes, got %x", ret[0:32])
 	}
 	if first.Uint64() != 999 {
