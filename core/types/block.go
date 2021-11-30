@@ -177,6 +177,10 @@ func (h Header) EncodingSize() int {
 		encodingSize += baseFeeLen
 	}
 
+	if h.Eip3675 {
+		encodingSize += common.HashLength + 1
+	}
+
 	return encodingSize
 }
 
@@ -576,10 +580,10 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 				}
 				return nil
 			}
-			return fmt.Errorf("read BaseFee: %w", err)
+			return fmt.Errorf("read Random: %w", err)
 		}
 		if len(b) != common.HashLength {
-			return fmt.Errorf("wrong size for BaseFee: %d", len(b))
+			return fmt.Errorf("wrong size for Random: %d", len(b))
 		}
 		h.Eip3675 = true
 		h.Random = common.BytesToHash(b)
