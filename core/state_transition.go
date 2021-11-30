@@ -355,7 +355,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		if len(st.data) >= 4 {
 			sig = hexutil.Encode(st.data[:4])
 		}
-		log.Info("executed evm tx", "gas", st.msg.Gas()-st.gas, "err", vmerr, "sender", sender.Address().Hex(), "sig", sig)
+		log.Debug("executed evm tx", "gas", st.msg.Gas()-st.gas, "err", vmerr, "sender", sender.Address().Hex(), "sig", sig)
 	}
 	if refunds {
 		if london {
