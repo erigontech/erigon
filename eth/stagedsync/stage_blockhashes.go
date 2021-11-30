@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -28,18 +29,20 @@ type BlockHashesCfg struct {
 	db        kv.RwDB
 	tmpDir    string
 	snapshots *snapshotsync.AllSnapshots
+	cc        *params.ChainConfig
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string, snapshots *snapshotsync.AllSnapshots) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string, snapshots *snapshotsync.AllSnapshots, cc *params.ChainConfig) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:        db,
 		tmpDir:    tmpDir,
 		snapshots: snapshots,
+		cc:        cc,
 	}
 }
 
 func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
-	if cfg.snapshots != nil {
+	if cfg.snapshots != nil && !cfg.snapshots.AllIdxAvailable() {
 		if !cfg.snapshots.AllSegmentsAvailable() {
 			return fmt.Errorf("not all snapshot segments are available")
 		}
@@ -53,7 +56,8 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 		}
 		expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
 		if expect > headers || expect > bodies || expect > txs {
-			if err := cfg.snapshots.BuildIndices(*u256.Num1); err != nil {
+			chainID, _ := uint256.FromBig(cfg.cc.ChainID)
+			if err := cfg.snapshots.BuildIndices(*chainID); err != nil {
 				return err
 			}
 		}
@@ -61,10 +65,10 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 		if err := cfg.snapshots.ReopenIndices(); err != nil {
 			return err
 		}
-		if expect > cfg.snapshots.BlocksAvailable() {
+		if expect > cfg.snapshots.IndicesAvailable() {
 			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
 		}
-		cfg.snapshots.SetAllSegmentsAvailable(true)
+		cfg.snapshots.SetAllIdxAvailable(true)
 	}
 
 	useExternalTx := tx != nil

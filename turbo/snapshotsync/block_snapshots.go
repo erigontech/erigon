@@ -84,6 +84,7 @@ func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block
 type AllSnapshots struct {
 	dir                  string
 	allSegmentsAvailable bool
+	allIdxAvailable      bool
 	blocksAvailable      uint64
 	blocks               []*BlocksSnapshot
 	cfg                  *params.SnapshotsConfig
@@ -105,6 +106,8 @@ func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig {
 func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
 func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
 func (s *AllSnapshots) BlocksAvailable() uint64        { return s.blocksAvailable }
+func (s *AllSnapshots) AllIdxAvailable() bool          { return s.allIdxAvailable }
+func (s *AllSnapshots) SetAllIdxAvailable(v bool)      { s.allIdxAvailable = v }
 func (s *AllSnapshots) IndicesAvailable() uint64       { return s.blocks[len(s.blocks)-1].Transactions.To }
 
 func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
@@ -131,7 +134,6 @@ func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error
 	}
 	return
 }
-
 func (s *AllSnapshots) ReopenIndices() error {
 	for _, bs := range s.blocks {
 		if bs.Headers.Idx != nil {

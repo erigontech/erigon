@@ -246,7 +246,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
 			allSnapshots,
-		), stagedsync.StageBlockHashesCfg(db, tmpdir, allSnapshots), stagedsync.StageBodiesCfg(
+		), stagedsync.StageBlockHashesCfg(db, tmpdir, allSnapshots, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
 			controlServer.SendBodyRequest,
