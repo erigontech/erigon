@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
@@ -75,7 +76,11 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, buildPay
 func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload ExecutionPayload) (map[string]interface{}, error) {
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
-		baseFee, _ = uint256.FromBig((*big.Int)(payload.BaseFeePerGas))
+		var overflow bool
+		baseFee, overflow = uint256.FromBig((*big.Int)(payload.BaseFeePerGas))
+		if overflow {
+			return nil, fmt.Errorf("invalid request")
+		}
 	}
 	// Maximum length of extra is 32 bytes so we can use the hash datatype
 	extra := common.BytesToHash(payload.Extra)
