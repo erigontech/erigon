@@ -214,42 +214,6 @@ func TestUncleHash(t *testing.T) {
 	}
 }
 
-func TestRandom(t *testing.T) {
-
-	check := func(f string, got, want interface{}) {
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
-		}
-	}
-
-	header := Header{
-		Difficulty: math.BigPow(11, 11),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000001"),
-		GasLimit:   12345678,
-		GasUsed:    1476322,
-		Time:       9876543,
-		BaseFee:    common.Big1,
-		Random:     common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"),
-		Eip1559:    true,
-		Eip3675:    true,
-	}
-	var buf bytes.Buffer
-	err := header.EncodeRLP(&buf)
-	if err != nil {
-		t.Fatalf("err during encododing: %s", err.Error())
-	}
-	var decodedHeader Header
-	decodedHeader.DecodeRLP(rlp.NewStream(&buf, 0))
-
-	check("Difficulty", decodedHeader.Difficulty, math.BigPow(11, 11))
-	check("GasLimit", decodedHeader.GasLimit, uint64(12345678))
-	check("GasUsed", decodedHeader.GasUsed, uint64(1476322))
-	check("Coinbase", decodedHeader.Coinbase, common.HexToAddress("0x0000000000000000000000000000000000000001"))
-	check("BaseFee", decodedHeader.BaseFee, common.Big1)
-	check("Random", decodedHeader.Random, common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
-	check("Time", decodedHeader.Time, uint64(9876543))
-}
-
 var benchBuffer = bytes.NewBuffer(make([]byte, 0, 32000))
 
 func BenchmarkEncodeBlock(b *testing.B) {

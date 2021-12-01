@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -98,11 +99,13 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 				return err
 			}
 
-			td.Add(td, header.Difficulty)
-
-			if header.Eip3675 {
+			if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+				// Proof-of-Stake block
+				// TODO(yperbasis): double check that it's secure
 				return nil
 			}
+
+			td.Add(td, header.Difficulty)
 
 			if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
 				return rawdb.MarkTransition(tx, blockNum)
