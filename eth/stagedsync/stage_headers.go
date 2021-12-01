@@ -153,6 +153,7 @@ func HeadersForward(
 		count, _ := c.Count()
 		if true || count == 0 || count == 1 { // genesis does write 1 record
 			tx.ClearBucket(kv.HeaderTD)
+			var lastHeader *types.Header
 			//total  difficulty write
 			td := big.NewInt(0)
 			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
@@ -167,7 +168,11 @@ func HeadersForward(
 					}
 				*/
 				// TODO: append
+				if header.Number.Uint64() == 5499999 {
+					fmt.Printf("writeTD: %d, %x\n", header.Number.Uint64(), header.Hash())
+				}
 				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
+				lastHeader = header
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -179,6 +184,11 @@ func HeadersForward(
 			}); err != nil {
 				return err
 			}
+			tx.ClearBucket(kv.HeaderCanonical)
+			if err = fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+				return err
+			}
+
 		}
 
 	}
@@ -218,6 +228,7 @@ func HeadersForward(
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
 
+	fmt.Printf("readTD: %d, %x\n", headerProgress, hash)
 	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
 	if err != nil {
 		return err
