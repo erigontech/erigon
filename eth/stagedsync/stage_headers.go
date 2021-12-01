@@ -77,10 +77,10 @@ func SpawnStageHeaders(
 	}
 
 	var blockNumber uint64
-	
-	if s == nil{
-		blockNumber = 0;
-	}else{
+
+	if s == nil {
+		blockNumber = 0
+	} else {
 		blockNumber = s.BlockNumber
 	}
 
