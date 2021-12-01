@@ -97,6 +97,7 @@ func HeadersForward(
 			}
 			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
 			if expect <= headers && expect <= bodies && expect <= txs {
+				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
 				if err := cfg.snapshots.ReopenSegments(); err != nil {
 					return err
 				}
@@ -104,36 +105,6 @@ func HeadersForward(
 					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
 				}
 				cfg.snapshots.SetAllSegmentsAvailable(true)
-
-				//total  difficulty write
-				td := big.NewInt(0)
-				k := make([]byte, 8+32)
-				if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
-					td.Add(td, header.Difficulty)
-					/*
-						if header.Eip3675 {
-							return nil
-						}
-
-						if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
-							return rawdb.MarkTransition(tx, blockNum)
-						}
-					*/
-					data, err := rlp.EncodeToBytes(td)
-					if err != nil {
-						return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
-					}
-					binary.BigEndian.PutUint64(k[:8], header.Number.Uint64())
-					copy(k[8:], header.Hash().Bytes())
-					if header.Number.Uint64() > 0 {
-						if err := tx.Append(kv.HeaderTD, k, data); err != nil {
-							return err
-						}
-					}
-					return nil
-				}); err != nil {
-					return err
-				}
 
 				_ = s.Update(tx, cfg.snapshots.BlocksAvailable())
 				break
@@ -145,6 +116,7 @@ func HeadersForward(
 				return ctx.Err()
 			case <-logEvery.C:
 				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+			default:
 			}
 		}
 
@@ -176,6 +148,39 @@ func HeadersForward(
 			}
 			cfg.snapshots.SetAllIdxAvailable(true)
 		}
+
+		c, _ := tx.Cursor(kv.HeaderTD)
+		count, _ := c.Count()
+		if true || count == 0 || count == 1 { // genesis does write 1 record
+			tx.ClearBucket(kv.HeaderTD)
+			//total  difficulty write
+			td := big.NewInt(0)
+			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+				td.Add(td, header.Difficulty)
+				/*
+					if header.Eip3675 {
+						return nil
+					}
+
+					if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
+						return rawdb.MarkTransition(tx, blockNum)
+					}
+				*/
+				// TODO: append
+				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
+				default:
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	var headerProgress uint64
@@ -217,6 +222,7 @@ func HeadersForward(
 	if err != nil {
 		return err
 	}
+	fmt.Printf("localTd %d\n", localTd)
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx})
 
