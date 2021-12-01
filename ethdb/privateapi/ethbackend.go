@@ -191,10 +191,9 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 	// Check mandatory fields
-	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
-		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
-		req.Transactions == nil {
-
+	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil ||
+		req.ReceiptRoot == nil || req.StateRoot == nil {
+		fmt.Println(req)
 		return nil, fmt.Errorf("invalid execution payload")
 	}
 
