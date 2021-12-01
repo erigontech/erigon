@@ -19,9 +19,9 @@ import (
 // Hashes
 var (
 	startingHeadHash = common.HexToHash("0x1")
-	payload1Hash     = common.HexToHash("9c344b6c65e0293dd3d45510fef3b6e957a1058c124d88ff607aa59fbd1293a7")
-	payload2Hash     = common.HexToHash("99937164b496a50595aa445a587200fd8a84024e63078871ab3508b6483a8c53")
-	payload3Hash     = common.HexToHash("34f005ca6dee15d637b2c45c3fca124a479daa7bc25c781bba6782ce90aac566")
+	payload1Hash     = common.HexToHash("a1726a8541a53f098b21f58e9d1c63a450b8acbecdce0510162f8257be790320")
+	payload2Hash     = common.HexToHash("a19013b8b5f95ffaa008942fd2f04f72a3ae91f54eb64a3f6f8c6630db742aef")
+	payload3Hash     = common.HexToHash("8aa80e6d2270ae7273e87fa5752d94b94a0f05da60f99fd4b8e36ca767cbae91")
 )
 
 // Payloads
