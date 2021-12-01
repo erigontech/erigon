@@ -1193,7 +1193,7 @@ func Transitioned(db kv.Getter, blockNum uint64) (trans bool, err error) {
 	if len(data) == 0 {
 		return false, nil
 	}
-	return blockNum > binary.BigEndian.Uint64(data), nil
+	return blockNum >= binary.BigEndian.Uint64(data), nil
 }
 
 // MarkTreansition sets transition to proof-of-stake from the block number

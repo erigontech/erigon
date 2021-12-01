@@ -643,9 +643,10 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error), terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
 	for len(hd.insertList) > 0 {
 		// Make sure long insertions do not appear as a stuck stage 1
@@ -688,10 +689,16 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 			continue
 		}
 
-		// Check if transition to proof-of-stake happened
-		if err := hf(link.header, link.hash, link.blockHeight, terminalTotalDifficulty); err != nil {
+		isTrans, err := hf(link.header, link.hash, link.blockHeight, terminalTotalDifficulty)
+		if err != nil {
 			return false, err
 		}
+		// Check if transition to proof-of-stake happened and stop forward syncing
+		if isTrans {
+			hd.highestInDb = link.blockHeight
+			return true, nil
+		}
+
 		if link.blockHeight > hd.highestInDb {
 			hd.highestInDb = link.blockHeight
 		}
@@ -769,32 +776,41 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
-	return func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
+	return func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
 		return hi.FeedHeader(db, header, hash, blockHeight, terminalTotalDifficulty)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
-	if hash == hi.prevHash {
-		// Skip duplicates
-		return nil
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
+
+	isTrans, err := rawdb.Transitioned(db, header.Number.Uint64())
+	if err != nil {
+		return false, err
 	}
 
+	if isTrans {
+		return true, nil
+	}
+
+	if hash == hi.prevHash {
+		// Skip duplicates
+		return false, nil
+	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
-		return nil
+		return false, nil
 	}
 	// Load parent header
 	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
 	if parent == nil {
 		// Fail on headers without parent
-		return fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
+		return false, fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
-		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+		return false, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
 	td := new(big.Int).Add(parentTd, header.Difficulty)
@@ -810,7 +826,7 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 			ch = fromCache.(common.Hash)
 		} else {
 			if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
-				return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
+				return false, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 			}
 		}
 		if ch == header.ParentHash {
@@ -836,16 +852,16 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 				ancestorHeight--
 			}
 			if err != nil {
-				return fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+				return false, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
 			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 			forkingPoint = ancestorHeight
 		}
 		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
-			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
+			return false, fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 		}
 		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+			return false, fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
 		}
 		hi.highest = blockHeight
 		hi.highestHash = hash
@@ -861,23 +877,26 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 	}
 	data, err2 := rlp.EncodeToBytes(header)
 	if err2 != nil {
-		return fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
+		return false, fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
-		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+		return false, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 
 	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
-		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+		return false, fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 
-	if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
-		if err = rawdb.MarkTransition(db, blockHeight); err != nil {
-			return err
-		}
-	}
 	hi.prevHash = hash
-	return nil
+
+	if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
+		log.Info("Transitioned to proof-of-stake", "number", blockHeight)
+		if err = rawdb.MarkTransition(db, blockHeight); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {

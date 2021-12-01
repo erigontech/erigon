@@ -195,6 +195,9 @@ Loop:
 		}
 
 		if isTrans {
+			if err := s.Update(tx, headerProgress); err != nil {
+				return err
+			}
 			break
 		}
 		currentTime := uint64(time.Now().Unix())
