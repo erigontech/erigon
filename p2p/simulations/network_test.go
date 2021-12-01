@@ -473,7 +473,7 @@ func TestGetNodeIDs(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID())
 		}
 	}
 
@@ -484,7 +484,7 @@ func TestGetNodeIDs(t *testing.T) {
 	}
 	for _, nodeID := range gotNodeIDsExcl {
 		if bytes.Equal(excludeNodeID.Bytes(), nodeID.Bytes()) {
-			t.Fatalf("GetNodeIDs returned the node ID we excluded, ID: %s", nodeID.String())
+			t.Fatalf("GetNodeIDs returned the node ID we excluded, ID: %s", nodeID)
 		}
 	}
 }
@@ -523,7 +523,7 @@ func TestGetNodes(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID())
 		}
 	}
 
@@ -534,7 +534,7 @@ func TestGetNodes(t *testing.T) {
 	}
 	for _, node := range gotNodesExcl {
 		if bytes.Equal(excludeNodeID.Bytes(), node.ID().Bytes()) {
-			t.Fatalf("GetNodes returned the node we excluded, ID: %s", node.ID().String())
+			t.Fatalf("GetNodes returned the node we excluded, ID: %s", node.ID())
 		}
 	}
 }
@@ -579,7 +579,7 @@ func TestGetNodesByID(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node was not returned by GetNodesByID(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node was not returned by GetNodesByID(), ID: %s", node1.ID())
 		}
 	}
 }
@@ -625,7 +625,7 @@ func TestGetNodesByProperty(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node with property was not returned by GetNodesByProperty(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node with property was not returned by GetNodesByProperty(), ID: %s", node1.ID())
 		}
 	}
 }
@@ -672,7 +672,7 @@ func TestGetNodeIDsByProperty(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("Not all nodes IDs were returned by GetNodeIDsByProperty(), ID: %s", id1.String())
+			t.Fatalf("Not all nodes IDs were returned by GetNodeIDsByProperty(), ID: %s", id1)
 		}
 	}
 }

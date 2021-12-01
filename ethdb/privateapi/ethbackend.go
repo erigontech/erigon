@@ -32,6 +32,7 @@ const (
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 // 2.1.0 - add NetPeerCount function
+// 2.2.0 - add NodesInfo function
 var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
@@ -60,6 +61,7 @@ type EthBackend interface {
 	Etherbase() (common.Address, error)
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
+	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 }
 
 // This is the status of a newly execute block.
@@ -224,8 +226,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
 		Root:        gointerfaces.ConvertH256ToHash(req.StateRoot),
 		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
-		Random:      gointerfaces.ConvertH256ToHash(req.Random),
-		Eip3675:     true,
 		Eip1559:     eip1559,
 		BaseFee:     baseFee,
 		Extra:       extra_data.Bytes(),
@@ -233,7 +233,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		GasUsed:     req.GasUsed,
 		GasLimit:    req.GasLimit,
 		Time:        req.Timestamp,
-		MixDigest:   common.Hash{},
+		MixDigest:   gointerfaces.ConvertH256ToHash(req.Random),
 		UncleHash:   types.EmptyUncleHash,
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
@@ -272,4 +272,12 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return &payload, nil
 	}
 	return nil, fmt.Errorf("unknown payload")
+}
+
+func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {
+	nodesInfo, err := s.eth.NodesInfo(int(r.Limit))
+	if err != nil {
+		return nil, err
+	}
+	return nodesInfo, nil
 }
