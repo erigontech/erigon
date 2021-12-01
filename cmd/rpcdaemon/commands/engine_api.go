@@ -34,12 +34,6 @@ type ExecutionPayload struct {
 	Transactions  []hexutil.Bytes `json:"transactions"  gencodec:"required"`
 }
 
-type ForkchoiceState struct {
-	HeadBlockHash      common.Hash `json:"headBlockHash"      gencodec:"required"`
-	SafeBlockHash      common.Hash `json:"safeBlockHash"      gencodec:"required"`
-	FinalizedBlockHash common.Hash `json:"finalizedBlockHash" gencodec:"required"`
-}
-
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
@@ -49,7 +43,7 @@ type PayloadAttributes struct {
 
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
-	ForkchoiceUpdatedV1(context.Context, *ForkchoiceState, *PayloadAttributes) (map[string]interface{}, error)
+	ForkchoiceUpdatedV1(context.Context, struct{}, *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
 }
@@ -64,7 +58,7 @@ type EngineImpl struct {
 // ForkchoiceUpdatedV1 is executed only if we are running a beacon validator,
 // in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
 // if the payloadAttributes is different than null, we return
-func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, forkchoiceState *ForkchoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
 	if payloadAttributes == nil {
 		return map[string]interface{}{
