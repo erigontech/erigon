@@ -101,6 +101,7 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 
 			if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 				// Proof-of-Stake block
+				// TODO(yperbasis): double check that it's secure
 				return nil
 			}
 
