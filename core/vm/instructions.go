@@ -557,6 +557,9 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
 	loc := scope.Stack.Pop()
 	val := scope.Stack.Pop()
 	interpreter.hasherBuf = loc.Bytes32()
@@ -630,6 +633,9 @@ func opGas(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte
 }
 
 func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
 	var (
 		value  = scope.Stack.Pop()
 		offset = scope.Stack.Pop()
@@ -669,6 +675,9 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 }
 
 func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
 	var (
 		endowment    = scope.Stack.Pop()
 		offset, size = scope.Stack.Pop(), scope.Stack.Pop()
@@ -715,6 +724,9 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	if !value.IsZero() {
+		if interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
 		gas += params.CallStipend
 	}
 
@@ -853,6 +865,9 @@ func opStop(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 }
 
 func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
 	beneficiaryAddr := common.Address(beneficiary.Bytes20())
@@ -870,6 +885,9 @@ func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 // make log instruction function
 func makeLog(size int) executionFunc {
 	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+		if interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
 		topics := make([]common.Hash, size)
 		stack := scope.Stack
 		mStart, mSize := stack.Pop(), stack.Pop()
