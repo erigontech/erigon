@@ -68,14 +68,24 @@ func SpawnStageHeaders(
 ) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
-		tx, err := cfg.db.BeginRw(ctx)
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
 		}
 		defer tx.Rollback()
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, cfg.hd.Progress())
+	var blockNumber uint64
+	
+	if s == nil{
+		blockNumber = 0;
+	}else{
+		blockNumber = s.BlockNumber
+	}
+
+	isTrans, err := rawdb.Transitioned(tx, blockNumber)
+
 	if err != nil {
 		return err
 	}
@@ -83,11 +93,11 @@ func SpawnStageHeaders(
 	if isTrans {
 		return HeadersDownward(s, u, ctx, tx, cfg, initialCycle, test)
 	} else {
-		return HeadersForward(s, u, ctx, tx, cfg, initialCycle, test)
+		return HeadersForward(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
 }
 
-// HeadersForward progresses Headers stage in the downward direction
+// HeadersDownwards progresses Headers stage in the downward direction
 func HeadersDownward(
 	s *StageState,
 	u Unwinder,
@@ -110,15 +120,12 @@ func HeadersForward(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	useExternalTx bool,
 ) error {
 	var headerProgress uint64
 	var err error
-	useExternalTx := tx != nil
+
 	if !useExternalTx {
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
 		defer tx.Rollback()
 	}
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
