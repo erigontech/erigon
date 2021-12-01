@@ -40,7 +40,7 @@ func TestStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil, nil, nil, nil)
+	state := New(s, nil, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -80,7 +80,7 @@ func TestDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil, nil, nil, nil)
+	state := New(s, nil, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -120,7 +120,7 @@ func TestErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, nil, nil)
+	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
@@ -203,7 +203,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, nil, nil)
+	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -296,7 +296,7 @@ func TestUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, nil, nil)
+	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -385,7 +385,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, nil, nil)
+	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
@@ -441,12 +441,12 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil, nil, nil, nil)
+	state := New(s, nil, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.NoError(t, err)
 
-	state = New(s, nil, nil, nil, nil)
+	state = New(s, nil, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -499,14 +499,14 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil, nil, nil, nil)
+	state := New(s, nil, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 
-	state = New(s, nil, nil, nil, nil)
+	state = New(s, nil, nil)
 	err = state.Run(db, tx, true)
 	assert.NoError(t, err)
 
@@ -578,7 +578,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, nil, nil)
+	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil)
 	db, tx := memdb.NewTestTx(t)
 	err := state.Run(db, tx, true)
 	assert.Error(t, errInterrupted, err)

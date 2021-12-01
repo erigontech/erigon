@@ -90,7 +90,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	reverseDownloadCh := make(chan types.Block)
+	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := true
 
@@ -156,7 +156,7 @@ func TestMockValidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Block)
+	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := true
 
@@ -192,7 +192,7 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Block)
+	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
 
 	waitingForHeaders := true
@@ -228,7 +228,7 @@ func TestInvalidRequest(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Block)
+	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := true
 
@@ -264,7 +264,7 @@ func TestNoTTD(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Block)
+	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := true
 

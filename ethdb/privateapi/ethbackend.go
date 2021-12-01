@@ -45,7 +45,7 @@ type EthBackendServer struct {
 	config          *params.ChainConfig
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send reverse sync starting point to staged sync
-	reverseDownloadCh chan<- types.Block
+	reverseDownloadCh chan<- types.Header
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Last block number sent over via reverseDownloadCh
@@ -71,7 +71,7 @@ type ExecutionStatus struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- types.Block, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *bool,
+	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForPOSHeaders: waitingForPOSHeaders,
@@ -253,7 +253,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.Transactions(transactions)),
+		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
@@ -262,7 +262,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	log.Info("Received Payload from beacon-chain", "hash", blockHash)
 	// Send the block over
 	s.numberSent = req.BlockNumber
-	s.reverseDownloadCh <- *types.NewBlock(&header, transactions, nil, nil)
+	s.reverseDownloadCh <- header
 
 	executedStatus := <-s.statusCh
 
