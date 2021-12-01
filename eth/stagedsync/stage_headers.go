@@ -89,6 +89,7 @@ func HeadersForward(
 					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
 				}
 				cfg.snapshots.SetAllSegmentsAvailable(true)
+				_ = s.Update(tx, cfg.snapshots.BlocksAvailable())
 				break
 			}
 			time.Sleep(10 * time.Second)
