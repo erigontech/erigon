@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -29,6 +30,7 @@ type BodiesCfg struct {
 	timeout         int
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
+	snapshots       *snapshotsync.AllSnapshots
 }
 
 func StageBodiesCfg(
@@ -40,8 +42,9 @@ func StageBodiesCfg(
 	timeout int,
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
+	snapshots *snapshotsync.AllSnapshots,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -76,6 +79,9 @@ func BodiesForward(
 		return err
 	}
 	bodyProgress = s.BlockNumber
+	if cfg.snapshots.BlocksAvailable() > bodyProgress {
+		bodyProgress = cfg.snapshots.BlocksAvailable()
+	}
 	if bodyProgress == headerProgress {
 		return nil
 	}

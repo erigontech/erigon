@@ -23,12 +23,12 @@ func NewBlockReader() *BlockReader {
 	return &BlockReader{}
 }
 
-func (back *BlockReader) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeader(tx, hash, blockHeight)
 	return h, nil
 }
 
-func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeaderByNumber(tx, blockHeight)
 	return h, nil
 }
@@ -98,7 +98,7 @@ type BlockReaderWithSnapshots struct {
 func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
 }
-func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
 		h := rawdb.ReadHeaderByNumber(tx, blockHeight)
@@ -106,7 +106,7 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	}
 	return back.headerFromSnapshot(blockHeight, sn)
 }
-func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
 		h := rawdb.ReadHeader(tx, hash, blockHeight)
@@ -116,7 +116,7 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash
 	return back.headerFromSnapshot(blockHeight, sn)
 }
 
-func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
 		h := rawdb.ReadHeader(tx, hash, blockHeight)

@@ -246,6 +246,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
 			allSnapshots,
+			blockReader,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, allSnapshots, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
@@ -255,6 +256,7 @@ func NewStagedSync(
 			cfg.BodyDownloadTimeoutSeconds,
 			*controlServer.ChainConfig,
 			cfg.BatchSize,
+			allSnapshots,
 		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,

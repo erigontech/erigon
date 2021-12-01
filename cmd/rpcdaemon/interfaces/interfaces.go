@@ -14,6 +14,6 @@ type BlockReader interface {
 
 type FullBlockReader interface {
 	BlockReader
-	Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error)
-	HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error)
+	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error)
 }

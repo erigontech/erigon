@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"time"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -42,35 +40,6 @@ func StageBlockHashesCfg(db kv.RwDB, tmpDir string, snapshots *snapshotsync.AllS
 }
 
 func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
-	if cfg.snapshots != nil && !cfg.snapshots.AllIdxAvailable() {
-		if !cfg.snapshots.AllSegmentsAvailable() {
-			return fmt.Errorf("not all snapshot segments are available")
-		}
-
-		// wait for Downloader service to download all expected snapshots
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-		headers, bodies, txs, err := cfg.snapshots.IdxAvailability()
-		if err != nil {
-			return err
-		}
-		expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-		if expect > headers || expect > bodies || expect > txs {
-			chainID, _ := uint256.FromBig(cfg.cc.ChainID)
-			if err := cfg.snapshots.BuildIndices(*chainID); err != nil {
-				return err
-			}
-		}
-
-		if err := cfg.snapshots.ReopenIndices(); err != nil {
-			return err
-		}
-		if expect > cfg.snapshots.IndicesAvailable() {
-			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
-		}
-		cfg.snapshots.SetAllIdxAvailable(true)
-	}
-
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

@@ -163,7 +163,7 @@ func (s *AllSnapshots) ReopenIndices() error {
 			return err
 		}
 		bs.Transactions.Idx = idx
-		s.idxAvailable = bs.Transactions.To
+		s.idxAvailable = bs.Transactions.To - 1
 	}
 	return nil
 }
@@ -228,7 +228,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 		}
 
 		s.blocks = append(s.blocks, blocksSnapshot)
-		s.segmentsAvailable = blocksSnapshot.To
+		s.segmentsAvailable = blocksSnapshot.To - 1
 	}
 	return nil
 }
@@ -321,7 +321,7 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 			maxBlock = to
 		}
 	}
-	return maxBlock, nil
+	return maxBlock - 1, nil
 }
 func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 	files, err := idxFiles(dir, ofType)
@@ -341,7 +341,7 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 			maxBlock = to
 		}
 	}
-	return maxBlock, nil
+	return maxBlock - 1, nil
 }
 
 func segments(dir string, ofType SnapshotType) ([]string, error) {
