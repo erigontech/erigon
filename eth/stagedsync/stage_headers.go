@@ -34,6 +34,7 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	reverseDownloadCh chan types.Header
+	waitingPosHeaders *bool
 }
 
 func StageHeadersCfg(
@@ -46,6 +47,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan types.Header,
+	waitingPosHeaders *bool,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -57,6 +59,7 @@ func StageHeadersCfg(
 		batchSize:         batchSize,
 		noP2PDiscovery:    noP2PDiscovery,
 		reverseDownloadCh: reverseDownloadCh,
+		waitingPosHeaders: waitingPosHeaders,
 	}
 }
 
@@ -100,7 +103,26 @@ func HeadersDownward(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
+	*cfg.waitingPosHeaders = true
+	// Waiting for the beacon chain
+	header := <-cfg.reverseDownloadCh
+	*cfg.waitingPosHeaders = false
+	// Do we need to unwind? (TODO)
 
+	// Write current payload
+	rawdb.WriteHeader(tx, &header)
+	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+		return err
+	}
+	// if we have the parent then we can move on with the stagedsync
+	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	if err != nil {
+		return err
+	}
+	if parent != nil && parent.Hash() == header.ParentHash {
+		return s.Update(tx, header.Number.Uint64())
+	}
+	// Downward sync if we need to process more (TODO)
 	return nil
 }
 

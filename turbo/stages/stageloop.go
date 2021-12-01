@@ -252,6 +252,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
 			reverseDownloadCh,
+			waitingForPOSHeaders,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,

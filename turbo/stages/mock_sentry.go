@@ -281,6 +281,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BatchSize,
 			false,
 			nil,
+			nil,
 		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
