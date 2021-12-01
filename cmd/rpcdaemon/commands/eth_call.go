@@ -295,7 +295,7 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, args ethapi.CallArgs) (*accessListResult, error) {
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
