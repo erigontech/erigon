@@ -104,6 +104,37 @@ func HeadersForward(
 					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
 				}
 				cfg.snapshots.SetAllSegmentsAvailable(true)
+
+				//total  difficulty write
+				td := big.NewInt(0)
+				k := make([]byte, 8+32)
+				if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+					td.Add(td, header.Difficulty)
+					/*
+						if header.Eip3675 {
+							return nil
+						}
+
+						if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
+							return rawdb.MarkTransition(tx, blockNum)
+						}
+					*/
+					data, err := rlp.EncodeToBytes(td)
+					if err != nil {
+						return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)
+					}
+					binary.BigEndian.PutUint64(k[:8], header.Number.Uint64())
+					copy(k[8:], header.Hash().Bytes())
+					if header.Number.Uint64() > 0 {
+						if err := tx.Append(kv.HeaderTD, k, data); err != nil {
+							return err
+						}
+					}
+					return nil
+				}); err != nil {
+					return err
+				}
+
 				_ = s.Update(tx, cfg.snapshots.BlocksAvailable())
 				break
 			}

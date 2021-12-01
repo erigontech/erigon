@@ -2,6 +2,7 @@ package snapshotsync
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -750,6 +751,27 @@ RETRY:
 		return err
 	}
 
+	return nil
+}
+
+func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) error {
+	for _, sn := range s.blocks {
+		d := sn.Headers.Segment
+		g := d.MakeGetter()
+		word := make([]byte, 0, 4096)
+		header := new(types.Header)
+		r := bytes.NewReader(nil)
+		for g.HasNext() {
+			word, _ = g.Next(word[:0])
+			r.Reset(word)
+			if err := rlp.Decode(r, header); err != nil {
+				return err
+			}
+			if err := walker(header); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
