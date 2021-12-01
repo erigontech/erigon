@@ -198,7 +198,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, fmt.Errorf("invalid execution payload")
 	}
 
-	var err error
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
 	// If another payload is already commissioned then we just reply with syncing
@@ -217,19 +216,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if req.BaseFeePerGas != nil {
 		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
 		eip1559 = true
-	}
-
-	// Decode transactions
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
-	transactions := make([]types.Transaction, len(req.Transactions))
-
-	for i, encodedTransaction := range req.Transactions {
-		reader.Reset(encodedTransaction)
-		stream.Reset(reader, 0)
-		if transactions[i], err = types.DecodeTransaction(stream); err != nil {
-			return nil, err
-		}
 	}
 
 	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
