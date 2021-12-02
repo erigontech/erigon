@@ -296,6 +296,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			return err
 		}
 
+		fmt.Printf("alexxxxx: %d\n", b.BaseTxId)
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
 			return err
@@ -468,6 +469,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 
 	firstIDSaved := false
 
+	var prevTxID uint64
 	from := dbutils.EncodeBlockNumber(fromBlock)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
@@ -497,6 +499,11 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 			firstTxID = body.BaseTxId
 		}
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
+			id := binary.BigEndian.Uint64(tk)
+			if id != prevTxID+1 {
+				panic(fmt.Sprintf("no gaps in tx ids are allowed: jump from %d to %d", prevTxID, id))
+			}
+			prevTxID = id
 			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
 				return err
 			}
@@ -623,12 +630,13 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
 			return true, nil
 		}
-		if i == 0 {
-			b := &types.BodyForStorage{}
-			if err = rlp.DecodeBytes(dataRLP, b); err != nil {
-				panic(err)
-			}
-		}
+
+		//if i == 0 {
+		//	b := &types.BodyForStorage{}
+		//	if err = rlp.DecodeBytes(dataRLP, b); err != nil {
+		//		panic(err)
+		//	}
+		//}
 		i++
 
 		numBuf := make([]byte, binary.MaxVarintLen64)
