@@ -784,7 +784,7 @@ func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types
 
 func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
 
-	isTrans, err := rawdb.Transitioned(db, header.Number.Uint64())
+	isTrans, err := rawdb.Transitioned(db, header.Number.Uint64(), terminalTotalDifficulty)
 	if err != nil {
 		return false, err
 	}
@@ -889,13 +889,6 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 
 	hi.prevHash = hash
 
-	if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
-		log.Info("Transitioned to proof-of-stake", "number", blockHeight)
-		if err = rawdb.MarkTransition(db, blockHeight); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
 	return false, nil
 }
 

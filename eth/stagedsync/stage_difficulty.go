@@ -107,9 +107,6 @@ func SpawnDifficultyStage(s *StageState, tx kv.RwTx, cfg DifficultyCfg, ctx cont
 
 			td.Add(td, header.Difficulty)
 
-			if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
-				return rawdb.MarkTransition(tx, blockNum)
-			}
 			data, err := rlp.EncodeToBytes(td)
 			if err != nil {
 				return fmt.Errorf("failed to RLP encode block total difficulty: %w", err)

@@ -80,7 +80,6 @@ func makeTestDb(ctx context.Context, db kv.RwDB) {
 	tx, _ := db.BeginRw(ctx)
 	rawdb.WriteHeadBlockHash(tx, startingHeadHash)
 	rawdb.WriteHeaderNumber(tx, startingHeadHash, 50)
-	rawdb.MarkTransition(tx, 0)
 	_ = tx.Commit()
 }
 

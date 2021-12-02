@@ -81,7 +81,7 @@ func SpawnStageHeaders(
 		defer tx.Rollback()
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, cfg.hd.Progress())
+	isTrans, err := rawdb.Transitioned(tx, cfg.hd.Progress(), cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func HeadersForward(
 Loop:
 	for !stopped {
 
-		isTrans, err := rawdb.Transitioned(tx, headerProgress)
+		isTrans, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
@@ -378,17 +378,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
-		// unwind the merge
-		isTrans, err := rawdb.Transitioned(tx, u.UnwindPoint)
-		if err != nil {
-			return err
-		}
 
-		if cfg.chainConfig.TerminalTotalDifficulty != nil && !isTrans {
-			if err := tx.Delete(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey), nil); err != nil {
-				return err
-			}
-		}
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
 			// Find header with biggest TD
 			tdCursor, cErr := tx.Cursor(kv.HeaderTD)
