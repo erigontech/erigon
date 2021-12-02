@@ -911,7 +911,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	tmpdir := path.Join(datadir, etl.TmpDirName)
 
-	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
+	pm, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.TxLookup))
 
 	tx, err := db.BeginRw(ctx)
@@ -936,7 +936,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	}
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageTxLookupCfg(db, pm, tmpdir)
+	cfg := stagedsync.StageTxLookupCfg(db, pm, tmpdir, allSnapshots(chainConfig))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx)

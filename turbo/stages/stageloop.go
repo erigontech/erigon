@@ -279,7 +279,7 @@ func NewStagedSync(
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, allSnapshots),
 			stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,

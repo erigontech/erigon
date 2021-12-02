@@ -501,7 +501,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if id != prevTxID+1 {
-				panic(fmt.Sprintf("no gaps in tx ids are allowed: jump from %d to %d", prevTxID, id))
+				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
 			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
@@ -511,8 +511,8 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 			if len(senders) > 0 {
 				sender = senders[j][:]
 			} else {
-				sender = make([]byte, 20) // TODO: return error here
-				//panic("not implemented")
+				//sender = make([]byte, 20) // TODO: return error here
+				panic("not implemented")
 			}
 			_ = sender
 			valueBuf = valueBuf[:0]
@@ -530,7 +530,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Info("Dumping txs", "million txs", i/1_000_000, "block num", blockNum,
+				log.Info("Dumping txs", "processed", i/1_000_000, "block num", blockNum,
 					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 				)
 			}
