@@ -383,7 +383,3 @@ func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
 	bd.AddToPrefetch(block)
 	return nil
 }
-func (bd *BodyDownload) AddBlockFromSnapshot(block *types.Block) error {
-	bd.AddToPrefetch(block)
-	return nil
-}
