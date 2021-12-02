@@ -3,6 +3,7 @@ package snapshotsync
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -272,7 +273,7 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 	return snapshot, false
 }
 
-func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
+func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) error {
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
 		if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
@@ -686,16 +687,22 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
 func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word, &h); err != nil {
 			return err
 		}
+
 		if err := idx.AddKey(h.Hash().Bytes(), offset); err != nil {
 			return err
 		}
+		// hashBuf := make([]byte, 32)
+		// common.HashTo(word, hashBuf)
+		//if err := idx.AddKey(types.RawRlpHash(word).Bytes(), offset); err != nil {
+		//	return err
+		//}
 
 		select {
 		default:
@@ -710,7 +717,7 @@ func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error
 }
 
 func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	num := make([]byte, 8)
 	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {

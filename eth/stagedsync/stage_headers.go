@@ -97,8 +97,7 @@ func HeadersForward(
 					return err
 				}
 				expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-				if expect <= headers && expect <= bodies && expect <= txs {
-					log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+				if headers >= expect && bodies >= expect && txs >= expect {
 					if err := cfg.snapshots.ReopenSegments(); err != nil {
 						return err
 					}
@@ -109,6 +108,7 @@ func HeadersForward(
 
 					break
 				}
+				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
 				time.Sleep(10 * time.Second)
 
 				select {
@@ -134,9 +134,9 @@ func HeadersForward(
 				return err
 			}
 			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-			if expect > headers || expect > bodies || expect > txs {
+			if headers < expect || bodies < expect || txs < expect {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				if err := cfg.snapshots.BuildIndices(*chainID); err != nil {
+				if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
 					return err
 				}
 			}
