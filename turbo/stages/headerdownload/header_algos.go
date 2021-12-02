@@ -1049,7 +1049,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlock
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	addPreVerifiedHashes := len(hd.preverifiedHashes) == 0
-	if addPreVerifiedHashes {
+	if addPreVerifiedHashes && hd.preverifiedHashes == nil {
 		hd.preverifiedHashes = map[common.Hash]struct{}{}
 	}
 

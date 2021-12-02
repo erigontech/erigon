@@ -148,7 +148,6 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullB
 				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					// Perhaps we already have this block
-					fmt.Printf("ReadBlock: %d\n", blockNum)
 					block = rawdb.ReadBlock(db, hash, blockNum)
 					if block == nil {
 						var doubleHash DoubleHash

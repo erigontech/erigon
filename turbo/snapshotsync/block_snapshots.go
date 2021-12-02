@@ -98,6 +98,9 @@ type AllSnapshots struct {
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
 func NewAllSnapshots(dir string, cfg *params.SnapshotsConfig) *AllSnapshots {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		panic(err)
+	}
 	return &AllSnapshots{dir: dir, cfg: cfg}
 }
 
@@ -293,6 +296,7 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 			return err
 		}
 
+		fmt.Printf("b.BaseTxId: %d\n", b.BaseTxId)
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
 			return err

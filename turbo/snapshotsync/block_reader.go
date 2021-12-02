@@ -193,7 +193,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	if len(senders) != block.Transactions().Len() {
 		return block, senders, nil // no senders is fine - will recover them on the fly
 	}
-	block.SendersToTxs(senders)
+	//block.SendersToTxs(senders)
 	return block, senders, nil
 }
 

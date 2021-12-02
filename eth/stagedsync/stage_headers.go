@@ -172,9 +172,6 @@ func HeadersForward(
 					}
 				*/
 				// TODO: append
-				if header.Number.Uint64() == cfg.snapshots.BlocksAvailable() {
-					fmt.Printf("writeTD: %d, %x\n", header.Number.Uint64(), header.Hash())
-				}
 				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
 				lastHeader = header
 				select {
@@ -192,6 +189,10 @@ func HeadersForward(
 			if err = fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
 				return err
 			}
+
+			//hash, _ := rawdb.ReadCanonicalHash(tx, cfg.snapshots.BlocksAvailable())
+			//block cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, cfg.snapshots.BlocksAvailable())
+			//tx.IncrementSequence()
 		}
 
 		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
