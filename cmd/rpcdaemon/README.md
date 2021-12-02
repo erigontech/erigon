@@ -447,7 +447,7 @@ Reduce `--private.api.ratelimit`
 
 ### Read DB directly without Json-RPC/Graphql
 
-[./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+[./../../docs/programmers_guide/db_faq.md](./../../docs/programmers_guide/db_faq.md)
 
 ### Faster Batch requests
 
