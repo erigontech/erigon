@@ -18,14 +18,12 @@ type CVM struct {
 }
 
 func (cvm *CVM) Create(code []byte) ([]byte, common.Address, error) {
-	ret, err := cvm.run(code)
+	address := common.Address{}
+	cvm.intraBlockState.SetCode(address, code)
+	return code, common.Address{}, nil
 
-	if err == nil {
-		address := common.Address{}
-		cvm.intraBlockState.SetCode(address, ret)
-	}
-
-	return ret, common.Address{}, err
+	//TODO:: execute cairo construct
+	//ret, err := cvm.run(code)
 }
 
 func (cvm *CVM) Config() Config {

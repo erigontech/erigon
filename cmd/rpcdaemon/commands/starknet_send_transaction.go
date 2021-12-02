@@ -24,8 +24,6 @@ func (api *StarknetImpl) SendRawTransaction(ctx context.Context, encodedTx hexut
 		return common.Hash{}, errors.New("only support contract creation")
 	}
 
-	//TODO::change tx type (first byte)
-
 	hash := txn.Hash()
 	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {

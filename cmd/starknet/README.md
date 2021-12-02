@@ -1,0 +1,1 @@
+`go run ./cmd/starknet/main.go generateRawTx -c ./cairo/contract.json -o /cairo/send_raw_transaction -k b9a8b19ff082a7f4b943fcbe0da6cce6ce2c860090f05d031f463412ab534e95`

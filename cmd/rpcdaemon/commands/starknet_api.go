@@ -21,9 +21,10 @@ type StarknetImpl struct {
 	db     kv.RoDB
 }
 
-func NewStarknetAPI(base *BaseAPI, db kv.RoDB) *StarknetImpl {
+func NewStarknetAPI(base *BaseAPI, db kv.RoDB, txPool txpool.TxpoolClient) *StarknetImpl {
 	return &StarknetImpl{
 		BaseAPI: base,
 		db:      db,
+		txPool:  txPool,
 	}
 }

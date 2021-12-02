@@ -27,7 +27,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db)
-	starknetImpl := NewStarknetAPI(base, db)
+	starknetImpl := NewStarknetAPI(base, db, txPool)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
