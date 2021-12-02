@@ -168,7 +168,7 @@ func HeadersForward(
 					}
 				*/
 				// TODO: append
-				if header.Number.Uint64() == 5499999 {
+				if header.Number.Uint64() == cfg.snapshots.BlocksAvailable() {
 					fmt.Printf("writeTD: %d, %x\n", header.Number.Uint64(), header.Hash())
 				}
 				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
@@ -190,7 +190,9 @@ func HeadersForward(
 			}
 		}
 
-		cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader)
+		if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+			return err
+		}
 	}
 
 	var headerProgress uint64
@@ -233,7 +235,7 @@ func HeadersForward(
 		return err
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx})
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	var sentToPeer bool
 	stopped := false
@@ -283,7 +285,7 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
 		}
 
@@ -514,19 +516,36 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 }
 
 type chainReader struct {
-	config *params.ChainConfig
-	tx     kv.RwTx
+	config      *params.ChainConfig
+	tx          kv.RwTx
+	blockReader interfaces.FullBlockReader
 }
 
 func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
 func (cr chainReader) CurrentHeader() *types.Header { panic("") }
 func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		return h
+	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		return h
+	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
+
 }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	if cr.blockReader != nil {
+		number := rawdb.ReadHeaderNumber(cr.tx, hash)
+		if number == nil {
+			return nil
+		}
+		return cr.GetHeader(hash, *number)
+	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }

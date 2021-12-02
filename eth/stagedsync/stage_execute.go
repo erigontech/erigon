@@ -112,7 +112,7 @@ func executeBlock(
 	callTracer := NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, contractHasTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	if err != nil {
 		return err
 	}

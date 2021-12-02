@@ -648,7 +648,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
-	fmt.Printf("%s: Inserting headers: %d, %d\n", logPrefix, len(hd.insertList), hd.highestInDb)
 	for len(hd.insertList) > 0 {
 		// Make sure long insertions do not appear as a stuck stage 1
 		select {
@@ -771,35 +770,34 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
 	return func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
-		return hi.FeedHeader(db, header, hash, blockHeight, terminalTotalDifficulty)
+		return hi.FeedHeader(db, headerReader, header, hash, blockHeight, terminalTotalDifficulty)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil
 	}
 
-	fmt.Printf("FeedHeader: %d\n", blockHeight)
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
-		fmt.Printf("FeedHeader skip: %d\n", blockHeight)
 		// Already inserted, skip
 		return nil
 	}
 	// Load parent header
-	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
+	parent, err := headerReader.Header(context.Background(), db, header.ParentHash, blockHeight-1)
+	if err != nil {
+		return err
+	}
 	if parent == nil {
-		fmt.Printf("FeedHeader no parent: %d\n", blockHeight)
 		// Fail on headers without parent
 		return fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
-		fmt.Printf("FeedHeader no parent TD: %d\n", blockHeight)
 		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
@@ -953,7 +951,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 				log.Debug("Connect failed", "error", err)
 				return
 			}
-			log.Warn("Connected", "start", startNum, "end", endNum)
+			log.Trace("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
 			var err error
@@ -980,7 +978,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		log.Trace("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())
-	log.Warn("Link queue", "size", hd.linkQueue.Len())
+	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
 		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(subSegment), "limit", hd.linkLimit)
 		hd.pruneLinkQueue()
