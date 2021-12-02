@@ -1046,6 +1046,8 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 }
 
 func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlockReader) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
 	addPreVerifiedHashes := len(hd.preverifiedHashes) == 0
 	if addPreVerifiedHashes {
 		hd.preverifiedHashes = map[common.Hash]struct{}{}
