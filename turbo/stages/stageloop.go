@@ -257,6 +257,7 @@ func NewStagedSync(
 			*controlServer.ChainConfig,
 			cfg.BatchSize,
 			allSnapshots,
+			blockReader,
 		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,

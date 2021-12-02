@@ -9,6 +9,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -31,6 +32,7 @@ type BodiesCfg struct {
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
 	snapshots       *snapshotsync.AllSnapshots
+	blockReader     interfaces.FullBlockReader
 }
 
 func StageBodiesCfg(
@@ -43,8 +45,9 @@ func StageBodiesCfg(
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
 	snapshots *snapshotsync.AllSnapshots,
+	blockReader interfaces.FullBlockReader,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -120,7 +123,7 @@ Loop:
 		if req == nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("request more bodies: %w", err)
 			}
@@ -142,7 +145,7 @@ Loop:
 		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("request more bodies: %w", err)
 			}

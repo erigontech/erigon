@@ -7,9 +7,10 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -77,7 +78,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	if blockNum < bd.requestedLow {
 		blockNum = bd.requestedLow
 	}
@@ -110,17 +111,21 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveriesH[blockNum-bd.requestedLow]
 			if header == nil {
-				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			hash = header.Hash()
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(db, blockNum)
 			if err != nil {
-				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
-			header = rawdb.ReadHeader(db, hash, blockNum)
+
+			header, err = blockReader.Header(context.Background(), db, hash, blockNum)
+			if err != nil {
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+			}
 			if header == nil {
-				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+				return nil, 0, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
 			}
 
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
@@ -143,6 +148,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					// Perhaps we already have this block
+					fmt.Printf("ReadBlock: %d\n", blockNum)
 					block = rawdb.ReadBlock(db, hash, blockNum)
 					if block == nil {
 						var doubleHash DoubleHash
