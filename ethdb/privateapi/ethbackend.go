@@ -33,7 +33,8 @@ const (
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 // 2.1.0 - add NetPeerCount function
 // 2.2.0 - add NodesInfo function
-var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 1, Patch: 0}
+// 3.0.0 - adding PoS interfaces
+var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
