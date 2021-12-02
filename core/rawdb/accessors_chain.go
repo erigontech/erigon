@@ -1189,6 +1189,10 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	if terminalTotalDifficulty == nil {
 		return false, nil
 	}
+
+	if terminalTotalDifficulty.Cmp(common.Big0) == 0 {
+		return true, nil
+	}
 	header := ReadHeaderByNumber(db, blockNum)
 	if header == nil {
 		return false, nil
