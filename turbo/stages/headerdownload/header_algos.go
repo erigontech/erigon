@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -784,15 +785,6 @@ func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types
 
 func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
 
-	isTrans, err := rawdb.Transitioned(db, header.Number.Uint64(), terminalTotalDifficulty)
-	if err != nil {
-		return false, err
-	}
-
-	if isTrans {
-		return true, nil
-	}
-
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return false, nil
@@ -889,7 +881,14 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 
 	hi.prevHash = hash
 
-	return false, nil
+	if terminalTotalDifficulty == nil {
+		return false, nil
+	}
+
+	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		return true, nil
+	}
+	return td.Cmp(terminalTotalDifficulty) >= 0, nil
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {

@@ -1191,7 +1191,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	}
 	header := ReadHeaderByNumber(db, blockNum)
 	if header == nil {
-		return false, fmt.Errorf("block header not found.")
+		return false, nil
 	}
 
 	if header.Difficulty.Cmp(common.Big0) == 0 {
@@ -1202,5 +1202,6 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	if err != nil {
 		return false, err
 	}
-	return terminalTotalDifficulty.Cmp(headerTd) >= 0, nil
+
+	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
