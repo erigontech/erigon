@@ -151,7 +151,7 @@ func HeadersForward(
 
 		c, _ := tx.Cursor(kv.HeaderTD)
 		count, _ := c.Count()
-		if true || count == 0 || count == 1 { // genesis does write 1 record
+		if count == 0 || count == 1 { // genesis does write 1 record
 			tx.ClearBucket(kv.HeaderTD)
 			var lastHeader *types.Header
 			//total  difficulty write
@@ -188,9 +188,9 @@ func HeadersForward(
 			if err = fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
 				return err
 			}
-
 		}
 
+		cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader)
 	}
 
 	var headerProgress uint64
@@ -228,12 +228,10 @@ func HeadersForward(
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
 
-	fmt.Printf("readTD: %d, %x\n", headerProgress, hash)
 	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("localTd %d\n", localTd)
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx})
 
@@ -285,7 +283,6 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
 		}

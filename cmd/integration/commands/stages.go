@@ -538,7 +538,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm)
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, allSnapshots(chainConfig))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)

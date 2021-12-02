@@ -293,8 +293,6 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 			return err
 		}
 
-		fmt.Printf("b.BaseTxId: %d, %s, %d, %d\n", b.BaseTxId, sn.Bodies.File, sn.Transactions.From, sn.Bodies.From)
-
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
 			return err
@@ -653,6 +651,8 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 }
 
 func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName string) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
@@ -664,6 +664,12 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 		if err := idx.AddKey(slot.IdHash[:], offset); err != nil {
 			return err
 		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("[Snapshots] TransactionsHashIdx", "millions", i/1_000_000)
+		}
 		return nil
 	}); err != nil {
 		return fmt.Errorf("TransactionsHashIdx: %w", err)
@@ -673,12 +679,23 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
 func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word, &h); err != nil {
 			return err
 		}
-		return idx.AddKey(h.Hash().Bytes(), offset)
+		if err := idx.AddKey(h.Hash().Bytes(), offset); err != nil {
+			return err
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("[Snapshots] HeadersHashIdx", "block num", h.Number.Uint64())
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("HeadersHashIdx: %w", err)
 	}
@@ -686,10 +703,21 @@ func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error
 }
 
 func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	num := make([]byte, 8)
 	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
-		return idx.AddKey(num[:n], offset)
+		if err := idx.AddKey(num[:n], offset); err != nil {
+			return err
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			log.Info("[Snapshots] BodiesIdx", "millions", i/1_000_000)
+		}
+		return nil
 	}); err != nil {
 		return fmt.Errorf("BodiesIdx: %w", err)
 	}

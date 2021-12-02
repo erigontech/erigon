@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -647,6 +648,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
+	fmt.Printf("%s: Inserting headers: %d, %d\n", logPrefix, len(hd.insertList), hd.highestInDb)
 	for len(hd.insertList) > 0 {
 		// Make sure long insertions do not appear as a stuck stage 1
 		select {
@@ -781,19 +783,23 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 		return nil
 	}
 
+	fmt.Printf("FeedHeader: %d\n", blockHeight)
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
+		fmt.Printf("FeedHeader skip: %d\n", blockHeight)
 		// Already inserted, skip
 		return nil
 	}
 	// Load parent header
 	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
 	if parent == nil {
+		fmt.Printf("FeedHeader no parent: %d\n", blockHeight)
 		// Fail on headers without parent
 		return fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
+		fmt.Printf("FeedHeader no parent TD: %d\n", blockHeight)
 		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
@@ -947,7 +953,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 				log.Debug("Connect failed", "error", err)
 				return
 			}
-			log.Trace("Connected", "start", startNum, "end", endNum)
+			log.Warn("Connected", "start", startNum, "end", endNum)
 		} else {
 			// ExtendDown
 			var err error
@@ -974,7 +980,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		log.Trace("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())
-	log.Trace("Link queue", "size", hd.linkQueue.Len())
+	log.Warn("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
 		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(subSegment), "limit", hd.linkLimit)
 		hd.pruneLinkQueue()
@@ -1023,8 +1029,7 @@ func (hd *HeaderDownload) Fetching() bool {
 	return hd.fetching
 }
 
-func (hd *HeaderDownload) AddMinedBlock(block *types.Block) error {
-	header := block.Header()
+func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	buf := bytes.NewBuffer(nil)
 	if err := header.EncodeRLP(buf); err != nil {
 		return err
@@ -1039,6 +1044,46 @@ func (hd *HeaderDownload) AddMinedBlock(block *types.Block) error {
 	for _, segment := range segments {
 		_, _ = hd.ProcessSegment(segment, false /* newBlock */, peerID)
 	}
+	return nil
+}
+
+func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlockReader) error {
+	addPreVerifiedHashes := len(hd.preverifiedHashes) == 0
+	if addPreVerifiedHashes {
+		hd.preverifiedHashes = map[common.Hash]struct{}{}
+	}
+
+	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
+		header, err := r.HeaderByNumber(context.Background(), nil, i)
+		if err != nil {
+			return err
+		}
+		if header == nil {
+			continue
+		}
+		v, err := rlp.EncodeToBytes(header)
+		if err != nil {
+			return err
+		}
+		h := ChainSegmentHeader{
+			HeaderRaw: v,
+			Header:    header,
+			Hash:      types.RawRlpHash(v),
+			Number:    header.Number.Uint64(),
+		}
+		link := hd.addHeaderAsLink(h, true /* persisted */)
+		link.preverified = true
+		if addPreVerifiedHashes {
+			hd.preverifiedHashes[h.Hash] = struct{}{}
+		}
+	}
+	if hd.highestInDb < n {
+		hd.highestInDb = n
+	}
+	if hd.preverifiedHeight < n {
+		hd.preverifiedHeight = n
+	}
+
 	return nil
 }
 
