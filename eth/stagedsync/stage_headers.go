@@ -86,37 +86,38 @@ func HeadersForward(
 		defer tx.Rollback()
 	}
 
-	if cfg.snapshots != nil && !cfg.snapshots.AllSegmentsAvailable() {
-		// wait for Downloader service to download all expected snapshots
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-		for {
-			headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
-			if err != nil {
-				return err
-			}
-			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-			if expect <= headers && expect <= bodies && expect <= txs {
-				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
-				if err := cfg.snapshots.ReopenSegments(); err != nil {
+	if cfg.snapshots != nil {
+		if !cfg.snapshots.AllSegmentsAvailable() {
+			// wait for Downloader service to download all expected snapshots
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+			for {
+				headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
+				if err != nil {
 					return err
 				}
-				if expect > cfg.snapshots.BlocksAvailable() {
-					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+				expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+				if expect <= headers && expect <= bodies && expect <= txs {
+					log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+					if err := cfg.snapshots.ReopenSegments(); err != nil {
+						return err
+					}
+					if expect > cfg.snapshots.BlocksAvailable() {
+						return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+					}
+					cfg.snapshots.SetAllSegmentsAvailable(true)
+
+					break
 				}
-				cfg.snapshots.SetAllSegmentsAvailable(true)
+				time.Sleep(10 * time.Second)
 
-				_ = s.Update(tx, cfg.snapshots.BlocksAvailable())
-				break
-			}
-			time.Sleep(10 * time.Second)
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
-			default:
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+				default:
+				}
 			}
 		}
 
@@ -152,6 +153,9 @@ func HeadersForward(
 		c, _ := tx.Cursor(kv.HeaderTD)
 		count, _ := c.Count()
 		if count == 0 || count == 1 { // genesis does write 1 record
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+
 			tx.ClearBucket(kv.HeaderTD)
 			var lastHeader *types.Header
 			//total  difficulty write
@@ -190,8 +194,13 @@ func HeadersForward(
 			}
 		}
 
-		if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
-			return err
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+				return err
+			}
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
 		}
 	}
 

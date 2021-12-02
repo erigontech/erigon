@@ -61,7 +61,6 @@ func BodiesForward(
 ) error {
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
-
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -71,6 +70,15 @@ func BodiesForward(
 		}
 		defer tx.Rollback()
 	}
+
+	if cfg.snapshots != nil {
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
+		}
+	}
+
 	timeout := cfg.timeout
 	// This will update bd.maxProgress
 	if _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
