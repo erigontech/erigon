@@ -1024,12 +1024,16 @@ var _allSnapshotsSingleton *snapshotsync.AllSnapshots
 
 func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 	openSnapshotOnce.Do(func() {
-		snapshotCfg := ethconfig.Snapshot{}
 		if enableSnapshot {
-			snapshotCfg.Enabled = true
-			snapshotCfg.Dir = path.Join(datadir, "snapshots")
+			snapshotCfg := ethconfig.Snapshot{
+				Enabled: true,
+				Dir:     path.Join(datadir, "snapshots"),
+			}
 			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, params.KnownSnapshots(cc.ChainName))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
+				panic(err)
+			}
+			if err := _allSnapshotsSingleton.ReopenIndices(); err != nil {
 				panic(err)
 			}
 		}

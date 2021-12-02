@@ -284,19 +284,17 @@ func (s *AllSnapshots) BuildIndices(chainID uint256.Int) error {
 			return err
 		}
 	}
-	_ = s.ReopenIndices() // hack to read block body
-	for _, sn := range s.blocks {
-		bodyOffset := sn.Bodies.Idx.Lookup2(0)
 
+	// hack to read first block body - to get baseTxId from there
+	_ = s.ReopenIndices()
+	for _, sn := range s.blocks {
 		gg := sn.Bodies.Segment.MakeGetter()
-		gg.Reset(bodyOffset)
 		buf, _ := gg.Next(nil)
 		b := &types.BodyForStorage{}
 		if err := rlp.DecodeBytes(buf, b); err != nil {
 			return err
 		}
 
-		fmt.Printf("b.BaseTxId: %d\n", b.BaseTxId)
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
 			return err
@@ -324,6 +322,9 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 			maxBlock = to
 		}
 	}
+	if maxBlock == 0 {
+		return 0, nil
+	}
 	return maxBlock - 1, nil
 }
 func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
@@ -343,6 +344,9 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 		if maxBlock < to {
 			maxBlock = to
 		}
+	}
+	if maxBlock == 0 {
+		return 0, nil
 	}
 	return maxBlock - 1, nil
 }
@@ -623,7 +627,6 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 			if err = rlp.DecodeBytes(dataRLP, b); err != nil {
 				panic(err)
 			}
-			fmt.Printf("body: %d, %x\n", b.BaseTxId, k)
 		}
 		i++
 
