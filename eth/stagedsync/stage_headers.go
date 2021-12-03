@@ -105,7 +105,7 @@ func SpawnStageHeaders(
 	}
 }
 
-// HeadersDownwards progresses Headers stage in the downward direction
+// HeadersDownward progresses Headers stage in the downward direction
 func HeadersDownward(
 	s *StageState,
 	u Unwinder,
