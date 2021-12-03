@@ -94,7 +94,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if crit.FromBlock != nil {
 			if crit.FromBlock.Sign() >= 0 {
 				begin = crit.FromBlock.Uint64()
-			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.PendingBlockNumber) {
+			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
 				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
 			}
 		}
@@ -102,7 +102,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		if crit.ToBlock != nil {
 			if crit.ToBlock.Sign() >= 0 {
 				end = crit.ToBlock.Uint64()
-			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.PendingBlockNumber) {
+			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
 				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
 			}
 		}
