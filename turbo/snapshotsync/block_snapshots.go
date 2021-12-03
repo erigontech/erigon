@@ -498,6 +498,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 			firstIDSaved = true
 			firstTxID = body.BaseTxId
 		}
+		fmt.Printf("b: %d, %d,%d", blockNum, body.BaseTxId, body.TxAmount)
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if id != prevTxID+1 && id != 0 {
