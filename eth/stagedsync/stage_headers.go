@@ -118,8 +118,11 @@ func HeadersDownward(
 	log.Info("Waiting for payloads...")
 	header := <-cfg.reverseDownloadCh
 	*cfg.waitingPosHeaders = false
-	// Do we need to unwind? (TODO)
 
+	// Do we need to unwind? (TODO)
+	if header.Number.Uint64() >= s.BlockNumber{
+		u.UnwindTo(header.Number.Uint64()-1, header.Hash())
+	}
 	// Write current payload
 	rawdb.WriteHeader(tx, &header)
 	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
