@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
@@ -131,6 +132,126 @@ func HeadersForward(
 	useExternalTx bool,
 ) error {
 	var headerProgress uint64
+
+	if cfg.snapshots != nil {
+		if !cfg.snapshots.AllSegmentsAvailable() {
+			// wait for Downloader service to download all expected snapshots
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+			for {
+				headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
+				if err != nil {
+					return err
+				}
+				expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+				if headers >= expect && bodies >= expect && txs >= expect {
+					if err := cfg.snapshots.ReopenSegments(); err != nil {
+						return err
+					}
+					if expect > cfg.snapshots.BlocksAvailable() {
+						return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+					}
+					cfg.snapshots.SetAllSegmentsAvailable(true)
+
+					break
+				}
+				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+				time.Sleep(10 * time.Second)
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+				default:
+				}
+			}
+		}
+
+		if !cfg.snapshots.AllIdxAvailable() {
+			if !cfg.snapshots.AllSegmentsAvailable() {
+				return fmt.Errorf("not all snapshot segments are available")
+			}
+
+			// wait for Downloader service to download all expected snapshots
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+			headers, bodies, txs, err := cfg.snapshots.IdxAvailability()
+			if err != nil {
+				return err
+			}
+			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+			if headers < expect || bodies < expect || txs < expect {
+				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+				if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
+					return err
+				}
+			}
+
+			if err := cfg.snapshots.ReopenIndices(); err != nil {
+				return err
+			}
+			if expect > cfg.snapshots.IndicesAvailable() {
+				return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+			}
+			cfg.snapshots.SetAllIdxAvailable(true)
+		}
+
+		c, _ := tx.Cursor(kv.HeaderTD)
+		count, _ := c.Count()
+		if count == 0 || count == 1 { // genesis does write 1 record
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+
+			tx.ClearBucket(kv.HeaderTD)
+			var lastHeader *types.Header
+			//total  difficulty write
+			td := big.NewInt(0)
+			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+				td.Add(td, header.Difficulty)
+				/*
+					if header.Eip3675 {
+						return nil
+					}
+
+					if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
+						return rawdb.MarkTransition(tx, blockNum)
+					}
+				*/
+				// TODO: append
+				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
+				lastHeader = header
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
+				default:
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			tx.ClearBucket(kv.HeaderCanonical)
+			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+				return err
+			}
+
+			//hash, _ := rawdb.ReadCanonicalHash(tx, cfg.snapshots.BlocksAvailable())
+			//block cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, cfg.snapshots.BlocksAvailable())
+			//tx.IncrementSequence()
+		}
+
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+				return err
+			}
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
+		}
+	}
+
 	var err error
 
 	if !useExternalTx {
