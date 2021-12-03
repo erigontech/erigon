@@ -192,12 +192,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
-	// Check mandatory fields
-	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil ||
-		req.ReceiptRoot == nil || req.StateRoot == nil {
-		fmt.Println(req)
-		return nil, fmt.Errorf("invalid execution payload")
-	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 

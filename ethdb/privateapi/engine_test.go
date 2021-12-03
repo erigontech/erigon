@@ -220,42 +220,6 @@ func TestMockInvalidExecution(t *testing.T) {
 	require.Equal(replyHash[:], startingHeadHash[:])
 }
 
-func TestInvalidRequest(t *testing.T) {
-	db := memdb.New()
-	ctx := context.Background()
-	require := require.New(t)
-
-	makeTestDb(ctx, db)
-
-	reverseDownloadCh := make(chan types.Header)
-	statusCh := make(chan ExecutionStatus)
-	waitingForHeaders := true
-
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
-
-	var err error
-
-	done := make(chan bool)
-
-	go func() {
-		// The payload is malformed, some fields are not set
-		_, err = backend.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
-			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
-			BlockNumber:   51,
-			GasLimit:      52,
-			GasUsed:       4,
-			Timestamp:     4,
-			Coinbase:      gointerfaces.ConvertAddressToH160(common.HexToAddress("0x1")),
-			Transactions:  make([][]byte, 0),
-		})
-		done <- true
-	}()
-
-	<-done
-
-	require.Equal(err.Error(), "invalid execution payload")
-}
-
 func TestNoTTD(t *testing.T) {
 	db := memdb.New()
 	ctx := context.Background()
