@@ -103,9 +103,6 @@ func executeBlock(
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	if blockNum%10000 == 0 {
-		log.Info("executing block", "number", blockNum)
-	}
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
 	if err != nil {
 		return err

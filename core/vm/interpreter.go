@@ -309,7 +309,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if memorySize > 0 {
 			mem.Resize(memorySize)
 		}
-		//println(fmt.Sprintf("pc=%d\top=%s\tgas=%d\tcost=%d", pc, op.String(), contract.Gas+cost, cost))
 
 		if in.cfg.Debug {
 			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck

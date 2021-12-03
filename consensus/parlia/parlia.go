@@ -693,88 +693,7 @@ func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header
 	if err != nil {
 		return nil, err
 	}
-	//for _, r := range receipts {
-	//	var tx types.Transaction
-	//	for _, tx2 := range txs {
-	//		if r.TxHash == tx2.Hash() {
-	//			tx = tx2
-	//			break
-	//		}
-	//	}
-	//	if tx == nil {
-	//		panic("not possible")
-	//	}
-	//	txJson, _ := json2.Marshal(txs[i])
-	//	json, _ := r.MarshalJSON()
-	//	sender, _ := txs[i].GetSender()
-	//	log.Info("receipt", "sender", sender.Hex(), "tx", string(txJson), "receipt", string(json))
-	//}
-	// TODO: "calc block root?"
 	return types.NewBlock(header, txs, nil, receipts), nil
-
-	//// No block rewards in PoA, so the state remains as is and uncles are dropped
-	//if txs == nil {
-	//	txs = make([]types.Transaction, 0)
-	//}
-	//if receipts == nil {
-	//	receipts = make([]*types.Receipt, 0)
-	//}
-	//if header.Number.Cmp(common.Big1) == 0 {
-	//	err := p.initContract(state, header, &txs, &receipts, nil, &header.GasUsed, true)
-	//	if err != nil {
-	//		log.Error("init contract failed")
-	//	}
-	//}
-	//if header.Difficulty.Cmp(diffInTurn) != 0 {
-	//	number := header.Number.Uint64()
-	//	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	//	spoiledVal := snap.supposeValidator()
-	//	signedRecently := false
-	//	for _, recent := range snap.Recents {
-	//		if recent == spoiledVal {
-	//			signedRecently = true
-	//			break
-	//		}
-	//	}
-	//	if !signedRecently {
-	//		err = p.slash(spoiledVal, state, header, &txs, &receipts, nil, &header.GasUsed, true)
-	//		if err != nil {
-	//			// it is possible that slash validator failed because of the slash channel is disabled.
-	//			log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
-	//		}
-	//	}
-	//}
-	//err := p.distributeIncoming(p.val, state, header, &txs, &receipts, nil, &header.GasUsed, true)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//// should not happen. Once happen, stop the node is better than broadcast the block
-	//if header.GasLimit < header.GasUsed {
-	//	return nil, errors.New("gas consumption of system txs exceed the gas limit")
-	//}
-	//header.UncleHash = types.CalcUncleHash(nil)
-	//blk := types.NewBlock(header, txs, nil, receipts)
-	//rootHash, err := trie.CalcRoot("GenerateChain", tx)
-	//
-	//state.CommitBlock()
-	//
-	//wg := sync.WaitGroup{}
-	//wg.Add(2)
-	//go func() {
-	//	rootHash = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
-	//	wg.Done()
-	//}()
-	//go func() {
-	//	blk = types.NewBlock(header, txs, nil, receipts)
-	//	wg.Done()
-	//}()
-	//wg.Wait()
-	//blk.SetRoot(rootHash)
-	//// Assemble and return the final block for sealing
-	//return blk, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1035,7 +954,7 @@ func (p *Parlia) applyTransaction(
 	to common.Address,
 	value *uint256.Int,
 	data []byte,
-	state *state.IntraBlockState,
+	ibs *state.IntraBlockState,
 	header *types.Header,
 	txs *[]types.Transaction,
 	receipts *types.Receipts,
@@ -1043,7 +962,7 @@ func (p *Parlia) applyTransaction(
 	usedGas *uint64,
 	mining bool,
 ) (err error) {
-	nonce := state.GetNonce(from)
+	nonce := ibs.GetNonce(from)
 	expectedTx := types.Transaction(types.NewTransaction(nonce, to, value, math.MaxUint64/2, u256.Num0, data))
 	expectedHash := expectedTx.SigningHash(p.chainConfig.ChainID)
 	if from == p.val && mining {
@@ -1059,14 +978,6 @@ func (p *Parlia) applyTransaction(
 		actualTx := (*receivedTxs)[0]
 		actualHash := actualTx.SigningHash(p.chainConfig.ChainID)
 		if !bytes.Equal(actualHash.Bytes(), expectedHash.Bytes()) {
-			log.Error(fmt.Sprintf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualTx.Hash().String(),
-				expectedTx.GetNonce(),
-				expectedTx.GetTo().String(),
-				expectedTx.GetValue().String(),
-				expectedTx.GetGas(),
-				expectedTx.GetPrice().String(),
-				hex.EncodeToString(expectedTx.GetData()),
-			))
 			return fmt.Errorf("expected system tx (hash %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s), actual tx (hash %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s)",
 				expectedHash.String(),
 				expectedTx.GetNonce(),
@@ -1088,21 +999,24 @@ func (p *Parlia) applyTransaction(
 		// move to next
 		*receivedTxs = (*receivedTxs)[1:]
 	}
-	state.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
-	gasUsed, _, err := core.SysCallContract(from, to, data, *p.chainConfig, state, header, p, value)
+	ibs.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
+	gasUsed, _, err := core.SysCallContract(from, to, data, *p.chainConfig, ibs, header, p, value)
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
 	receipt.TxHash = expectedTx.Hash()
 	receipt.GasUsed = gasUsed
+	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64()), state.NewNoopWriter()); err != nil {
+		return err
+	}
 	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = state.GetLogs(expectedTx.Hash())
+	receipt.Logs = ibs.GetLogs(expectedTx.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockHash = header.Hash()
 	receipt.BlockNumber = header.Number
-	receipt.TransactionIndex = uint(state.TxIndex())
+	receipt.TransactionIndex = uint(ibs.TxIndex())
 	*receipts = append(*receipts, receipt)
-	state.SetNonce(from, nonce+1)
+	ibs.SetNonce(from, nonce+1)
 	return nil
 }
 
