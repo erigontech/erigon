@@ -300,12 +300,14 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 		for ii := uint64(499990); ii < 5_000_000; ii++ {
 			off := sn.Bodies.Idx.Lookup2(ii)
 			gg.Reset(off)
+
 			buf, _ = gg.Next(nil)
-			bb := &types.BodyForStorage{}
-			if err := rlp.DecodeBytes(buf, bb); err != nil {
-				return err
+			bodyForStorage := new(types.BodyForStorage)
+			err := rlp.DecodeBytes(buf, bodyForStorage)
+			if err != nil {
+				panic(err)
 			}
-			fmt.Printf("at: %d: %d,%d,%d, %x\n", ii, off, b.BaseTxId, b.TxAmount, buf)
+			fmt.Printf("at: %d, %d,%d, %x\n", ii, bodyForStorage.BaseTxId, bodyForStorage.TxAmount, buf)
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, b.BaseTxId+uint64(b.TxAmount)); err != nil {
