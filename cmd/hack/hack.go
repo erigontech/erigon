@@ -2657,9 +2657,9 @@ func checkBlockSnapshot(chaindata string) error {
 	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots("goerli"))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
-	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
-	//	panic(err)
-	//}
+	if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
+		panic(err)
+	}
 
 	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	tx, err := database.BeginRo(context.Background())
