@@ -296,7 +296,6 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			return err
 		}
 
-		fmt.Printf("alexxxxx: %d\n", b.BaseTxId)
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
 			return err
