@@ -2561,11 +2561,11 @@ func recsplitWholeChain(chaindata string) error {
 		last := binary.BigEndian.Uint64(k)
 
 		// TODO: enable next condition (disabled for tests)
-		if last > params.FullImmutabilityThreshold {
-			last -= params.FullImmutabilityThreshold
-		} else {
-			last = 0
-		}
+		//if last > params.FullImmutabilityThreshold {
+		//	last -= params.FullImmutabilityThreshold
+		//} else {
+		//	last = 0
+		//}
 		last = last - last%blocksPerFile
 		return last, nil
 	}
