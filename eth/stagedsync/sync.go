@@ -9,9 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -20,14 +18,12 @@ type Sync struct {
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
 	badBlock        common.Hash
 
-	stages          []*Stage
-	unwindOrder     []*Stage
-	pruningOrder    []*Stage
-	currentStage    uint
-	timings         []Timing
-	logPrefixes     []string
-	startDownloadCh chan types.Block
-	statusCh        chan privateapi.ExecutionStatus
+	stages       []*Stage
+	unwindOrder  []*Stage
+	pruningOrder []*Stage
+	currentStage uint
+	timings      []Timing
+	logPrefixes  []string
 }
 
 type Timing struct {
@@ -136,7 +132,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, startDownloadCh chan types.Block, statusCh chan privateapi.ExecutionStatus) *Sync {
+func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
@@ -161,13 +157,11 @@ func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, st
 	}
 
 	return &Sync{
-		stages:          stagesList,
-		currentStage:    0,
-		unwindOrder:     unwindStages,
-		pruningOrder:    pruneStages,
-		logPrefixes:     logPrefixes,
-		startDownloadCh: startDownloadCh,
-		statusCh:        statusCh,
+		stages:       stagesList,
+		currentStage: 0,
+		unwindOrder:  unwindStages,
+		pruningOrder: pruneStages,
+		logPrefixes:  logPrefixes,
 	}
 }
 

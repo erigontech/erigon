@@ -94,6 +94,16 @@ type TransactionMisc struct {
 	from atomic.Value
 }
 
+type RawTransactions [][]byte
+
+func (t RawTransactions) Len() int {
+	return len(t)
+}
+
+func (t RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+	w.Write(t[i])
+}
+
 func (tm TransactionMisc) Time() time.Time {
 	return tm.time
 }

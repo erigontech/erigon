@@ -418,29 +418,6 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 }
 
-// Tests that transitions is handled correctly
-func TestTransition(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-	require := require.New(t)
-	transitionBlock := uint64(1000)
-
-	isTrans, err := Transitioned(tx, 1500)
-	require.NoError(err)
-	require.False(isTrans)
-	isTrans, err = Transitioned(tx, 20)
-	require.NoError(err)
-	require.False(isTrans)
-
-	require.NoError(MarkTransition(tx, transitionBlock))
-
-	isTrans, err = Transitioned(tx, 1500)
-	require.NoError(err)
-	require.True(isTrans)
-	isTrans, err = Transitioned(tx, 20)
-	require.NoError(err)
-	require.False(isTrans)
-}
-
 func checkReceiptsRLP(have, want types.Receipts) error {
 	if len(have) != len(want) {
 		return fmt.Errorf("receipts sizes mismatch: have %d, want %d", len(have), len(want))

@@ -280,6 +280,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			penalize,
 			cfg.BatchSize,
 			false,
+			nil,
+			nil,
 		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
@@ -310,8 +312,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir, blockReader), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
-		nil,
-		nil,
 	)
 
 	miningConfig := cfg.Miner
@@ -334,8 +334,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
-		nil,
-		nil,
 	)
 
 	mock.StreamWg.Add(1)

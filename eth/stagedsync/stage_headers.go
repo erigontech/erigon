@@ -33,6 +33,8 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	reverseDownloadCh chan types.Header
+	waitingPosHeaders *bool
 }
 
 func StageHeadersCfg(
@@ -44,6 +46,8 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
+	reverseDownloadCh chan types.Header,
+	waitingPosHeaders *bool,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -54,6 +58,8 @@ func StageHeadersCfg(
 		penalize:          penalize,
 		batchSize:         batchSize,
 		noP2PDiscovery:    noP2PDiscovery,
+		reverseDownloadCh: reverseDownloadCh,
+		waitingPosHeaders: waitingPosHeaders,
 	}
 }
 
@@ -84,7 +90,7 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, blockNumber)
+	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 
 	if err != nil {
 		return err
@@ -107,8 +113,28 @@ func HeadersDownward(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
-	// Add code for downward sync
-	return nil
+	*cfg.waitingPosHeaders = true
+	// Waiting for the beacon chain
+	log.Info("Waiting for payloads...")
+	header := <-cfg.reverseDownloadCh
+	*cfg.waitingPosHeaders = false
+	// Do we need to unwind? (TODO)
+
+	// Write current payload
+	rawdb.WriteHeader(tx, &header)
+	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+		return err
+	}
+	// if we have the parent then we can move on with the stagedsync
+	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	if err != nil {
+		return err
+	}
+	if parent != nil && parent.Hash() == header.ParentHash {
+		return s.Update(tx, header.Number.Uint64())
+	}
+	// Downward sync if we need to process more (TODO)
+	return s.Update(tx, header.Number.Uint64())
 }
 
 // HeadersForward progresses Headers stage in the forward direction
@@ -175,12 +201,15 @@ func HeadersForward(
 Loop:
 	for !stopped {
 
-		isTrans, err := rawdb.Transitioned(tx, headerProgress)
+		isTrans, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
 
 		if isTrans {
+			if err := s.Update(tx, headerProgress); err != nil {
+				return err
+			}
 			break
 		}
 		currentTime := uint64(time.Now().Unix())
@@ -357,17 +386,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		var maxTd big.Int
 		var maxHash common.Hash
 		var maxNum uint64 = 0
-		// unwind the merge
-		isTrans, err := rawdb.Transitioned(tx, u.UnwindPoint)
-		if err != nil {
-			return err
-		}
 
-		if cfg.chainConfig.TerminalTotalDifficulty != nil && !isTrans {
-			if err := tx.Delete(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey), nil); err != nil {
-				return err
-			}
-		}
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
 			// Find header with biggest TD
 			tdCursor, cErr := tx.Cursor(kv.HeaderTD)

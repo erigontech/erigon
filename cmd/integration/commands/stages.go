@@ -1115,7 +1115,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		),
 		stagedsync.MiningUnwindOrder,
 		stagedsync.MiningPruneOrder,
-		nil, nil,
 	)
 
 	return pm, engine, chainConfig, vmConfig, sync, miningSync, miner

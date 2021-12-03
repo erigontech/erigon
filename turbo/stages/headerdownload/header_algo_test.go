@@ -48,10 +48,10 @@ func TestInserter1(t *testing.T) {
 		ParentHash: h1Hash,
 	}
 	h2Hash := h2.Hash()
-	if err = hi.FeedHeader(tx, &h1, h1Hash, 1, nil); err != nil {
+	if _, err = hi.FeedHeader(tx, &h1, h1Hash, 1, nil); err != nil {
 		t.Errorf("feed empty header 1: %v", err)
 	}
-	if err = hi.FeedHeader(tx, &h2, h2Hash, 2, nil); err != nil {
+	if _, err = hi.FeedHeader(tx, &h2, h2Hash, 2, nil); err != nil {
 		t.Errorf("feed empty header 2: %v", err)
 	}
 }

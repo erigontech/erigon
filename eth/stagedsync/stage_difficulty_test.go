@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -223,6 +224,7 @@ func TestDifficultyGreaterThanTerminalDifficulty(t *testing.T) {
 	// Insert the headers into the db
 	rawdb.WriteHeader(tx, &header1)
 	rawdb.WriteHeader(tx, &header2)
+	header3.Difficulty = serenity.SerenityDifficulty
 	rawdb.WriteHeader(tx, &header3)
 	// Canonical hashes
 	rawdb.WriteCanonicalHash(tx, header1.Hash(), header1.Number.Uint64())
