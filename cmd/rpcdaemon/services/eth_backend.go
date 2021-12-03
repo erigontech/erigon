@@ -157,9 +157,14 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 
 	ret := make([]p2p.NodeInfo, 0, len(nodes.NodesInfo))
 	for _, node := range nodes.NodesInfo {
-		var protocols map[string]interface{}
-		if err = json.Unmarshal(node.Protocols, &protocols); err != nil {
+		var rawProtocols map[string]json.RawMessage
+		if err = json.Unmarshal(node.Protocols, &rawProtocols); err != nil {
 			return nil, fmt.Errorf("cannot decode protocols metadata: %w", err)
+		}
+
+		protocols := make(map[string]interface{}, len(rawProtocols))
+		for k, v := range rawProtocols {
+			protocols[k] = v
 		}
 
 		ret = append(ret, p2p.NodeInfo{
