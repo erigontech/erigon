@@ -67,7 +67,7 @@ func HashTo(data []byte, to []byte) {
 		panic(err)
 	}
 
-	_, err = h.Sha.Read(to[:])
+	_, err = h.Sha.Read(to)
 	if err != nil {
 		panic(err)
 	}
