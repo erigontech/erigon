@@ -24,9 +24,10 @@ import (
 type PayloadStatus string
 
 const (
-	Syncing PayloadStatus = "SYNCING"
-	Valid   PayloadStatus = "VALID"
-	Invalid PayloadStatus = "INVALID"
+	Syncing   PayloadStatus = "SYNCING"
+	Valid     PayloadStatus = "VALID"
+	Invalid   PayloadStatus = "INVALID"
+	Unwinding PayloadStatus = "UNWINDING"
 )
 
 // EthBackendAPIVersion
