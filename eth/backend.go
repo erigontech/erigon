@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -34,8 +35,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
@@ -119,6 +122,11 @@ type Ethereum struct {
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       *txpool2.GrpcServer
 	notifyMiningAboutNewTxs chan struct{}
+	// When we receive something here, it means that the beacon chain transitioned
+	// to proof-of-stake so we start reverse syncing from the header
+	reverseDownloadCh    chan types.Block
+	statusCh             chan privateapi.ExecutionStatus
+	waitingForPOSHeaders bool
 }
 
 // New creates a new Ethereum object (including the
@@ -339,6 +347,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
+	backend.reverseDownloadCh = make(chan types.Block)
+	backend.statusCh = make(chan privateapi.ExecutionStatus)
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
@@ -358,13 +368,15 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder, backend.reverseDownloadCh, backend.statusCh)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader)
+	backend.waitingForPOSHeaders = false
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -432,7 +444,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty, backend.downloadServer, tmpdir, backend.notifications.Accumulator)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.downloadCtx, backend.logger, backend.chainDB, stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty, backend.downloadServer, tmpdir, backend.notifications.Accumulator, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
 	if err != nil {
 		return nil, err
 	}
@@ -618,6 +630,29 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	}
 
 	return sentryPc, nil
+}
+
+func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
+	if limit == 0 || limit > len(s.sentries) {
+		limit = len(s.sentries)
+	}
+
+	nodes := make([]*prototypes.NodeInfoReply, 0, limit)
+	for i := 0; i < limit; i++ {
+		sc := s.sentries[i]
+
+		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
+		if err != nil {
+			log.Error("sentry nodeInfo", "err", err)
+		}
+
+		nodes = append(nodes, nodeInfo)
+	}
+
+	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
+	sort.Sort(nodesInfo)
+
+	return nodesInfo, nil
 }
 
 // Protocols returns all the currently configured

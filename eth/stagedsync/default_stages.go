@@ -17,7 +17,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, block
 				if badBlockUnwind {
 					return nil
 				}
-				return HeadersForward(s, u, ctx, tx, headers, firstCycle, test)
+				return SpawnStageHeaders(s, u, ctx, tx, headers, firstCycle, test)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return HeadersUnwind(u, s, tx, headers, test)

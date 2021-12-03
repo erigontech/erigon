@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"runtime"
 	"time"
 
@@ -17,9 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
@@ -326,62 +322,6 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 	}, etl.TransformArgs{}); err != nil {
 		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
 	}
-	return nil
-}
-
-type CallTracer struct {
-	froms   map[common.Address]struct{}
-	tos     map[common.Address]bool // address -> isCreated
-	hasTEVM func(contractHash common.Hash) (bool, error)
-}
-
-func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTracer {
-	return &CallTracer{
-		froms:   make(map[common.Address]struct{}),
-		tos:     make(map[common.Address]bool),
-		hasTEVM: hasTEVM,
-	}
-}
-
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
-	ct.froms[from] = struct{}{}
-
-	created, ok := ct.tos[to]
-	if !ok {
-		ct.tos[to] = false
-	}
-
-	if !created && create {
-		if len(code) > 0 && ct.hasTEVM != nil {
-			has, err := ct.hasTEVM(common.BytesToHash(crypto.Keccak256(code)))
-			if !has {
-				ct.tos[to] = true
-			}
-
-			if err != nil {
-				log.Warn("while CaptureStart", "error", err)
-			}
-		}
-	}
-	return nil
-}
-func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
-	return nil
-}
-func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
-	ct.froms[from] = struct{}{}
-	ct.tos[to] = false
-}
-func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 

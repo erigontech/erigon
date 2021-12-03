@@ -20,9 +20,9 @@ import (
 
 // Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
 var (
-	serenityDiff  = common.Big0                // Serenity block's difficulty is always 0.
-	serenityNonce = types.BlockNonce{}         // Serenity chain's nonces are 0.
-	serenityCap   = uint64(0x7fffffffffffffff) // Serenity's difficulty cap.
+	SerenityDifficulty = common.Big0                // Serenity block's difficulty is always 0.
+	SerenityNonce      = types.BlockNonce{}         // Serenity chain's nonces are 0.
+	serenityCap        = uint64(0x7fffffffffffffff) // Serenity's difficulty cap.
 )
 
 var (
@@ -87,7 +87,7 @@ func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Heade
 
 // Prepare makes sure difficulty and nonce are correct
 func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
-	header.Difficulty = serenityDiff
+	header.Difficulty = SerenityDifficulty
 	header.Nonce = types.BlockNonce{}
 	return nil
 }
@@ -126,7 +126,7 @@ func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
 }
 
 func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
-	return serenityDiff
+	return SerenityDifficulty
 }
 
 // verifyHeader checks whether a bunch of headers conforms to the consensus rules of the
@@ -137,11 +137,11 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return fmt.Errorf("extra-data longer than 32 bytes (%d)", len(header.Extra))
 	}
 
-	if header.Difficulty.Cmp(serenityDiff) != 0 {
+	if header.Difficulty.Cmp(SerenityDifficulty) != 0 {
 		return errInvalidDifficulty
 	}
 
-	if !bytes.Equal(header.Nonce[:], serenityNonce[:]) {
+	if !bytes.Equal(header.Nonce[:], SerenityNonce[:]) {
 		return errInvalidNonce
 	}
 
