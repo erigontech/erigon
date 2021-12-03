@@ -36,7 +36,6 @@ var indexTemplate = template.Must(template.New("index").Parse(`
 `))
 
 var address = "localhost:12345"
-var devAddr = "http://localhost:5500"
 
 type Server struct {
 	httpServer *http.Server
