@@ -2670,7 +2670,7 @@ func checkBlockSnapshot(chaindata string) error {
 
 	//snBlockReader.HeaderByNumber(context.Background(), tx, 499993)
 	//return nil
-	for i := uint64(499994); i < snapshots.BlocksAvailable(); i++ {
+	for i := uint64(499990); i < snapshots.BlocksAvailable(); i++ {
 		if i > 499_000 {
 			fmt.Printf("%d\n", i)
 		}
