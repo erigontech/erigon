@@ -783,7 +783,7 @@ func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error) {
 
 	if hash == hi.prevHash {
 		// Skip duplicates
