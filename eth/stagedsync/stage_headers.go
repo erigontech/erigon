@@ -120,7 +120,7 @@ func HeadersDownward(
 	*cfg.waitingPosHeaders = false
 
 	// Do we need to unwind? (TODO)
-	if header.Number.Uint64() >= s.BlockNumber {
+	if s.BlockNumber >= header.Number.Uint64() {
 		u.UnwindTo(header.Number.Uint64()-1, common.Hash{})
 	}
 	// Write current payload
