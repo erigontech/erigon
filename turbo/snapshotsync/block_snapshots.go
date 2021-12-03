@@ -305,7 +305,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			if err := rlp.DecodeBytes(buf, bb); err != nil {
 				return err
 			}
-			fmt.Printf("at %d: %d,%d,%d\n", ii, off, b.BaseTxId, b.TxAmount)
+			fmt.Printf("at: %d: %d,%d,%d, %x\n", ii, off, b.BaseTxId, b.TxAmount, buf)
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, b.BaseTxId+uint64(b.TxAmount)); err != nil {
