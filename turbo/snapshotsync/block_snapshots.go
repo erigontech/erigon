@@ -274,17 +274,18 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) error {
-	//for _, sn := range s.blocks {
-	//	f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
-	//	if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
-	//		return err
-	//	}
-	//
-	//	f = path.Join(s.dir, SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies))
-	//	if err := BodiesIdx(f, sn.Bodies.From); err != nil {
-	//		return err
-	//	}
-	//}
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
+		if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
+			return err
+		}
+
+		f = path.Join(s.dir, SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies))
+		if err := BodiesIdx(f, sn.Bodies.From); err != nil {
+			return err
+		}
+		break
+	}
 
 	// hack to read first block body - to get baseTxId from there
 	_ = s.ReopenIndices()
@@ -752,6 +753,15 @@ func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 			return err
 		}
 
+		if i > 499990 {
+			bodyForStorage := new(types.BodyForStorage)
+			err := rlp.DecodeBytes(word, bodyForStorage)
+			if err != nil {
+				panic(err)
+			}
+
+			fmt.Printf("a: %d, %d, %d, %x\n", i, bodyForStorage.BaseTxId, bodyForStorage.TxAmount, word)
+		}
 		select {
 		default:
 		case <-logEvery.C:
