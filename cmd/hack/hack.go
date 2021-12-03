@@ -2590,6 +2590,7 @@ func recsplitWholeChain(chaindata string) error {
 	log.Info("Last body number", "last", last)
 	for i := uint64(*block); i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
+
 		log.Info("Creating", "file", fileName+".seg")
 		db := mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
@@ -2641,6 +2642,56 @@ func recsplitWholeChain(chaindata string) error {
 
 		//nolint
 		//break // TODO: remove me - useful for tests
+	}
+	return nil
+}
+
+func checkBlockSnapshot(chaindata string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	dataDir := path.Dir(chaindata)
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	_ = chainID
+
+	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots("goerli"))
+	snapshots.ReopenSegments()
+	snapshots.ReopenIndices()
+	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
+	//	panic(err)
+	//}
+
+	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+	tx, err := database.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	//snBlockReader.HeaderByNumber(context.Background(), tx, 499993)
+	//return nil
+	for i := uint64(499994); i < snapshots.BlocksAvailable(); i++ {
+		if i > 499_000 {
+			fmt.Printf("%d\n", i)
+		}
+		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		if err != nil {
+			return err
+		}
+		_, a, b := rawdb.ReadBody(tx, hash, i)
+		fmt.Printf("ab: %d, %d, %d\n", i, a, b)
+		blockFromDB := rawdb.ReadBlock(tx, hash, i)
+		blockFromSnapshot, _, err := snBlockReader.BlockWithSenders(context.Background(), tx, hash, i)
+		if err != nil {
+			return err
+		}
+
+		if blockFromSnapshot.Hash() != blockFromDB.Hash() {
+			panic(i)
+		}
+		if i%1_000 == 0 {
+			log.Info(fmt.Sprintf("Block Num: %dK", i/1_000))
+		}
 	}
 	return nil
 }
@@ -3928,6 +3979,8 @@ func main() {
 		err = compress1(*chaindata, *name, *name)
 	case "recsplitWholeChain":
 		err = recsplitWholeChain(*chaindata)
+	case "checkBlockSnapshot":
+		err = checkBlockSnapshot(*chaindata)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":

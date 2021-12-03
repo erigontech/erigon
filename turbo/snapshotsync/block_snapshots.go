@@ -274,17 +274,17 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) error {
-	for _, sn := range s.blocks {
-		f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
-		if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
-			return err
-		}
-
-		f = path.Join(s.dir, SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies))
-		if err := BodiesIdx(f, sn.Bodies.From); err != nil {
-			return err
-		}
-	}
+	//for _, sn := range s.blocks {
+	//	f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
+	//	if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
+	//		return err
+	//	}
+	//
+	//	f = path.Join(s.dir, SegmentFileName(sn.Bodies.From, sn.Bodies.To, Bodies))
+	//	if err := BodiesIdx(f, sn.Bodies.From); err != nil {
+	//		return err
+	//	}
+	//}
 
 	// hack to read first block body - to get baseTxId from there
 	_ = s.ReopenIndices()
@@ -296,8 +296,18 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			return err
 		}
 
+		for ii := uint64(499990); ii < 5_000_000; ii++ {
+			off := sn.Bodies.Idx.Lookup2(ii)
+			gg.Reset(off)
+			buf, _ = gg.Next(nil)
+			bb := &types.BodyForStorage{}
+			if err := rlp.DecodeBytes(buf, bb); err != nil {
+				return err
+			}
+			fmt.Printf("at %d: %d,%d,%d\n", ii, off, b.BaseTxId, b.TxAmount)
+		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
-		if err := TransactionsHashIdx(chainID, b.BaseTxId, f); err != nil {
+		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, b.BaseTxId+uint64(b.TxAmount)); err != nil {
 			return err
 		}
 	}
@@ -459,7 +469,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 	}
 	defer f.Close()
 
-	i := 0
+	var count, prevTxID uint64
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -468,8 +478,8 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 
 	firstIDSaved := false
 
-	var prevTxID uint64
 	from := dbutils.EncodeBlockNumber(fromBlock)
+	var lastBody types.BodyForStorage
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= fromBlock+uint64(blocksAmount) {
@@ -482,6 +492,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
 		}
+		lastBody = body
 		if body.TxAmount == 0 {
 			return true, nil
 		}
@@ -491,12 +502,12 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 		}
 
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-		j := 0
 
 		if !firstIDSaved {
 			firstIDSaved = true
 			firstTxID = body.BaseTxId
 		}
+		j := 0
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if prevTxID != 0 && id != prevTxID+1 {
@@ -521,7 +532,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 			if err := f.Append(valueBuf); err != nil {
 				return err
 			}
-			i++
+			count++
 			j++
 
 			select {
@@ -529,7 +540,7 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Info("Dumping txs", "processed", i/1_000_000, "block num", blockNum,
+				log.Info("Dumping txs", "processed", count/1_000_000, "block num", blockNum,
 					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 				)
 			}
@@ -541,7 +552,10 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 	}); err != nil {
 		return 0, err
 	}
-
+	if lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID != count {
+		fmt.Printf("prevTxID: %d\n", prevTxID)
+		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
+	}
 	return firstTxID, nil
 }
 
@@ -665,13 +679,14 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 	return nil
 }
 
-func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName string) error {
+func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName string, expectedCount uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	var sender [20]byte
+	var j uint64
 	if err := Idx(segmentFileName, firstTxID, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:]); err != nil {
 			return err
@@ -685,9 +700,13 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 		case <-logEvery.C:
 			log.Info("[Snapshots] TransactionsHashIdx", "millions", i/1_000_000)
 		}
+		j++
 		return nil
 	}); err != nil {
 		return fmt.Errorf("TransactionsHashIdx: %w", err)
+	}
+	if j != expectedCount {
+		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 	}
 	return nil
 }
