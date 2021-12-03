@@ -60,6 +60,8 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if startBlock < pruneTo {
 		startBlock = pruneTo
 	}
+
+	// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
 	if cfg.snapshots != nil && cfg.snapshots.BlocksAvailable() > startBlock {
 		startBlock = cfg.snapshots.BlocksAvailable()
 	}
