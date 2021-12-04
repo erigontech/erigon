@@ -70,16 +70,15 @@ func BodiesForward(
 		}
 		defer tx.Rollback()
 	}
-
-	//if cfg.snapshots != nil {
-	//	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-	//		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
-	//			return err
-	//		}
-	//	}
-	//}
-
 	timeout := cfg.timeout
+
+	if cfg.snapshots != nil {
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
+		}
+	}
 	// This will update bd.maxProgress
 	if _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
