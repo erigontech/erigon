@@ -134,9 +134,7 @@ func HeadersForward(
 	var headerProgress uint64
 
 	if cfg.snapshots != nil {
-		fmt.Printf("alex0\n")
 		if !cfg.snapshots.AllSegmentsAvailable() {
-			fmt.Printf("alex1\n")
 			// wait for Downloader service to download all expected snapshots
 			logEvery := time.NewTicker(logInterval)
 			defer logEvery.Stop()
@@ -171,7 +169,6 @@ func HeadersForward(
 		}
 
 		if !cfg.snapshots.AllIdxAvailable() {
-			fmt.Printf("alex\n")
 			if !cfg.snapshots.AllSegmentsAvailable() {
 				return fmt.Errorf("not all snapshot segments are available")
 			}
