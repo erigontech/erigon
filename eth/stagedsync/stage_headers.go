@@ -128,7 +128,7 @@ func HeadersDownward(
 		u.UnwindTo(header.Number.Uint64()-1, common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			HeadHash: header.Hash(),
-			Status:   privateapi.Unwinding,
+			Status:   privateapi.Syncing,
 		}
 	}
 
