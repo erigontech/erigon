@@ -354,7 +354,7 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 	}
 	var maxBlock, prevTo uint64
 	for _, f := range files {
-		_, to, _, err := ParseFileName(f, ".idx")
+		from, to, _, err := ParseFileName(f, ".idx")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
