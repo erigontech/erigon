@@ -165,6 +165,7 @@ func (s *AllSnapshots) ReopenIndices() error {
 		}
 		idx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Transactions.From, bs.Transactions.To, Transactions)))
 		if err != nil {
+			panic(err)
 			return err
 		}
 		bs.Transactions.Idx = idx
