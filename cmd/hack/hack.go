@@ -2654,7 +2654,7 @@ func checkBlockSnapshot(chaindata string) error {
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
 
-	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots("goerli"))
+	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots(chainConfig.ChainName))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
