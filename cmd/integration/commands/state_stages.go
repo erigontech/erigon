@@ -470,6 +470,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	pm, engine, chainConfig, vmConfig, sync, _, _ := newSync(ctx, db, nil)
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -489,7 +490,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, getBlockReader(chainConfig))
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpdir, getBlockReader(chainConfig))
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {

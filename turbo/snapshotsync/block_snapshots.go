@@ -284,7 +284,6 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 		if err := BodiesIdx(f, sn.Bodies.From); err != nil {
 			return err
 		}
-		break
 	}
 
 	// hack to read first block body - to get baseTxId from there
@@ -707,13 +706,11 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 		j++
 		return nil
 	}); err != nil {
-		panic(err)
 		return fmt.Errorf("TransactionsHashIdx: %w", err)
 	}
 	if j != expectedCount {
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 	}
-	fmt.Printf("indexed txs: %d\n", j)
 	return nil
 }
 

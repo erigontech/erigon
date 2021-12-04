@@ -558,6 +558,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))
+	tmpdir := path.Join(datadir, etl.TmpDirName)
 
 	if reset {
 		genesis, _ := byChain()
@@ -585,7 +586,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpDBPath, getBlockReader(chainConfig))
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpdir, getBlockReader(chainConfig))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
 		err := stagedsync.UnwindExecutionStage(u, s, nil, ctx, cfg, false)

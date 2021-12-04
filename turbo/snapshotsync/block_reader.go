@@ -163,7 +163,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
 	b := &types.BodyForStorage{}
-	if err = rlp.DecodeBytes(buf, b); err != nil {
+	reader := bytes.NewReader(buf)
+	if err = rlp.Decode(reader, b); err != nil {
 		return nil, nil, err
 	}
 
@@ -174,11 +175,10 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
 	if b.TxAmount > 0 {
-		reader := bytes.NewReader(nil)
-		stream := rlp.NewStream(reader, 0)
 		txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
 		gg = sn.Transactions.Segment.MakeGetter()
 		gg.Reset(txnOffset)
+		stream := rlp.NewStream(reader, 0)
 		for i := uint32(0); i < b.TxAmount; i++ {
 			buf, _ = gg.Next(buf[:0])
 			senders[i].SetBytes(buf[1 : 1+20])
