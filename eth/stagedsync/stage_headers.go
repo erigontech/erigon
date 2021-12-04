@@ -169,6 +169,7 @@ func HeadersForward(
 		}
 
 		if !cfg.snapshots.AllIdxAvailable() {
+			fmt.Printf("alex0\n")
 			if !cfg.snapshots.AllSegmentsAvailable() {
 				return fmt.Errorf("not all snapshot segments are available")
 			}
