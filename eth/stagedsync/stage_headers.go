@@ -143,6 +143,7 @@ func HeadersForward(
 				if err != nil {
 					return err
 				}
+				fmt.Printf("Segments availability: %d,%d,%d\n", headers, bodies, txs)
 				expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
 				if headers >= expect && bodies >= expect && txs >= expect {
 					if err := cfg.snapshots.ReopenSegments(); err != nil {
