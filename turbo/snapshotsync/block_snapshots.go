@@ -326,6 +326,7 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 		return 0, err
 	}
 	var maxBlock, prevTo uint64
+	fmt.Printf("files: %s\n", files)
 	for _, f := range files {
 		from, to, _, err := ParseFileName(f, ".seg")
 		if err != nil {
