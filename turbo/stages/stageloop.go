@@ -227,7 +227,7 @@ func NewStagedSync(
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	reverseDownloadCh chan types.Block,
+	reverseDownloadCh chan types.Header,
 	statusCh chan privateapi.ExecutionStatus,
 	waitingForPOSHeaders *bool,
 ) (*stagedsync.Sync, error) {
@@ -250,6 +250,8 @@ func NewStagedSync(
 			controlServer.Penalize,
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
+			reverseDownloadCh,
+			waitingForPOSHeaders,
 			allSnapshots,
 			blockReader,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
@@ -288,7 +290,5 @@ func NewStagedSync(
 			stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
-		reverseDownloadCh,
-		statusCh,
 	), nil
 }

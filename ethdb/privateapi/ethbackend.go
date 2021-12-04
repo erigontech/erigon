@@ -47,7 +47,7 @@ type EthBackendServer struct {
 	config          *params.ChainConfig
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send reverse sync starting point to staged sync
-	reverseDownloadCh chan<- types.Block
+	reverseDownloadCh chan<- types.Header
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Last block number sent over via reverseDownloadCh
@@ -74,7 +74,7 @@ type ExecutionStatus struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- types.Block, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *bool,
+	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForPOSHeaders: waitingForPOSHeaders,
@@ -193,15 +193,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
-	// Check mandatory fields
-	if req == nil || req.ParentHash == nil || req.BlockHash == nil || req.Coinbase == nil || req.ExtraData == nil ||
-		req.LogsBloom == nil || req.ReceiptRoot == nil || req.StateRoot == nil || req.Random == nil ||
-		req.Transactions == nil {
 
-		return nil, fmt.Errorf("invalid execution payload")
-	}
-
-	var err error
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
 	// If another payload is already commissioned then we just reply with syncing
@@ -220,19 +212,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if req.BaseFeePerGas != nil {
 		baseFee = gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig()
 		eip1559 = true
-	}
-
-	// Decode transactions
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
-	transactions := make([]types.Transaction, len(req.Transactions))
-
-	for i, encodedTransaction := range req.Transactions {
-		reader.Reset(encodedTransaction)
-		stream.Reset(reader, 0)
-		if transactions[i], err = types.DecodeTransaction(stream); err != nil {
-			return nil, err
-		}
 	}
 
 	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
@@ -254,7 +233,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.Transactions(transactions)),
+		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
@@ -263,7 +242,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	log.Info("Received Payload from beacon-chain", "hash", blockHash)
 	// Send the block over
 	s.numberSent = req.BlockNumber
-	s.reverseDownloadCh <- *types.NewBlock(&header, transactions, nil, nil)
+	s.reverseDownloadCh <- header
 
 	executedStatus := <-s.statusCh
 

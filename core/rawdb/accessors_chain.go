@@ -1178,33 +1178,28 @@ func WritePendingEpoch(tx kv.RwTx, blockNum uint64, blockHash common.Hash, trans
 	return tx.Put(kv.PendingEpoch, k, transitionProof)
 }
 
-// Transitioned returns true if the block number comes after POS transition
-func Transitioned(db kv.Getter, blockNum uint64) (trans bool, err error) {
-	data, err := db.GetOne(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey))
-	if err != nil {
-		return false, fmt.Errorf("failed ReadTd: %w", err)
-	}
-	if len(data) == 0 {
+// Transitioned returns true if the block number comes after POS transition or is the last POW block
+func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.Int) (trans bool, err error) {
+	if terminalTotalDifficulty == nil {
 		return false, nil
 	}
-	return blockNum > binary.BigEndian.Uint64(data), nil
-}
 
-// MarkTreansition sets transition to proof-of-stake from the block number
-func MarkTransition(db kv.StatelessRwTx, blockNum uint64) error {
-	data := make([]byte, 8)
-	binary.BigEndian.PutUint64(data, blockNum)
-	// If we already transitioned then we do not update the transition
-	marked, err := db.Has(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey))
+	if terminalTotalDifficulty.Cmp(common.Big0) == 0 {
+		return true, nil
+	}
+	header := ReadHeaderByNumber(db, blockNum)
+	if header == nil {
+		return false, nil
+	}
+
+	if header.Difficulty.Cmp(common.Big0) == 0 {
+		return true, nil
+	}
+
+	headerTd, err := ReadTd(db, header.Hash(), blockNum)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	if marked {
-		return nil
-	}
-	if err := db.Put(kv.TransitionBlockKey, []byte(kv.TransitionBlockKey), data); err != nil {
-		return fmt.Errorf("failed to store block total difficulty: %w", err)
-	}
-	return nil
+	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
