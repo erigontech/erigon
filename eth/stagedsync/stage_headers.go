@@ -169,9 +169,7 @@ func HeadersForward(
 			}
 		}
 
-		fmt.Printf("alex222\n")
 		if !cfg.snapshots.AllIdxAvailable() {
-			fmt.Printf("alex0\n")
 			if !cfg.snapshots.AllSegmentsAvailable() {
 				return fmt.Errorf("not all snapshot segments are available")
 			}
@@ -184,8 +182,6 @@ func HeadersForward(
 				return err
 			}
 			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-			fmt.Printf("alex1\n")
-			fmt.Printf("headers: %d, bodies: %d, txs: %d, expect: %d\n", headers, bodies, txs, expect)
 			if headers < expect || bodies < expect || txs < expect {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
