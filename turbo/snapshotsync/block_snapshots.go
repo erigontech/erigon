@@ -326,8 +326,9 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 		return 0, err
 	}
 	maxBlock := uint64(0)
+	var prevTo uint64
 	for _, f := range files {
-		_, to, _, err := ParseFileName(f, ".seg")
+		from, to, _, err := ParseFileName(f, ".seg")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
@@ -336,6 +337,10 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 		}
 		if maxBlock < to {
 			maxBlock = to
+		}
+		if from != prevTo { // no gaps
+			log.Debug("[open snapshots] snapshot missed before", "file", f)
+			break
 		}
 	}
 	if maxBlock == 0 {
@@ -349,6 +354,7 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 		return 0, err
 	}
 	maxBlock := uint64(0)
+	var prevTo uint64
 	for _, f := range files {
 		_, to, _, err := ParseFileName(f, ".idx")
 		if err != nil {
@@ -359,6 +365,10 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 		}
 		if maxBlock < to {
 			maxBlock = to
+		}
+		if from != prevTo { // no gaps
+			log.Debug("[open snapshots] snapshot missed before", "file", f)
+			break
 		}
 	}
 	if maxBlock == 0 {

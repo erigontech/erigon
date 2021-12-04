@@ -3,6 +3,10 @@ module github.com/ledgerwatch/erigon
 go 1.16
 
 
+replace (
+	github.com/ledgerwatch/erigon-lib => ./../erigon-lib
+)
+
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.8.0
