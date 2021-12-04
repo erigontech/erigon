@@ -168,6 +168,7 @@ func HeadersForward(
 			}
 		}
 
+		fmt.Printf("alex222\n")
 		if !cfg.snapshots.AllIdxAvailable() {
 			fmt.Printf("alex0\n")
 			if !cfg.snapshots.AllSegmentsAvailable() {
