@@ -330,6 +330,7 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 		from, to, _, err := ParseFileName(f, ".seg")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
+				fmt.Printf("ooo: %s,%s\n", err, f)
 				continue
 			}
 			return 0, err
