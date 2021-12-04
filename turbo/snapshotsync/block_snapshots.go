@@ -338,7 +338,7 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 			maxBlock = to
 		}
 		if from != prevTo { // no gaps
-			log.Debug("[open snapshots] snapshot missed before", "file", f)
+			log.Warn("[open snapshots] snapshot missed before", "file", f)
 			break
 		}
 	}
@@ -365,7 +365,7 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 			maxBlock = to
 		}
 		if from != prevTo { // no gaps
-			log.Debug("[open snapshots] snapshot missed before", "file", f)
+			log.Warn("[open snapshots] snapshot missed before", "file", f)
 			break
 		}
 	}
