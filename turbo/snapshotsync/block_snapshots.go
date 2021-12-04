@@ -297,8 +297,9 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			return err
 		}
 
-		for ii := uint64(499990); ii < 5_000_000; ii++ {
-			off := sn.Bodies.Idx.Lookup2(ii)
+		var expectedTxsAmount uint64
+		{
+			off := sn.Bodies.Idx.Lookup2(sn.To - 1)
 			gg.Reset(off)
 
 			buf, _ = gg.Next(nil)
@@ -307,10 +308,10 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			if err != nil {
 				panic(err)
 			}
-			fmt.Printf("at: %d, %d,%d, %x\n", ii, bodyForStorage.BaseTxId, bodyForStorage.TxAmount, buf)
+			expectedTxsAmount = bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount) - b.BaseTxId
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
-		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, b.BaseTxId+uint64(b.TxAmount)); err != nil {
+		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, expectedTxsAmount); err != nil {
 			return err
 		}
 	}
@@ -706,11 +707,13 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 		j++
 		return nil
 	}); err != nil {
+		panic(err)
 		return fmt.Errorf("TransactionsHashIdx: %w", err)
 	}
 	if j != expectedCount {
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 	}
+	fmt.Printf("indexed txs: %d\n", j)
 	return nil
 }
 

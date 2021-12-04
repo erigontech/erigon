@@ -2641,7 +2641,7 @@ func recsplitWholeChain(chaindata string) error {
 		_ = os.Remove(fileName + ".dat")
 
 		//nolint
-		//break // TODO: remove me - useful for tests
+		break // TODO: remove me - useful for tests
 	}
 	return nil
 }
@@ -2657,9 +2657,9 @@ func checkBlockSnapshot(chaindata string) error {
 	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots("goerli"))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
-	if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
-		panic(err)
-	}
+	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
+	//	panic(err)
+	//}
 
 	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	tx, err := database.BeginRo(context.Background())
@@ -2678,8 +2678,6 @@ func checkBlockSnapshot(chaindata string) error {
 		if err != nil {
 			return err
 		}
-		_, a, b := rawdb.ReadBody(tx, hash, i)
-		fmt.Printf("ab: %d, %d, %d\n", i, a, b)
 		blockFromDB := rawdb.ReadBlock(tx, hash, i)
 		blockFromSnapshot, _, err := snBlockReader.BlockWithSenders(context.Background(), tx, hash, i)
 		if err != nil {
