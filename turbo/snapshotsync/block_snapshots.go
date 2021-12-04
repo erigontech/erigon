@@ -767,15 +767,6 @@ func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 			return err
 		}
 
-		if i > 499990 {
-			bodyForStorage := new(types.BodyForStorage)
-			err := rlp.DecodeBytes(word, bodyForStorage)
-			if err != nil {
-				panic(err)
-			}
-
-			fmt.Printf("a: %d, %d, %d, %x\n", i, bodyForStorage.BaseTxId, bodyForStorage.TxAmount, word)
-		}
 		select {
 		default:
 		case <-logEvery.C:
