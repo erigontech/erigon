@@ -77,6 +77,7 @@ func BodiesForward(
 			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 				return err
 			}
+			s.BlockNumber = cfg.snapshots.BlocksAvailable()
 		}
 	}
 	// This will update bd.maxProgress
@@ -89,9 +90,6 @@ func BodiesForward(
 		return err
 	}
 	bodyProgress = s.BlockNumber
-	if cfg.snapshots != nil && cfg.snapshots.BlocksAvailable() > bodyProgress {
-		bodyProgress = cfg.snapshots.BlocksAvailable()
-	}
 	if bodyProgress == headerProgress {
 		return nil
 	}
