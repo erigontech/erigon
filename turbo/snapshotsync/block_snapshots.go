@@ -325,8 +325,7 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	maxBlock := uint64(0)
-	var prevTo uint64
+	var maxBlock, prevTo uint64
 	for _, f := range files {
 		from, to, _, err := ParseFileName(f, ".seg")
 		if err != nil {
@@ -353,8 +352,7 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	maxBlock := uint64(0)
-	var prevTo uint64
+	var maxBlock, prevTo uint64
 	for _, f := range files {
 		_, to, _, err := ParseFileName(f, ".idx")
 		if err != nil {
