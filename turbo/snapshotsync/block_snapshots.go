@@ -642,7 +642,6 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 
 	key := make([]byte, 8+32)
 	from := dbutils.EncodeBlockNumber(fromBlock)
-	i := 0
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= fromBlock+uint64(blocksAmount) {
@@ -658,14 +657,6 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
 			return true, nil
 		}
-
-		//if i == 0 {
-		//	b := &types.BodyForStorage{}
-		//	if err = rlp.DecodeBytes(dataRLP, b); err != nil {
-		//		panic(err)
-		//	}
-		//}
-		i++
 
 		numBuf := make([]byte, binary.MaxVarintLen64)
 		n := binary.PutUvarint(numBuf, uint64(len(dataRLP)))
