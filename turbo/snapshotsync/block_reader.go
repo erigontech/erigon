@@ -170,23 +170,25 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
 		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.Transactions.Idx.BaseDataID(), sn.Transactions.File)
 	}
-	fmt.Printf("b.BaseTxId: %d, %d\n", blockHeight, b.BaseTxId)
-	txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
-	gg = sn.Transactions.Segment.MakeGetter()
-	gg.Reset(txnOffset)
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
+
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
-	for i := uint32(0); i < b.TxAmount; i++ {
-		buf, _ = gg.Next(buf[:0])
-		senders[i].SetBytes(buf[1 : 1+20])
-		txRlp := buf[1+20:]
-		reader.Reset(txRlp)
-		stream.Reset(reader, 0)
-		txs[i], err = types.DecodeTransaction(stream)
-		if err != nil {
-			return nil, nil, err
+	if b.TxAmount > 0 {
+		reader := bytes.NewReader(nil)
+		stream := rlp.NewStream(reader, 0)
+		txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
+		gg = sn.Transactions.Segment.MakeGetter()
+		gg.Reset(txnOffset)
+		for i := uint32(0); i < b.TxAmount; i++ {
+			buf, _ = gg.Next(buf[:0])
+			senders[i].SetBytes(buf[1 : 1+20])
+			txRlp := buf[1+20:]
+			reader.Reset(txRlp)
+			stream.Reset(reader, 0)
+			txs[i], err = types.DecodeTransaction(stream)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
