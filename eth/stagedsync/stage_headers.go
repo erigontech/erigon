@@ -236,10 +236,6 @@ func HeadersForward(
 			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
 				return err
 			}
-
-			//hash, _ := rawdb.ReadCanonicalHash(tx, cfg.snapshots.BlocksAvailable())
-			//block cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, cfg.snapshots.BlocksAvailable())
-			//tx.IncrementSequence()
 		}
 
 		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
@@ -249,6 +245,7 @@ func HeadersForward(
 			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 				return err
 			}
+			s.BlockNumber = cfg.snapshots.BlocksAvailable()
 		}
 	}
 
