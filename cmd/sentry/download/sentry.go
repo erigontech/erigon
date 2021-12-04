@@ -33,6 +33,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -466,7 +468,11 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	}
 	grpcServer := grpcutil.NewServer(100, nil)
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+
 	go func() {
+		defer healthServer.Shutdown()
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry gRPC server fail", "err", err1)
 		}

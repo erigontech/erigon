@@ -8,8 +8,12 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_testing "github.com/ledgerwatch/erigon-lib/gointerfaces/testing"
@@ -118,6 +122,8 @@ func grpcTestDriverServer(ctx context.Context, testingAddr string) (*TestDriverS
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	testDriverServer := NewTestDriverServer(ctx)
 	proto_testing.RegisterTestDriverServer(grpcServer, testDriverServer)
@@ -125,6 +131,7 @@ func grpcTestDriverServer(ctx context.Context, testingAddr string) (*TestDriverS
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 	go func() {
+		defer healthServer.Shutdown()
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Test driver server fail", "err", err1)
 		}
@@ -177,13 +184,15 @@ func grpcTestSentryServer(ctx context.Context, sentryAddr string) (*TestSentrySe
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
-
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	testSentryServer := NewTestSentryServer(ctx)
 	proto_sentry.RegisterSentryServer(grpcServer, testSentryServer)
 	//if metrics.Enabled {
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 	go func() {
+		defer healthServer.Shutdown()
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Test driver server fail", "err", err1)
 		}

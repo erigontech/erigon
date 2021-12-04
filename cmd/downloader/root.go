@@ -8,6 +8,9 @@ import (
 	"path"
 	"time"
 
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	proto_snap "github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
@@ -190,12 +193,15 @@ func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *cr
 	if snServer != nil {
 		proto_snap.RegisterDownloaderServer(grpcServer, snServer)
 	}
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	//if metrics.Enabled {
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 
 	go func() {
+		defer healthServer.Shutdown()
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("gRPC server stop", "err", err)
 		}

@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"path"
 	"time"
+
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -32,6 +35,7 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/status"
 )
 
@@ -60,6 +64,9 @@ type Flags struct {
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
 	Snapshot             ethconfig.Snapshot
+	GRPCServerEnabled    bool
+	GRPCListenAddress    string
+	GRPCPort             int
 }
 
 var rootCmd = &cobra.Command{
@@ -94,6 +101,9 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
 	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, "experimental.snapshot", false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
+	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -352,7 +362,24 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled, "ws.compression", cfg.WebsocketCompression)
+	var (
+		healthServer *grpcHealth.Server
+		grpcServer   *grpc.Server
+		grpcListener net.Listener
+	)
+	if cfg.GRPCServerEnabled {
+		grpcEndpoint := fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil {
+			return fmt.Errorf("could not start GRPC listener: %w", err)
+		}
+		grpcServer = grpc.NewServer()
+		healthServer = grpcHealth.NewServer()
+		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+		go grpcServer.Serve(grpcListener)
+	}
+
+	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled, "grpc.port", cfg.GRPCPort)
 
 	defer func() {
 		srv.Stop()
@@ -360,6 +387,13 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+
+		if cfg.GRPCServerEnabled {
+			healthServer.Shutdown()
+			grpcServer.GracefulStop()
+			_ = grpcListener.Close()
+			log.Info("GRPC endpoint closed", "url", httpEndpoint)
+		}
 	}()
 	<-ctx.Done()
 	log.Info("Exiting...")

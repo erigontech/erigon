@@ -13,8 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -134,6 +138,8 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
 	grpcServer = grpc.NewServer(opts...)
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
 	cliqueServer := NewCliqueServer(ctx)
 	proto_cons.RegisterConsensusEngineServer(grpcServer, cliqueServer)
@@ -144,6 +150,7 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 	go func() {
+		defer healthServer.Shutdown()
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Clique server fail", "err", err1)
 		}
