@@ -2668,9 +2668,7 @@ func checkBlockSnapshot(chaindata string) error {
 	}
 	defer tx.Rollback()
 
-	//snBlockReader.HeaderByNumber(context.Background(), tx, 499993)
-	//return nil
-	for i := uint64(499990); i < snapshots.BlocksAvailable(); i++ {
+	for i := uint64(0); i < snapshots.BlocksAvailable(); i++ {
 		hash, err := rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
 			return err
