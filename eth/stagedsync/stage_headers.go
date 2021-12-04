@@ -180,10 +180,10 @@ func HeadersForward(
 			if err != nil {
 				return err
 			}
-			fmt.Printf("alex1\n")
 			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+			fmt.Printf("alex1\n")
+			fmt.Printf("headers: %d, bodies: %d, txs: %d, expect: %d\n", headers, bodies, txs, expect)
 			if headers < expect || bodies < expect || txs < expect {
-				fmt.Printf("alex2\n")
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
 					return err
