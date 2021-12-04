@@ -99,7 +99,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer canonicalC.Close()
 
 	startFrom := s.BlockNumber + 1
-	if startFrom < cfg.snapshots.BlocksAvailable() {
+	if cfg.snapshots != nil && startFrom < cfg.snapshots.BlocksAvailable() {
 		startFrom = cfg.snapshots.BlocksAvailable()
 	}
 
