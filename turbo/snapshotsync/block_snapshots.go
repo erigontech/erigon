@@ -334,7 +334,6 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 			}
 			return 0, err
 		}
-		fmt.Printf("alex000: %d,%d,%d\n", from, to, prevTo)
 		if from != prevTo { // no gaps
 			log.Warn("[open snapshots] snapshot missed", "type", ofType, "from", prevTo, "to", from)
 			break
