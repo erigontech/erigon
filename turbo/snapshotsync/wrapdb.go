@@ -2,7 +2,6 @@ package snapshotsync
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
@@ -34,12 +33,6 @@ var (
 		},
 	}
 )
-
-//nolint
-func WrapBySnapshotsFromDir(kv kv.RwDB, snapshotDir string, mode SnapshotMode) (kv.RwDB, error) {
-	//todo remove it
-	return nil, errors.New("deprecated") //nolint
-}
 
 func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[snapshotsync.SnapshotType]*snapshotsync.SnapshotsInfo) (kv.RwDB, error) {
 	snKV := snapshotdb.NewSnapshotKV().DB(db)
