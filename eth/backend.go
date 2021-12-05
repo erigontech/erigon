@@ -239,20 +239,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	// setting notifier to support streaming events to rpc daemon
-	var mg *snapshotsync.SnapshotMigrator
-	if config.Snapshot.Enabled {
-		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainKv)
-		if err != nil {
-			return nil, err
-		}
-		mg = snapshotsync.NewMigrator(config.Snapshot.Dir, currentSnapshotBlock, currentInfohash)
-		err = mg.RemoveNonCurrentSnapshots()
-		if err != nil {
-			log.Error("Remove non current snapshot", "err", err)
-		}
-	}
-
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
 			sentryClient, err := download.GrpcSentryClient(backend.downloadCtx, addr)
