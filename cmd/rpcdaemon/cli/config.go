@@ -39,33 +39,34 @@ import (
 )
 
 type Flags struct {
-	PrivateApiAddr       string
-	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
-	Datadir              string
-	Chaindata            string
-	HttpListenAddress    string
-	TLSCertfile          string
-	TLSCACert            string
-	TLSKeyFile           string
-	HttpPort             int
-	HttpCORSDomain       []string
-	HttpVirtualHost      []string
-	HttpCompression      bool
-	API                  []string
-	Gascap               uint64
-	MaxTraces            uint64
-	WebsocketEnabled     bool
-	WebsocketCompression bool
-	RpcAllowListFilePath string
-	RpcBatchConcurrency  uint
-	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr        string
-	TevmEnabled          bool
-	StateCache           kvcache.CoherentConfig
-	Snapshot             ethconfig.Snapshot
-	GRPCServerEnabled    bool
-	GRPCListenAddress    string
-	GRPCPort             int
+	PrivateApiAddr         string
+	SingleNodeMode         bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
+	Datadir                string
+	Chaindata              string
+	HttpListenAddress      string
+	TLSCertfile            string
+	TLSCACert              string
+	TLSKeyFile             string
+	HttpPort               int
+	HttpCORSDomain         []string
+	HttpVirtualHost        []string
+	HttpCompression        bool
+	API                    []string
+	Gascap                 uint64
+	MaxTraces              uint64
+	WebsocketEnabled       bool
+	WebsocketCompression   bool
+	RpcAllowListFilePath   string
+	RpcBatchConcurrency    uint
+	TraceCompatibility     bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolApiAddr          string
+	TevmEnabled            bool
+	StateCache             kvcache.CoherentConfig
+	Snapshot               ethconfig.Snapshot
+	GRPCServerEnabled      bool
+	GRPCListenAddress      string
+	GRPCPort               int
+	GRPCHealthCheckEnabled bool
 }
 
 var rootCmd = &cobra.Command{
@@ -103,6 +104,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -365,15 +367,18 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		healthServer *grpcHealth.Server
 		grpcServer   *grpc.Server
 		grpcListener net.Listener
+		grpcEndpoint string
 	)
 	if cfg.GRPCServerEnabled {
-		grpcEndpoint := fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
 		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil {
 			return fmt.Errorf("could not start GRPC listener: %w", err)
 		}
 		grpcServer = grpc.NewServer()
-		healthServer = grpcHealth.NewServer()
-		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+		if cfg.GRPCHealthCheckEnabled {
+			healthServer = grpcHealth.NewServer()
+			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+		}
 		go grpcServer.Serve(grpcListener)
 	}
 
@@ -388,10 +393,12 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 
 		if cfg.GRPCServerEnabled {
-			healthServer.Shutdown()
+			if cfg.GRPCHealthCheckEnabled {
+				healthServer.Shutdown()
+			}
 			grpcServer.GracefulStop()
 			_ = grpcListener.Close()
-			log.Info("GRPC endpoint closed", "url", httpEndpoint)
+			log.Info("GRPC endpoint closed", "url", grpcEndpoint)
 		}
 	}()
 	<-ctx.Done()
