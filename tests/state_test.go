@@ -44,9 +44,6 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTimeConsuming/`)
 	st.skipLoad(`.*vmPerformance/loop.*`)
 
-	// TODO(yperbasis): investigate
-	st.skipLoad(`^stTransactionTest/HighGasPrice.json`)
-
 	// Broken tests:
 	st.skipLoad(`^stCreate2/create2collisionStorage.json`)
 	st.skipLoad(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json`)
