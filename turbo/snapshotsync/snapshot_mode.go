@@ -9,18 +9,14 @@ import (
 var DefaultSnapshotMode = SnapshotMode{}
 
 type SnapshotMode struct {
-	Headers  bool
-	Bodies   bool
+	Blocks   bool
 	State    bool
 	Receipts bool
 }
 
 func (m SnapshotMode) ToString() string {
 	var mode string
-	if m.Headers {
-		mode += "h"
-	}
-	if m.Bodies {
+	if m.Blocks {
 		mode += "b"
 	}
 	if m.State {
@@ -34,10 +30,7 @@ func (m SnapshotMode) ToString() string {
 
 func (m SnapshotMode) ToSnapshotTypes() []snapshotsync.SnapshotType {
 	var types []snapshotsync.SnapshotType
-	if m.Headers {
-		types = append(types, snapshotsync.SnapshotType_headers)
-	}
-	if m.Bodies {
+	if m.Blocks {
 		types = append(types, snapshotsync.SnapshotType_bodies)
 	}
 	if m.State {

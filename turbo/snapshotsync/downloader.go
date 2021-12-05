@@ -12,6 +12,7 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -19,8 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 )
 
 type Client struct {
@@ -118,47 +117,44 @@ func (cli *Client) AddTorrentSpec(snapshotName string, snapshotHash metainfo.Has
 	return t, err
 }
 
-func (cli *Client) AddTorrent(ctx context.Context, db kv.RwTx, snapshotType snapshotsync.SnapshotType, networkID uint64) error { //nolint: interfacer
-	infoHashBytes, infoBytes, err := getTorrentSpec(db, snapshotType.String(), networkID)
-	if err != nil {
-		return err
-	}
-	var infoHash metainfo.Hash
+type torrentSpecFromDb struct {
+	exists       bool
+	snapshotType snapshotsync.SnapshotType
+	networkID    uint64
+	infoHash     torrent.InfoHash
+	infoBytes    []byte
+}
+
+func (cli *Client) AddTorrent(ctx context.Context, spec *torrentSpecFromDb) (*torrentSpecFromDb, error) { //nolint: interfacer
 	newTorrent := false
-	if infoHashBytes != nil {
-		copy(infoHash[:], infoHashBytes[:metainfo.HashSize])
-	} else {
-		log.Info("Init new torrent", "snapshot", snapshotType.String())
+	if !spec.exists {
+		log.Info("Init new torrent", "snapshot", spec.snapshotType.String())
 		newTorrent = true
 		var ok bool
-		infoHash, ok = TorrentHashes[networkID][snapshotType]
+		spec.infoHash, ok = TorrentHashes[spec.networkID][spec.snapshotType]
 		if !ok {
-			return fmt.Errorf("%w type %v, networkID %v", ErrInvalidSnapshot, snapshotType, networkID)
+			return nil, fmt.Errorf("%w type %v, networkID %v", ErrInvalidSnapshot, spec.snapshotType, spec.networkID)
 		}
 	}
-	log.Info("Added torrent spec", "snapshot", snapshotType.String(), "hash", infoHash.String())
-	t, err := cli.AddTorrentSpec(snapshotType.String(), infoHash, infoBytes)
+	log.Info("Added torrent spec", "snapshot", spec.snapshotType.String(), "hash", spec.infoHash.String())
+	t, err := cli.AddTorrentSpec(spec.snapshotType.String(), spec.infoHash, spec.infoBytes)
 	if err != nil {
-		return fmt.Errorf("error on add snapshot: %w", err)
+		return nil, fmt.Errorf("error on add snapshot: %w", err)
 	}
-	log.Info("Getting infobytes", "snapshot", snapshotType.String())
-	infoBytes, err = cli.GetInfoBytes(context.Background(), infoHash)
+	log.Info("Getting infobytes", "snapshot", spec.snapshotType.String())
+	spec.infoBytes, err = cli.GetInfoBytes(context.Background(), spec.infoHash)
 	if err != nil {
-		log.Warn("Init failure", "snapshot", snapshotType.String(), "err", ctx.Err())
-		return fmt.Errorf("error on get info bytes: %w", err)
+		log.Warn("Init failure", "snapshot", spec.snapshotType.String(), "err", ctx.Err())
+		return nil, fmt.Errorf("error on get info bytes: %w", err)
 	}
 	t.AllowDataDownload()
 	t.DownloadAll()
-	log.Info("Got infobytes", "snapshot", snapshotType.String(), "file", t.Files()[0].Path())
+	log.Info("Got infobytes", "snapshot", spec.snapshotType.String(), "file", t.Files()[0].Path())
 
 	if newTorrent {
-		log.Info("Save spec", "snapshot", snapshotType.String())
-		err := saveTorrentSpec(db, snapshotType.String(), networkID, infoHash, infoBytes)
-		if err != nil {
-			return err
-		}
+		return spec, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash) ([]byte, error) {
@@ -177,42 +173,6 @@ func (cli *Client) GetInfoBytes(ctx context.Context, snapshotHash metainfo.Hash)
 			time.Sleep(time.Second * 60)
 		}
 	}
-}
-
-func (cli *Client) AddSnapshotsTorrents(ctx context.Context, db kv.RwTx, networkId uint64, mode SnapshotMode) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
-	defer cancel()
-	eg := errgroup.Group{}
-
-	if mode.Headers {
-		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_headers, networkId)
-		})
-	}
-
-	if mode.Bodies {
-		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_bodies, networkId)
-		})
-	}
-
-	if mode.State {
-		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_state, networkId)
-		})
-	}
-
-	if mode.Receipts {
-		eg.Go(func() error {
-			return cli.AddTorrent(ctx, db, snapshotsync.SnapshotType_receipts, networkId)
-		})
-	}
-	err := eg.Wait()
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (cli *Client) Download() {
@@ -332,30 +292,43 @@ func (cli *Client) StopSeeding(hash metainfo.Hash) error {
 	return nil
 }
 
-func getTorrentSpec(db kv.Tx, snapshotName string, networkID uint64) ([]byte, []byte, error) {
-	var infohash, infobytes []byte
+func getTorrentSpec(db kv.Tx, snapshotName snapshotsync.SnapshotType, networkID uint64) (*torrentSpecFromDb, error) {
+	snapshotNameS := snapshotName.String()
+	var infoHashBytes, infobytes []byte
 	var err error
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, networkID)
-	infohash, err = db.GetOne(kv.SnapshotInfo, MakeInfoHashKey(snapshotName, networkID))
+	infoHashBytes, err = db.GetOne(kv.SnapshotInfo, MakeInfoHashKey(snapshotNameS, networkID))
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	infobytes, err = db.GetOne(kv.SnapshotInfo, MakeInfoBytesKey(snapshotName, networkID))
-	if err != nil {
-		return nil, nil, err
+	var infoHash metainfo.Hash
+	if infoHashBytes != nil {
+		copy(infoHash[:], infoHashBytes[:metainfo.HashSize])
 	}
 
-	return infohash, infobytes, nil
+	infobytes, err = db.GetOne(kv.SnapshotInfo, MakeInfoBytesKey(snapshotNameS, networkID))
+	if err != nil {
+		return nil, err
+	}
+
+	return &torrentSpecFromDb{
+		exists:       infoHashBytes != nil,
+		snapshotType: snapshotName,
+		networkID:    networkID,
+		infoHash:     infoHash,
+		infoBytes:    infobytes,
+	}, nil
 }
-func saveTorrentSpec(db kv.Putter, snapshotName string, networkID uint64, hash torrent.InfoHash, infobytes []byte) error {
+func saveTorrentSpec(db kv.Putter, spec *torrentSpecFromDb) error {
+	snapshotNameS := spec.snapshotType.String()
 	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, networkID)
-	err := db.Put(kv.SnapshotInfo, MakeInfoHashKey(snapshotName, networkID), hash.Bytes())
+	binary.BigEndian.PutUint64(b, spec.networkID)
+	err := db.Put(kv.SnapshotInfo, MakeInfoHashKey(snapshotNameS, spec.networkID), spec.infoHash.Bytes())
 	if err != nil {
 		return err
 	}
-	return db.Put(kv.SnapshotInfo, MakeInfoBytesKey(snapshotName, networkID), infobytes)
+	return db.Put(kv.SnapshotInfo, MakeInfoBytesKey(snapshotNameS, spec.networkID), spec.infoBytes)
 }
 
 func MakeInfoHashKey(snapshotName string, networkID uint64) []byte {
