@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
@@ -35,9 +36,10 @@ type SendersCfg struct {
 	tmpdir          string
 	prune           prune.Mode
 	chainConfig     *params.ChainConfig
+	snapshots       *snapshotsync.AllSnapshots
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.AllSnapshots) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -51,6 +53,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 		tmpdir:          tmpdir,
 		chainConfig:     chainCfg,
 		prune:           prune,
+		snapshots:       snapshots,
 	}
 }
 
@@ -95,7 +98,12 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}
 	defer canonicalC.Close()
 
-	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, v, err = canonicalC.Next() {
+	startFrom := s.BlockNumber + 1
+	if cfg.snapshots != nil && startFrom < cfg.snapshots.BlocksAvailable() {
+		startFrom = cfg.snapshots.BlocksAvailable()
+	}
+
+	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
 			return err
 		}
