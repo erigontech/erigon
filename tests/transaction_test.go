@@ -26,8 +26,7 @@ func TestTransaction(t *testing.T) {
 	t.Parallel()
 
 	txt := new(testMatcher)
-	// These can't be parsed, invalid hex in RLP
-	txt.skipLoad("^ttWrongRLP/.*")
+
 	// We don't allow more than uint64 in gas amount
 	// This is a pseudo-consensus vulnerability, but not in practice
 	// because of the gas limit
