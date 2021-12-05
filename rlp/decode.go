@@ -295,23 +295,46 @@ func decodeUint256NoPtr(s *Stream, val reflect.Value) error {
 }
 
 func decodeUint256(s *Stream, val reflect.Value) error {
-	b, err := s.Bytes()
-	if err != nil {
+	var buffer []byte
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
 		return wrapStreamError(err, val.Type())
-	}
-	if len(b) > 32 {
+	case kind == List:
+		return wrapStreamError(ErrExpectedString, val.Type())
+	case kind == Byte:
+		buffer = s.uintbuf[:1]
+		buffer[0] = s.byteval
+		s.kind = -1 // re-arm Kind
+	case size == 0:
+		// Avoid zero-length read.
+		s.kind = -1
+	case size <= 32:
+		buffer = s.uintbuf[:size]
+		if err := s.readFull(buffer); err != nil {
+			return wrapStreamError(err, val.Type())
+		}
+		// Reject inputs where single byte encoding should have been used.
+		if size == 1 && buffer[0] < 128 {
+			return wrapStreamError(ErrCanonSize, val.Type())
+		}
+	default:
+		// size > 32
 		return wrapStreamError(errUintOverflow, val.Type())
 	}
+
+	// Reject leading zero bytes.
+	if len(buffer) > 0 && buffer[0] == 0 {
+		return wrapStreamError(ErrCanonInt, val.Type())
+	}
+
+	// Set the integer bytes.
 	i := val.Interface().(*uint256.Int)
 	if i == nil {
 		i = new(uint256.Int)
 		val.Set(reflect.ValueOf(i))
 	}
-	// Reject leading zero bytes
-	if len(b) > 0 && b[0] == 0 {
-		return wrapStreamError(ErrCanonInt, val.Type())
-	}
-	i.SetBytes(b)
+	i.SetBytes(buffer)
 	return nil
 }
 
