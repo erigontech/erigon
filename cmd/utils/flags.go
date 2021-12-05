@@ -538,6 +538,11 @@ var (
 		Name:  "experimental.snapshot",
 		Usage: "Enabling experimental snapshot sync",
 	}
+
+	HealthCheckFlag = cli.BoolFlag{
+		Name:  "healthcheck",
+		Usage: "Enabling grpc health check",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}

@@ -49,9 +49,10 @@ var (
 )
 
 type Config struct {
-	Addr    string
-	Dir     string
-	Seeding bool
+	Addr        string
+	Dir         string
+	Seeding     bool
+	HealthCheck bool
 }
 
 func main() {
@@ -100,7 +101,11 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Run snapshot downloader", "addr", cfg.Addr, "dir", cfg.Dir, "seeding", cfg.Seeding)
+	cfg.HealthCheck, err = cmd.Flags().GetBool("health")
+	if err != nil {
+		return err
+	}
+	log.Info("Run snapshot downloader", "addr", cfg.Addr, "dir", cfg.Dir, "seeding", cfg.Seeding, "health", cfg.HealthCheck)
 
 	bittorrentServer, err := snapshotsync.NewServer(cfg.Dir, cfg.Seeding)
 	if err != nil {
@@ -144,7 +149,7 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 			time.Sleep(time.Minute)
 		}
 	}()
-	grpcServer, err := StartGrpc(bittorrentServer, cfg.Addr, nil)
+	grpcServer, err := StartGrpc(bittorrentServer, cfg, nil)
 	if err != nil {
 		return err
 	}
@@ -155,10 +160,10 @@ func runDownloader(cmd *cobra.Command, args []string) error {
 
 }
 
-func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", addr)
+func StartGrpc(snServer *snapshotsync.SNDownloaderServer, cfg *Config, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+	lis, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
+		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, cfg.Addr)
 	}
 
 	var (
@@ -192,19 +197,24 @@ func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *cr
 	if snServer != nil {
 		proto_snap.RegisterDownloaderServer(grpcServer, snServer)
 	}
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	var healthServer *health.Server
+	if cfg.HealthCheck {
+		healthServer = health.NewServer()
+		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	}
 
 	//if metrics.Enabled {
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 
 	go func() {
-		defer healthServer.Shutdown()
+		if cfg.HealthCheck {
+			defer healthServer.Shutdown()
+		}
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("gRPC server stop", "err", err)
 		}
 	}()
-	log.Info("Started gRPC server", "on", addr)
+	log.Info("Started gRPC server", "on", cfg.Addr)
 	return grpcServer, nil
 }
