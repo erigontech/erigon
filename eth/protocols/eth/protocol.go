@@ -373,11 +373,8 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode TD
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read TD: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for TD: %d", len(b))
 	}
 	nbp.TD = new(big.Int).SetBytes(b)
 	if err = s.ListEnd(); err != nil {
