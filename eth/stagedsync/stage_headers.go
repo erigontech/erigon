@@ -123,13 +123,23 @@ func HeadersDownward(
 	header := <-cfg.reverseDownloadCh
 	*cfg.waitingPosHeaders = false
 
+	defer tx.Commit()
+
+	headerNumber := header.Number.Uint64()
+
+	blockHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	if err != nil {
+		return err
+	}
+
 	// Do we need to unwind? (TODO)
-	if s.BlockNumber >= header.Number.Uint64() {
-		u.UnwindTo(header.Number.Uint64()-1, common.Hash{})
+	if s.BlockNumber >= headerNumber && header.Hash() != blockHash {
+		u.UnwindTo(headerNumber-1, blockHash)
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			HeadHash: header.Hash(),
 			Status:   privateapi.Syncing,
 		}
+		return nil
 	}
 
 	// Write current payload
