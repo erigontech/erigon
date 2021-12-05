@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"time"
 
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
@@ -54,8 +54,8 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
 	torrentConfig.Debug = false
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Debug)
 	torrentConfig.Logger = NewAdapterLogger()
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 	return torrentConfig
 }
 
