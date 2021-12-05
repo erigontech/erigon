@@ -23,12 +23,12 @@ func NewBlockReader() *BlockReader {
 	return &BlockReader{}
 }
 
-func (back *BlockReader) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeader(tx, hash, blockHeight)
 	return h, nil
 }
 
-func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeaderByNumber(tx, blockHeight)
 	return h, nil
 }
@@ -98,7 +98,7 @@ type BlockReaderWithSnapshots struct {
 func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
 }
-func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Tx, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
 		h := rawdb.ReadHeaderByNumber(tx, blockHeight)
@@ -106,7 +106,7 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	}
 	return back.headerFromSnapshot(blockHeight, sn)
 }
-func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
 		h := rawdb.ReadHeader(tx, hash, blockHeight)
@@ -116,7 +116,7 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Tx, hash
 	return back.headerFromSnapshot(blockHeight, sn)
 }
 
-func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
 		h := rawdb.ReadHeader(tx, hash, blockHeight)
@@ -163,29 +163,32 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
 	b := &types.BodyForStorage{}
-	if err = rlp.DecodeBytes(buf, b); err != nil {
+	reader := bytes.NewReader(buf)
+	if err = rlp.Decode(reader, b); err != nil {
 		return nil, nil, err
 	}
 
 	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
-		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d\n", b.BaseTxId, sn.Transactions.Idx.BaseDataID())
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.Transactions.Idx.BaseDataID(), sn.Transactions.File)
 	}
-	txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
-	gg = sn.Transactions.Segment.MakeGetter()
-	gg.Reset(txnOffset)
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
+
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
-	for i := uint32(0); i < b.TxAmount; i++ {
-		buf, _ = gg.Next(buf[:0])
-		senders[i].SetBytes(buf[1 : 1+20])
-		txRlp := buf[1+20:]
-		reader.Reset(txRlp)
-		stream.Reset(reader, 0)
-		txs[i], err = types.DecodeTransaction(stream)
-		if err != nil {
-			return nil, nil, err
+	if b.TxAmount > 0 {
+		txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
+		gg = sn.Transactions.Segment.MakeGetter()
+		gg.Reset(txnOffset)
+		stream := rlp.NewStream(reader, 0)
+		for i := uint32(0); i < b.TxAmount; i++ {
+			buf, _ = gg.Next(buf[:0])
+			senders[i].SetBytes(buf[1 : 1+20])
+			txRlp := buf[1+20:]
+			reader.Reset(txRlp)
+			stream.Reset(reader, 0)
+			txs[i], err = types.DecodeTransaction(stream)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 

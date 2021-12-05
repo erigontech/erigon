@@ -270,6 +270,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	blockReader := snapshotsync.NewBlockReader()
+	var allSnapshots *snapshotsync.AllSnapshots
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
@@ -282,7 +283,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			false,
 			nil,
 			nil,
-		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir), stagedsync.StageBodiesCfg(
+			allSnapshots,
+			blockReader,
+		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
 			sendBodyRequest,
@@ -291,8 +294,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BodyDownloadTimeoutSeconds,
 			*mock.ChainConfig,
 			cfg.BatchSize,
+			allSnapshots,
+			blockReader,
 		), stagedsync.StageDifficultyCfg(mock.DB, mock.tmpdir, nil, blockReader),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, allSnapshots),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,
@@ -309,7 +314,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.DB,
 				cfg.BatchSize,
 				mock.ChainConfig,
-			), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir, blockReader), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
+			), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir, blockReader), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
