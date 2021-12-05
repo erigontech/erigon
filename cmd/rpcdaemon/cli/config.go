@@ -362,7 +362,8 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
-
+	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 	var (
 		healthServer *grpcHealth.Server
 		grpcServer   *grpc.Server
@@ -380,10 +381,10 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 		}
 		go grpcServer.Serve(grpcListener)
+		info = append(info, "grpc.port", cfg.GRPCPort)
 	}
 
-	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled,
-		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled, "grpc.port", cfg.GRPCPort)
+	log.Info("HTTP endpoint opened", info...)
 
 	defer func() {
 		srv.Stop()
