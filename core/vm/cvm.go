@@ -34,7 +34,7 @@ func (cvm *CVM) IntraBlockState() IntraBlockState {
 	return cvm.intraBlockState
 }
 
-func (cvm *CVM) run(code []byte) ([]byte, error) {
-	// TODO:: call grpc cairo
-	return code, nil
-}
+//func (cvm *CVM) run(code []byte) ([]byte, error) {
+//	// TODO:: call grpc cairo
+//	return code, nil
+//}

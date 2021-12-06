@@ -7,14 +7,13 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 	"github.com/spf13/cobra"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 type Flags struct {
 	Contract   string
 	PrivateKey string
-	Output string
+	Output     string
 }
 
 var generateRawTxCmd = &cobra.Command{
@@ -36,13 +35,6 @@ func init() {
 	generateRawTxCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		rawTxGenerator := services.NewRawTxGenerator(flags.PrivateKey)
 
-		if flags.Output == "" {
-			absPath, _ := filepath.Abs(flags.Contract)
-			if _, err := os.Stat(absPath); err != nil {
-				return fmt.Errorf("could not find contract file: %v", absPath)
-			}
-		}
-
 		fs := os.DirFS("/")
 		buf := bytes.NewBuffer(nil)
 		err := rawTxGenerator.CreateFromFS(fs, strings.Trim(flags.Contract, "/"), buf)
@@ -58,6 +50,9 @@ func init() {
 			defer outputFile.Close()
 
 			_, err = outputFile.WriteString(hex.EncodeToString(buf.Bytes()))
+			if err != nil {
+				return fmt.Errorf("could not write to output file: %v", flags.Output)
+			}
 		} else {
 			fmt.Println(hex.EncodeToString(buf.Bytes()))
 		}

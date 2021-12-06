@@ -24,8 +24,7 @@ func NewRawTxGenerator(privateKey string) RawTxGenerator {
 }
 
 type RawTxGenerator struct {
-	privateKey   string
-	contractFile string
+	privateKey string
 }
 
 func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, writer io.Writer) error {

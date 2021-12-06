@@ -12,6 +12,11 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+var (
+	ErrOnlyStarknetTx     = errors.New("only support starknet transactions")
+	ErrOnlyContractDeploy = errors.New("only support contract creation")
+)
+
 // SendRawTransaction deploy new cairo contract
 func (api *StarknetImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
 	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))
@@ -20,8 +25,12 @@ func (api *StarknetImpl) SendRawTransaction(ctx context.Context, encodedTx hexut
 		return common.Hash{}, err
 	}
 
+	if !txn.IsStarkNet() {
+		return common.Hash{}, ErrOnlyStarknetTx
+	}
+
 	if !txn.IsContractDeploy() {
-		return common.Hash{}, errors.New("only support contract creation")
+		return common.Hash{}, ErrOnlyContractDeploy
 	}
 
 	hash := txn.Hash()
