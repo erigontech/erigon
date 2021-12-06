@@ -241,6 +241,7 @@ type OeTracer struct {
 }
 
 func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
+	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if depth > 0 {
@@ -270,14 +271,13 @@ func (ot *OeTracer) CaptureStart(depth int, from common.Address, to common.Addre
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 {
+	if precompile && depth > 0 && value.Sign() <= 0 {
 		ot.precompile = true
 		return nil
 	}
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
 	}
-	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
 	trace := &ParityTrace{}
 	if create {
 		trResult := &CreateTraceResult{}
