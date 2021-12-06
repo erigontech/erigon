@@ -325,7 +325,7 @@ func UpgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 	case params.RialtoGenesisHash:
 		network = rialtoNet
 	default:
-		network = mainNet
+		network = defaultNet
 	}
 
 	logger := log.New("system-contract-upgrade", network)
