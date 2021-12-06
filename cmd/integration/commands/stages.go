@@ -1001,6 +1001,12 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.BSCChainName:
 		chainConfig = params.BSCChainConfig
 		genesis = core.DefaultBSCGenesisBlock()
+	case params.ChapelChainName:
+		chainConfig = params.ChapelChainConfig
+		genesis = core.DefaultChapelGenesisBlock()
+	case params.RialtoChainName:
+		chainConfig = params.RialtoChainConfig
+		genesis = core.DefaultChapelGenesisBlock()
 	case params.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
@@ -1043,7 +1049,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	switch chain {
 	case params.SokolChainName, params.KovanChainName:
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
-	case params.BSCChainName:
+	case params.BSCChainName, params.ChapelChainName, params.RialtoChainName:
 		config := &ethconfig.Defaults
 		var consensusConfig interface{}
 		if chainConfig.Parlia != nil {

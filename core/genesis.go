@@ -627,6 +627,38 @@ func DefaultBSCGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultChapelGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.ChapelChainConfig,
+		Nonce:      0x00,
+		Timestamp:  0x5e9da7ce,
+		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001284214b9b9c85549ab3d2b972df0deef66ac2c9b71b214cb885500844365e95cd9942c7276e7fd8a2959d3f95eae5dc7d70144ce1b73b403b7eb6e0980a75ecd1309ea12fa2ed87a8744fbfc9b863d535552c16704d214347f29fa77f77da6d75d7c752f474cf03cceff28abc65c9cbae594f725c80e12d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x2625a00,
+		Difficulty: big.NewInt(0x1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
+		Alloc:      readPrealloc("allocs/bsc.json"),
+		Number:     0x00,
+		GasUsed:    0x00,
+	}
+}
+
+func DefaultRialtoGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.RialtoChainConfig,
+		Nonce:      0x00,
+		Timestamp:  0x5e9da7ce,
+		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001284214b9b9c85549ab3d2b972df0deef66ac2c9b71b214cb885500844365e95cd9942c7276e7fd8a2959d3f95eae5dc7d70144ce1b73b403b7eb6e0980a75ecd1309ea12fa2ed87a8744fbfc9b863d535552c16704d214347f29fa77f77da6d75d7c752f474cf03cceff28abc65c9cbae594f725c80e12d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x2625a00,
+		Difficulty: big.NewInt(0x1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
+		Alloc:      readPrealloc("allocs/bsc.json"),
+		Number:     0x00,
+		GasUsed:    0x00,
+	}
+}
+
 func DefaultKovanGenesisBlock() *Genesis {
 	sealRlp, err := rlp.EncodeToBytes([][]byte{
 		common.FromHex(""),

@@ -603,6 +603,10 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.BSCChainName:
 			urls = params.BscBootnodes
+		case params.ChapelChainName:
+			urls = params.ChapelBootnodes
+		case params.RialtoChainName:
+			urls = params.RialtoBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
 		case params.SokolChainName:
@@ -639,6 +643,10 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.GoerliBootnodes
 		case params.BSCChainName:
 			urls = params.BscBootnodes
+		case params.ChapelChainName:
+			urls = params.ChapelBootnodes
+		case params.RialtoChainName:
+			urls = params.RialtoBootnodes
 		case params.ErigonMineName:
 			urls = params.ErigonBootnodes
 		case params.SokolChainName:
@@ -666,6 +674,10 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		switch chain {
 		case params.BSCChainName:
 			urls = params.BscStaticPeers
+		case params.ChapelChainName:
+			urls = params.ChapelStaticPeers
+		case params.RialtoChainName:
+			urls = params.RialtoStaticPeers
 		}
 	}
 	cfg.StaticNodes, _ = GetUrlListNodes(urls, StaticPeersFlag.Name, log.Error)
@@ -1307,6 +1319,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultBSCGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
+	case params.ChapelChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 97
+		}
+		cfg.Genesis = core.DefaultChapelGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.ChapelGenesisHash)
+	case params.RialtoChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 97
+		}
+		cfg.Genesis = core.DefaultRialtoGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.RialtoGenesisHash)
 	case params.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
@@ -1399,6 +1423,10 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultGoerliGenesisBlock()
 	case params.BSCChainName:
 		genesis = core.DefaultBSCGenesisBlock()
+	case params.ChapelChainName:
+		genesis = core.DefaultChapelGenesisBlock()
+	case params.RialtoChainName:
+		genesis = core.DefaultRialtoGenesisBlock()
 	case params.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
 	case params.SokolChainName:
