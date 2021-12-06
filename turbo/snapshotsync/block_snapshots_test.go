@@ -6,11 +6,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
+	cfg := params.KnownSnapshots(params.MainnetChainName)
 	createFile := func(from, to uint64, name SnapshotType) {
 		c, err := compress.NewCompressor("test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100)
 		require.NoError(err)
@@ -32,26 +34,31 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = idx.Build()
 		require.NoError(err)
 	}
-	s, err := OpenAll(dir)
+	s := NewAllSnapshots(dir, cfg)
+	err := s.ReopenSegments()
 	require.NoError(err)
 	require.Equal(0, len(s.blocks))
 	s.Close()
 
 	createFile(500_000, 1_000_000, Bodies)
-	s = MustOpenAll(dir)
+	s = NewAllSnapshots(dir, cfg)
 	require.Equal(0, len(s.blocks)) //because, no headers and transactions snapshot files are created
 	s.Close()
 
 	createFile(500_000, 1_000_000, Headers)
 	createFile(500_000, 1_000_000, Transactions)
-	s = MustOpenAll(dir)
+	s = NewAllSnapshots(dir, cfg)
+	err = s.ReopenSegments()
+	require.NoError(err)
 	require.Equal(0, len(s.blocks)) //because, no gaps are allowed (expect snapshots from block 0)
 	s.Close()
 
 	createFile(0, 500_000, Bodies)
 	createFile(0, 500_000, Headers)
 	createFile(0, 500_000, Transactions)
-	s = MustOpenAll(dir)
+	s = NewAllSnapshots(dir, cfg)
+	err = s.ReopenSegments()
+	require.NoError(err)
 	defer s.Close()
 	require.Equal(2, len(s.blocks))
 
@@ -69,24 +76,24 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
-	_, _, _, err := ParseCompressedFileName("a")
+	_, _, _, err := ParseFileName("a", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("1-a")
+	_, _, _, err = ParseFileName("1-a", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("1-2-a")
+	_, _, _, err = ParseFileName("1-2-a", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("1-2-bodies.info")
+	_, _, _, err = ParseFileName("1-2-bodies.info", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("1-2-bodies.idx")
+	_, _, _, err = ParseFileName("1-2-bodies.idx", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("1-2-bodies.seg")
+	_, _, _, err = ParseFileName("1-2-bodies.seg", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("v2-1-2-bodies.seg")
+	_, _, _, err = ParseFileName("v2-1-2-bodies.seg", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseCompressedFileName("v0-1-2-bodies.seg")
+	_, _, _, err = ParseFileName("v0-1-2-bodies.seg", ".seg")
 	require.Error(err)
 
-	from, to, tt, err := ParseCompressedFileName("v1-1-2-bodies.seg")
+	from, to, tt, err := ParseFileName("v1-1-2-bodies.seg", ".seg")
 	require.NoError(err)
 	require.Equal(tt, Bodies)
 	require.Equal(1_000, int(from))

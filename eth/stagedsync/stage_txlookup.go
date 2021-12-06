@@ -15,23 +15,27 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type TxLookupCfg struct {
-	db     kv.RwDB
-	prune  prune.Mode
-	tmpdir string
+	db        kv.RwDB
+	prune     prune.Mode
+	tmpdir    string
+	snapshots *snapshotsync.AllSnapshots
 }
 
 func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
+	snapshots *snapshotsync.AllSnapshots,
 ) TxLookupCfg {
 	return TxLookupCfg{
-		db:     db,
-		prune:  prune,
-		tmpdir: tmpdir,
+		db:        db,
+		prune:     prune,
+		tmpdir:    tmpdir,
+		snapshots: snapshots,
 	}
 }
 
@@ -55,6 +59,11 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
 	if startBlock < pruneTo {
 		startBlock = pruneTo
+	}
+
+	// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
+	if cfg.snapshots != nil && cfg.snapshots.BlocksAvailable() > startBlock {
+		startBlock = cfg.snapshots.BlocksAvailable()
 	}
 	if startBlock > 0 {
 		startBlock++

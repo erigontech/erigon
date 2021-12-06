@@ -42,10 +42,10 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-Recommend 2Tb storage space on a single partition: 1.3Tb state, 200GB temp files (can symlink or mount
+Recommend 2Tb storage space on a single partition: 1.6Tb state, 200GB temp files (can symlink or mount
 folder `<datadir>/etl-tmp` to another disk).
 
-RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install)
+RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
 
 <code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 

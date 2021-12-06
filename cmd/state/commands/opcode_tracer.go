@@ -434,14 +434,16 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				}
 
 				if fops == nil {
-					fops, e = os.Create("./opcodes-" + bnStr)
-					check(e)
+					if fops, e = os.Create("./opcodes-" + bnStr); e != nil {
+						panic(e)
+					}
 					fopsWriter = bufio.NewWriter(fops)
 					fopsEnc = gob.NewEncoder(fopsWriter)
 				}
 
-				e = fopsEnc.Encode(blockTxs)
-				check(e)
+				if e = fopsEnc.Encode(blockTxs); e != nil {
+					panic(e)
+				}
 
 			}
 
@@ -478,38 +480,45 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				bnStr := strconv.Itoa(int(bn))
 
 				if f != nil && bn%1000 == 0 {
-					_, e = fWriter.WriteString("\n}")
-					check(e)
+					if _, e = fWriter.WriteString("\n}"); e != nil {
+						panic(e)
+					}
 					fWriter.Flush()
 					f.Close()
 					f = nil
 				}
 
 				if f == nil {
-					f, e = os.Create("./bblocks-" + bnStr + ".json")
-					check(e)
+					if f, e = os.Create("./bblocks-" + bnStr + ".json"); e != nil {
+						panic(e)
+					}
 					fWriter = bufio.NewWriter(f)
 					fwEnc = json.NewEncoder(fWriter)
 				}
 
-				_, e = fWriter.WriteString(",\n\"" + bnStr + "\":[\n")
-				check(e)
+				if _, e = fWriter.WriteString(",\n\"" + bnStr + "\":[\n"); e != nil {
+					panic(e)
+				}
 				for i := uint(0); i < sp.NumTxs; i++ {
 					if i != 0 {
-						_, e = fWriter.WriteString(",")
-						check(e)
+						if _, e = fWriter.WriteString(","); e != nil {
+							panic(e)
+						}
 					}
 					sd := <-chanSegDump
-					e = fwEnc.Encode(sd)
-					check(e)
+					if e = fwEnc.Encode(sd); e != nil {
+						panic(e)
+					}
 				}
-				_, e = fWriter.WriteString("]")
-				check(e)
+				if _, e = fWriter.WriteString("]"); e != nil {
+					panic(e)
+				}
 			}
 
 			if fWriter != nil {
-				_, e = fWriter.WriteString("\n}")
-				check(e)
+				if _, e = fWriter.WriteString("\n}"); e != nil {
+					panic(e)
+				}
 				fWriter.Flush()
 				f.Close()
 				f = nil
@@ -540,8 +549,10 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 		if fsum == nil {
 			var err error
-			fsum, err = os.Create("./summary-" + bnStr)
-			check(err)
+			if fsum, err = os.Create("./summary-" + bnStr); err != nil {
+				return err
+			}
+
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
@@ -555,9 +566,9 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		if err1 != nil {
 			return err1
 		}
-		if chainConfig.IsByzantium(block.Number().Uint64()) {
+		if chainConfig.IsByzantium(block.NumberU64()) {
 			receiptSha := types.DeriveSha(receipts)
-			if receiptSha != block.Header().ReceiptHash {
+			if receiptSha != block.ReceiptHash() {
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 			}
 		}
@@ -642,7 +653,9 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 			ot.fsumWriter.Flush()
 			fi, err := fsum.Stat()
-			check(err)
+			if err != nil {
+				return err
+			}
 			// if the summary file for the just-finished range of blocks is empty, delete it
 			if fi.Size() == 0 {
 				os.Remove(fi.Name())
@@ -657,12 +670,6 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime), "blocks/s", bpss)
 
 	return nil
-}
-
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
 }
 
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,

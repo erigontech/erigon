@@ -3,6 +3,8 @@ package download
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -989,6 +991,33 @@ func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_s
 	case <-server.Context().Done():
 		return nil
 	}
+}
+
+func (ss *SentryServerImpl) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {
+	if ss.P2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+
+	info := ss.P2pServer.NodeInfo()
+	ret := &proto_types.NodeInfoReply{
+		Id:    info.ID,
+		Name:  info.Name,
+		Enode: info.Enode,
+		Enr:   info.ENR,
+		Ports: &proto_types.NodeInfoPorts{
+			Discovery: uint32(info.Ports.Discovery),
+			Listener:  uint32(info.Ports.Listener),
+		},
+		ListenerAddr: info.ListenAddr,
+	}
+
+	protos, err := json.Marshal(info.Protocols)
+	if err != nil {
+		return nil, fmt.Errorf("cannot encode protocols map: %w", err)
+	}
+
+	ret.Protocols = protos
+	return ret, nil
 }
 
 // PeersStreams - it's safe to use this class as non-pointer

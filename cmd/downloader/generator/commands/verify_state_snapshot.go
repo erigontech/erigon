@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/snapshotdb"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -76,7 +77,8 @@ func VerifyStateSnapshot(ctx context.Context, logger log.Logger, dbPath, snapsho
 		return fmt.Errorf("promote state err: %w", err)
 	}
 
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(snkv, true, true, os.TempDir()), expectedRootHash, ctx.Done())
+	blockReader := snapshotsync.NewBlockReader()
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(snkv, true, true, os.TempDir(), blockReader), expectedRootHash, ctx.Done())
 	if err != nil {
 		return fmt.Errorf("regenerateIntermediateHashes err: %w", err)
 	}

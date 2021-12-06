@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -13,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
@@ -53,6 +54,7 @@ type ExecuteBlockCfg struct {
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
+	blockReader   interfaces.FullBlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -66,6 +68,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
+	blockReader interfaces.FullBlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -78,16 +81,8 @@ func StageExecuteBlocksCfg(
 		tmpdir:        tmpdir,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
+		blockReader:   blockReader,
 	}
-}
-
-func readBlock(blockNum uint64, tx kv.Tx) (*types.Block, error) {
-	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	b, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
-	return b, err
 }
 
 func executeBlock(
@@ -109,12 +104,15 @@ func executeBlock(
 	}
 
 	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
+		return h
+	}
 
-	callTracer := NewCallTracer(contractHasTEVM)
+	callTracer := calltracer.NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, contractHasTEVM)
+	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	if err != nil {
 		return err
 	}
@@ -131,57 +129,8 @@ func executeBlock(
 		}
 	}
 	if writeCallTraces {
-		callTracer.tos[block.Coinbase()] = false
-		for _, uncle := range block.Uncles() {
-			callTracer.tos[uncle.Coinbase] = false
-		}
-		list := make(common.Addresses, len(callTracer.froms)+len(callTracer.tos))
-		i := 0
-		for addr := range callTracer.froms {
-			copy(list[i][:], addr[:])
-			i++
-		}
-		for addr := range callTracer.tos {
-			copy(list[i][:], addr[:])
-			i++
-		}
-		sort.Sort(list)
-		// List may contain duplicates
-		var blockNumEnc [8]byte
-		binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
-		var prev common.Address
-		var created bool
-		for j, addr := range list {
-			if j > 0 && prev == addr {
-				continue
-			}
-			var v [length.Addr + 1]byte
-			copy(v[:], addr[:])
-			if _, ok := callTracer.froms[addr]; ok {
-				v[length.Addr] |= 1
-			}
-			if _, ok := callTracer.tos[addr]; ok {
-				v[length.Addr] |= 2
-			}
-			// TEVM marking still untranslated contracts
-			if vmConfig.EnableTEMV {
-				if created = callTracer.tos[addr]; created {
-					v[length.Addr] |= 4
-				}
-			}
-			if j == 0 {
-				if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-					return err
-				}
-			} else {
-				if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-					return err
-				}
-			}
-			copy(prev[:], addr[:])
-		}
+		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
-
 	return nil
 }
 
@@ -269,9 +218,13 @@ Loop:
 		if stoppedErr = libcommon.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		var err error
-		var block *types.Block
-		if block, err = readBlock(blockNum, tx); err != nil {
+
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		block, _, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+		if err != nil {
 			return err
 		}
 		if block == nil {

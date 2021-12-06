@@ -24,9 +24,11 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -257,7 +259,25 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 	if cfg.SingleNodeMode {
 		if cfg.Snapshot.Enabled {
-			allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
+			var cc *params.ChainConfig
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+				if err != nil {
+					return err
+				}
+				cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				return nil, nil, nil, nil, nil, nil, err
+			}
+			if cc == nil {
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+			}
+
+			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, params.KnownSnapshots(cc.ChainName))
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, err
 			}

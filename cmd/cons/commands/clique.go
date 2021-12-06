@@ -87,7 +87,7 @@ func cliqueEngine(ctx context.Context, logger log.Logger) error {
 		}
 	}
 	server.db = openDB(filepath.Join(datadir, "clique", "db"), logger)
-	server.c = clique.New(server.chainConfig, &params.SnapshotConfig{}, server.db)
+	server.c = clique.New(server.chainConfig, params.CliqueSnapshot, server.db)
 	<-ctx.Done()
 	return nil
 }

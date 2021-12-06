@@ -108,7 +108,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{})
+	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{}, nil)
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
 	assert.NoError(t, err)
 

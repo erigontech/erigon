@@ -54,7 +54,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		statedb.Prepare(tx.Hash(), blockHash, idx)
 
 		// Assemble the transaction call message and return if the requested offset
-		msg, _ := tx.AsMessage(*signer, block.Header().BaseFee)
+		msg, _ := tx.AsMessage(*signer, block.BaseFee())
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == int(txIndex) {
 			return msg, BlockContext, TxContext, statedb, reader, nil
