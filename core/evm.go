@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -46,9 +47,10 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 
 	difficulty := new(big.Int)
 
-	if header.Eip3675 {
-		// Turn DIFFICULTY into RANDOM when the merge is done. spec: https://ethereum-magicians.org/t/eip-4399-supplant-difficulty-opcode-with-random/7368
-		difficulty.SetBytes(header.Random[:])
+	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
+		// TODO: Turn DIFFICULTY into RANDOM when the Merge is done.
+		difficulty.SetBytes(header.MixDigest[:])
 	} else {
 		difficulty.Set(header.Difficulty)
 	}

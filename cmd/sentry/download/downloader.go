@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -425,50 +426,14 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 	return nil
 }
 
-func (cs *ControlServerImpl) newBlockHashes65(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
-		return nil
-	}
-	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
-	var request eth.NewBlockHashesPacket
-	if err := rlp.DecodeBytes(req.Data, &request); err != nil {
-		return fmt.Errorf("decode newBlockHashes65: %w", err)
-	}
-	for _, announce := range request {
-		cs.Hd.SaveExternalAnnounce(announce.Hash)
-		if cs.Hd.HasLink(announce.Hash) {
-			continue
-		}
-		//log.Info(fmt.Sprintf("Sending header request {hash: %x, height: %d, length: %d}", announce.Hash, announce.Number, 1))
-		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket{
-			Amount:  1,
-			Reverse: false,
-			Skip:    0,
-			Origin:  eth.HashOrNumber{Hash: announce.Hash},
-		})
-		if err != nil {
-			return fmt.Errorf("encode header request: %w", err)
-		}
-		outreq := proto_sentry.SendMessageByIdRequest{
-			PeerId: req.PeerId,
-			Data: &proto_sentry.OutboundMessageData{
-				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_65,
-				Data: b,
-			},
-		}
-
-		if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			if isPeerNotFoundErr(err) {
-				continue
-			}
-			return fmt.Errorf("send header request: %w", err)
-		}
-	}
-	return nil
-}
-
 func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	// Extract header from the block
+	// Parse the entire packet from scratch
+	var pkt eth.BlockHeadersPacket66
+	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
+		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
+	}
+
+	// Prepare to extract raw headers from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
 	if _, err := rlpStream.List(); err != nil { // Now stream is at the beginning of 66 object
 		return fmt.Errorf("decode 1 BlockHeadersPacket66: %w", err)
@@ -476,114 +441,41 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 	if _, err := rlpStream.Uint(); err != nil { // Now stream is at the requestID field
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
-	if _, err := rlpStream.List(); err != nil { // Now stream is at the BlockHeadersPacket, which is list of headers
-		return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
-	}
-	var headersRaw [][]byte
-	for headerRaw, err := rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
-		if err != nil {
-			if !errors.Is(err, rlp.EOL) {
-				return fmt.Errorf("decode 4 BlockHeadersPacket66: %w", err)
-			}
-			break
-		}
+	// Now stream is at the BlockHeadersPacket, which is list of headers
 
-		headersRaw = append(headersRaw, headerRaw)
-	}
-
-	// Parse the entire request from scratch
-	var request eth.BlockHeadersPacket66
-	if err := rlp.DecodeBytes(in.Data, &request); err != nil {
-		return fmt.Errorf("decode 5 BlockHeadersPacket66: %w", err)
-	}
-	headers := request.BlockHeadersPacket
-	var heighestBlock uint64
-	for _, h := range headers {
-		if h.Number.Uint64() > heighestBlock {
-			heighestBlock = h.Number.Uint64()
-		}
-	}
-
-	if segments, penalty, err := cs.Hd.SplitIntoSegments(headersRaw, headers); err == nil {
-		if penalty == headerdownload.NoPenalty {
-			var canRequestMore bool
-			for _, segment := range segments {
-				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(in.PeerId))
-				canRequestMore = canRequestMore || requestMore
-				if len(penalties) > 0 {
-					cs.Penalize(ctx, penalties)
-				}
-			}
-
-			if canRequestMore {
-				currentTime := uint64(time.Now().Unix())
-				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
-				if req != nil {
-					if _, ok := cs.SendHeaderRequest(ctx, req); ok {
-						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
-						log.Trace("Sent request", "height", req.Number)
-					}
-				}
-				cs.Penalize(ctx, penalties)
-			}
-		} else {
-			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId:  in.PeerId,
-				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-			}
-			if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-				log.Error("Could not send penalty", "err", err1)
-			}
-		}
-	} else {
-		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
-	}
-	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   in.PeerId,
-		MinBlock: heighestBlock,
-	}
-	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-		log.Error("Could not send min block for peer", "err", err1)
-	}
-	return nil
+	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	// Extract header from the block
-	rlpStream := rlp.NewStream(bytes.NewReader(in.Data), uint64(len(in.Data)))
-	if _, err := rlpStream.List(); err != nil { // Now stream is at the BlockHeadersPacket, which is list of headers
-		return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H256, sentry direct.SentryClient) error {
+	// Stream is at the BlockHeadersPacket, which is list of headers
+	if _, err := rlpStream.List(); err != nil {
+		return fmt.Errorf("decode 2 BlockHeadersPacket65: %w", err)
 	}
-	var headersRaw [][]byte
-	for headerRaw, err := rlpStream.Raw(); ; headerRaw, err = rlpStream.Raw() {
+	// Extract headers from the block
+	var highestBlock uint64
+	csHeaders := make([]headerdownload.ChainSegmentHeader, 0, len(pkt))
+	for _, header := range pkt {
+		headerRaw, err := rlpStream.Raw()
 		if err != nil {
-			if !errors.Is(err, rlp.EOL) {
-				return fmt.Errorf("decode 4 BlockHeadersPacket66: %w", err)
-			}
-			break
+			return fmt.Errorf("decode 3 BlockHeadersPacket65: %w", err)
 		}
-
-		headersRaw = append(headersRaw, headerRaw)
-	}
-
-	// Parse the entire request from scratch
-	var request eth.BlockHeadersPacket
-	if err := rlp.DecodeBytes(in.Data, &request); err != nil {
-		return fmt.Errorf("decode 5 BlockHeadersPacket66: %w", err)
-	}
-	headers := request
-	var heighestBlock uint64
-	for _, h := range headers {
-		if h.Number.Uint64() > heighestBlock {
-			heighestBlock = h.Number.Uint64()
+		number := header.Number.Uint64()
+		if number > highestBlock {
+			highestBlock = number
 		}
+		csHeaders = append(csHeaders, headerdownload.ChainSegmentHeader{
+			Header:    header,
+			HeaderRaw: headerRaw,
+			Hash:      types.RawRlpHash(headerRaw),
+			Number:    number,
+		})
 	}
 
-	if segments, penalty, err := cs.Hd.SplitIntoSegments(headersRaw, headers); err == nil {
+	if segments, penalty, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
-				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(in.PeerId))
+				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
 				canRequestMore = canRequestMore || requestMore
 				if len(penalties) > 0 {
 					cs.Penalize(ctx, penalties)
@@ -603,7 +495,7 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId:  in.PeerId,
+				PeerId:  peerID,
 				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 			}
 			if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
@@ -614,8 +506,8 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
-		PeerId:   in.PeerId,
-		MinBlock: heighestBlock,
+		PeerId:   peerID,
+		MinBlock: highestBlock,
 	}
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
@@ -624,10 +516,6 @@ func (cs *ControlServerImpl) blockHeaders65(ctx context.Context, in *proto_sentr
 }
 
 func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	return cs.newBlock65(ctx, inreq, sentry)
-}
-
-func (cs *ControlServerImpl) newBlock65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
@@ -689,20 +577,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 	return nil
 }
 
-func (cs *ControlServerImpl) blockBodies65(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	var request eth.BlockRawBodiesPacket
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
-		return fmt.Errorf("decode blockBodies65: %w", err)
-	}
-	txs, uncles := request.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH256ToPeerID(inreq.PeerId))
-	return nil
-}
-
 func (cs *ControlServerImpl) receipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	return nil
-}
-func (cs *ControlServerImpl) receipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	return nil
 }
 
@@ -747,43 +622,6 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockHeaders65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	var query eth.GetBlockHeadersPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockHeaders65: %w, data: %x", err, inreq.Data)
-	}
-
-	var headers []*types.Header
-	if err := cs.db.View(ctx, func(tx kv.Tx) (err error) {
-		headers, err = eth.AnswerGetBlockHeadersQuery(tx, &query)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("querying BlockHeaders: %w", err)
-	}
-	b, err := rlp.EncodeToBytes(eth.BlockHeadersPacket(headers))
-	if err != nil {
-		return fmt.Errorf("encode header response: %w", err)
-	}
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: inreq.PeerId,
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_BLOCK_HEADERS_65,
-			Data: b,
-		},
-	}
-	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err != nil {
-		if !isPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 65: %w", err)
-		}
-	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH256ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
-	return nil
-}
-
 func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
@@ -807,40 +645,6 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 		PeerId: inreq.PeerId,
 		Data: &proto_sentry.OutboundMessageData{
 			Id:   proto_sentry.MessageId_BLOCK_BODIES_66,
-			Data: b,
-		},
-	}
-	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err != nil {
-		if isPeerNotFoundErr(err) {
-			return nil
-		}
-		return fmt.Errorf("send bodies response: %w", err)
-	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
-	return nil
-}
-
-func (cs *ControlServerImpl) getBlockBodies65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	var query eth.GetBlockBodiesPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getBlockBodies65: %w, data: %x", err, inreq.Data)
-	}
-	tx, err := cs.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	response := eth.AnswerGetBlockBodiesQuery(tx, query)
-	tx.Rollback()
-	b, err := rlp.EncodeToBytes(eth.BlockBodiesRLPPacket(response))
-	if err != nil {
-		return fmt.Errorf("encode header response: %w", err)
-	}
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: inreq.PeerId,
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_BLOCK_BODIES_65,
 			Data: b,
 		},
 	}
@@ -895,65 +699,8 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 	return nil
 }
 
-func (cs *ControlServerImpl) getReceipts65(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	var query eth.GetReceiptsPacket
-	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
-		return fmt.Errorf("decoding getReceipts65: %w, data: %x", err, inreq.Data)
-	}
-	tx, err := cs.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	receipts, err := eth.AnswerGetReceiptsQuery(tx, query)
-	if err != nil {
-		return err
-	}
-	tx.Rollback()
-	b, err := rlp.EncodeToBytes(eth.ReceiptsRLPPacket(receipts))
-	if err != nil {
-		return fmt.Errorf("encode header response: %w", err)
-	}
-	outreq := proto_sentry.SendMessageByIdRequest{
-		PeerId: inreq.PeerId,
-		Data: &proto_sentry.OutboundMessageData{
-			Id:   proto_sentry.MessageId_RECEIPTS_66,
-			Data: b,
-		},
-	}
-	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
-	if err != nil {
-		if isPeerNotFoundErr(err) {
-			return nil
-		}
-		return fmt.Errorf("send bodies response: %w", err)
-	}
-	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
-	return nil
-}
-
 func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	switch inreq.Id {
-	// ========= eth 65 ==========
-	case proto_sentry.MessageId_GET_BLOCK_HEADERS_65:
-		return cs.getBlockHeaders65(ctx, inreq, sentry)
-	case proto_sentry.MessageId_BLOCK_HEADERS_65:
-		return cs.blockHeaders65(ctx, inreq, sentry)
-	case proto_sentry.MessageId_NEW_BLOCK_65:
-		return cs.newBlock65(ctx, inreq, sentry)
-	case proto_sentry.MessageId_GET_BLOCK_BODIES_65:
-		return cs.getBlockBodies65(ctx, inreq, sentry)
-	case proto_sentry.MessageId_BLOCK_BODIES_65:
-		return cs.blockBodies65(inreq, sentry)
-	case proto_sentry.MessageId_GET_RECEIPTS_65:
-		return cs.getReceipts65(ctx, inreq, sentry)
-	case proto_sentry.MessageId_RECEIPTS_65:
-		return cs.receipts65(ctx, inreq, sentry)
-	case proto_sentry.MessageId_NEW_BLOCK_HASHES_65:
-		return cs.newBlockHashes65(ctx, inreq, sentry)
-
-	// transactions-related methods are in tx-pool server
-
 	// ========= eth 66 ==========
 
 	case proto_sentry.MessageId_NEW_BLOCK_HASHES_66:

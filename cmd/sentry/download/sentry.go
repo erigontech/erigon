@@ -3,6 +3,8 @@ package download
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -10,7 +12,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -71,8 +72,15 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 func (pi *PeerInfo) Height() uint64 {
 	return atomic.LoadUint64(&pi.height)
 }
-func (pi *PeerInfo) SetHeight(h uint64) {
-	atomic.StoreUint64(&pi.height, h)
+
+// SetIncreasedHeight atomically updates PeerInfo.height only if newHeight is higher
+func (pi *PeerInfo) SetIncreasedHeight(newHeight uint64) {
+	for {
+		oldHeight := atomic.LoadUint64(&pi.height)
+		if oldHeight >= newHeight || atomic.CompareAndSwapUint64(&pi.height, oldHeight, newHeight) {
+			break
+		}
+	}
 }
 
 // ClearDeadlines goes through the deadlines of
@@ -331,10 +339,34 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetNodeDataMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
+			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				continue
+			}
+			b := make([]byte, msg.Size)
+			if _, err := io.ReadFull(msg.Payload, b); err != nil {
+				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
+			}
+			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -514,7 +546,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint) error {
-	if err := os.MkdirAll(path.Join(datadir, "erigon"), 0744); err != nil {
+	if err := os.MkdirAll(datadir, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
 	ctx := rootContext()
@@ -626,9 +658,7 @@ func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.Pe
 func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH256ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-		if req.MinBlock > peerInfo.Height() {
-			peerInfo.SetHeight(req.MinBlock)
-		}
+		peerInfo.SetIncreasedHeight(req.MinBlock)
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -656,30 +686,35 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (*PeerInfo, bool) {
 }
 
 func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
+	reply := &proto_sentry.SentPeers{}
+
 	peerInfo, found := ss.findPeer(inreq.MinBlock)
 	if !found {
-		return &proto_sentry.SentPeers{}, nil
+		return reply, nil
 	}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
 	if msgcode != eth.GetBlockHeadersMsg &&
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
+		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
 	if err := ss.writePeer(peerInfo, msgcode, inreq.Data.Data); err != nil {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerInfo.ID(), err)
+		return reply, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerInfo.ID(), err)
 	}
 	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
-	return &proto_sentry.SentPeers{Peers: []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}}, nil
+	reply.Peers = []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}
+	return reply, nil
 }
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
+	reply := &proto_sentry.SentPeers{}
+
 	peerID := ConvertH256ToPeerID(inreq.PeerId)
 	peerInfo := ss.getPeer(peerID)
 	if peerInfo == nil {
 		//TODO: enable after support peer to sentry mapping
-		//return &proto_sentry.SentPeers{}, fmt.Errorf("peer not found: %s", peerID)
-		return &proto_sentry.SentPeers{}, nil
+		//return reply, fmt.Errorf("peer not found: %s", peerID)
+		return reply, nil
 	}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
 	if msgcode != eth.GetBlockHeadersMsg &&
@@ -690,21 +725,24 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		msgcode != eth.NewPooledTransactionHashesMsg &&
 		msgcode != eth.PooledTransactionsMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
+		return reply, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 
 	if err := ss.writePeer(peerInfo, msgcode, inreq.Data.Data); err != nil {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageById to peer %s: %w", peerID, err)
+		return reply, fmt.Errorf("sendMessageById to peer %s: %w", peerID, err)
 	}
-	return &proto_sentry.SentPeers{Peers: []*proto_types.H256{inreq.PeerId}}, nil
+	reply.Peers = []*proto_types.H256{inreq.PeerId}
+	return reply, nil
 }
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
+	reply := &proto_sentry.SentPeers{}
+
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Data.Id]
 	if msgcode != eth.NewBlockMsg &&
 		msgcode != eth.NewBlockHashesMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
+		return reply, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
 	amount := uint64(0)
@@ -720,7 +758,6 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	sendToAmount := int(math.Sqrt(float64(amount)))
 	i := 0
 	var innerErr error
-	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H256{}}
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if err := ss.writePeer(peerInfo, msgcode, req.Data.Data); err != nil {
 			innerErr = err
@@ -737,15 +774,16 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 }
 
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
+	reply := &proto_sentry.SentPeers{}
+
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Id]
 	if msgcode != eth.NewBlockMsg &&
 		msgcode != eth.NewPooledTransactionHashesMsg && // to broadcast new local transactions
 		msgcode != eth.NewBlockHashesMsg {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
+		return reply, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
 	var innerErr error
-	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H256{}}
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		if err := ss.writePeer(peerInfo, msgcode, req.Data); err != nil {
 			innerErr = err
@@ -942,6 +980,33 @@ func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_s
 	case <-server.Context().Done():
 		return nil
 	}
+}
+
+func (ss *SentryServerImpl) NodeInfo(_ context.Context, _ *emptypb.Empty) (*proto_types.NodeInfoReply, error) {
+	if ss.P2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+
+	info := ss.P2pServer.NodeInfo()
+	ret := &proto_types.NodeInfoReply{
+		Id:    info.ID,
+		Name:  info.Name,
+		Enode: info.Enode,
+		Enr:   info.ENR,
+		Ports: &proto_types.NodeInfoPorts{
+			Discovery: uint32(info.Ports.Discovery),
+			Listener:  uint32(info.Ports.Listener),
+		},
+		ListenerAddr: info.ListenAddr,
+	}
+
+	protos, err := json.Marshal(info.Protocols)
+	if err != nil {
+		return nil, fmt.Errorf("cannot encode protocols map: %w", err)
+	}
+
+	ret.Protocols = protos
+	return ret, nil
 }
 
 // PeersStreams - it's safe to use this class as non-pointer

@@ -31,6 +31,7 @@ import (
 	"text/template"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -181,7 +182,7 @@ var (
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
 		Usage: "Price bump percentage to replace an already existing transaction",
-		Value: ethconfig.Defaults.TxPool.PriceBump,
+		Value: txpool.DefaultConfig.PriceBump,
 	}
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
@@ -975,7 +976,6 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 }
 
 func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
-	cfg.V2 = true
 	if ctx.GlobalIsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
@@ -1099,7 +1099,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string) {
+func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)

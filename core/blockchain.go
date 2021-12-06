@@ -38,8 +38,7 @@ import (
 )
 
 var (
-	blockExecutionTimer     = metrics2.GetOrCreateSummary("chain_execution_seconds")
-	blockReorgInvalidatedTx = metrics2.GetOrCreateCounter("chain_reorg_invalidTx")
+	blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 )
 
 const (
@@ -153,7 +152,7 @@ func ExecuteBlockEphemerally(
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
-		if receiptSha != block.Header().ReceiptHash {
+		if receiptSha != block.ReceiptHash() {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}

@@ -23,9 +23,11 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -56,7 +58,6 @@ type Flags struct {
 	RpcAllowListFilePath string
 	RpcBatchConcurrency  uint
 	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolV2             bool
 	TxPoolApiAddr        string
 	TevmEnabled          bool
 	StateCache           kvcache.CoherentConfig
@@ -120,7 +121,6 @@ func RootCommand() (*cobra.Command, *Flags) {
 			}
 			cfg.Snapshot.Dir = path.Join(cfg.Datadir, "snapshots")
 		}
-		cfg.TxPoolV2 = true
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
@@ -248,7 +248,25 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 	if cfg.SingleNodeMode {
 		if cfg.Snapshot.Enabled {
-			allSnapshots, err := snapshotsync.OpenAll(cfg.Snapshot.Dir)
+			var cc *params.ChainConfig
+			if err := db.View(context.Background(), func(tx kv.Tx) error {
+				genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+				if err != nil {
+					return err
+				}
+				cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
+				return nil, nil, nil, nil, nil, nil, err
+			}
+			if cc == nil {
+				return nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+			}
+
+			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, params.KnownSnapshots(cc.ChainName))
 			if err != nil {
 				return nil, nil, nil, nil, nil, nil, err
 			}
@@ -285,12 +303,13 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	blockReader = remoteEth
 
 	txpoolConn := conn
-	if cfg.TxPoolV2 {
+	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
+
 	mining = services.NewMiningService(txpoolConn)
 	txPool = services.NewTxPoolService(txpoolConn)
 	if db == nil {

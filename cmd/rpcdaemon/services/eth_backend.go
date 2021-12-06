@@ -2,17 +2,20 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -30,6 +33,9 @@ type ApiBackend interface {
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 	BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
+	EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error)
+	EngineGetPayloadV1(ctx context.Context, payloadId uint64) (*types2.ExecutionPayload, error)
+	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 }
 
 type RemoteBackend struct {
@@ -152,4 +158,57 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
+}
+
+func (back *RemoteBackend) EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EngineExecutePayloadReply, err error) {
+	return back.remoteEthBackend.EngineExecutePayloadV1(ctx, payload)
+}
+
+func (back *RemoteBackend) EngineGetPayloadV1(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayload, err error) {
+	return back.remoteEthBackend.EngineGetPayloadV1(ctx, &remote.EngineGetPayloadRequest{
+		PayloadId: payloadId,
+	})
+}
+
+func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
+	nodes, err := back.remoteEthBackend.NodeInfo(ctx, &remote.NodesInfoRequest{Limit: limit})
+	if err != nil {
+		return nil, fmt.Errorf("nodes info request error: %w", err)
+	}
+
+	if nodes == nil || len(nodes.NodesInfo) == 0 {
+		return nil, errors.New("empty nodesInfo response")
+	}
+
+	ret := make([]p2p.NodeInfo, 0, len(nodes.NodesInfo))
+	for _, node := range nodes.NodesInfo {
+		var rawProtocols map[string]json.RawMessage
+		if err = json.Unmarshal(node.Protocols, &rawProtocols); err != nil {
+			return nil, fmt.Errorf("cannot decode protocols metadata: %w", err)
+		}
+
+		protocols := make(map[string]interface{}, len(rawProtocols))
+		for k, v := range rawProtocols {
+			protocols[k] = v
+		}
+
+		ret = append(ret, p2p.NodeInfo{
+			Enode:      node.Enode,
+			ID:         node.Id,
+			IP:         node.Enode,
+			ENR:        node.Enr,
+			ListenAddr: node.ListenerAddr,
+			Name:       node.Name,
+			Ports: struct {
+				Discovery int `json:"discovery"`
+				Listener  int `json:"listener"`
+			}{
+				Discovery: int(node.Ports.Discovery),
+				Listener:  int(node.Ports.Listener),
+			},
+			Protocols: protocols,
+		})
+	}
+
+	return ret, nil
 }

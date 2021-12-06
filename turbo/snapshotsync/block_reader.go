@@ -3,8 +3,8 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -21,6 +21,16 @@ type BlockReader struct {
 
 func NewBlockReader() *BlockReader {
 	return &BlockReader{}
+}
+
+func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	h := rawdb.ReadHeader(tx, hash, blockHeight)
+	return h, nil
+}
+
+func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
+	h := rawdb.ReadHeaderByNumber(tx, blockHeight)
+	return h, nil
 }
 
 func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
@@ -68,13 +78,52 @@ func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Tx, ha
 	return block, senders, nil
 }
 
+func (back *RemoteBlockReader) Header(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	block, _, err := back.BlockWithSenders(ctx, tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	return block.Header(), nil
+}
+
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
-	sn *AllSnapshots
+	sn   *AllSnapshots
+	lock sync.RWMutex
 }
 
 func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
+}
+func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		h := rawdb.ReadHeaderByNumber(tx, blockHeight)
+		return h, nil
+	}
+	return back.headerFromSnapshot(blockHeight, sn)
+}
+func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		h := rawdb.ReadHeader(tx, hash, blockHeight)
+		return h, nil
+	}
+
+	return back.headerFromSnapshot(blockHeight, sn)
+}
+
+func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		h := rawdb.ReadHeader(tx, hash, blockHeight)
+		return h, nil
+	}
+
+	return back.headerFromSnapshot(blockHeight, sn)
 }
 
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
@@ -96,9 +145,11 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 
 	buf := make([]byte, 16)
 
-	n := binary.PutUvarint(buf, blockHeight)
-	headerOffset := sn.Headers.Idx.Lookup2(sn.Headers.Idx.Lookup(buf[:n]))
-	bodyOffset := sn.Bodies.Idx.Lookup2(sn.Bodies.Idx.Lookup(buf[:n]))
+	back.lock.Lock()
+	defer back.lock.Unlock()
+
+	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.Idx.BaseDataID())
+	bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Bodies.Idx.BaseDataID())
 
 	gg := sn.Headers.Segment.MakeGetter()
 	gg.Reset(headerOffset)
@@ -112,27 +163,32 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
 	b := &types.BodyForStorage{}
-	if err = rlp.DecodeBytes(buf, b); err != nil {
+	reader := bytes.NewReader(buf)
+	if err = rlp.Decode(reader, b); err != nil {
 		return nil, nil, err
 	}
 
-	n = binary.PutUvarint(buf, b.BaseTxId)
-	txnOffset := sn.Transactions.Idx.Lookup2(sn.Transactions.Idx.Lookup(buf[:n]))
-	gg = sn.Transactions.Segment.MakeGetter()
-	gg.Reset(txnOffset)
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
+	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.Transactions.Idx.BaseDataID(), sn.Transactions.File)
+	}
+
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
-	for i := uint32(0); i < b.TxAmount; i++ {
-		buf, _ = gg.Next(buf[:0])
-		senders[i].SetBytes(buf[1 : 1+20])
-		txRlp := buf[1+20:]
-		reader.Reset(txRlp)
-		stream.Reset(reader, 0)
-		txs[i], err = types.DecodeTransaction(stream)
-		if err != nil {
-			return nil, nil, err
+	if b.TxAmount > 0 {
+		txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
+		gg = sn.Transactions.Segment.MakeGetter()
+		gg.Reset(txnOffset)
+		stream := rlp.NewStream(reader, 0)
+		for i := uint32(0); i < b.TxAmount; i++ {
+			buf, _ = gg.Next(buf[:0])
+			senders[i].SetBytes(buf[1 : 1+20])
+			txRlp := buf[1+20:]
+			reader.Reset(txRlp)
+			stream.Reset(reader, 0)
+			txs[i], err = types.DecodeTransaction(stream)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
@@ -142,4 +198,18 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	}
 	block.SendersToTxs(senders)
 	return block, senders, nil
+}
+
+func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn *BlocksSnapshot) (*types.Header, error) {
+	buf := make([]byte, 16)
+
+	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.Idx.BaseDataID())
+	gg := sn.Headers.Segment.MakeGetter()
+	gg.Reset(headerOffset)
+	buf, _ = gg.Next(buf[:0])
+	h := &types.Header{}
+	if err := rlp.DecodeBytes(buf, h); err != nil {
+		return nil, err
+	}
+	return h, nil
 }

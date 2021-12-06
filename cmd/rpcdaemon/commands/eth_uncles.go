@@ -116,9 +116,14 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	}
 	defer tx.Rollback()
 
-	block, err := rawdb.ReadBlockByHash(tx, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+	}
+
+	block, err := api.blockWithSenders(tx, hash, *number)
 	if err != nil {
-		return &n, err
+		return nil, err
 	}
 	if block == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
