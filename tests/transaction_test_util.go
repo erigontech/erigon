@@ -30,19 +30,27 @@ import (
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
 type TransactionTest struct {
-	RLP            hexutil.Bytes `json:"rlp"`
-	Byzantium      ttFork
-	Constantinople ttFork
-	Istanbul       ttFork
-	EIP150         ttFork
-	EIP158         ttFork
-	Frontier       ttFork
-	Homestead      ttFork
+	RLP   hexutil.Bytes `json:"txbytes"`
+	Forks ttForks       `json:"result"`
+}
+
+type ttForks struct {
+	Berlin            ttFork
+	Byzantium         ttFork
+	Constantinople    ttFork
+	ConstantinopleFix ttFork
+	EIP150            ttFork
+	EIP158            ttFork
+	Frontier          ttFork
+	Homestead         ttFork
+	Istanbul          ttFork
+	London            ttFork
 }
 
 type ttFork struct {
-	Sender common.UnprefixedAddress `json:"sender"`
-	Hash   common.UnprefixedHash    `json:"hash"`
+	Exception string         `json:"exception"`
+	Sender    common.Address `json:"sender"`
+	Hash      common.Hash    `json:"hash"`
 }
 
 func (tt *TransactionTest) Run(config *params.ChainConfig) error {
@@ -74,19 +82,22 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 		isHomestead bool
 		isIstanbul  bool
 	}{
-		{"Frontier", types.MakeFrontierSigner(), tt.Frontier, false, false},
-		{"Homestead", types.LatestSignerForChainID(nil), tt.Homestead, true, false},
-		{"EIP150", types.LatestSignerForChainID(nil), tt.EIP150, true, false},
-		{"EIP158", types.LatestSignerForChainID(config.ChainID), tt.EIP158, true, false},
-		{"Byzantium", types.LatestSignerForChainID(config.ChainID), tt.Byzantium, true, false},
-		{"Constantinople", types.LatestSignerForChainID(config.ChainID), tt.Constantinople, true, false},
-		{"Istanbul", types.LatestSignerForChainID(config.ChainID), tt.Istanbul, true, true},
+		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, false, false},
+		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, true, false},
+		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, true, false},
+		{"EIP158", types.LatestSignerForChainID(config.ChainID), tt.Forks.EIP158, true, false},
+		{"Byzantium", types.LatestSignerForChainID(config.ChainID), tt.Forks.Byzantium, true, false},
+		{"Constantinople", types.LatestSignerForChainID(config.ChainID), tt.Forks.Constantinople, true, false},
+		{"ConstantinopleFix", types.LatestSignerForChainID(config.ChainID), tt.Forks.ConstantinopleFix, true, false},
+		{"Istanbul", types.LatestSignerForChainID(config.ChainID), tt.Forks.Istanbul, true, true},
+		{"Berlin", types.LatestSignerForChainID(config.ChainID), tt.Forks.Berlin, true, true},
+		{"London", types.LatestSignerForChainID(config.ChainID), tt.Forks.London, true, true},
 	} {
 		sender, txhash, err := validateTx(tt.RLP, *testcase.signer, testcase.isHomestead, testcase.isIstanbul)
 
-		if testcase.fork.Sender == (common.UnprefixedAddress{}) {
+		if testcase.fork.Exception != "" {
 			if err == nil {
-				return fmt.Errorf("expected error, got none (address %v)[%v]", sender.String(), testcase.name)
+				return fmt.Errorf("expected error %v, got none [%v]", testcase.fork.Exception, testcase.name)
 			}
 			continue
 		}
