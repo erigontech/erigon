@@ -39,6 +39,8 @@ var (
 )
 
 func TestDifficulty(t *testing.T) {
+	t.Skip("TODO(yperbasis) re-enable")
+
 	t.Parallel()
 
 	dt := new(testMatcher)

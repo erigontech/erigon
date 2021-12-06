@@ -32,9 +32,8 @@ func TestTransaction(t *testing.T) {
 	// because of the gas limit
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
-	// The nonce is too large for uint64. Not a concern, it means geth won't
-	// accept transactions at a certain point in the distant future
-	txt.skipLoad("^ttNonce/TransactionWithHighNonce256.json")
+	// TODO(yperbasis) re-enable
+	txt.skipLoad("^ttNonce/TransactionWithHighNonce64Minus1.json")
 
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		cfg := params.MainnetChainConfig
