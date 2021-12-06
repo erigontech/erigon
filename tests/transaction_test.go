@@ -32,9 +32,6 @@ func TestTransaction(t *testing.T) {
 	// because of the gas limit
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 
-	// TODO(yperbasis) re-enable
-	txt.skipLoad("^ttNonce/TransactionWithHighNonce64Minus1.json")
-
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		cfg := params.MainnetChainConfig
 		if err := txt.checkFailure(t, test.Run(cfg)); err != nil {

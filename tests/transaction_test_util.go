@@ -71,6 +71,10 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 		if requiredGas > tx.GetGas() {
 			return nil, nil, fmt.Errorf("insufficient gas ( %d < %d )", tx.GetGas(), requiredGas)
 		}
+		// EIP-2681: Limit account nonce to 2^64-1
+		if tx.GetNonce()+1 < tx.GetNonce() {
+			return nil, nil, fmt.Errorf("%w: nonce: %d", core.ErrNonceMax, tx.GetNonce())
+		}
 		h := tx.Hash()
 		return &sender, &h, nil
 	}
