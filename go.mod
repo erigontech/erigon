@@ -53,12 +53,12 @@ require (
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart/v2 v2.1.0
 	go.uber.org/atomic v1.9.0
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/crypto v0.0.0-20211117183948-ae814b36b871
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20211030160813-b3129d9d1021
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	golang.org/x/tools v0.1.7
-	google.golang.org/grpc v1.41.0
+	google.golang.org/grpc v1.42.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.27.1
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15

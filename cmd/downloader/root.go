@@ -20,6 +20,8 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 )
@@ -28,6 +30,7 @@ var (
 	datadir           string
 	seeding           bool
 	downloaderApiAddr string
+	healthCheck       bool
 )
 
 func init() {
@@ -41,6 +44,7 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
+	rootCmd.Flags().BoolVar(&healthCheck, "healthcheck", false, "Enable grpc health check")
 }
 
 func main() {
@@ -112,7 +116,7 @@ var rootCmd = &cobra.Command{
 				time.Sleep(time.Minute)
 			}
 		}()
-		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil)
+		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil, healthCheck)
 		if err != nil {
 			return err
 		}
@@ -123,7 +127,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *credentials.TransportCredentials, healthCheck bool) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
@@ -160,12 +164,20 @@ func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *cr
 	if snServer != nil {
 		proto_snap.RegisterDownloaderServer(grpcServer, snServer)
 	}
+	var healthServer *health.Server
+	if healthCheck {
+		healthServer = health.NewServer()
+		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	}
 
 	//if metrics.Enabled {
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 
 	go func() {
+		if healthCheck {
+			defer healthServer.Shutdown()
+		}
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("gRPC server stop", "err", err)
 		}
