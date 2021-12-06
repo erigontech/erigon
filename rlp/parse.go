@@ -59,6 +59,9 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		dataPos = pos + 1
 		dataLen = int(first) - 128
 		isList = false
+		if dataLen == 1 && dataPos < len(payload) && payload[dataPos] < 128 {
+			err = fmt.Errorf("rlp: non-canonical size information")
+		}
 	case first < 192:
 		// If a string is more than 55 bytes long, the
 		// RLP encoding consists of a single byte with value 0xB7 plus the length
@@ -72,7 +75,6 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		isList = false
 		if dataLen < 56 {
 			err = fmt.Errorf("rlp: non-canonical size information")
-			break
 		}
 	case first < 248:
 		// isList of len < 56
@@ -97,7 +99,6 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		isList = true
 		if dataLen < 56 {
 			err = fmt.Errorf("rlp: non-canonical size information")
-			break
 		}
 	}
 	if err == nil {
@@ -193,7 +194,7 @@ func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
 		return 0, err
 	}
 	if dataLen > 32 {
-		return 0, fmt.Errorf("uint256 must not be more than 8 bytes long, got %d", dataLen)
+		return 0, fmt.Errorf("uint256 must not be more than 32 bytes long, got %d", dataLen)
 	}
 	if dataLen > 0 && payload[dataPos] == 0 {
 		return 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[dataPos:dataPos+dataLen])
