@@ -637,7 +637,7 @@ func DefaultChapelGenesisBlock() *Genesis {
 		Difficulty: big.NewInt(0x1),
 		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
-		Alloc:      readPrealloc("allocs/bsc.json"),
+		Alloc:      readPrealloc("allocs/chapel.json"),
 		Number:     0x00,
 		GasUsed:    0x00,
 	}
