@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon/consensus/parlia"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"math/big"
 	"os"
 	"path"
@@ -160,7 +161,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
-	log.Info("Initialised chain configuration", "config", chainConfig)
+	log.Info("Initialised chain configuration", "config", chainConfig, "genesis_hash", genesis.Hash())
+	systemcontracts.GenesisHash = genesis.Hash()
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
