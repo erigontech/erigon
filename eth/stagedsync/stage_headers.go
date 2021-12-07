@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -30,6 +31,7 @@ import (
 type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
+	statusCh          chan privateapi.ExecutionStatus
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
@@ -45,6 +47,7 @@ type HeadersCfg struct {
 func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
+	statusCh chan privateapi.ExecutionStatus,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
@@ -59,6 +62,7 @@ func StageHeadersCfg(
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
+		statusCh:          statusCh,
 		chainConfig:       chainConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
@@ -127,7 +131,25 @@ func HeadersDownward(
 	log.Info("Waiting for payloads...")
 	header := <-cfg.reverseDownloadCh
 	*cfg.waitingPosHeaders = false
+
+	defer tx.Commit()
+
+	headerNumber := header.Number.Uint64()
+
+	blockHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	if err != nil {
+		return err
+	}
+
 	// Do we need to unwind? (TODO)
+	if s.BlockNumber >= headerNumber && header.Hash() != blockHash {
+		u.UnwindTo(headerNumber-1, common.Hash{})
+		cfg.statusCh <- privateapi.ExecutionStatus{
+			HeadHash: header.ParentHash,
+			Status:   privateapi.Syncing,
+		}
+		return nil
+	}
 
 	// Write current payload
 	rawdb.WriteHeader(tx, &header)
