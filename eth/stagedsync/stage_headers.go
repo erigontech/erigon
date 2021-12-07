@@ -134,7 +134,7 @@ func HeadersDownward(
 
 	// Do we need to unwind? (TODO)
 	if s.BlockNumber >= headerNumber && header.Hash() != blockHash {
-		u.UnwindTo(headerNumber-1, blockHash)
+		u.UnwindTo(headerNumber-1, common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			HeadHash: header.ParentHash,
 			Status:   privateapi.Syncing,
