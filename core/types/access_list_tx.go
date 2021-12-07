@@ -628,3 +628,7 @@ func (tx AccessListTx) GetSender() (common.Address, bool) {
 func (tx *AccessListTx) SetSender(addr common.Address) {
 	tx.from.Store(addr)
 }
+
+func (tx AccessListTx) IsStarkNet() bool {
+	return false
+}
