@@ -127,14 +127,14 @@ func HeadersDownward(
 
 	headerNumber := header.Number.Uint64()
 
-	blockNumber, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	blockHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
 		return err
 	}
 
 	// Do we need to unwind? (TODO)
-	if s.BlockNumber >= headerNumber && header.Hash() != blockNumber {
-		u.UnwindTo(headerNumber-1, blockNumber)
+	if s.BlockNumber >= headerNumber && header.Hash() != blockHash {
+		u.UnwindTo(headerNumber-1, blockHash)
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			HeadHash: header.ParentHash,
 			Status:   privateapi.Syncing,
