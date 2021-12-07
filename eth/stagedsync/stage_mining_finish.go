@@ -55,7 +55,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//prev = sealHash
 
 	// Tests may set pre-calculated nonce
-	if block.Header().Nonce.Uint64() != 0 {
+	if block.NonceU64() != 0 {
 		cfg.miningState.MiningResultCh <- block
 		return nil
 	}

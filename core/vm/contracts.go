@@ -388,7 +388,7 @@ func (c *bigModExp) Run(input []byte) ([]byte, error) {
 		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
 		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
 	)
-	if mod.BitLen() == 0 {
+	if mod.Sign() == 0 {
 		// Modulo 0 is undefined, return zero
 		return common.LeftPadBytes([]byte{}, int(modLen)), nil
 	}

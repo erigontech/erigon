@@ -307,7 +307,7 @@ func (t *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) err
 		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.Header()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
-		b, _ = rawdb.ReadBlockByHash(tx, b.Header().ParentHash)
+		b, _ = rawdb.ReadBlockByHash(tx, b.ParentHash())
 	}
 	return nil
 }

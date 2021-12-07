@@ -11,16 +11,21 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -222,7 +227,19 @@ func NewStagedSync(
 	controlServer *download.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
+	reverseDownloadCh chan types.Header,
+	statusCh chan privateapi.ExecutionStatus,
+	waitingForPOSHeaders *bool,
 ) (*stagedsync.Sync, error) {
+	var blockReader interfaces.FullBlockReader
+	var allSnapshots *snapshotsync.AllSnapshots
+	if cfg.Snapshot.Enabled {
+		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, params.KnownSnapshots(controlServer.ChainConfig.ChainName))
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
 			db,
@@ -233,7 +250,11 @@ func NewStagedSync(
 			controlServer.Penalize,
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
-		), stagedsync.StageBlockHashesCfg(db, tmpdir), stagedsync.StageBodiesCfg(
+			reverseDownloadCh,
+			waitingForPOSHeaders,
+			allSnapshots,
+			blockReader,
+		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
 			controlServer.SendBodyRequest,
@@ -242,7 +263,9 @@ func NewStagedSync(
 			cfg.BodyDownloadTimeoutSeconds,
 			*controlServer.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune), stagedsync.StageExecuteBlocksCfg(
+			allSnapshots,
+			blockReader,
+		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,
@@ -253,16 +276,17 @@ func NewStagedSync(
 			accumulator,
 			cfg.StateStream,
 			tmpdir,
+			blockReader,
 		), stagedsync.StageTranspileCfg(
 			db,
 			cfg.BatchSize,
 			controlServer.ChainConfig,
 		), stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, true, true, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, allSnapshots),
 			stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,

@@ -52,7 +52,7 @@ func TestBlockEncoding(t *testing.T) {
 	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
 	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
 	check("Hash", block.Hash(), common.HexToHash("0a5843ac1cb04865017cb35a57b50b07084e5fcee39b5acadade33149f4fff9e"))
-	check("Nonce", block.Nonce(), uint64(0xa13a5a8c8f2bb1c4))
+	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 
@@ -89,7 +89,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
 	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
 	check("Hash", block.Hash(), common.HexToHash("c7252048cd273fe0dac09650027d07f0e3da4ee0675ebbb26627cea92729c372"))
-	check("Nonce", block.Nonce(), uint64(0xa13a5a8c8f2bb1c4))
+	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 	check("BaseFee", block.BaseFee(), new(big.Int).SetUint64(params.InitialBaseFee))
@@ -154,7 +154,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
 	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
 	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
-	check("Nonce", block.Nonce(), uint64(0xa13a5a8c8f2bb1c4))
+	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 
@@ -212,42 +212,6 @@ func TestUncleHash(t *testing.T) {
 	if h != exp {
 		t.Fatalf("empty uncle hash is wrong, got %x != %x", h, exp)
 	}
-}
-
-func TestRandom(t *testing.T) {
-
-	check := func(f string, got, want interface{}) {
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("%s mismatch: got %v, want %v", f, got, want)
-		}
-	}
-
-	header := Header{
-		Difficulty: math.BigPow(11, 11),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000001"),
-		GasLimit:   12345678,
-		GasUsed:    1476322,
-		Time:       9876543,
-		BaseFee:    common.Big1,
-		Random:     common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"),
-		Eip1559:    true,
-		Eip3675:    true,
-	}
-	var buf bytes.Buffer
-	err := header.EncodeRLP(&buf)
-	if err != nil {
-		t.Fatalf("err during encododing: %s", err.Error())
-	}
-	var decodedHeader Header
-	decodedHeader.DecodeRLP(rlp.NewStream(&buf, 0))
-
-	check("Difficulty", decodedHeader.Difficulty, math.BigPow(11, 11))
-	check("GasLimit", decodedHeader.GasLimit, uint64(12345678))
-	check("GasUsed", decodedHeader.GasUsed, uint64(1476322))
-	check("Coinbase", decodedHeader.Coinbase, common.HexToAddress("0x0000000000000000000000000000000000000001"))
-	check("BaseFee", decodedHeader.BaseFee, common.Big1)
-	check("Random", decodedHeader.Random, common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
-	check("Time", decodedHeader.Time, uint64(9876543))
 }
 
 var benchBuffer = bytes.NewBuffer(make([]byte, 0, 32000))

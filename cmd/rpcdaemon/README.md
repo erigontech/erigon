@@ -64,6 +64,12 @@ The daemon should respond with something like:
 INFO [date-time] HTTP endpoint opened url=localhost:8545...
 ```
 
+When RPC daemon runs remotely, by default it maintains a state cache, which is updated every time when Erigon imports a
+new block. When state cache is reasonably warm, it allows such remote RPC daemon to execute queries related to `latest`
+block (i.e. to current state) with comparable performance to a local RPC daemon
+(around 2x slower vs 10x slower without state cache). Since there can be multiple such RPC daemons per one Erigon node,
+it may scale well for some workloads that are heavy on the current state queries.
+
 ### Healthcheck
 
 Running the daemon also opens an endpoint `/health` that provides a basic health check.
@@ -191,6 +197,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getStorageAt                           | Yes     |                                            |
 | eth_call                                   | Yes     |                                            |
 | eth_callBundle                             | Yes     |                                            |
+| eth_createAccessList                       | Yes     |
 |                                            |         |                                            |
 | eth_newFilter                              | -       | not yet implemented                        |
 | eth_newBlockFilter                         | -       | not yet implemented                        |
@@ -440,7 +447,7 @@ Reduce `--private.api.ratelimit`
 
 ### Read DB directly without Json-RPC/Graphql
 
-[./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+[./../../docs/programmers_guide/db_faq.md](./../../docs/programmers_guide/db_faq.md)
 
 ### Faster Batch requests
 

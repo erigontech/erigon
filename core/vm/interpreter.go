@@ -90,21 +90,21 @@ type VM struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.ChainRules.IsLondon:
+	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
-	case evm.ChainRules.IsBerlin:
+	case evm.ChainRules().IsBerlin:
 		jt = &berlinInstructionSet
-	case evm.ChainRules.IsIstanbul:
+	case evm.ChainRules().IsIstanbul:
 		jt = &istanbulInstructionSet
-	case evm.ChainRules.IsConstantinople:
+	case evm.ChainRules().IsConstantinople:
 		jt = &constantinopleInstructionSet
-	case evm.ChainRules.IsByzantium:
+	case evm.ChainRules().IsByzantium:
 		jt = &byzantiumInstructionSet
-	case evm.ChainRules.IsEIP158:
+	case evm.ChainRules().IsEIP158:
 		jt = &spuriousDragonInstructionSet
-	case evm.ChainRules.IsEIP150:
+	case evm.ChainRules().IsEIP150:
 		jt = &tangerineWhistleInstructionSet
-	case evm.ChainRules.IsHomestead:
+	case evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet
 	default:
 		jt = &frontierInstructionSet
@@ -131,21 +131,21 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case vm.evm.ChainRules.IsLondon:
+	case vm.evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
-	case vm.evm.ChainRules.IsBerlin:
+	case vm.evm.ChainRules().IsBerlin:
 		jt = &berlinInstructionSet
-	case vm.evm.ChainRules.IsIstanbul:
+	case vm.evm.ChainRules().IsIstanbul:
 		jt = &istanbulInstructionSet
-	case vm.evm.ChainRules.IsConstantinople:
+	case vm.evm.ChainRules().IsConstantinople:
 		jt = &constantinopleInstructionSet
-	case vm.evm.ChainRules.IsByzantium:
+	case vm.evm.ChainRules().IsByzantium:
 		jt = &byzantiumInstructionSet
-	case vm.evm.ChainRules.IsEIP158:
+	case vm.evm.ChainRules().IsEIP158:
 		jt = &spuriousDragonInstructionSet
-	case vm.evm.ChainRules.IsEIP150:
+	case vm.evm.ChainRules().IsEIP150:
 		jt = &tangerineWhistleInstructionSet
-	case vm.evm.ChainRules.IsHomestead:
+	case vm.evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet
 	default:
 		jt = &frontierInstructionSet
@@ -263,7 +263,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// If the operation is valid, enforce and write restrictions
-		if in.readOnly && in.evm.ChainRules.IsByzantium {
+		if in.readOnly && in.evm.ChainRules().IsByzantium {
 			// If the interpreter is operating in readonly mode, make sure no
 			// state-modifying operation is performed. The 3rd stack item
 			// for a call operation is the value. Transferring value from one

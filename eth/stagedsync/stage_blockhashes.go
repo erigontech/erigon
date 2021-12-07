@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -24,12 +25,14 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 type BlockHashesCfg struct {
 	db     kv.RwDB
 	tmpDir string
+	cc     *params.ChainConfig
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *params.ChainConfig) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:     db,
 		tmpDir: tmpDir,
+		cc:     cc,
 	}
 }
 

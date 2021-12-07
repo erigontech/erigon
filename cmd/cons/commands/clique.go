@@ -15,6 +15,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -86,7 +87,7 @@ func cliqueEngine(ctx context.Context, logger log.Logger) error {
 		}
 	}
 	server.db = openDB(filepath.Join(datadir, "clique", "db"), logger)
-	server.c = clique.New(server.chainConfig, &params.SnapshotConfig{}, server.db)
+	server.c = clique.New(server.chainConfig, params.CliqueSnapshot, server.db)
 	<-ctx.Done()
 	return nil
 }

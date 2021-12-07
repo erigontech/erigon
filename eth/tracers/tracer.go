@@ -568,13 +568,13 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
 			// Update list of precompiles based on current block
-			rules := env.ChainConfig().Rules(env.Context.BlockNumber)
+			rules := env.ChainConfig().Rules(env.Context().BlockNumber)
 			jst.activePrecompiles = vm.ActivePrecompiles(rules)
 
-			jst.ctx["block"] = env.Context.BlockNumber
+			jst.ctx["block"] = env.Context().BlockNumber
 			// Compute intrinsic gas
-			isHomestead := env.ChainRules.IsHomestead
-			isIstanbul := env.ChainRules.IsIstanbul
+			isHomestead := env.ChainRules().IsHomestead
+			isIstanbul := env.ChainRules().IsIstanbul
 			var input []byte
 			if data, ok := jst.ctx["input"].([]byte); ok {
 				input = data
@@ -595,13 +595,13 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		jst.stackWrapper.stack = stack
 		jst.memoryWrapper.memory = memory
 		jst.contractWrapper.contract = contract
-		jst.dbWrapper.db = env.IntraBlockState
+		jst.dbWrapper.db = env.IntraBlockState()
 
 		*jst.pcValue = uint(pc)
 		*jst.gasValue = uint(gas)
 		*jst.costValue = uint(cost)
 		*jst.depthValue = uint(depth)
-		*jst.refundValue = uint(env.IntraBlockState.GetRefund())
+		*jst.refundValue = uint(env.IntraBlockState().GetRefund())
 
 		jst.errorValue = nil
 		if err != nil {

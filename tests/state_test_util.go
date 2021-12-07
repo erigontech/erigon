@@ -186,7 +186,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
-	readBlockNr := block.Number().Uint64()
+	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
 	_, err = MakePreState(params.Rules{}, tx, t.json.Pre, readBlockNr)
@@ -230,17 +230,10 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		statedb.RevertToSnapshot(snapshot)
 	}
 
-	// And _now_ get the state root
-	// Add 0-value mining reward. This only makes a difference in the cases
-	// where
-	// - the coinbase suicided, or
-	// - there are only 'bad' transactions, which aren't executed. In those cases,
-	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
-	statedb.AddBalance(block.Coinbase(), new(uint256.Int))
-	if err = statedb.FinalizeTx(evm.ChainRules, w); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules, w); err != nil {
+	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state

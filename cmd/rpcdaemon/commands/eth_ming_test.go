@@ -33,10 +33,10 @@ func TestPendingBlock(t *testing.T) {
 	ff.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
 	block := api.pendingBlock()
 
-	require.Equal(t, block.Number().Uint64(), expect)
+	require.Equal(t, block.NumberU64(), expect)
 	select {
 	case got := <-ch:
-		require.Equal(t, expect, got.Number().Uint64())
+		require.Equal(t, expect, got.NumberU64())
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("timeout waiting for  expected notification")
 	}

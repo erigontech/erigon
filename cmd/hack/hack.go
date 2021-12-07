@@ -988,7 +988,8 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, ""), expectedRootHash, nil)
+	blockReader := snapshotsync.NewBlockReader()
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, "", blockReader), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return tx.Commit()
@@ -2589,57 +2590,102 @@ func recsplitWholeChain(chaindata string) error {
 
 	log.Info("Last body number", "last", last)
 	for i := uint64(*block); i < last; i += blocksPerFile {
-		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
-		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
+		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
+
 		log.Info("Creating", "file", fileName+".seg")
 		db := mdbx.MustOpen(chaindata)
-		if err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile)); err != nil {
+		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
 		db.Close()
+		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.TransactionsIdx(*chainID, segmentFile); err != nil {
-			panic(err)
-		}
+		//if err := snapshotsync.BodiesIdx(segmentFile, i); err != nil {
+		//	panic(err)
+		//}
 		_ = os.Remove(fileName + ".dat")
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName+".seg")
 		db = mdbx.MustOpen(chaindata)
 		if err := snapshotsync.DumpHeaders(db, "", i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
 		db.Close()
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-
-		if err := snapshotsync.HeadersIdx(segmentFile); err != nil {
-			panic(err)
-		}
+		//if err := snapshotsync.HeadersHashIdx(segmentFile, i); err != nil {
+		//	panic(err)
+		//}
 		_ = os.Remove(fileName + ".dat")
 
-		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
 		log.Info("Creating", "file", fileName+".seg")
 		db = mdbx.MustOpen(chaindata)
-		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
+		firstTxID, err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile))
+		if err != nil {
 			panic(err)
 		}
 		db.Close()
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		if err := compress1(chaindata, fileName, segmentFile); err != nil {
 			panic(err)
 		}
-		if err := snapshotsync.BodiesIdx(segmentFile); err != nil {
-			panic(err)
-		}
+		_ = firstTxID
+		//if err := snapshotsync.TransactionsHashIdx(*chainID, firstTxID, segmentFile); err != nil {
+		//	panic(err)
+		//}
 		_ = os.Remove(fileName + ".dat")
 
 		//nolint
-		break // TODO: remove me - useful for tests
+		//break // TODO: remove me - useful for tests
+	}
+	return nil
+}
+
+func checkBlockSnapshot(chaindata string) error {
+	database := mdbx.MustOpen(chaindata)
+	defer database.Close()
+	dataDir := path.Dir(chaindata)
+	chainConfig := tool.ChainConfigFromDB(database)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	_ = chainID
+
+	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots(chainConfig.ChainName))
+	snapshots.ReopenSegments()
+	snapshots.ReopenIndices()
+	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
+	//	panic(err)
+	//}
+
+	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+	tx, err := database.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for i := uint64(0); i < snapshots.BlocksAvailable(); i++ {
+		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		if err != nil {
+			return err
+		}
+		blockFromDB := rawdb.ReadBlock(tx, hash, i)
+		blockFromSnapshot, _, err := snBlockReader.BlockWithSenders(context.Background(), tx, hash, i)
+		if err != nil {
+			return err
+		}
+
+		if blockFromSnapshot.Hash() != blockFromDB.Hash() {
+			panic(i)
+		}
+		if i%1_000 == 0 {
+			log.Info(fmt.Sprintf("Block Num: %dK", i/1_000))
+		}
 	}
 	return nil
 }
@@ -3678,8 +3724,8 @@ func scanReceipts(chaindata string, block uint64) error {
 		fix := true
 		if chainConfig.IsByzantium(blockNum) {
 			receiptSha := types.DeriveSha(receipts1)
-			if receiptSha != block.Header().ReceiptHash {
-				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
+			if receiptSha != block.ReceiptHash() {
+				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.ReceiptHash())
 				fix = false
 			}
 		}
@@ -3928,6 +3974,8 @@ func main() {
 		err = compress1(*chaindata, *name, *name)
 	case "recsplitWholeChain":
 		err = recsplitWholeChain(*chaindata)
+	case "checkBlockSnapshot":
+		err = checkBlockSnapshot(*chaindata)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
