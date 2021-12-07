@@ -650,14 +650,11 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 	defer hd.lock.Unlock()
 
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
-Loop:
 	for len(hd.insertList) > 0 {
 		// Make sure long insertions do not appear as a stuck stage 1
 		select {
 		case <-logChannel:
 			log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
-			// TODO "for testing only, delete me"
-			break Loop
 		default:
 		}
 		link := hd.insertList[len(hd.insertList)-1]
@@ -950,59 +947,58 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
 			hd.topSeenHeight = highestNum
 		}
-
-		subSegment := segment[start:end]
-		startNum := subSegment[0].Number
-		endNum := subSegment[len(subSegment)-1].Number
-		// There are 4 cases
-		if foundAnchor {
-			if foundTip {
-				// Connect
-				var err error
-				if penalties, err = hd.connect(subSegment); err != nil {
-					log.Debug("Connect failed", "error", err)
-					return
-				}
-				log.Trace("Connected", "start", startNum, "end", endNum)
-			} else {
-				// ExtendDown
-				var err error
-				if requestMore, err = hd.extendDown(subSegment); err != nil {
-					log.Debug("ExtendDown failed", "error", err)
-					return
-				}
-				log.Trace("Extended Down", "start", startNum, "end", endNum)
-			}
-		} else if foundTip {
-			// ExtendUp
-			if err := hd.extendUp(subSegment); err != nil {
-				log.Debug("ExtendUp failed", "error", err)
-				return
-			}
-			log.Trace("Extended Up", "start", startNum, "end", endNum)
-		} else {
-			// NewAnchor
-			var err error
-			if requestMore, err = hd.newAnchor(subSegment, peerID); err != nil {
-				log.Debug("NewAnchor failed", "error", err)
-				return
-			}
-			log.Trace("NewAnchor", "start", startNum, "end", endNum)
-		}
-		//log.Info(hd.anchorState())
-		log.Trace("Link queue", "size", hd.linkQueue.Len())
-		if hd.linkQueue.Len() > hd.linkLimit {
-			log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(subSegment), "limit", hd.linkLimit)
-			hd.pruneLinkQueue()
-		}
-		select {
-		case hd.DeliveryNotify <- struct{}{}:
-		default:
-		}
-
-		return hd.requestChaining && requestMore, penalties
 	}
-	return
+
+	subSegment := segment[start:end]
+	startNum := subSegment[0].Number
+	endNum := subSegment[len(subSegment)-1].Number
+	// There are 4 cases
+	if foundAnchor {
+		if foundTip {
+			// Connect
+			var err error
+			if penalties, err = hd.connect(subSegment); err != nil {
+				log.Debug("Connect failed", "error", err)
+				return
+			}
+			log.Trace("Connected", "start", startNum, "end", endNum)
+		} else {
+			// ExtendDown
+			var err error
+			if requestMore, err = hd.extendDown(subSegment); err != nil {
+				log.Debug("ExtendDown failed", "error", err)
+				return
+			}
+			log.Trace("Extended Down", "start", startNum, "end", endNum)
+		}
+	} else if foundTip {
+		// ExtendUp
+		if err := hd.extendUp(subSegment); err != nil {
+			log.Debug("ExtendUp failed", "error", err)
+			return
+		}
+		log.Trace("Extended Up", "start", startNum, "end", endNum)
+	} else {
+		// NewAnchor
+		var err error
+		if requestMore, err = hd.newAnchor(subSegment, peerID); err != nil {
+			log.Debug("NewAnchor failed", "error", err)
+			return
+		}
+		log.Trace("NewAnchor", "start", startNum, "end", endNum)
+	}
+	//log.Info(hd.anchorState())
+	log.Trace("Link queue", "size", hd.linkQueue.Len())
+	if hd.linkQueue.Len() > hd.linkLimit {
+		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(subSegment), "limit", hd.linkLimit)
+		hd.pruneLinkQueue()
+	}
+	select {
+	case hd.DeliveryNotify <- struct{}{}:
+	default:
+	}
+
+	return hd.requestChaining && requestMore, penalties
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
