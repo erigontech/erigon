@@ -106,7 +106,7 @@ func SpawnStageHeaders(
 	}
 
 	if isTrans {
-		return HeadersDownward(s, u, ctx, tx, cfg, initialCycle, test)
+		return HeadersDownward(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersForward(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -121,6 +121,7 @@ func HeadersDownward(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	useExternalTx bool,
 ) error {
 	*cfg.waitingPosHeaders = true
 	// Waiting for the beacon chain
@@ -142,6 +143,99 @@ func HeadersDownward(
 	if parent != nil && parent.Hash() == header.ParentHash {
 		return s.Update(tx, header.Number.Uint64())
 	}
+	cfg.hd.IsBackwards = true
+	cfg.hd.CurrentNumber = header.Number.Uint64() - 1
+	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+		return err
+	}
+	cfg.hd.SetProcessed(header.Number.Uint64())
+	cfg.hd.SetExpectedHash(header.ParentHash)
+	cfg.hd.SetFetching(true)
+	defer cfg.hd.SetFetching(false)
+	headerProgress := cfg.hd.Progress()
+	logPrefix := s.LogPrefix()
+	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
+	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
+	if err != nil {
+		return err
+	}
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	if hash == (common.Hash{}) {
+		headHash := rawdb.ReadHeadHeaderHash(tx)
+		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader); err != nil {
+			return err
+		}
+		if !useExternalTx {
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	// Allow other stages to run 1 cycle if no network available
+	if initialCycle && cfg.noP2PDiscovery {
+		return nil
+	}
+
+	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
+
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+
+	var sentToPeer bool
+	stopped := false
+	prevProgress := header.Number.Uint64()
+	for !stopped {
+		currentTime := uint64(time.Now().Unix())
+		req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
+		if req != nil {
+			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			if sentToPeer {
+				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
+				log.Trace("Sent request", "height", req.Number)
+			}
+		}
+		cfg.penalize(ctx, penalties)
+		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
+		for req != nil && sentToPeer && maxRequests > 0 {
+			req, penalties = cfg.hd.RequestMoreHeadersForPOS(currentTime)
+			if req != nil {
+				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				if sentToPeer {
+					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
+					log.Trace("Sent request", "height", req.Number)
+				}
+			}
+			cfg.penalize(ctx, penalties)
+			maxRequests--
+		}
+
+		// Load headers into the database
+		var inSync bool
+		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, logPrefix, logEvery.C); err != nil {
+			return err
+		}
+
+		announces := cfg.hd.GrabAnnounces()
+		if len(announces) > 0 {
+			cfg.announceNewHashes(ctx, announces)
+		}
+		if inSync { // We do not break unless there best header changed
+			break
+		}
+		timer := time.NewTimer(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			stopped = true
+		case <-logEvery.C:
+			log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
+				"now", cfg.hd.CurrentNumber, "blk/sec", float64(prevProgress-cfg.hd.POSProress())/float64(logInterval/time.Second))
+			prevProgress = cfg.hd.POSProress()
+		}
+		timer.Stop()
+	}
+	cfg.hd.IsBackwards = true
 	// Downward sync if we need to process more (TODO)
 	return s.Update(tx, header.Number.Uint64())
 }

@@ -239,7 +239,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if header.Hash() != blockHash {
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
-	log.Info("Received Payload from beacon-chain", "hash", blockHash)
 	// Send the block over
 	s.numberSent = req.BlockNumber
 	s.reverseDownloadCh <- header

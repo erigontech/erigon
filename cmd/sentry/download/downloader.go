@@ -526,9 +526,8 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			Number:    number,
 		})
 	}
-
 	if segments, penalty, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
-		if penalty == headerdownload.NoPenalty {
+		if penalty == headerdownload.NoPenalty && !cs.Hd.IsBackwards {
 			var canRequestMore bool
 			for _, segment := range segments {
 				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
@@ -548,6 +547,14 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 					}
 				}
 				cs.Penalize(ctx, penalties)
+			}
+		} else if penalty == headerdownload.NoPenalty && cs.Hd.IsBackwards {
+			for _, segment := range segments {
+				// Invalid segment length, so ignore.
+				if len(segment) != 192 {
+					continue
+				}
+				cs.Hd.AppendSegmentPOS(segment)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{

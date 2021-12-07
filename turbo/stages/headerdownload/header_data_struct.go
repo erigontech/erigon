@@ -198,6 +198,12 @@ type HeaderDownload struct {
 	topSeenHeight      uint64
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
+	// proof-of-stake
+	lastProcessedPayload uint64
+	expectedHash         common.Hash
+	CurrentNumber        uint64
+	IsBackwards          bool
+	PosHeaders           []types.Header
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
