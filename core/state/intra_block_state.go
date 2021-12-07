@@ -184,11 +184,6 @@ func (sdb *IntraBlockState) Reset() {
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
-	dataString := "0x"
-	for i := 1; i < len(log2.Topics); i++ {
-		dataString += log2.Topics[i].Hex()[2:]
-	}
-	//log.Info("add log", "topic", log2.Topics[0].Hex(), "data", dataString+hexutil.Encode(log2.Data))
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
 	log2.TxHash = sdb.thash
 	log2.BlockHash = sdb.bhash

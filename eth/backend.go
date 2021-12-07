@@ -169,7 +169,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
-	log.Info("Initialised chain configuration", "config", chainConfig, "genesis_hash", genesis.Hash())
+	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 	systemcontracts.GenesisHash = genesis.Hash()
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -553,7 +553,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
-		// TODO: "add wallet"
+		panic("validator mode for parlia consensus is not yet supported")
 	}
 
 	if s.chainConfig.ChainID.Uint64() > 10 {

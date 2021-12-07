@@ -18,9 +18,7 @@ package core
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/log/v3"
 	"math"
 
 	"github.com/holiman/uint256"
@@ -360,11 +358,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout)
-		sig := "0x"
-		if len(st.data) >= 4 {
-			sig = hexutil.Encode(st.data[:4])
-		}
-		log.Debug("executed evm tx", "gas", st.msg.Gas()-st.gas, "err", vmerr, "sender", sender.Address().Hex(), "sig", sig)
 	}
 	if refunds {
 		if london {
@@ -380,7 +373,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context().BaseFee))
 	}
 	// consensus engine is parlia
-	st.evm.Config()
 	if st.evm.ChainConfig().Parlia != nil {
 		st.state.AddBalance(consensus.SystemAddress, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 	} else {
