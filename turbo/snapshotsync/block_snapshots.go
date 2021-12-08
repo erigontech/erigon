@@ -43,6 +43,8 @@ const (
 	Transactions SnapshotType = "transactions"
 )
 
+var AllSnapshotTypes = []SnapshotType{Headers, Bodies, Transactions}
+
 var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
 )
