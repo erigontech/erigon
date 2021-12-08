@@ -131,10 +131,10 @@ func HeadersDownward(
 	// Do we need to unwind? (TODO)
 
 	// Write current payload
-	rawdb.WriteHeader(tx, &header)
+	/*rawdb.WriteHeader(tx, &header)
 	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
 		return err
-	}
+	}*/
 	// if we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
@@ -179,7 +179,7 @@ func HeadersDownward(
 		return nil
 	}
 
-	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
+	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", header.Number.Uint64())
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
@@ -192,7 +192,7 @@ func HeadersDownward(
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
+				// cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
@@ -203,7 +203,7 @@ func HeadersDownward(
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
+					// cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
 				}
 			}
@@ -456,14 +456,6 @@ Loop:
 			maxRequests--
 		}
 
-		// Send skeleton request if required
-		req = cfg.hd.RequestSkeleton()
-		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				log.Trace("Sent skeleton request", "height", req.Number)
-			}
-		}
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {

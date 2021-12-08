@@ -550,10 +550,6 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			}
 		} else if penalty == headerdownload.NoPenalty && cs.Hd.IsBackwards {
 			for _, segment := range segments {
-				// Invalid segment length, so ignore.
-				if len(segment) != 192 {
-					continue
-				}
 				cs.Hd.AppendSegmentPOS(segment)
 			}
 		} else {
