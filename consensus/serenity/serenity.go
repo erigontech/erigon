@@ -32,8 +32,6 @@ var (
 	// errInvalidNonce is returned if the nonce is non-zero.
 	errInvalidNonce = errors.New("invalid nonce")
 
-	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
-	errInvalidMixDigest = errors.New("non-zero mix digest")
 	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
 )
@@ -176,10 +174,6 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	// Verify that the block number is parent's +1
 	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(big.NewInt(1)) != 0 {
 		return consensus.ErrInvalidNumber
-	}
-
-	if header.MixDigest != (common.Hash{}) {
-		return errInvalidMixDigest
 	}
 
 	if header.UncleHash != types.EmptyUncleHash {
