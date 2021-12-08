@@ -30,7 +30,7 @@ type Client struct {
 func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
-	torrentConfig.DataDir = snapshotsDir + "/alex"
+	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
