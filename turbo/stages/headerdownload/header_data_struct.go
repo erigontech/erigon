@@ -179,6 +179,7 @@ type HeaderRequest struct {
 	Length  uint64
 	Skip    uint64
 	Reverse bool
+	Anchor  *Anchor
 }
 
 type PenaltyItem struct {

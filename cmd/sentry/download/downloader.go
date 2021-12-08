@@ -486,8 +486,9 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 				currentTime := uint64(time.Now().Unix())
 				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 				if req != nil {
-					if _, ok := cs.SendHeaderRequest(ctx, req); ok {
-						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
+					if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+						cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 						log.Trace("Sent request", "height", req.Number)
 					}
 				}

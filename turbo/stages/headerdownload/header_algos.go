@@ -240,11 +240,9 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment) (bool, error) {
 				heap.Push(hd.anchorQueue, newAnchor)
 			}
 		}
-
-		// Anchor is removed from the map, but not from the anchorQueue
-		// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
-		// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
+		// Anchor is removed from the map, and from the priority queue
 		delete(hd.anchors, anchor.parentHash)
+		heap.Remove(hd.anchorQueue, anchor.idx)
 		// Add all headers in the segments as links to this anchor
 		var prevLink *Link
 		for i := len(segment) - 1; i >= 0; i-- {
@@ -294,10 +292,9 @@ func (hd *HeaderDownload) connect(segment ChainSegment) ([]PenaltyItem, error) {
 			break
 		}
 	}
-	// Anchor is removed from the map, but not from the anchorQueue
-	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
-	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
+	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
+	heap.Remove(hd.anchorQueue, anchor.idx)
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
 	for i := len(segment) - 1; i >= 0; i-- {
@@ -331,10 +328,9 @@ func (hd *HeaderDownload) removeAnchor(anchorHash common.Hash) error {
 	if !ok {
 		return fmt.Errorf("connect attachment anchors not found for %x", anchorHash)
 	}
-	// Anchor is removed from the map, but not from the anchorQueue
-	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
-	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
+	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
+	heap.Remove(hd.anchorQueue, anchor.idx)
 	return nil
 }
 
@@ -575,6 +571,7 @@ func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 
 func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor) {
 	log.Warn("Invalidating anchor for suspected unavailability", "height", anchor.blockHeight)
+	// Anchor is removed only from the map here, because we assume it has been popped from the priority queue
 	delete(hd.anchors, anchor.parentHash)
 	hd.removeUpwards(anchor.links)
 }
@@ -587,37 +584,33 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 		log.Trace("Empty anchor queue")
 		return nil, penalties
 	}
-	for hd.anchorQueue.Len() > 0 {
-		anchor := (*hd.anchorQueue)[0]
-		if _, ok := hd.anchors[anchor.parentHash]; ok {
-			if anchor.nextRetryTime > currentTime {
-				// Anchor not ready for re-request yet
-				return nil, penalties
-			}
-			if anchor.timeouts < 10 {
-				return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}, penalties
-			} else {
-				// Ancestors of this anchor seem to be unavailable, invalidate and move on
-				hd.invalidateAnchor(anchor)
-				penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
-			}
+	// Only process the anchors for which the nextRetryTime has already come
+	for hd.anchorQueue.Len() > 0 && (*hd.anchorQueue)[0].nextRetryTime <= currentTime {
+		anchor := heap.Pop(hd.anchorQueue).(*Anchor)
+		if anchor.timeouts < 10 {
+			// Produce a header request that would extend this anchor (add parent, parent of parent, etc.)
+			return &HeaderRequest{
+				Anchor:  anchor,
+				Hash:    anchor.parentHash,
+				Number:  anchor.blockHeight - 1,
+				Length:  192,
+				Skip:    0,
+				Reverse: true,
+			}, penalties
 		}
-		// Anchor disappeared or unavailable, pop from the queue and move on
-		heap.Remove(hd.anchorQueue, 0)
+		// Ancestors of this anchor seem to be unavailable, invalidate and move on
+		hd.invalidateAnchor(anchor)
+		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 	}
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout uint64) {
+func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	anchor, ok := hd.anchors[req.Hash]
-	if !ok {
-		return
-	}
-	anchor.timeouts++
-	anchor.nextRetryTime = currentTime + timeout
-	heap.Fix(hd.anchorQueue, anchor.idx)
+	req.Anchor.timeouts++
+	req.Anchor.nextRetryTime = currentTime + timeout
+	heap.Fix(hd.anchorQueue, req.Anchor.idx)
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
