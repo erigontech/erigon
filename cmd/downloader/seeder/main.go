@@ -114,7 +114,7 @@ func Seed(ctx context.Context, datadir string) error {
 			Trackers:  trnt.Trackers,
 			InfoHash:  mi.HashInfoBytes(),
 			InfoBytes: mi.InfoBytes,
-			ChunkSize: trnt.DefaultChunkSize,
+			ChunkSize: trnt.DefaultPieceSize,
 		})
 		if err != nil {
 			return err

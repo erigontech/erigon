@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DefaultChunkSize = 1024 * 1024
+	DefaultPieceSize = 2 * 1024 * 1024
 	MdbxFilename     = "mdbx.dat"
 	EpochSize        = 500_000
 

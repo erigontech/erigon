@@ -262,6 +262,17 @@ func HeadersForward(
 			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
 				return err
 			}
+
+			sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+			if !ok {
+				return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+			}
+
+			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+			lastTxnID := sn.Transactions.Idx.BaseDataID() + uint64(sn.Transactions.Segment.Count())
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				return err
+			}
 		}
 
 		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {

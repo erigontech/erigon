@@ -10,16 +10,15 @@ import (
 	"time"
 
 	lg "github.com/anacrolix/log"
+	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Client struct {
@@ -31,7 +30,7 @@ type Client struct {
 func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
-	torrentConfig.DataDir = snapshotsDir
+	torrentConfig.DataDir = snapshotsDir + "/alex"
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
