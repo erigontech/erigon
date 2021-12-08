@@ -79,9 +79,9 @@ func enable1884(jt *JumpTable) {
 	}
 }
 
-func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
-	balance := interpreter.evm.IntraBlockState.GetBalance(callContext.contract.Address())
-	callContext.stack.Push(balance)
+func opSelfBalance(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	balance := interpreter.evm.IntraBlockState.GetBalance(scope.Contract.Address())
+	scope.Stack.Push(balance)
 	return nil, nil
 }
 
@@ -98,9 +98,9 @@ func enable1344(jt *JumpTable) {
 }
 
 // opChainID implements CHAINID opcode
-func opChainID(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+func opChainID(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	chainId, _ := uint256.FromBig(interpreter.evm.ChainRules.ChainID)
-	callContext.stack.Push(chainId)
+	scope.Stack.Push(chainId)
 	return nil, nil
 }
 
@@ -166,8 +166,8 @@ func enable3198(jt *JumpTable) {
 }
 
 // opBaseFee implements BASEFEE opcode
-func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *callCtx) ([]byte, error) {
+func opBaseFee(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	baseFee := interpreter.evm.Context.BaseFee
-	callContext.stack.Push(baseFee)
+	scope.Stack.Push(baseFee)
 	return nil, nil
 }
