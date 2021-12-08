@@ -230,10 +230,10 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment) (bool, error) {
 		newAnchor, preExisting := hd.anchors[newAnchorHeader.ParentHash]
 		if !preExisting {
 			newAnchor = &Anchor{
-				parentHash:  newAnchorHeader.ParentHash,
-				timestamp:   0,
-				peerID:      anchor.peerID,
-				blockHeight: newAnchorH.Number,
+				parentHash:    newAnchorHeader.ParentHash,
+				nextRetryTime: 0, // Will ensure this anchor will be top priority
+				peerID:        anchor.peerID,
+				blockHeight:   newAnchorH.Number,
 			}
 			if newAnchor.blockHeight > 0 {
 				hd.anchors[newAnchorHeader.ParentHash] = newAnchor
@@ -353,10 +353,10 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) (bool
 			return false, fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
 		}
 		anchor = &Anchor{
-			parentHash:  anchorHeader.ParentHash,
-			peerID:      peerID,
-			timestamp:   0,
-			blockHeight: anchorH.Number,
+			parentHash:    anchorHeader.ParentHash,
+			peerID:        peerID,
+			nextRetryTime: 0, // Will ensure this anchor will be top priority
+			blockHeight:   anchorH.Number,
 		}
 		hd.anchors[anchorHeader.ParentHash] = anchor
 		heap.Push(hd.anchorQueue, anchor)
@@ -590,7 +590,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	for hd.anchorQueue.Len() > 0 {
 		anchor := (*hd.anchorQueue)[0]
 		if _, ok := hd.anchors[anchor.parentHash]; ok {
-			if anchor.timestamp > currentTime {
+			if anchor.nextRetryTime > currentTime {
 				// Anchor not ready for re-request yet
 				return nil, penalties
 			}
@@ -616,7 +616,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 		return
 	}
 	anchor.timeouts++
-	anchor.timestamp = currentTime + timeout
+	anchor.nextRetryTime = currentTime + timeout
 	heap.Fix(hd.anchorQueue, anchor.idx)
 }
 
@@ -625,22 +625,22 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	defer hd.lock.RUnlock()
 	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
-	nextHeight := hd.highestInDb + stride
-	maxHeight := hd.topSeenHeight + 1 // Inclusive upper bound
-	if maxHeight <= nextHeight {
+	strideHeight := hd.highestInDb + stride
+	lowestAnchorHeight := hd.topSeenHeight + 1 // Inclusive upper bound
+	if lowestAnchorHeight <= strideHeight {
 		return nil
 	}
 	// Determine the query range as the height of lowest anchor
 	for _, anchor := range hd.anchors {
-		if anchor.blockHeight > nextHeight && anchor.blockHeight < maxHeight {
-			maxHeight = anchor.blockHeight // Exclusive upper bound
+		if anchor.blockHeight > strideHeight && anchor.blockHeight < lowestAnchorHeight {
+			lowestAnchorHeight = anchor.blockHeight // Exclusive upper bound
 		}
 	}
-	length := (maxHeight - nextHeight) / stride
+	length := (lowestAnchorHeight - strideHeight) / stride
 	if length > 192 {
 		length = 192
 	}
-	return &HeaderRequest{Number: nextHeight, Length: length, Skip: stride - 1, Reverse: false}
+	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
