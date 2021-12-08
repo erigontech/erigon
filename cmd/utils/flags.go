@@ -618,6 +618,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.FermionBootnodes
 		case params.MumbaiChainName:
 			urls = params.MumbaiBootnodes
+		case params.BorMainnetChainName:
+			urls = params.BorMainnetBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -654,6 +656,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.FermionBootnodes
 		case params.MumbaiChainName:
 			urls = params.MumbaiBootnodes
+		case params.BorMainnetChainName:
+			urls = params.BorMainnetBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -924,6 +928,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "fermion")
 	case params.MumbaiChainName:
 		return filepath.Join(datadir, "mumbai")
+	case params.BorMainnetChainName:
+		return filepath.Join(datadir, "bor-mainnet")
 	default:
 		return datadir
 	}
@@ -1320,6 +1326,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultMumbaiGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.MumbaiGenesisHash)
+	case params.BorMainnetChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 137
+		}
+		cfg.Genesis = core.DefaultBorMainnetGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.BorMainnetGenesisHash)
 	case params.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1400,6 +1412,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultFermionGenesisBlock()
 	case params.MumbaiChainName:
 		genesis = core.DefaultMumbaiGenesisBlock()
+	case params.BorMainnetChainName:
+		genesis = core.DefaultBorMainnetGenesisBlock()
 	case params.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

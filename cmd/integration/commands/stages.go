@@ -1016,6 +1016,9 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.MumbaiChainName:
 		chainConfig = params.MumbaiChainConfig
 		genesis = core.DefaultMumbaiGenesisBlock()
+	case params.BorMainnetChainName:
+		chainConfig = params.BorMainnetChainConfig
+		genesis = core.DefaultBorMainnetGenesisBlock()
 	}
 	return genesis, chainConfig
 }
