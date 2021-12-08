@@ -23,20 +23,23 @@ func TestErrorStarknetSendRawTransaction(t *testing.T) {
 		{name: "not contract creation", tx: "0x03f87b83127ed801010182ee489467b1d87101671b127f5f8714789c7192f7ad340e809637623232363136323639323233613230356235643764c080a0ceb955e6039bf37dbf77e4452a10b4a47906bbbd2f6dcf0c15bccb052d3bbb60a03de24d584a0a20523f55a137ebc651e2b092fbc3728d67c9fda09da9f0edd154", error: commands.ErrOnlyContractDeploy},
 	}
 
-	m, require := stages.Mock(t), require.New(t)
+	m, require := stages.MockWithTxPool(t), require.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
-	api := commands.NewStarknetAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, txPool)
-
 	for _, tt := range cases {
+		noopTxPool := commands.NewNoopTxPoolClient()
+		api := commands.NewStarknetAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, noopTxPool)
+
 		t.Run(tt.name, func(t *testing.T) {
 			hex, _ := hexutil.Decode(tt.tx)
 
 			_, err := api.SendRawTransaction(ctx, hex)
+
 			require.ErrorIs(err, tt.error)
+			require.Len(noopTxPool.AddCalls, 0)
 		})
 	}
 }
