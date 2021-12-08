@@ -640,7 +640,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	if length > 192 {
 		length = 192
 	}
-	return &HeaderRequest{Number: nextHeight, Length: length, Skip: stride - 1, Reverse: false}
+	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
