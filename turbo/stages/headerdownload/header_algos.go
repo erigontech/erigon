@@ -230,10 +230,10 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment) (bool, error) {
 		newAnchor, preExisting := hd.anchors[newAnchorHeader.ParentHash]
 		if !preExisting {
 			newAnchor = &Anchor{
-				parentHash:  newAnchorHeader.ParentHash,
-				timestamp:   0,
-				peerID:      anchor.peerID,
-				blockHeight: newAnchorH.Number,
+				parentHash:    newAnchorHeader.ParentHash,
+				nextRetryTime: 0, // Will ensure this anchor will be top priority
+				peerID:        anchor.peerID,
+				blockHeight:   newAnchorH.Number,
 			}
 			if newAnchor.blockHeight > 0 {
 				hd.anchors[newAnchorHeader.ParentHash] = newAnchor
@@ -353,10 +353,10 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) (bool
 			return false, fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
 		}
 		anchor = &Anchor{
-			parentHash:  anchorHeader.ParentHash,
-			peerID:      peerID,
-			timestamp:   0,
-			blockHeight: anchorH.Number,
+			parentHash:    anchorHeader.ParentHash,
+			peerID:        peerID,
+			nextRetryTime: 0, // Will ensure this anchor will be top priority
+			blockHeight:   anchorH.Number,
 		}
 		hd.anchors[anchorHeader.ParentHash] = anchor
 		heap.Push(hd.anchorQueue, anchor)
@@ -590,7 +590,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	for hd.anchorQueue.Len() > 0 {
 		anchor := (*hd.anchorQueue)[0]
 		if _, ok := hd.anchors[anchor.parentHash]; ok {
-			if anchor.timestamp > currentTime {
+			if anchor.nextRetryTime > currentTime {
 				// Anchor not ready for re-request yet
 				return nil, penalties
 			}
@@ -616,7 +616,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 		return
 	}
 	anchor.timeouts++
-	anchor.timestamp = currentTime + timeout
+	anchor.nextRetryTime = currentTime + timeout
 	heap.Fix(hd.anchorQueue, anchor.idx)
 }
 
