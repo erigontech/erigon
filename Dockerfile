@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.17-alpine AS builder
+FROM docker.io/library/golang:1.17-alpine3.14 AS builder
 
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
@@ -9,7 +9,7 @@ ADD . .
 # expect that host run `git submodule update --init`
 RUN make erigon rpcdaemon integration sentry hack db-tools
 
-FROM alpine:latest
+FROM docker.io/library/alpine:3.14
 
 RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
