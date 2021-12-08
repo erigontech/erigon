@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -255,6 +256,13 @@ func New(
 		GenesisContractsClient: genesisContractsClient,
 		HeimdallClient:         heimdallClient,
 		WithoutHeimdall:        withoutHeimdall,
+	}
+
+	// make sure we can decode all the GenesisAlloc in the BorConfig.
+	for key, genesisAlloc := range c.config.BlockAlloc {
+		if _, err := decodeGenesisAlloc(genesisAlloc); err != nil {
+			panic(fmt.Sprintf("BUG: Block alloc '%s' in genesis is not correct: %v", key, err))
+		}
 	}
 
 	return c
@@ -667,6 +675,11 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 		}
 	}
 
+	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
+		log.Error("Error changing contract code", "error", err)
+		return err
+	}
+
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	// header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number.Uint64()))
 	header.UncleHash = types.CalcUncleHash(nil)
@@ -674,6 +687,34 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 	// Set state sync data to blockchain
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)
+	return nil
+}
+
+func decodeGenesisAlloc(i interface{}) (core.GenesisAlloc, error) {
+	var alloc core.GenesisAlloc
+	b, err := json.Marshal(i)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(b, &alloc); err != nil {
+		return nil, err
+	}
+	return alloc, nil
+}
+
+func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.IntraBlockState) error {
+	for blockNumber, genesisAlloc := range c.config.BlockAlloc {
+		if blockNumber == strconv.FormatUint(headerNumber, 10) {
+			allocs, err := decodeGenesisAlloc(genesisAlloc)
+			if err != nil {
+				return fmt.Errorf("failed to decode genesis alloc: %v", err)
+			}
+			for addr, account := range allocs {
+				log.Info("change contract code", "address", addr)
+				state.SetCode(addr, account.Code)
+			}
+		}
+	}
 	return nil
 }
 
@@ -705,6 +746,11 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 				return nil, err
 			}
 		}
+	}
+
+	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
+		log.Error("Error changing contract code", "error", err)
+		return nil, err
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
