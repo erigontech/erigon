@@ -11,7 +11,7 @@ import (
 	"math/bits"
 )
 
-type CairoTransaction struct {
+type StarknetTransaction struct {
 	CommonTx
 
 	ChainID    *uint256.Int
@@ -20,15 +20,15 @@ type CairoTransaction struct {
 	AccessList AccessList
 }
 
-func (tx CairoTransaction) Type() byte {
-	return CairoType
+func (tx StarknetTransaction) Type() byte {
+	return StarknetType
 }
 
-func (tx CairoTransaction) IsStarkNet() bool {
+func (tx StarknetTransaction) IsStarkNet() bool {
 	return true
 }
 
-func (tx *CairoTransaction) DecodeRLP(s *rlp.Stream) error {
+func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
@@ -111,35 +111,35 @@ func (tx *CairoTransaction) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (tx CairoTransaction) GetChainID() *uint256.Int {
+func (tx StarknetTransaction) GetChainID() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) GetPrice() *uint256.Int {
+func (tx StarknetTransaction) GetPrice() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) GetTip() *uint256.Int {
+func (tx StarknetTransaction) GetTip() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+func (tx StarknetTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) GetFeeCap() *uint256.Int {
+func (tx StarknetTransaction) GetFeeCap() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) Cost() *uint256.Int {
+func (tx StarknetTransaction) Cost() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
+func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
 	panic("implement me")
 }
 
-func (tx *CairoTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+func (tx *StarknetTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
 	cpy := tx.copy()
 	r, s, v, err := signer.SignatureValues(tx, sig)
 	if err != nil {
@@ -152,11 +152,11 @@ func (tx *CairoTransaction) WithSignature(signer Signer, sig []byte) (Transactio
 	return cpy, nil
 }
 
-func (tx CairoTransaction) FakeSign(address common.Address) (Transaction, error) {
+func (tx StarknetTransaction) FakeSign(address common.Address) (Transaction, error) {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) Hash() common.Hash {
+func (tx StarknetTransaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {
 		return *hash.(*common.Hash)
 	}
@@ -176,30 +176,30 @@ func (tx CairoTransaction) Hash() common.Hash {
 	return hash
 }
 
-func (tx CairoTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) Size() common.StorageSize {
+func (tx StarknetTransaction) Size() common.StorageSize {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) GetAccessList() AccessList {
+func (tx StarknetTransaction) GetAccessList() AccessList {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) Protected() bool {
+func (tx StarknetTransaction) Protected() bool {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+func (tx StarknetTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) MarshalBinary(w io.Writer) error {
+func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
 	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
 	var b [33]byte
-	b[0] = CairoType
+	b[0] = StarknetType
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
@@ -209,15 +209,15 @@ func (tx CairoTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx CairoTransaction) Sender(signer Signer) (common.Address, error) {
+func (tx StarknetTransaction) Sender(signer Signer) (common.Address, error) {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) SetSender(address common.Address) {
+func (tx StarknetTransaction) SetSender(address common.Address) {
 	panic("implement me")
 }
 
-func (tx CairoTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
+func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b); err != nil {
 		return err
@@ -305,7 +305,7 @@ func (tx CairoTransaction) encodePayload(w io.Writer, b []byte, payloadSize, non
 	return nil
 }
 
-func (tx CairoTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
+func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
 	// size of ChainID
 	payloadSize++
 	var chainIdLen int
@@ -396,8 +396,8 @@ func (tx CairoTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, acc
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
-func (tx CairoTransaction) copy() *CairoTransaction {
-	cpy := &CairoTransaction{
+func (tx StarknetTransaction) copy() *StarknetTransaction {
+	cpy := &StarknetTransaction{
 		CommonTx: CommonTx{
 			TransactionMisc: TransactionMisc{
 				time: tx.time,

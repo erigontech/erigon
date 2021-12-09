@@ -44,7 +44,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
-	CairoType
+	StarknetType
 )
 
 // Transaction is an Ethereum transaction.
@@ -158,8 +158,8 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		tx = t
-	case CairoType:
-		t := &CairoTransaction{}
+	case StarknetType:
+		t := &StarknetTransaction{}
 		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
