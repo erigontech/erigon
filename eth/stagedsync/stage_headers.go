@@ -186,6 +186,20 @@ func HeadersDownward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := header.Number.Uint64()
+	go func() {
+		for {
+			timer := time.NewTimer(1 * time.Second)
+			select {
+			case <-ctx.Done():
+				stopped = true
+			case <-logEvery.C:
+				log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
+					"now", cfg.hd.CurrentNumber, "blk/sec", float64(prevProgress-cfg.hd.POSProress())/float64(logInterval/time.Second))
+				prevProgress = cfg.hd.POSProress()
+			}
+			timer.Stop()
+		}
+	}()
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
@@ -197,26 +211,12 @@ func HeadersDownward(
 			}
 		}
 		cfg.penalize(ctx, penalties)
-		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
-		for req != nil && sentToPeer && maxRequests > 0 {
-			req, penalties = cfg.hd.RequestMoreHeadersForPOS(currentTime)
-			if req != nil {
-				_, sentToPeer = cfg.headerReqSend(ctx, req)
-				if sentToPeer {
-					// cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
-					log.Trace("Sent request", "height", req.Number)
-				}
-			}
-			cfg.penalize(ctx, penalties)
-			maxRequests--
-		}
 
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, logPrefix, logEvery.C); err != nil {
 			return err
 		}
-
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
@@ -224,16 +224,6 @@ func HeadersDownward(
 		if inSync { // We do not break unless there best header changed
 			break
 		}
-		timer := time.NewTimer(1 * time.Second)
-		select {
-		case <-ctx.Done():
-			stopped = true
-		case <-logEvery.C:
-			log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
-				"now", cfg.hd.CurrentNumber, "blk/sec", float64(prevProgress-cfg.hd.POSProress())/float64(logInterval/time.Second))
-			prevProgress = cfg.hd.POSProress()
-		}
-		timer.Stop()
 	}
 	cfg.hd.IsBackwards = true
 	// Downward sync if we need to process more (TODO)
@@ -418,7 +408,24 @@ func HeadersForward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
-Loop:
+	go func() {
+		for {
+			timer := time.NewTimer(1 * time.Second)
+			select {
+			case <-ctx.Done():
+				stopped = true
+			case <-logEvery.C:
+				progress := cfg.hd.Progress()
+				logProgressHeaders(logPrefix, prevProgress, progress)
+				prevProgress = progress
+			case <-timer.C:
+				log.Trace("RequestQueueTime (header) ticked")
+			case <-cfg.hd.DeliveryNotify:
+				log.Trace("headerLoop woken up by the incoming request")
+			}
+			timer.Stop()
+		}
+	}()
 	for !stopped {
 
 		isTrans, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
@@ -456,6 +463,14 @@ Loop:
 			maxRequests--
 		}
 
+		req = cfg.hd.RequestSkeleton()
+		if req != nil {
+			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			if sentToPeer {
+				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
+				log.Trace("Sent request", "height", req.Number)
+			}
+		}
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
@@ -479,22 +494,6 @@ Loop:
 		if test {
 			break
 		}
-		timer := time.NewTimer(1 * time.Second)
-		select {
-		case <-ctx.Done():
-			stopped = true
-		case <-logEvery.C:
-			progress := cfg.hd.Progress()
-			logProgressHeaders(logPrefix, prevProgress, progress)
-			prevProgress = progress
-		case <-timer.C:
-			log.Trace("RequestQueueTime (header) ticked")
-		case <-cfg.hd.DeliveryNotify:
-			log.Trace("headerLoop woken up by the incoming request")
-		case <-cfg.hd.SkipCycleHack:
-			break Loop
-		}
-		timer.Stop()
 	}
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})

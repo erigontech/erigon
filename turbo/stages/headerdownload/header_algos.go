@@ -742,6 +742,9 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 }
 
 func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+	if len(hd.PosHeaders) == 0 {
+		return false, nil
+	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	sort.Slice(hd.PosHeaders, func(i, j int) bool {
@@ -789,15 +792,13 @@ func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
 }
 
 func (hd *HeaderDownload) POSProress() uint64 {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
 	return hd.lastProcessedPayload
 }
 
 func (hd *HeaderDownload) AppendSegmentPOS(segment ChainSegment) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	log.Info("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
+	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		blocknum := segmentFragment.Header.Number.Uint64()
 		if blocknum > hd.lastProcessedPayload-1 || hd.fetched[blocknum] {
