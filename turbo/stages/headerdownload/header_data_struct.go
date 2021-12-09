@@ -218,11 +218,10 @@ type HeaderDownload struct {
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
 	// proof-of-stake
-	lastProcessedPayload uint64          // The last header number inserted when processing the chain backwards
-	fetched              map[uint32]bool // Check if the block number inserted has been fetched or not (TODO: make it memory efficient, but not really a problem)
-	expectedHash         common.Hash     // Parenthash of the last header inserted, we keep it to not fetch it back over and over
-	nextPayloadHeight    uint64          // Next blocknumber to request next
-	backwards            bool            // Tell if the chain is syncing backwards or not
+	lastProcessedPayload uint64           // The last header number inserted when processing the chain backwards
+	expectedHash         common.Hash      // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	requestAssembler     RequestAssembler // Build proof-of-stake P2P requests
+	backwards            bool             // Tell if the chain is syncing backwards or not
 	PosHeaders           []types.Header
 }
 
@@ -240,7 +239,6 @@ func NewHeaderDownload(
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
 		badHeaders:         make(map[common.Hash]struct{}),
-		fetched:            make(map[uint32]bool),
 		anchors:            make(map[common.Hash]*Anchor),
 		persistedLinkLimit: persistentLinkLimit,
 		linkLimit:          linkLimit - persistentLinkLimit,
@@ -363,7 +361,7 @@ func (r *RequestAssembler) AskForHeaderNumber(ask uint64) {
 }
 
 // AssembleRequest gives priority to a specific header number to be fetched
-func (r *RequestAssembler) AssembleRequest() HeaderRequest {
+func (r *RequestAssembler) AssembleRequest() *HeaderRequest {
 	var blocknum uint64
 	// If we prioritize a certain header, let's fetch that one first
 	if r.overwriteBlockNumberRequest > 0 {
@@ -375,7 +373,7 @@ func (r *RequestAssembler) AssembleRequest() HeaderRequest {
 		// Prepare next request
 		r.nextBlockNumberRequest -= 192
 	}
-	return HeaderRequest{
+	return &HeaderRequest{
 		Hash:    common.Hash{},
 		Number:  blocknum,
 		Length:  192,

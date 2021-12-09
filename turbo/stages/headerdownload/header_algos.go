@@ -615,23 +615,8 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 		log.Trace("Empty anchor queue")
 		return nil
 	}
-	if hd.nextPayloadHeight == 0 {
-		return nil
-	}
-	// Find the next block that has not been checked
-	for hd.fetched[uint32(hd.nextPayloadHeight)] {
-		hd.nextPayloadHeight--
-	}
-	// After assembling the request, we prepare the next request
-	defer func() {
-		if hd.nextPayloadHeight < 192 {
-			hd.nextPayloadHeight = 0
-		} else {
-			hd.nextPayloadHeight -= 192
-		}
-	}()
 	// Assemble the request
-	return &HeaderRequest{Hash: common.Hash{}, Number: hd.nextPayloadHeight, Length: 192, Skip: 0, Reverse: true}
+	return hd.requestAssembler.AssembleRequest()
 
 }
 
@@ -764,14 +749,9 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, l
 			hd.PosHeaders = hd.PosHeaders[1:]
 			continue
 		}
-		if header.Number.Uint64() != hd.lastProcessedPayload-1 {
-			hd.nextPayloadHeight = hd.lastProcessedPayload
-			break
-		}
-		// This is the parent of the last processed block
-		if header.Hash() != hd.expectedHash {
-			hd.fetched[uint32(header.Number.Uint64())] = false
-			hd.nextPayloadHeight = hd.lastProcessedPayload
+		// If we miss some headers or an header results to be invalid, we ask for them again
+		if header.Number.Uint64() != hd.lastProcessedPayload-1 || header.Hash() != hd.expectedHash {
+			hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload - 1)
 			break
 		}
 		rawdb.WriteHeader(tx, &header)
@@ -805,10 +785,9 @@ func (hd *HeaderDownload) AppendSegmentPOS(segment ChainSegment) {
 	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		blocknum := segmentFragment.Header.Number.Uint64()
-		if blocknum > hd.lastProcessedPayload-1 || hd.fetched[uint32(blocknum)] {
+		if blocknum > hd.lastProcessedPayload-1 {
 			continue
 		}
-		hd.fetched[uint32(blocknum)] = true
 		hd.PosHeaders = append(hd.PosHeaders, *segmentFragment.Header)
 	}
 }
@@ -1124,7 +1103,7 @@ func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.lastProcessedPayload = lastProcessed
-	hd.nextPayloadHeight = lastProcessed - 1
+	hd.requestAssembler = NewRequestAssembler(lastProcessed - 1)
 }
 
 func (hd *HeaderDownload) SetBackwards(backwards bool) {
