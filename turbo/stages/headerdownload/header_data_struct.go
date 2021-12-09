@@ -357,7 +357,7 @@ func NewRequestAssembler(nextBlockNumberRequest uint64) RequestAssembler {
 
 // AskForHeaderNumber gives priority to a specific header number to be fetched
 func (r *RequestAssembler) AskForHeaderNumber(ask uint64) {
-	r.overwriteBlockNumberRequest = ask
+	r.nextBlockNumberRequest = ask
 }
 
 // AssembleRequest gives priority to a specific header number to be fetched
@@ -366,7 +366,6 @@ func (r *RequestAssembler) AssembleRequest() *HeaderRequest {
 	// If we prioritize a certain header, let's fetch that one first
 	if r.overwriteBlockNumberRequest > 0 {
 		blocknum = r.overwriteBlockNumberRequest
-		// priority has been satisfied so we update overwriteBlockNumberRequest
 		r.overwriteBlockNumberRequest = 0
 	} else {
 		blocknum = r.nextBlockNumberRequest
@@ -382,14 +381,11 @@ func (r *RequestAssembler) AssembleRequest() *HeaderRequest {
 
 // PrepareNextRequest prepare the next request to be fetched
 func (r *RequestAssembler) PrepareNextRequest() {
-	// If we prioritize a certain header, let's fetch that one first
-	if r.overwriteBlockNumberRequest > 0 {
-		r.overwriteBlockNumberRequest = 0
+	// Prepare the next request
+	if r.nextBlockNumberRequest > 192 {
+		r.nextBlockNumberRequest -= 192
 	} else {
-		if r.nextBlockNumberRequest > 192 {
-			r.nextBlockNumberRequest -= 192
-		} else {
-			r.nextBlockNumberRequest = 0
-		}
+		r.nextBlockNumberRequest = 0
 	}
+
 }

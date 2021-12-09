@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -738,8 +739,9 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
 
-func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollector *etl.Collector, headerCollector *etl.Collector, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	if len(hd.PosHeaders) == 0 {
+		hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload)
 		return false, nil
 	}
 	hd.lock.Lock()
@@ -754,12 +756,22 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, l
 			continue
 		}
 		// If we miss some headers or an header results to be invalid, we ask for them again
-		if header.Number.Uint64() != hd.lastProcessedPayload-1 || header.Hash() != hd.expectedHash {
-			hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload)
+		if header.Number.Uint64() != hd.lastProcessedPayload-1 {
 			break
 		}
-		rawdb.WriteHeader(tx, &header)
-		if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+		if header.Hash() != hd.expectedHash {
+			hd.PosHeaders = hd.PosHeaders[1:]
+			break
+		}
+		// Write the encoded header
+		data, err := rlp.EncodeToBytes(header)
+		if err != nil {
+			log.Crit("Failed to RLP encode header", "err", err)
+		}
+		if err := headerCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), data); err != nil {
+			return false, err
+		}
+		if err := canonicalHashCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
 			return false, err
 		}
 		hd.lastProcessedPayload--
@@ -774,6 +786,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, l
 		hd.expectedHash = header.ParentHash
 		hd.PosHeaders = hd.PosHeaders[1:]
 	}
+	hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload)
 	return false, nil
 }
 
@@ -788,10 +801,6 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment) {
 	defer hd.lock.Unlock()
 	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
-		blocknum := segmentFragment.Header.Number.Uint64()
-		if blocknum > hd.lastProcessedPayload-1 {
-			continue
-		}
 		hd.PosHeaders = append(hd.PosHeaders, *segmentFragment.Header)
 	}
 }

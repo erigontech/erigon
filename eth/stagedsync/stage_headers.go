@@ -11,6 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -38,6 +39,7 @@ type HeadersCfg struct {
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
+	tmpdir            string
 	reverseDownloadCh chan types.Header
 	waitingPosHeaders *bool
 	snapshots         *snapshotsync.AllSnapshots
@@ -58,6 +60,7 @@ func StageHeadersCfg(
 	waitingPosHeaders *bool,
 	snapshots *snapshotsync.AllSnapshots,
 	blockReader interfaces.FullBlockReader,
+	tmpdir string,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -219,15 +222,18 @@ func HeadersDownward(
 			case <-ctx.Done():
 				stopped = true
 			case <-logEvery.C:
+				diff := prevProgress - cfg.hd.Progress()
 				if cfg.hd.Progress() <= prevProgress {
 					log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
-						"now", cfg.hd.Progress(), "blk/sec", float64(prevProgress-cfg.hd.Progress())/float64(logInterval/time.Second))
+						"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
 					prevProgress = cfg.hd.Progress()
 				}
 			}
 			timer.Stop()
 		}
 	}()
+	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
 		req := cfg.hd.RequestMoreHeadersForPOS(currentTime)
@@ -251,7 +257,7 @@ func HeadersDownward(
 
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, headerCollector, canonicalHeadersCollector, logPrefix, logEvery.C); err != nil {
 			return err
 		}
 		announces := cfg.hd.GrabAnnounces()
@@ -262,6 +268,12 @@ func HeadersDownward(
 			s.Update(tx, header.Number.Uint64())
 			break
 		}
+	}
+	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		return err
+	}
+	if err := canonicalHeadersCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+		return err
 	}
 	// Downward sync if we need to process more (TODO)
 	return tx.Commit()
