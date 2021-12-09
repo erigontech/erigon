@@ -33,16 +33,17 @@ func TestStoreCapture(t *testing.T) {
 			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 		logger   = NewStructLogger(nil)
-		mem      = NewMemory()
-		stack    = stack.New()
 		contract = NewContract(&dummyContractRef{}, &dummyContractRef{}, new(uint256.Int), 0, false /* skipAnalysis */, false)
+		scope    = &ScopeContext{
+			Memory:   NewMemory(),
+			Stack:    stack.New(),
+			Contract: contract,
+		}
 	)
-	stack.Push(uint256.NewInt(1))
-	stack.Push(uint256.NewInt(0))
+	scope.Stack.Push(uint256.NewInt(1))
+	scope.Stack.Push(uint256.NewInt(0))
 	var index common.Hash
-	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, nil, contract, 0, nil); err != nil {
-		t.Fatalf("error while caturing state %v", err)
-	}
+	logger.CaptureState(env, 0, SSTORE, 0, 0, scope, nil, 0, nil)
 	if len(logger.storage[contract.Address()]) == 0 {
 		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))
 	}

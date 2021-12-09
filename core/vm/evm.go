@@ -228,10 +228,10 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		code = evm.IntraBlockState.GetCode(addr)
 	}
 	// Capture the tracer start/end events in debug mode
-	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig(), code)
+	if evm.Config.Debug && evm.depth == 0 {
+		evm.Config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, input, gas, value.ToBig())
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(ret, startGas-gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 
@@ -315,9 +315,9 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig(), code)
+		evm.Config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, input, gas, value.ToBig())
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(ret, startGas-gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 	var (
@@ -372,9 +372,9 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1), code)
+		evm.Config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, input, gas, big.NewInt(-1))
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	snapshot := evm.IntraBlockState.Snapshot()
@@ -424,9 +424,9 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.Config.Debug {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2), code)
+		evm.Config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, input, gas, big.NewInt(-2))
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	// We take a snapshot here. This is a bit counter-intuitive, and could probably be skipped.
@@ -499,9 +499,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
 	if evm.Config.Debug || evm.Config.EnableTEMV {
-		_ = evm.Config.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), nil)
+		evm.Config.Tracer.CaptureStart(evm, caller.Address(), address, true, codeAndHash.code, gas, value.ToBig())
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.Config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.Config.Tracer.CaptureEnd(ret, startGas-gas, time.Since(startTime), err) //nolint:errcheck
 		}(gas, time.Now())
 	}
 	nonce := evm.IntraBlockState.GetNonce(caller.Address())

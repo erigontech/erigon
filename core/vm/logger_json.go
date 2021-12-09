@@ -24,8 +24,9 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
 )
+
+var _ Tracer = (*JSONLogger)(nil)
 
 type JSONLogger struct {
 	encoder *json.Encoder
@@ -42,12 +43,13 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return l
 }
 
-func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
-	return nil
+func (l *JSONLogger) CaptureStart(env *EVM, from, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, rData []byte, contract *Contract, depth int, err error) error {
+func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+	memory := scope.Memory
+	stack := scope.Stack
 	log := StructLog{
 		Pc:            pc,
 		Op:            op,
@@ -70,30 +72,25 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 		}
 		log.Stack = logstack
 	}
-	return l.encoder.Encode(log)
+	_ = l.encoder.Encode(log)
 }
 
 // CaptureFault outputs state information on the logger.
-func (l *JSONLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *stack.Stack, contract *Contract, depth int, err error) error {
-	return nil
-}
+func (l *JSONLogger) CaptureFault(*EVM, uint64, OpCode, uint64, uint64, *ScopeContext, int, error) {}
 
 // CaptureEnd is triggered at end of execution.
-func (l *JSONLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
+func (l *JSONLogger) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) {
 	type endLog struct {
 		Output  string              `json:"output"`
 		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
 		Time    time.Duration       `json:"time"`
 		Err     string              `json:"error,omitempty"`
 	}
-	if depth != 0 {
-		return nil
-	}
 	var errMsg string
 	if err != nil {
 		errMsg = err.Error()
 	}
-	return l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(startGas - endGas), t, errMsg})
+	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), t, errMsg})
 }
 
 func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
