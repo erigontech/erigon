@@ -11,9 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type CallTracer struct {
@@ -30,7 +27,7 @@ func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTr
 	}
 }
 
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
+func (ct *CallTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
 	ct.froms[from] = struct{}{}
 
 	created, ok := ct.tos[to]
@@ -39,6 +36,7 @@ func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Add
 	}
 
 	if !created && create {
+		/* TODO(fdymylja): code is missing from the tracer API
 		if len(code) > 0 && ct.hasTEVM != nil {
 			has, err := ct.hasTEVM(common.BytesToHash(crypto.Keccak256(code)))
 			if !has {
@@ -49,18 +47,16 @@ func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Add
 				log.Warn("while CaptureStart", "error", err)
 			}
 		}
+		*/
 	}
-	return nil
+	return
 }
-func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rData []byte, contract *vm.Contract, depth int, err error) error {
-	return nil
+func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+
 }
-func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
-	return nil
+func (ct *CallTracer) CaptureFault(*vm.EVM, uint64, vm.OpCode, uint64, uint64, *vm.ScopeContext, int, error) {
 }
-func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
-	return nil
-}
+func (ct *CallTracer) CaptureEnd([]byte, uint64, time.Duration, error) {}
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 	ct.froms[from] = struct{}{}
 	ct.tos[to] = false

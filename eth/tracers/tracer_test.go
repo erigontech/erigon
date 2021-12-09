@@ -71,13 +71,10 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.Code); err != nil {
-		return nil, err
-	}
+	tracer.CaptureStart(env, contract.Caller(), contract.Address(), false, []byte{}, startGas, value.ToBig())
+
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	if err1 := tracer.CaptureEnd(0, ret, startGas, contract.Gas, 1, err); err1 != nil {
-		return nil, err1
-	}
+	tracer.CaptureEnd(ret, startGas-contract.Gas, 1, err)
 	if err != nil {
 		return nil, err
 	}
@@ -164,14 +161,55 @@ func TestHaltBetweenSteps(t *testing.T) {
 		BlockNumber:     1,
 		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
-	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false, false)
+	scope := &vm.ScopeContext{
+		Contract: vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false, false),
+	}
 
-	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	tracer.CaptureState(env, 0, 0, 0, 0, scope, nil, 0, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	tracer.CaptureState(env, 0, 0, 0, 0, scope, nil, 0, nil)
 
 	if _, err := tracer.GetResult(); err.Error() != timeout.Error() {
 		t.Errorf("Expected timeout error, got %v", err)
+	}
+}
+
+// TestNoStepExec tests a regular value transfer (no exec), and accessing the statedb
+// in 'result'
+func TestNoStepExec(t *testing.T) {
+	runEmptyTrace := func(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
+		env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+		startGas := uint64(10000)
+		contract := vm.NewContract(account{}, account{}, uint256.NewInt(0), startGas, false, true)
+		tracer.CaptureStart(env, contract.Caller(), contract.Address(), false, []byte{}, startGas, big.NewInt(0))
+		tracer.CaptureEnd(nil, startGas-contract.Gas, 1, nil)
+		return tracer.GetResult()
+	}
+	execTracer := func(code string) []byte {
+		t.Helper()
+		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		tracer, err := New(code, ctx.txCtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ret, err := runEmptyTrace(tracer, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ret
+	}
+	for i, tt := range []struct {
+		code string
+		want string
+	}{
+		{ // tests that we don't panic on accessing the db methods
+			code: "{depths: [], step: function() {}, fault: function() {},  result: function(ctx, db){ return db.getBalance(ctx.to)} }",
+			want: `"0"`,
+		},
+	} {
+		if have := execTracer(tt.code); tt.want != string(have) {
+			t.Errorf("testcase %d: expected return value to be %s got %s\n\tcode: %v", i, tt.want, string(have), tt.code)
+		}
 	}
 }
