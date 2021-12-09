@@ -188,7 +188,7 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 	prevLink := attachmentLink
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		if attachmentLink.persisted {
+		if prevLink.persisted {
 			// If we are attching to already persisted link, schedule for insertion (persistence)
 			hd.insertList = append(hd.insertList, link)
 		}
