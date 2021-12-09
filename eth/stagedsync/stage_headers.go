@@ -201,6 +201,10 @@ func HeadersDownward(
 		return nil
 	}
 
+	cfg.statusCh <- privateapi.ExecutionStatus{
+		Status:   privateapi.Syncing,
+		HeadHash: rawdb.ReadHeadBlockHash(tx),
+	}
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", header.Number.Uint64())
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -224,7 +228,7 @@ func HeadersDownward(
 	}()
 	for !stopped {
 		currentTime := uint64(time.Now().Unix())
-		req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
+		req := cfg.hd.RequestMoreHeadersForPOS(currentTime)
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
@@ -232,7 +236,7 @@ func HeadersDownward(
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
-		cfg.penalize(ctx, penalties)
+		cfg.penalize(ctx, []headerdownload.PenaltyItem{})
 
 		// Load headers into the database
 		var inSync bool

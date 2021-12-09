@@ -608,13 +608,12 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) (*HeaderRequest, []PenaltyItem) {
+func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRequest {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	var penalties []PenaltyItem
 	if hd.anchorQueue.Len() == 0 {
 		log.Trace("Empty anchor queue")
-		return nil, penalties
+		return nil
 	}
 
 	for hd.fetched[hd.CurrentNumber] {
@@ -623,7 +622,7 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) (*HeaderR
 	defer func() {
 		hd.CurrentNumber -= 192
 	}()
-	return &HeaderRequest{Hash: common.Hash{}, Number: hd.CurrentNumber, Length: 192, Skip: 0, Reverse: true}, nil
+	return &HeaderRequest{Hash: common.Hash{}, Number: hd.CurrentNumber, Length: 192, Skip: 0, Reverse: true}
 
 }
 
