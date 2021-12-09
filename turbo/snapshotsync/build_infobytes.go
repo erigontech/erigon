@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml"
 )
 
 func CreateTorrentFile(root string, info *metainfo.Info) error {
@@ -58,7 +60,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 			if !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
-			info, err := BuildInfoBytesForSnapshot(root, f)
+			info, err := BuildInfoBytesForFile(root, f)
 			if err != nil {
 				return err
 			}
@@ -100,10 +102,59 @@ func ForEachTorrentFile(root string, walker func(torrentFileName string) error) 
 	return nil
 }
 
-func BuildInfoBytesForSnapshot(root string, fileName string) (*metainfo.Info, error) {
+func BuildInfoBytesForFile(root string, fileName string) (*metainfo.Info, error) {
 	info := &metainfo.Info{PieceLength: DefaultPieceSize}
 	if err := info.BuildFromFilePath(filepath.Join(root, fileName)); err != nil {
 		return nil, err
 	}
 	return info, nil
+}
+
+//nolint
+func BuildMetaToml(snapshotsDir string) error {
+	//TODO: check existence
+	metaFilePath := path.Join(snapshotsDir, "meta.toml")
+	if _, err := os.Stat(metaFilePath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		info, err := BuildInfoBytesForFile(snapshotsDir, "meta.toml")
+		if err != nil {
+			return err
+		}
+		if err := CreateTorrentFile(snapshotsDir, info); err != nil {
+			return err
+		}
+	}
+
+	metaFile := PreverifiedSnapshotHashes{Segments: map[string]string{}}
+	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+		mi, err := metainfo.LoadFromFile(torrentFilePath)
+		if err != nil {
+			return err
+		}
+
+		_, fileName := path.Split(torrentFilePath)
+		metaFile.Segments[fileName] = mi.HashInfoBytes().String()
+		return nil
+	}); err != nil {
+		return err
+	}
+	b, err := toml.Marshal(metaFile)
+	if err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(metaFilePath, b, 0600); err != nil {
+		return err
+	}
+	info, err := BuildInfoBytesForFile(snapshotsDir, "meta.toml")
+	if err != nil {
+		return err
+	}
+	if err := CreateTorrentFile(snapshotsDir, info); err != nil {
+		return err
+	}
+	//hh, _ := common.HashData(b) // sign?
+	//fmt.Printf("%s,%x\n", b, hh)
+	return nil
 }

@@ -52,96 +52,14 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 			return nil, err
 		}
 
-		// add .torrent files
-		if err := ForEachTorrentFile(snapshotsDir, func(torrentFileName string) error {
-			mi, err := metainfo.LoadFromFile(torrentFileName)
-			if err != nil {
-				return err
-			}
-			mi.AnnounceList = Trackers
-			//TODO: check hash with hard-coded
-			tr, err := torrentClient.AddTorrent(mi)
-			if err != nil {
-				return err
-			}
-			tr.AllowDataDownload()
-			tr.AllowDataUpload()
-			return nil
-		}); err != nil {
+		preverifiedHashes := goerliPreverifiedSnapshotHashes
+		if err := AddTorrentFiles(context.Background(), snapshotsDir, torrentClient, preverifiedHashes); err != nil {
 			return nil, err
 		}
-
-		waitForChecksumVerify(context.Background(), torrentClient)
-		// add hard-coded hashes as magnet links
-		//TODO: add magnets, call torrent.DownloadAll() and wait for <-torrent.GotInfo()
-		waitForDownloadAll(context.Background(), torrentClient)
+		DownloadEverythingIfNeed(context.Background(), torrentClient, preverifiedHashes)
 
 		torrentClient.Close()
 		progressStore.Close()
-		/*
-			mi.InfoBytes, err = bencode.Marshal(info)
-			if err != nil {
-				log.Fatal(err)
-			}
-			err := info.BuildFromFilePath(a[])
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			mi.InfoBytes, err = bencode.Marshal(a[0])
-			if err != nil {
-				panic(err)
-			}
-			infoHash := mi.HashInfoBytes()
-			_ = infoHash // TODO: compare with hardcoded hash
-			tr, err := torrentClient.AddTorrent(mi)
-			if err != nil {
-				panic(err)
-			}
-		*/
-		panic(1)
-
-		/*
-			mi := &metainfo.MetaInfo{
-				CreationDate: time.Now().Unix(),
-				CreatedBy:    "erigon",
-				AnnounceList: Trackers,
-			}
-			infoHash := metainfo.NewHashFromHex("8800e00ccdd575c01198cfab5adb5957100a0baa")
-			magnet := mi.Magnet(&infoHash, nil)
-			tr, err := torrentClient.AddMagnet(magnet.String())
-			if err != nil {
-				panic(err)
-			}
-			go func() {
-				// Wait until we get the metainfo, then check for the data.
-				<-tr.GotInfo()
-				fmt.Printf("got info: %x\n", tr.Info().Pieces)
-				//tr.DownloadAll()
-				//torrentClient.WaitAll()
-				//tr.VerifyData()
-			}()
-
-			for i := 0; i < 100; i++ {
-				wr := tr.Stats().BytesWritten
-				fmt.Printf("alex: %s, %dMb, %d\n", tr.Name(), wr.Int64()/1024/1024, tr.Stats().ActivePeers)
-				time.Sleep(2 * time.Second)
-			}
-
-			torrentClient.WaitAll()
-
-			ts := &torrent.TorrentSpec{
-				Trackers: Trackers,
-				InfoHash: infoHash,
-				//DisplayName: a[0].Name,
-				InfoBytes: mi.InfoBytes,
-			}
-
-			_ = ts
-			//fmt.Printf("%x, %x\n", infoHash, infoBytes)
-		*/
-
-		//fmt.Printf("%s\n", a[0].Files[0].Path, ts.)
 		panic(1)
 	}
 
@@ -369,7 +287,7 @@ func (cli *Client) GetSnapshots(tx kv.Tx, networkID uint64) (map[snapshotsync.Sn
 }
 
 func (cli *Client) SeedSnapshot(name string, path string) (metainfo.Hash, error) {
-	info, err := BuildInfoBytesForSnapshot(path, MdbxFilename)
+	info, err := BuildInfoBytesForFile(path, MdbxFilename)
 	if err != nil {
 		return [20]byte{}, err
 	}
@@ -482,11 +400,73 @@ func SnapshotSeeding(chainDB kv.RwDB, cli *Client, name string, snapshotsDir str
 	return nil
 }
 
-// verifyHashesIfNeed - in case when file exists, but .torrent doesn't - .torrent file will
-// be created, but adding it will require verify file (and pieces) checksum. This may take long time.
-// But once it done - result will stored into `piece completion storage` and this func will finish fast (without disk IO).
-// Call it after adding all .torrent files to client.
+// AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
+// added first time - pieces verification process will start (disk IO heavy) - progress
+// kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
+func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client, preverifiedHashes PreverifiedSnapshotHashes) error {
+	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+		mi, err := metainfo.LoadFromFile(torrentFilePath)
+		if err != nil {
+			return err
+		}
+		mi.AnnounceList = Trackers
+
+		// skip non-preverified files
+		_, torrentFileName := filepath.Split(torrentFilePath)
+		hashString, ok := preverifiedHashes.Segments[torrentFileName]
+		if !ok {
+			return nil
+		}
+		expect := metainfo.NewHashFromHex(hashString)
+		if mi.HashInfoBytes() != expect {
+			return fmt.Errorf("file %s has unexpected hash %x, expected %x", torrentFileName, mi.HashInfoBytes(), expect)
+		}
+
+		tr, err := torrentClient.AddTorrent(mi)
+		if err != nil {
+			return err
+		}
+		tr.AllowDataDownload()
+		tr.AllowDataUpload()
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	waitForChecksumVerify(ctx, torrentClient)
+	return nil
+}
+
+// DownloadEverythingIfNeed - add hard-coded hashes (if client doesn't have) as magnet links and download everything
+func DownloadEverythingIfNeed(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes PreverifiedSnapshotHashes) {
+	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
+	for _, hashStr := range preverifiedHashes.Segments {
+		infoHash := metainfo.NewHashFromHex(hashStr)
+		if _, ok := torrentClient.Torrent(infoHash); ok {
+			continue
+		}
+		magnet := mi.Magnet(&infoHash, nil)
+		t, err := torrentClient.AddMagnet(magnet.String())
+		if err != nil {
+			panic(err)
+		}
+		t.AllowDataDownload()
+		t.AllowDataUpload()
+		go func() {
+			select {
+			case <-ctx.Done():
+				t.Drop()
+				return
+			case <-t.GotInfo():
+			}
+			t.DownloadAll()
+		}()
+	}
+
+	waitForDownloadAll(ctx, torrentClient)
+}
+
 func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 	//TODO: tr.VerifyData() - find when to call it
 	ctx, cancel := context.WithCancel(ctx)

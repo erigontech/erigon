@@ -19,7 +19,7 @@ func init() {
 func PrintMetaInfoHash(path string) error {
 	t := time.Now()
 	mi := metainfo.MetaInfo{}
-	info, err := snapshotsync.BuildInfoBytesForSnapshot(path, snapshotsync.MdbxFilename)
+	info, err := snapshotsync.BuildInfoBytesForFile(path, snapshotsync.MdbxFilename)
 	if err != nil {
 		return err
 	}

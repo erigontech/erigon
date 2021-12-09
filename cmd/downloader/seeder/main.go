@@ -100,7 +100,7 @@ func Seed(ctx context.Context, datadir string) error {
 		if common.IsCanceled(ctx) {
 			return libcommon.ErrStopped
 		}
-		info, err := trnt.BuildInfoBytesForSnapshot(v, trnt.MdbxFilename)
+		info, err := trnt.BuildInfoBytesForFile(v, trnt.MdbxFilename)
 		if err != nil {
 			return err
 		}
