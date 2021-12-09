@@ -280,6 +280,9 @@ func HeadersDownward(
 	if err := canonicalHeadersCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
+	if s.BlockNumber >= cfg.hd.Progress() {
+		u.UnwindTo(cfg.hd.Progress(), common.Hash{})
+	}
 	// Downward sync if we need to process more (TODO)
 	return tx.Commit()
 }
@@ -420,6 +423,7 @@ func HeadersForward(
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
+	cfg.hd.SetBackwards(false)
 	cfg.hd.SetFetching(true)
 	defer cfg.hd.SetFetching(false)
 	headerProgress = cfg.hd.Progress()

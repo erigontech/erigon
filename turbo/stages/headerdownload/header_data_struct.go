@@ -220,7 +220,7 @@ type HeaderDownload struct {
 	// proof-of-stake
 	lastProcessedPayload   uint64      // The last header number inserted when processing the chain backwards
 	expectedHash           common.Hash // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
-	nextBlockNumberRequest uint64      // Build proof-of-stake P2P requests
+	nextBlockNumberRequest uint64      // next block height to request
 	backwards              bool        // True if the chain is syncing backwards or not
 }
 
