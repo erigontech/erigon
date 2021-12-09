@@ -623,6 +623,10 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	if hd.backwards {
+		hd.requestAssembler.PrepareNextRequest()
+		return
+	}
 	anchor, ok := hd.anchors[req.Hash]
 	if !ok {
 		return
@@ -751,7 +755,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, l
 		}
 		// If we miss some headers or an header results to be invalid, we ask for them again
 		if header.Number.Uint64() != hd.lastProcessedPayload-1 || header.Hash() != hd.expectedHash {
-			hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload - 1)
+			hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload)
 			break
 		}
 		rawdb.WriteHeader(tx, &header)
@@ -779,7 +783,7 @@ func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
 	hd.expectedHash = hash
 }
 
-func (hd *HeaderDownload) AppendSegmentPOS(segment ChainSegment) {
+func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))

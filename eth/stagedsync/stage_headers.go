@@ -239,19 +239,16 @@ func HeadersDownward(
 			}
 		}
 
-		maxRequests := 64
 		req = cfg.hd.RequestMoreHeadersForPOS(currentTime)
-		for req != nil && sentToPeer && maxRequests > 0 {
-			req = cfg.hd.RequestMoreHeadersForPOS(currentTime)
-			if req != nil {
-				_, sentToPeer = cfg.headerReqSend(ctx, req)
-				if sentToPeer {
-					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
-					log.Trace("Sent request", "height", req.Number)
-				}
+
+		if req != nil {
+			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			if sentToPeer {
+				cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
+				log.Trace("Sent request", "height", req.Number)
 			}
-			maxRequests--
 		}
+
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, logPrefix, logEvery.C); err != nil {

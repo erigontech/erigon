@@ -494,7 +494,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			}
 		} else if penalty == headerdownload.NoPenalty && cs.Hd.GetBackwards() {
 			for _, segment := range segments {
-				cs.Hd.AppendSegmentPOS(segment)
+				cs.Hd.ProcessSegmentPOS(segment)
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{

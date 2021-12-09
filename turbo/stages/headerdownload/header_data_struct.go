@@ -221,7 +221,7 @@ type HeaderDownload struct {
 	lastProcessedPayload uint64           // The last header number inserted when processing the chain backwards
 	expectedHash         common.Hash      // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
 	requestAssembler     RequestAssembler // Build proof-of-stake P2P requests
-	backwards            bool             // Tell if the chain is syncing backwards or not
+	backwards            bool             // True if the chain is syncing backwards or not
 	PosHeaders           []types.Header
 }
 
@@ -370,8 +370,6 @@ func (r *RequestAssembler) AssembleRequest() *HeaderRequest {
 		r.overwriteBlockNumberRequest = 0
 	} else {
 		blocknum = r.nextBlockNumberRequest
-		// Prepare next request
-		r.nextBlockNumberRequest -= 192
 	}
 	return &HeaderRequest{
 		Hash:    common.Hash{},
@@ -379,5 +377,19 @@ func (r *RequestAssembler) AssembleRequest() *HeaderRequest {
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
+	}
+}
+
+// PrepareNextRequest prepare the next request to be fetched
+func (r *RequestAssembler) PrepareNextRequest() {
+	// If we prioritize a certain header, let's fetch that one first
+	if r.overwriteBlockNumberRequest > 0 {
+		r.overwriteBlockNumberRequest = 0
+	} else {
+		if r.nextBlockNumberRequest > 192 {
+			r.nextBlockNumberRequest -= 192
+		} else {
+			r.nextBlockNumberRequest = 0
+		}
 	}
 }
