@@ -616,11 +616,15 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 		return nil
 	}
 
-	for hd.fetched[hd.CurrentNumber] {
+	for hd.fetched[uint32(hd.CurrentNumber)] {
 		hd.CurrentNumber--
 	}
 	defer func() {
-		hd.CurrentNumber -= 192
+		if hd.CurrentNumber < 192 {
+			hd.CurrentNumber = 0
+		} else {
+			hd.CurrentNumber -= 192
+		}
 	}()
 	return &HeaderRequest{Hash: common.Hash{}, Number: hd.CurrentNumber, Length: 192, Skip: 0, Reverse: true}
 
@@ -761,7 +765,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, l
 		}
 		// This is the parent of the last processed block
 		if header.Hash() != hd.expectedHash {
-			hd.fetched[header.Number.Uint64()] = false
+			hd.fetched[uint32(header.Number.Uint64())] = false
 			hd.CurrentNumber = hd.lastProcessedPayload
 			break
 		}
@@ -800,10 +804,10 @@ func (hd *HeaderDownload) AppendSegmentPOS(segment ChainSegment) {
 	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		blocknum := segmentFragment.Header.Number.Uint64()
-		if blocknum > hd.lastProcessedPayload-1 || hd.fetched[blocknum] {
+		if blocknum > hd.lastProcessedPayload-1 || hd.fetched[uint32(blocknum)] {
 			continue
 		}
-		hd.fetched[blocknum] = true
+		hd.fetched[uint32(blocknum)] = true
 		hd.PosHeaders = append(hd.PosHeaders, *segmentFragment.Header)
 	}
 }
@@ -1116,6 +1120,18 @@ func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
 	defer hd.lock.Unlock()
 	hd.lastProcessedPayload = lastProcessed
 	hd.CurrentNumber = lastProcessed - 1
+}
+
+func (hd *HeaderDownload) SetBackwards(backwards bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.backwards = backwards
+}
+
+func (hd *HeaderDownload) GetBackwards() bool {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	return hd.backwards
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {

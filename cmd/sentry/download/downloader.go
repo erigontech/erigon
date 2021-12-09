@@ -471,7 +471,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 		})
 	}
 	if segments, penalty, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
-		if penalty == headerdownload.NoPenalty && !cs.Hd.IsBackwards {
+		if penalty == headerdownload.NoPenalty && !cs.Hd.GetBackwards() {
 			var canRequestMore bool
 			for _, segment := range segments {
 				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
@@ -492,7 +492,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 				}
 				cs.Penalize(ctx, penalties)
 			}
-		} else if penalty == headerdownload.NoPenalty && cs.Hd.IsBackwards {
+		} else if penalty == headerdownload.NoPenalty && cs.Hd.GetBackwards() {
 			for _, segment := range segments {
 				cs.Hd.AppendSegmentPOS(segment)
 			}

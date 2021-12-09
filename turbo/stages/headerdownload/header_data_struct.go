@@ -219,12 +219,11 @@ type HeaderDownload struct {
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
 	// proof-of-stake
 	lastProcessedPayload uint64
-	fetched              map[uint64]bool
+	fetched              map[uint32]bool
 	expectedHash         common.Hash
 	CurrentNumber        uint64
-	IsBackwards          bool
+	backwards            bool
 	PosHeaders           []types.Header
-	counter              uint64
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -241,7 +240,7 @@ func NewHeaderDownload(
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
 		badHeaders:         make(map[common.Hash]struct{}),
-		fetched:            make(map[uint64]bool),
+		fetched:            make(map[uint32]bool),
 		anchors:            make(map[common.Hash]*Anchor),
 		persistedLinkLimit: persistentLinkLimit,
 		linkLimit:          linkLimit - persistentLinkLimit,

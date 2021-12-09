@@ -133,8 +133,6 @@ func HeadersDownward(
 	header := <-cfg.reverseDownloadCh
 	*cfg.waitingPosHeaders = false
 
-	defer tx.Commit()
-
 	headerNumber := header.Number.Uint64()
 
 	blockHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
@@ -153,19 +151,22 @@ func HeadersDownward(
 	}
 
 	// Write current payload
-	/*rawdb.WriteHeader(tx, &header)
+	rawdb.WriteHeader(tx, &header)
 	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
 		return err
-	}*/
+	}
 	// if we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		return s.Update(tx, header.Number.Uint64())
+		if err := s.Update(tx, header.Number.Uint64()); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
-	cfg.hd.IsBackwards = true
+	cfg.hd.SetBackwards(true)
 	cfg.hd.CurrentNumber = header.Number.Uint64() - 1
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
@@ -219,9 +220,11 @@ func HeadersDownward(
 			case <-ctx.Done():
 				stopped = true
 			case <-logEvery.C:
-				log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
-					"now", cfg.hd.CurrentNumber, "blk/sec", float64(prevProgress-cfg.hd.POSProress())/float64(logInterval/time.Second))
-				prevProgress = cfg.hd.POSProress()
+				if cfg.hd.POSProress() <= prevProgress {
+					log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
+						"now", cfg.hd.CurrentNumber, "blk/sec", float64(prevProgress-cfg.hd.POSProress())/float64(logInterval/time.Second))
+					prevProgress = cfg.hd.POSProress()
+				}
 			}
 			timer.Stop()
 		}
@@ -236,8 +239,20 @@ func HeadersDownward(
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
-		cfg.penalize(ctx, []headerdownload.PenaltyItem{})
 
+		maxRequests := 64
+		req = cfg.hd.RequestMoreHeadersForPOS(currentTime)
+		for req != nil && sentToPeer && maxRequests > 0 {
+			req = cfg.hd.RequestMoreHeadersForPOS(currentTime)
+			if req != nil {
+				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				if sentToPeer {
+					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
+					log.Trace("Sent request", "height", req.Number)
+				}
+			}
+			maxRequests--
+		}
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, logPrefix, logEvery.C); err != nil {
@@ -248,12 +263,12 @@ func HeadersDownward(
 			cfg.announceNewHashes(ctx, announces)
 		}
 		if inSync { // We do not break unless there best header changed
+			s.Update(tx, header.Number.Uint64())
 			break
 		}
 	}
-	cfg.hd.IsBackwards = true
 	// Downward sync if we need to process more (TODO)
-	return s.Update(tx, header.Number.Uint64())
+	return tx.Commit()
 }
 
 // HeadersForward progresses Headers stage in the forward direction
