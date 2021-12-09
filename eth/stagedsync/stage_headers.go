@@ -167,6 +167,11 @@ func HeadersDownward(
 		if err := s.Update(tx, header.Number.Uint64()); err != nil {
 			return err
 		}
+		// For the sake of simplicity we can just assume it will be valid for now. (TODO: move to execution stage)
+		cfg.statusCh <- privateapi.ExecutionStatus{
+			Status:   privateapi.Valid,
+			HeadHash: header.Hash(),
+		}
 		return tx.Commit()
 	}
 	cfg.hd.SetBackwards(true)
