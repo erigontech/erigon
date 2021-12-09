@@ -617,7 +617,13 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 		return nil
 	}
 	// Assemble the request
-	return hd.requestAssembler.AssembleRequest()
+	return &HeaderRequest{
+		Hash:    common.Hash{},
+		Number:  hd.nextBlockNumberRequest,
+		Length:  192,
+		Skip:    0,
+		Reverse: true,
+	}
 
 }
 
@@ -625,7 +631,7 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.backwards {
-		hd.requestAssembler.PrepareNextRequest()
+		hd.nextBlockNumberRequest -= 191
 		return
 	}
 	anchor, ok := hd.anchors[req.Hash]
@@ -741,7 +747,6 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 
 func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollector *etl.Collector, headerCollector *etl.Collector, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	if len(hd.PosHeaders) == 0 {
-		hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload)
 		return false, nil
 	}
 	hd.lock.Lock()
@@ -786,7 +791,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollec
 		hd.expectedHash = header.ParentHash
 		hd.PosHeaders = hd.PosHeaders[1:]
 	}
-	hd.requestAssembler.AskForHeaderNumber(hd.lastProcessedPayload)
+	hd.nextBlockNumberRequest = hd.lastProcessedPayload
 	return false, nil
 }
 
@@ -1116,7 +1121,7 @@ func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.lastProcessedPayload = lastProcessed
-	hd.requestAssembler = NewRequestAssembler(lastProcessed - 1)
+	hd.nextBlockNumberRequest = lastProcessed - 1
 }
 
 func (hd *HeaderDownload) SetBackwards(backwards bool) {

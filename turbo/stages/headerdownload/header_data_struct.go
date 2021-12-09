@@ -218,11 +218,11 @@ type HeaderDownload struct {
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
 	// proof-of-stake
-	lastProcessedPayload uint64           // The last header number inserted when processing the chain backwards
-	expectedHash         common.Hash      // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
-	requestAssembler     RequestAssembler // Build proof-of-stake P2P requests
-	backwards            bool             // True if the chain is syncing backwards or not
-	PosHeaders           []types.Header
+	lastProcessedPayload   uint64      // The last header number inserted when processing the chain backwards
+	expectedHash           common.Hash // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	nextBlockNumberRequest uint64      // Build proof-of-stake P2P requests
+	backwards              bool        // True if the chain is syncing backwards or not
+	PosHeaders             []types.Header
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -339,53 +339,4 @@ func (s SeenAnnounces) Seen(hash common.Hash) bool {
 
 func (s *SeenAnnounces) Add(b common.Hash) {
 	s.hashes.ContainsOrAdd(b, struct{}{})
-}
-
-// RequestAssembler assemble requests for the backward proof-of-stake sync
-type RequestAssembler struct {
-	nextBlockNumberRequest      uint64 // block number that will be requested
-	overwriteBlockNumberRequest uint64 // block number that if set to a value different than 0, will be requested instead of nextBlockNumberRequest
-}
-
-// NewRequestAssembler create a new request assembler
-func NewRequestAssembler(nextBlockNumberRequest uint64) RequestAssembler {
-	return RequestAssembler{
-		nextBlockNumberRequest:      nextBlockNumberRequest,
-		overwriteBlockNumberRequest: 0,
-	}
-}
-
-// AskForHeaderNumber gives priority to a specific header number to be fetched
-func (r *RequestAssembler) AskForHeaderNumber(ask uint64) {
-	r.nextBlockNumberRequest = ask
-}
-
-// AssembleRequest gives priority to a specific header number to be fetched
-func (r *RequestAssembler) AssembleRequest() *HeaderRequest {
-	var blocknum uint64
-	// If we prioritize a certain header, let's fetch that one first
-	if r.overwriteBlockNumberRequest > 0 {
-		blocknum = r.overwriteBlockNumberRequest
-		r.overwriteBlockNumberRequest = 0
-	} else {
-		blocknum = r.nextBlockNumberRequest
-	}
-	return &HeaderRequest{
-		Hash:    common.Hash{},
-		Number:  blocknum,
-		Length:  192,
-		Skip:    0,
-		Reverse: true,
-	}
-}
-
-// PrepareNextRequest prepare the next request to be fetched
-func (r *RequestAssembler) PrepareNextRequest() {
-	// Prepare the next request
-	if r.nextBlockNumberRequest > 192 {
-		r.nextBlockNumberRequest -= 192
-	} else {
-		r.nextBlockNumberRequest = 0
-	}
-
 }
