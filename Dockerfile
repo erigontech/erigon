@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 FROM docker.io/library/golang:1.17-alpine3.14 AS builder
 
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
