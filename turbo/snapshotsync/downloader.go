@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"time"
 
@@ -40,12 +41,15 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 		panic(err)
 	}
 	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
+	//torrentConfig.SetListenAddr(":0")
 
 	torrentClient, err := torrent.NewClient(torrentConfig)
 	if err != nil {
 		log.Error("Fail to start torrnet client", "err", err)
 		return nil, fmt.Errorf("fail to start: %w", err)
 	}
+	log.Info(fmt.Sprintf("Torrent protocol listen: %s,  my IP: %s", torrentClient.ListenAddrs(), GetOutboundIP()))
+	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", seeding, torrentClient.PeerID()))
 
 	{
 		if err := BuildTorrentFilesIfNeed(context.Background(), snapshotsDir); err != nil {
@@ -61,6 +65,14 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 		}
 
 		fmt.Printf("download done, just seeding now\n")
+		for {
+			time.Sleep(10 * time.Second)
+			for _, t := range torrentClient.Torrents() {
+				stats := t.Stats()
+				l := fmt.Sprintf("(active=%d pending=%d seeders=%d)", stats.ActivePeers, stats.PendingPeers, stats.ConnectedSeeders)
+				log.Info("Snapshot stats", t.Name(), l)
+			}
+		}
 		time.Sleep(time.Hour)
 		torrentClient.Close()
 		progressStore.Close()
@@ -79,7 +91,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.ListenPort = 0
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
-	torrentConfig.Debug = false
+	torrentConfig.Debug = true
 	torrentConfig.Logger = NewAdapterLogger()
 	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 	return torrentConfig
@@ -522,42 +534,55 @@ func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
 			case <-logEvery.C:
 				var aggBytesCompleted, aggLen int64
 				var aggCompletedPieces, aggNumPieces, aggPartialPieces int
-				for _, t := range torrentClient.Torrents() {
-					var completedPieces, partialPieces int
-					psrs := t.PieceStateRuns()
-					for _, r := range psrs {
-						if r.Complete {
-							completedPieces += r.Length
-						}
-						if r.Partial {
-							partialPieces += r.Length
-						}
-					}
-					aggCompletedPieces += completedPieces
-					aggPartialPieces += partialPieces
-					aggNumPieces = t.NumPieces()
+				peers := map[torrent.PeerID]*torrent.PeerConn{}
 
+				for _, t := range torrentClient.Torrents() {
 					stats := t.Stats()
 
-					byteRate := int64(time.Second)
-					bytesReadUsefulData := stats.BytesReadUsefulData.Int64()
-					byteRate *= stats.BytesReadUsefulData.Int64() - prevBytesReadUsefulData
-					byteRate /= int64(interval)
-					aggByteRate += byteRate
+					select {
+					case <-t.GotInfo(): // some methods can call only after GotInfo
+						fmt.Printf("got some info\n")
 
-					prevBytesReadUsefulData = bytesReadUsefulData
-					aggBytesCompleted += t.BytesCompleted()
-					aggLen += t.Length()
+						var completedPieces, partialPieces int
+						psrs := t.PieceStateRuns()
+						for _, r := range psrs {
+							if r.Complete {
+								completedPieces += r.Length
+							}
+							if r.Partial {
+								partialPieces += r.Length
+							}
+						}
+						aggCompletedPieces += completedPieces
+						aggPartialPieces += partialPieces
+						aggNumPieces = t.NumPieces()
+
+						byteRate := int64(time.Second)
+						bytesReadUsefulData := stats.BytesReadUsefulData.Int64()
+						byteRate *= stats.BytesReadUsefulData.Int64() - prevBytesReadUsefulData
+						byteRate /= int64(interval)
+						aggByteRate += byteRate
+
+						prevBytesReadUsefulData = bytesReadUsefulData
+						aggBytesCompleted += t.BytesCompleted()
+						aggLen += t.Length()
+					default:
+					}
+
+					for _, peer := range t.PeerConns() {
+						peers[peer.PeerID] = peer
+					}
+					fmt.Printf("peers: %d, %d, %d\n", stats.ActivePeers, stats.PendingPeers, stats.ConnectedSeeders)
 				}
-
 				line := fmt.Sprintf(
-					"downloading: %s/%s, %d/%d pieces completed (%d partial): %v/s",
+					"downloading: %s/%s, %d/%d pieces completed (%d partial): %v/s, peers: %d",
 					humanize.Bytes(uint64(aggBytesCompleted)),
 					humanize.Bytes(uint64(aggLen)),
 					aggCompletedPieces,
 					aggNumPieces,
 					aggPartialPieces,
 					humanize.Bytes(uint64(aggByteRate)),
+					len(peers),
 				)
 				log.Info(line)
 			}
@@ -565,4 +590,17 @@ func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
 	}()
 
 	torrentClient.WaitAll()
+}
+
+// GetOutboundIP preferred outbound ip of this machine
+func GetOutboundIP() net.IP {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP
 }
