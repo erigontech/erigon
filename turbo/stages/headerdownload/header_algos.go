@@ -297,7 +297,7 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
-func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) (bool, error) {
+func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) bool {
 	anchorH := segment[len(segment)-1]
 	anchorHeader := anchorH.Header
 
@@ -305,10 +305,12 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) (bool
 	anchor, preExisting := hd.anchors[anchorHeader.ParentHash]
 	if !preExisting {
 		if anchorH.Number < hd.highestInDb {
-			return false, fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorH.Number, hd.highestInDb)
+			log.Warn(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", anchorH.Number, hd.highestInDb))
+			return false
 		}
 		if len(hd.anchors) >= hd.anchorLimit {
-			return false, fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
+			log.Warn(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
+			return false
 		}
 		anchor = &Anchor{
 			parentHash:    anchorHeader.ParentHash,
@@ -333,7 +335,7 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) (bool
 			hd.markPreverified(link)
 		}
 	}
-	return !preExisting, nil
+	return !preExisting
 }
 
 func (hd *HeaderDownload) pruneLinkQueue() {
@@ -537,32 +539,36 @@ func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
 	hd.removeUpwards(anchor.links)
 }
 
-func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest, *PenaltyItem) {
+func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest, []PenaltyItem) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	var penalties []PenaltyItem
 	if hd.anchorQueue.Len() == 0 {
 		log.Trace("Empty anchor queue")
-		return nil, nil
+		return nil, penalties
 	}
-	// Only process the anchors for which the nextRetryTime has already come
-	if (*hd.anchorQueue)[0].nextRetryTime > currentTime {
-		return nil, nil
+	for hd.anchorQueue.Len() > 0 {
+		anchor := (*hd.anchorQueue)[0]
+		// Only process the anchors for which the nextRetryTime has already come
+		if anchor.nextRetryTime > currentTime {
+			return nil, penalties
+		}
+		if anchor.timeouts < 10 {
+			// Produce a header request that would extend this anchor (add parent, parent of parent, etc.)
+			return &HeaderRequest{
+				Anchor:  anchor,
+				Hash:    anchor.parentHash,
+				Number:  anchor.blockHeight - 1,
+				Length:  192,
+				Skip:    0,
+				Reverse: true,
+			}, penalties
+		}
+		// Ancestors of this anchor seem to be unavailable, invalidate and move on
+		hd.invalidateAnchor(anchor, "suspected unavailability")
+		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 	}
-	anchor := (*hd.anchorQueue)[0]
-	if anchor.timeouts < 10 {
-		// Produce a header request that would extend this anchor (add parent, parent of parent, etc.)
-		return &HeaderRequest{
-			Anchor:  anchor,
-			Hash:    anchor.parentHash,
-			Number:  anchor.blockHeight - 1,
-			Length:  192,
-			Skip:    0,
-			Reverse: true,
-		}, nil
-	}
-	// Ancestors of this anchor seem to be unavailable, invalidate and move on
-	hd.invalidateAnchor(anchor, "suspected unavailability")
-	return nil, &PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}
+	return nil, penalties
 }
 
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
@@ -918,11 +924,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		log.Trace("Extended Up", "start", startNum, "end", endNum)
 	} else {
 		// NewAnchor
-		var err error
-		if requestMore, err = hd.newAnchor(subSegment, peerID); err != nil {
-			log.Debug("NewAnchor failed", "error", err)
-			return
-		}
+		requestMore = hd.newAnchor(subSegment, peerID)
 		log.Trace("NewAnchor", "start", startNum, "end", endNum)
 	}
 	//log.Info(hd.anchorState())

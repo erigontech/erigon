@@ -361,7 +361,7 @@ Loop:
 			break
 		}
 		currentTime := uint64(time.Now().Unix())
-		req, penalty := cfg.hd.RequestMoreHeaders(currentTime)
+		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
@@ -370,12 +370,12 @@ Loop:
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
-		if penalty != nil {
-			cfg.penalize(ctx, []headerdownload.PenaltyItem{*penalty})
+		if len(penalties) > 0 {
+			cfg.penalize(ctx, penalties)
 		}
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
 		for req != nil && sentToPeer && maxRequests > 0 {
-			req, penalty = cfg.hd.RequestMoreHeaders(currentTime)
+			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
@@ -384,8 +384,8 @@ Loop:
 					log.Trace("Sent request", "height", req.Number)
 				}
 			}
-			if penalty != nil {
-				cfg.penalize(ctx, []headerdownload.PenaltyItem{*penalty})
+			if len(penalties) > 0 {
+				cfg.penalize(ctx, penalties)
 			}
 			maxRequests--
 		}
