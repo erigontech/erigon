@@ -598,7 +598,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error), terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error), terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
@@ -644,7 +644,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 			continue
 		}
 
-		isTrans, err := hf(link.header, link.hash, link.blockHeight, terminalTotalDifficulty)
+		isTrans, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight, terminalTotalDifficulty)
 		if err != nil {
 			return false, err
 		}
@@ -659,6 +659,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 		}
 		link.persisted = true
 		link.header = nil // Drop header reference to free memory, as we won't need it anymore
+		link.headerRaw = nil
 		heap.Push(hd.persistedLinkQueue, link)
 		if len(link.next) > 0 {
 			hd.insertList = append(hd.insertList, link.next...)
@@ -720,6 +721,7 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 		blockHeight: h.Number,
 		hash:        h.Hash,
 		header:      h.Header,
+		headerRaw:   h.HeaderRaw,
 		persisted:   persisted,
 	}
 	hd.links[h.Hash] = link
@@ -731,13 +733,13 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
-	return func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
-		return hi.FeedHeader(db, headerReader, header, hash, blockHeight, terminalTotalDifficulty)
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
+	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
+		return hi.FeedHeader(db, headerReader, header, headerRaw, hash, blockHeight, terminalTotalDifficulty)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error) {
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return false, nil
@@ -823,15 +825,11 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 		// This makes sure we end up chosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
-	data, err2 := rlp.EncodeToBytes(header)
-	if err2 != nil {
-		return false, fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
-	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return false, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 
-	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
+	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
 		return false, fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 
