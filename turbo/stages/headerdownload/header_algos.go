@@ -746,18 +746,18 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 }
 
 func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollector *etl.Collector, headerCollector *etl.Collector, logPrefix string, logChannel <-chan time.Time) (bool, error) {
-	if len(hd.PosHeaders) == 0 {
+	if len(hd.insertList) == 0 {
 		return false, nil
 	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	sort.Slice(hd.PosHeaders, func(i, j int) bool {
-		return hd.PosHeaders[i].Number.Uint64() > hd.PosHeaders[j].Number.Uint64()
+	sort.Slice(hd.insertList, func(i, j int) bool {
+		return hd.insertList[i].header.Number.Uint64() > hd.insertList[j].header.Number.Uint64()
 	})
-	for len(hd.PosHeaders) > 0 {
-		header := hd.PosHeaders[0]
+	for len(hd.insertList) > 0 {
+		header := hd.insertList[0].header
 		if header.Number.Uint64() >= hd.lastProcessedPayload {
-			hd.PosHeaders = hd.PosHeaders[1:]
+			hd.insertList = hd.insertList[1:]
 			continue
 		}
 		// If we miss some headers or an header results to be invalid, we ask for them again
@@ -765,7 +765,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollec
 			break
 		}
 		if header.Hash() != hd.expectedHash {
-			hd.PosHeaders = hd.PosHeaders[1:]
+			hd.insertList = hd.insertList[1:]
 			break
 		}
 		// Write the encoded header
@@ -789,7 +789,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollec
 			return true, nil
 		}
 		hd.expectedHash = header.ParentHash
-		hd.PosHeaders = hd.PosHeaders[1:]
+		hd.insertList = hd.insertList[1:]
 	}
 	hd.nextBlockNumberRequest = hd.lastProcessedPayload
 	return false, nil
@@ -806,7 +806,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment) {
 	defer hd.lock.Unlock()
 	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
-		hd.PosHeaders = append(hd.PosHeaders, *segmentFragment.Header)
+		hd.insertList = append(hd.insertList, &Link{header: segmentFragment.Header})
 	}
 }
 

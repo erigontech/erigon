@@ -222,7 +222,6 @@ type HeaderDownload struct {
 	expectedHash           common.Hash // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
 	nextBlockNumberRequest uint64      // Build proof-of-stake P2P requests
 	backwards              bool        // True if the chain is syncing backwards or not
-	PosHeaders             []types.Header
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
