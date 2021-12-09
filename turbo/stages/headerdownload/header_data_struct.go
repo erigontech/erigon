@@ -342,3 +342,44 @@ func (s SeenAnnounces) Seen(hash common.Hash) bool {
 func (s *SeenAnnounces) Add(b common.Hash) {
 	s.hashes.ContainsOrAdd(b, struct{}{})
 }
+
+// RequestAssembler assemble requests for the backward proof-of-stake sync
+type RequestAssembler struct {
+	nextBlockNumberRequest      uint64 // block number that will be requested
+	overwriteBlockNumberRequest uint64 // block number that if set to a value different than 0, will be requested instead of nextBlockNumberRequest
+}
+
+// NewRequestAssembler create a new request assembler
+func NewRequestAssembler(nextBlockNumberRequest uint64) RequestAssembler {
+	return RequestAssembler{
+		nextBlockNumberRequest:      nextBlockNumberRequest,
+		overwriteBlockNumberRequest: 0,
+	}
+}
+
+// AskForHeaderNumber gives priority to a specific header number to be fetched
+func (r *RequestAssembler) AskForHeaderNumber(ask uint64) {
+	r.overwriteBlockNumberRequest = ask
+}
+
+// AssembleRequest gives priority to a specific header number to be fetched
+func (r *RequestAssembler) AssembleRequest() HeaderRequest {
+	var blocknum uint64
+	// If we prioritize a certain header, let's fetch that one first
+	if r.overwriteBlockNumberRequest > 0 {
+		blocknum = r.overwriteBlockNumberRequest
+		// priority has been satisfied so we update overwriteBlockNumberRequest
+		r.overwriteBlockNumberRequest = 0
+	} else {
+		blocknum = r.nextBlockNumberRequest
+		// Prepare next request
+		r.nextBlockNumberRequest -= 192
+	}
+	return HeaderRequest{
+		Hash:    common.Hash{},
+		Number:  blocknum,
+		Length:  192,
+		Skip:    0,
+		Reverse: true,
+	}
+}
