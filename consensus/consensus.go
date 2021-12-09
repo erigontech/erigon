@@ -149,6 +149,7 @@ type PoW interface {
 	Hashrate() float64
 }
 
+// PoSA is a consensus engine based on proof-of-stake-authority used by Binance Smart Chain.
 type PoSA interface {
 	Engine
 
