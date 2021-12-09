@@ -29,7 +29,7 @@ import (
 )
 
 var (
-    SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 // ChainHeaderReader defines a small collection of methods needed to access the local
