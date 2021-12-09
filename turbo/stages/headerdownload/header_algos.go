@@ -305,11 +305,11 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) bool 
 	anchor, preExisting := hd.anchors[anchorHeader.ParentHash]
 	if !preExisting {
 		if anchorH.Number < hd.highestInDb {
-			log.Warn(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", anchorH.Number, hd.highestInDb))
+			log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", anchorH.Number, hd.highestInDb))
 			return false
 		}
 		if len(hd.anchors) >= hd.anchorLimit {
-			log.Warn(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
+			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
 			return false
 		}
 		anchor = &Anchor{
