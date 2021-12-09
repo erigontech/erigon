@@ -218,11 +218,11 @@ type HeaderDownload struct {
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
 	// proof-of-stake
-	lastProcessedPayload uint64
-	fetched              map[uint32]bool
-	expectedHash         common.Hash
-	CurrentNumber        uint64
-	backwards            bool
+	lastProcessedPayload uint64          // The last header number inserted when processing the chain backwards
+	fetched              map[uint32]bool // Check if the block number inserted has been fetched or not (TODO: make it memory efficient, but not really a problem)
+	expectedHash         common.Hash     // Parenthash of the last header inserted, we keep it to not fetch it back over and over
+	nextPayloadHeight    uint64          // Next blocknumber to request next
+	backwards            bool            // Tell if the chain is syncing backwards or not
 	PosHeaders           []types.Header
 }
 

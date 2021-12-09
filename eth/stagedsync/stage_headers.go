@@ -167,7 +167,6 @@ func HeadersDownward(
 		return tx.Commit()
 	}
 	cfg.hd.SetBackwards(true)
-	cfg.hd.CurrentNumber = header.Number.Uint64() - 1
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
@@ -220,10 +219,10 @@ func HeadersDownward(
 			case <-ctx.Done():
 				stopped = true
 			case <-logEvery.C:
-				if cfg.hd.POSProress() <= prevProgress {
+				if cfg.hd.Progress() <= prevProgress {
 					log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
-						"now", cfg.hd.CurrentNumber, "blk/sec", float64(prevProgress-cfg.hd.POSProress())/float64(logInterval/time.Second))
-					prevProgress = cfg.hd.POSProress()
+						"now", cfg.hd.Progress(), "blk/sec", float64(prevProgress-cfg.hd.Progress())/float64(logInterval/time.Second))
+					prevProgress = cfg.hd.Progress()
 				}
 			}
 			timer.Stop()

@@ -615,18 +615,23 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 		log.Trace("Empty anchor queue")
 		return nil
 	}
-
-	for hd.fetched[uint32(hd.CurrentNumber)] {
-		hd.CurrentNumber--
+	if hd.nextPayloadHeight == 0 {
+		return nil
 	}
+	// Find the next block that has not been checked
+	for hd.fetched[uint32(hd.nextPayloadHeight)] {
+		hd.nextPayloadHeight--
+	}
+	// After assembling the request, we prepare the next request
 	defer func() {
-		if hd.CurrentNumber < 192 {
-			hd.CurrentNumber = 0
+		if hd.nextPayloadHeight < 192 {
+			hd.nextPayloadHeight = 0
 		} else {
-			hd.CurrentNumber -= 192
+			hd.nextPayloadHeight -= 192
 		}
 	}()
-	return &HeaderRequest{Hash: common.Hash{}, Number: hd.CurrentNumber, Length: 192, Skip: 0, Reverse: true}
+	// Assemble the request
+	return &HeaderRequest{Hash: common.Hash{}, Number: hd.nextPayloadHeight, Length: 192, Skip: 0, Reverse: true}
 
 }
 
@@ -760,13 +765,13 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, logPrefix string, l
 			continue
 		}
 		if header.Number.Uint64() != hd.lastProcessedPayload-1 {
-			hd.CurrentNumber = hd.lastProcessedPayload
+			hd.nextPayloadHeight = hd.lastProcessedPayload
 			break
 		}
 		// This is the parent of the last processed block
 		if header.Hash() != hd.expectedHash {
 			hd.fetched[uint32(header.Number.Uint64())] = false
-			hd.CurrentNumber = hd.lastProcessedPayload
+			hd.nextPayloadHeight = hd.lastProcessedPayload
 			break
 		}
 		rawdb.WriteHeader(tx, &header)
@@ -792,10 +797,6 @@ func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.expectedHash = hash
-}
-
-func (hd *HeaderDownload) POSProress() uint64 {
-	return hd.lastProcessedPayload
 }
 
 func (hd *HeaderDownload) AppendSegmentPOS(segment ChainSegment) {
@@ -824,7 +825,11 @@ func (hd *HeaderDownload) GrabAnnounces() []Announce {
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.highestInDb
+	if hd.backwards {
+		return hd.lastProcessedPayload
+	} else {
+		return hd.highestInDb
+	}
 }
 
 func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
@@ -1119,7 +1124,7 @@ func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.lastProcessedPayload = lastProcessed
-	hd.CurrentNumber = lastProcessed - 1
+	hd.nextPayloadHeight = lastProcessed - 1
 }
 
 func (hd *HeaderDownload) SetBackwards(backwards bool) {
