@@ -59,6 +59,10 @@ func (ct CommonTx) GetData() []byte {
 	return ct.Data
 }
 
+func (ct CommonTx) IsContractDeploy() bool {
+	return ct.GetTo() == nil
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
@@ -369,11 +373,8 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -389,35 +390,23 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Value: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
-	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
-	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read S: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
@@ -538,4 +527,8 @@ func (tx LegacyTx) GetSender() (common.Address, bool) {
 
 func (tx *LegacyTx) SetSender(addr common.Address) {
 	tx.from.Store(addr)
+}
+
+func (tx LegacyTx) IsStarkNet() bool {
+	return false
 }

@@ -271,6 +271,13 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
+	case *CairoTransaction:
+		// Check that chain ID of tx matches the signer. We also accept ID zero here,
+		// because it indicates that the chain ID was not specified in the tx.
+		if t.ChainID != nil && !t.ChainID.IsZero() && !t.ChainID.Eq(&sg.chainID) {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		R, S, V = decodeSignature(sig)
 	default:
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}

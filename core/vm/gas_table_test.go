@@ -109,7 +109,7 @@ func TestEIP2200(t *testing.T) {
 			if used := tt.gaspool - gas; used != tt.used {
 				t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 			}
-			if refund := vmenv.IntraBlockState.GetRefund(); refund != tt.refund {
+			if refund := vmenv.IntraBlockState().GetRefund(); refund != tt.refund {
 				t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
 			}
 		})

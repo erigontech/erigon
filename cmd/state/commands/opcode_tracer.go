@@ -228,7 +228,7 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	}
 
 	pc16 := uint16(pc)
-	currentTxHash := env.TxHash
+	currentTxHash := env.TxContext().TxHash
 	currentTxDepth := opDepth - 1
 
 	ls := len(ot.stack)

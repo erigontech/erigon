@@ -200,7 +200,7 @@ func TestAddMod(t *testing.T) {
 			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
-		evmInterpreter = NewEVMInterpreter(env, env.Config)
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
 	)
 	tests := []struct {
@@ -289,7 +289,7 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
-		evmInterpreter = NewEVMInterpreter(env, env.Config)
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
 
 	env.interpreter = evmInterpreter
@@ -526,7 +526,7 @@ func TestOpMstore(t *testing.T) {
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
-		evmInterpreter = NewEVMInterpreter(env, env.Config)
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
 
 	env.interpreter = evmInterpreter
@@ -552,7 +552,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
-		evmInterpreter = NewEVMInterpreter(env, env.Config)
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
 
 	env.interpreter = evmInterpreter
@@ -575,7 +575,7 @@ func BenchmarkOpSHA3(bench *testing.B) {
 		}, TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
 		mem            = NewMemory()
-		evmInterpreter = NewEVMInterpreter(env, env.Config)
+		evmInterpreter = NewEVMInterpreter(env, env.Config())
 	)
 	env.interpreter = evmInterpreter
 	mem.Resize(32)

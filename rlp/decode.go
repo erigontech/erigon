@@ -242,18 +242,16 @@ func decodeBigIntNoPtr(s *Stream, val reflect.Value) error {
 }
 
 func decodeBigInt(s *Stream, val reflect.Value) error {
-	b, err := s.Bytes()
+	b, err := s.bigIntBytes()
 	if err != nil {
 		return wrapStreamError(err, val.Type())
 	}
+
+	// Set the integer bytes.
 	i := val.Interface().(*big.Int)
 	if i == nil {
 		i = new(big.Int)
 		val.Set(reflect.ValueOf(i))
-	}
-	// Reject leading zero bytes
-	if len(b) > 0 && b[0] == 0 {
-		return wrapStreamError(ErrCanonInt, val.Type())
 	}
 	i.SetBytes(b)
 	return nil
@@ -264,21 +262,16 @@ func decodeUint256NoPtr(s *Stream, val reflect.Value) error {
 }
 
 func decodeUint256(s *Stream, val reflect.Value) error {
-	b, err := s.Bytes()
+	b, err := s.Uint256Bytes()
 	if err != nil {
 		return wrapStreamError(err, val.Type())
 	}
-	if len(b) > 32 {
-		return wrapStreamError(errUintOverflow, val.Type())
-	}
+
+	// Set the integer bytes.
 	i := val.Interface().(*uint256.Int)
 	if i == nil {
 		i = new(uint256.Int)
 		val.Set(reflect.ValueOf(i))
-	}
-	// Reject leading zero bytes
-	if len(b) > 0 && b[0] == 0 {
-		return wrapStreamError(ErrCanonInt, val.Type())
 	}
 	i.SetBytes(b)
 	return nil
@@ -599,7 +592,7 @@ type Stream struct {
 	limited   bool
 
 	// auxiliary buffer for integer decoding
-	uintbuf []byte
+	uintbuf [32]byte
 
 	kind    Kind   // kind of value ahead
 	size    uint64 // size of value ahead
@@ -734,6 +727,59 @@ func (s *Stream) uint(maxbits int) (uint64, error) {
 	}
 }
 
+func (s *Stream) Uint256Bytes() ([]byte, error) {
+	b, err := s.bigIntBytes()
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > 32 {
+		return nil, errUintOverflow
+	}
+	return b, nil
+}
+
+func (s *Stream) bigIntBytes() ([]byte, error) {
+	var buffer []byte
+	kind, size, err := s.Kind()
+	switch {
+	case err != nil:
+		return nil, err
+	case kind == List:
+		return nil, ErrExpectedString
+	case kind == Byte:
+		buffer = s.uintbuf[:1]
+		buffer[0] = s.byteval
+		s.kind = -1 // re-arm Kind
+	case size == 0:
+		// Avoid zero-length read.
+		s.kind = -1
+	case size <= uint64(len(s.uintbuf)):
+		// For integers smaller than s.uintbuf, allocating a buffer
+		// can be avoided.
+		buffer = s.uintbuf[:size]
+		if err := s.readFull(buffer); err != nil {
+			return nil, err
+		}
+		// Reject inputs where single byte encoding should have been used.
+		if size == 1 && buffer[0] < 128 {
+			return nil, ErrCanonSize
+		}
+	default:
+		// For large integers, a temporary buffer is needed.
+		buffer = make([]byte, size)
+		if err := s.readFull(buffer); err != nil {
+			return nil, err
+		}
+	}
+
+	// Reject leading zero bytes.
+	if len(buffer) > 0 && buffer[0] == 0 {
+		return nil, ErrCanonInt
+	}
+
+	return buffer, nil
+}
+
 // Bool reads an RLP string of up to 1 byte and returns its contents
 // as a boolean. If the input does not contain an RLP string, the
 // returned error will be ErrExpectedString.
@@ -856,9 +902,7 @@ func (s *Stream) Reset(r io.Reader, inputLimit uint64) {
 	s.size = 0
 	s.kind = -1
 	s.kinderr = nil
-	if s.uintbuf == nil {
-		s.uintbuf = make([]byte, 8)
-	}
+	s.uintbuf = [32]byte{}
 	s.byteval = 0
 }
 
@@ -977,20 +1021,20 @@ func (s *Stream) readUint(size byte) (uint64, error) {
 		b, err := s.readByte()
 		return uint64(b), err
 	default:
-		start := int(8 - size)
-		for i := 0; i < start; i++ {
-			s.uintbuf[i] = 0
+		buffer := s.uintbuf[:8]
+		for i := range buffer {
+			buffer[i] = 0
 		}
-		if err := s.readFull(s.uintbuf[start:]); err != nil {
+		start := int(8 - size)
+		if err := s.readFull(buffer[start:]); err != nil {
 			return 0, err
 		}
-		if s.uintbuf[start] == 0 {
-			// Note: readUint is also used to decode integer
-			// values. The error needs to be adjusted to become
-			// ErrCanonInt in this case.
+		if buffer[start] == 0 {
+			// Note: readUint is also used to decode integer values.
+			// The error needs to be adjusted to become ErrCanonInt in this case.
 			return 0, ErrCanonSize
 		}
-		return binary.BigEndian.Uint64(s.uintbuf), nil
+		return binary.BigEndian.Uint64(buffer), nil
 	}
 }
 
