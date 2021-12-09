@@ -471,8 +471,8 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 		})
 	}
 
-	if segments, penalty, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
-		if penalty == headerdownload.NoPenalty {
+	if segments, penaltyKind, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
+		if penaltyKind == headerdownload.NoPenalty {
 			var canRequestMore bool
 			for _, segment := range segments {
 				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
@@ -484,7 +484,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 
 			if canRequestMore {
 				currentTime := uint64(time.Now().Unix())
-				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
+				req, penalty := cs.Hd.RequestMoreHeaders(currentTime)
 				if req != nil {
 					if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
 						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
@@ -492,7 +492,9 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 						log.Trace("Sent request", "height", req.Number)
 					}
 				}
-				cs.Penalize(ctx, penalties)
+				if penalty != nil {
+					cs.Penalize(ctx, []headerdownload.PenaltyItem{*penalty})
+				}
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
