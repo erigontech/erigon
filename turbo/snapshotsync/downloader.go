@@ -56,8 +56,12 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 		if err := AddTorrentFiles(context.Background(), snapshotsDir, torrentClient, preverifiedHashes); err != nil {
 			return nil, err
 		}
-		DownloadEverythingIfNeed(context.Background(), torrentClient, preverifiedHashes)
+		if err := DownloadEverythingIfNeed(context.Background(), torrentClient, preverifiedHashes); err != nil {
+			return nil, err
+		}
 
+		fmt.Printf("download done, just seeding now\n")
+		time.Sleep(time.Hour)
 		torrentClient.Close()
 		progressStore.Close()
 		panic(1)
@@ -439,7 +443,7 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 }
 
 // DownloadEverythingIfNeed - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func DownloadEverythingIfNeed(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes PreverifiedSnapshotHashes) {
+func DownloadEverythingIfNeed(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes PreverifiedSnapshotHashes) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, hashStr := range preverifiedHashes.Segments {
 		infoHash := metainfo.NewHashFromHex(hashStr)
@@ -449,7 +453,7 @@ func DownloadEverythingIfNeed(ctx context.Context, torrentClient *torrent.Client
 		magnet := mi.Magnet(&infoHash, nil)
 		t, err := torrentClient.AddMagnet(magnet.String())
 		if err != nil {
-			panic(err)
+			return err
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
@@ -465,6 +469,7 @@ func DownloadEverythingIfNeed(ctx context.Context, torrentClient *torrent.Client
 	}
 
 	waitForDownloadAll(ctx, torrentClient)
+	return nil
 }
 
 func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
@@ -479,7 +484,7 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 		for {
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case <-logEvery.C:
 				var aggBytesCompleted, aggLen int64
 				for _, t := range torrentClient.Torrents() {
@@ -497,7 +502,6 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 		}
 	}()
 	torrentClient.WaitAll() // wait for checksum verify
-	cancel()
 }
 
 func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
@@ -512,10 +516,9 @@ func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
 		var prevBytesReadUsefulData, aggByteRate int64
 
 		for {
-			time.Sleep(interval)
 			select {
 			case <-ctx.Done():
-				break
+				return
 			case <-logEvery.C:
 				var aggBytesCompleted, aggLen int64
 				var aggCompletedPieces, aggNumPieces, aggPartialPieces int
@@ -562,5 +565,4 @@ func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
 	}()
 
 	torrentClient.WaitAll()
-	cancel()
 }
