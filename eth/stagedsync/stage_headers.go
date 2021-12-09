@@ -377,7 +377,6 @@ func HeadersForward(
 					if header.Eip3675 {
 						return nil
 					}
-
 					if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
 						return rawdb.MarkTransition(tx, blockNum)
 					}
@@ -462,24 +461,7 @@ func HeadersForward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
-	go func() {
-		for {
-			timer := time.NewTimer(1 * time.Second)
-			select {
-			case <-ctx.Done():
-				stopped = true
-			case <-logEvery.C:
-				progress := cfg.hd.Progress()
-				logProgressHeaders(logPrefix, prevProgress, progress)
-				prevProgress = progress
-			case <-timer.C:
-				log.Trace("RequestQueueTime (header) ticked")
-			case <-cfg.hd.DeliveryNotify:
-				log.Trace("headerLoop woken up by the incoming request")
-			}
-			timer.Stop()
-		}
-	}()
+Loop:
 	for !stopped {
 
 		isTrans, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
@@ -517,12 +499,12 @@ func HeadersForward(
 			maxRequests--
 		}
 
+		// Send skeleton request if required
 		req = cfg.hd.RequestSkeleton()
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
-				log.Trace("Sent request", "height", req.Number)
+				log.Trace("Sent skeleton request", "height", req.Number)
 			}
 		}
 		// Load headers into the database
@@ -548,6 +530,22 @@ func HeadersForward(
 		if test {
 			break
 		}
+		timer := time.NewTimer(1 * time.Second)
+		select {
+		case <-ctx.Done():
+			stopped = true
+		case <-logEvery.C:
+			progress := cfg.hd.Progress()
+			logProgressHeaders(logPrefix, prevProgress, progress)
+			prevProgress = progress
+		case <-timer.C:
+			log.Trace("RequestQueueTime (header) ticked")
+		case <-cfg.hd.DeliveryNotify:
+			log.Trace("headerLoop woken up by the incoming request")
+		case <-cfg.hd.SkipCycleHack:
+			break Loop
+		}
+		timer.Stop()
 	}
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
