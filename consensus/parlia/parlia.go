@@ -1141,7 +1141,7 @@ func (p *Parlia) applyTransaction(
 
 		actualTx := (receivedTxs)[0]
 
-		if !bytes.Equal(expectedTx.SigningHash(p.chainConfig.ChainID).Bytes(), expectedHash.Bytes()) {
+		if actualTx.SigningHash(p.chainConfig.ChainID) != expectedHash {
 			actualHash := (actualTx).Hash()
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualHash.String(),
 				initExpectedTx.Nonce,
