@@ -1135,7 +1135,7 @@ func (p *Parlia) applyTransaction(
 			return err
 		}
 	} else {
-		if receivedTxs == nil || len(receivedTxs) == 0 || (receivedTxs)[0] == nil {
+		if len(receivedTxs) == 0 || (receivedTxs)[0] == nil {
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 
@@ -1153,8 +1153,6 @@ func (p *Parlia) applyTransaction(
 			)
 		}
 		expectedTx = actualTx
-		// move to next
-		receivedTxs = (receivedTxs)[1:]
 	}
 	state.Prepare(expectedTx.Hash(), common.Hash{}, len(txs))
 	_, err = applyMessage(msg, state, header, p.chainConfig, chainContext)
