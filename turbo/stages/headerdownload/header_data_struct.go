@@ -21,6 +21,7 @@ import (
 // present to allow potential reorgs
 type Link struct {
 	header      *types.Header
+	headerRaw   []byte
 	next        []*Link     // Allows iteration over links in ascending block height order
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
@@ -179,6 +180,7 @@ type HeaderRequest struct {
 	Length  uint64
 	Skip    uint64
 	Reverse bool
+	Anchor  *Anchor
 }
 
 type PenaltyItem struct {
