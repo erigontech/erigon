@@ -20,14 +20,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 )
 
-
 // Covalent change: This has been uncommented to be used in eth/backend.go
 // EthAPIBackend implements ethapi.Backend for full nodes
 type EthAPIBackend struct {
 	extRPCEnabled       bool
 	allowUnprotectedTxs bool
 	// eth                 *Ethereum 		// Covalent change: This has been left commented as there is no available eth instance in eth/backend.go
-	gpo                 *gasprice.Oracle
+	gpo *gasprice.Oracle
 }
 
 /*

@@ -25,8 +25,8 @@ import (
 	"sort"
 
 	"github.com/goccy/go-json"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -37,7 +37,7 @@ import (
 // Snapshot is the state of the validatorSet at a given point.
 type Snapshot struct {
 	config   *params.ParliaConfig // Consensus engine parameters to fine tune behavior
-	sigCache *lru.ARCCache // Cache of recent block signatures to speed up ecrecover
+	sigCache *lru.ARCCache        // Cache of recent block signatures to speed up ecrecover
 
 	Number           uint64                      `json:"number"`             // Block number where the snapshot was created
 	Hash             common.Hash                 `json:"hash"`               // Block hash where the snapshot was created

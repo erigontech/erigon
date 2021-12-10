@@ -160,7 +160,7 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   params.AuRaConfig
-	Parlia   params.ParliaConfig
+	Parlia params.ParliaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
