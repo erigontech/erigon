@@ -1163,7 +1163,7 @@ func (p *Parlia) applyTransaction(
 		*receivedTxs = (*receivedTxs)[1:]
 	}
 	state.Prepare(expectedTx.Hash(), common.Hash{}, len(txs))
-	_, err := applyMessage(msg, state, header, p.chainConfig, chainContext)
+	_, err = applyMessage(msg, state, header, p.chainConfig, chainContext)
 	if err != nil {
 		return err
 	}
