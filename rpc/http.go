@@ -249,7 +249,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("content-type", contentType)
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	codec := newHTTPServerConn(r, w)
+
 	defer codec.close()
 	s.serveSingleRequest(ctx, codec)
 }

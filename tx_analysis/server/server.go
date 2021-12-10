@@ -2,17 +2,14 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/tx_analysis/utils"
 )
 
@@ -54,10 +51,7 @@ func newServer() *Server {
 
 	srv := &Server{
 		httpServer: httpServer,
-		rpcClient:  utils.NewHTTPClient("http://127.0.0.1:8545"),
 	}
-
-	mux.HandleFunc("/blocks", srv.handleBlocks)
 
 	return srv
 }
@@ -82,38 +76,6 @@ func (s *Server) stop() error {
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	indexTemplate.Execute(w, nil)
-}
-
-func (s *Server) handleBlocks(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Content-Type", "application/json")
-
-	query, ok := r.URL.Query()["block"]
-
-	if !ok || len(query) < 1 {
-		w.Write([]byte("len < 1"))
-		// json.NewEncoder(w).Encode()
-		return
-	}
-
-	blockNstr := query[0]
-
-	blockN, err := strconv.ParseUint(blockNstr, 10, 64)
-	if err != nil {
-		fmt.Println("ERROROR")
-		w.Write([]byte("Error: ERRORROROR"))
-	}
-
-	var t rpctest.EthBlockByNumber
-	err = utils.GetBlockByNumber(&s.rpcClient, blockN, &t)
-	if err != nil {
-		fmt.Println("error block by number: ", err)
-		return
-	}
-
-	if err := json.NewEncoder(w).Encode(&t); err != nil {
-		fmt.Println(err)
-	}
 }
 
 func main() {
