@@ -123,6 +123,7 @@ func init() {
 	withIntegrityChecks(stateStags)
 	withMining(stateStags)
 	withChain(stateStags)
+	withHeimdall(stateStags)
 
 	rootCmd.AddCommand(stateStags)
 
@@ -130,6 +131,7 @@ func init() {
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
+	withHeimdall(loopIhCmd)
 
 	rootCmd.AddCommand(loopIhCmd)
 
@@ -137,6 +139,7 @@ func init() {
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
+	withHeimdall(loopExecCmd)
 
 	rootCmd.AddCommand(loopExecCmd)
 }
