@@ -15,8 +15,8 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
-	"golang.org/x/crypto/sha3"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon"
@@ -26,9 +26,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/systemcontracts/parlia"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts/parlia"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -200,11 +200,10 @@ type Parlia struct {
 
 	signer types.Signer
 
-	val      common.Address // Ethereum address of the signing key
-	signFn   SignerFn       // Signer function to authorize hashes with
-	signTxFn SignerTxFn
+	val            common.Address // Ethereum address of the signing key
+	signFn         SignerFn       // Signer function to authorize hashes with
+	signTxFn       SignerTxFn
 	signTxFnLegacy SignerTxFnLegacy
-
 
 	lock sync.RWMutex // Protects the signer fields
 
@@ -1132,7 +1131,7 @@ func (p *Parlia) applyTransaction(
 			panic("Oops")
 		}
 		return expectedTx
-	} (initExpectedTx)
+	}(initExpectedTx)
 
 	expectedHash := p.signer.Hash(expectedTx)
 	if msg.From() == p.val && mining {

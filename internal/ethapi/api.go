@@ -33,7 +33,7 @@ import (
 )
 
 // Covalent change: Empty Backend interface used for PublicBlockChainAPI below
-type Backend interface {}
+type Backend interface{}
 
 // Covalent change: This has been uncommented to be used for Parlia
 // PublicBlockChainAPI provides an API to access the Ethereum blockchain.
