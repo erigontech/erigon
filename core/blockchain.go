@@ -241,7 +241,7 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 	//ibs.Print(cc.Rules(header.Number.Uint64()))
 	//fmt.Printf("====tx processing end====\n")
 
-	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, nil, usedGas, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+	if _, _, err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	}); err != nil {
 		return err

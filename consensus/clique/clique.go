@@ -369,10 +369,10 @@ func (c *Clique) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, systemTxs *[]*types.Transaction, usedGas *uint64, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (err error) {
+func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	return nil
+	return systemTxs, usedGas, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,

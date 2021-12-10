@@ -608,10 +608,10 @@ func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.Cha
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
-func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, systemTxs *[]*types.Transaction, usedGas *uint64, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (err error) {
+func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	return nil
+	return nil, usedGas, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
@@ -620,7 +620,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, heade
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, []*types.Receipt, error) {
 
 	// Finalize block
-	ethash.Finalize(chainConfig, header, state, txs, uncles, r, nil, nil, e, chain, syscall)
+	ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, r), r, nil
 }

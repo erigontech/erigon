@@ -108,7 +108,7 @@ type Engine interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, systemTxs *[]*types.Transaction, usedGas *uint64, e EpochReader, chain ChainHeaderReader, syscall SystemCall) error
+	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.

@@ -648,13 +648,12 @@ func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
-	uncles []*types.Header, receipts types.Receipts, systemTxs *[]*types.Transaction, usedGas *uint64, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (err error) {
+func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error) {
 	// warn if not in majority fork
 	number := header.Number.Uint64()
 	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
-		return err
+		return systemTxs, usedGas, err
 	}
 	nextForkHash := forkid.NextForkHash(p.chainConfig, p.genesisHash, number)
 	if !snap.isMajorityFork(hex.EncodeToString(nextForkHash[:])) {
@@ -665,7 +664,7 @@ func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, stat
 	if header.Number.Uint64()%p.config.Epoch == 0 {
 		newValidators, err := p.getCurrentValidators(header.ParentHash, syscall)
 		if err != nil {
-			return err
+			return systemTxs, usedGas, err
 		}
 		// sort validator by address
 		sort.Sort(validatorsAscending(newValidators))
@@ -676,7 +675,7 @@ func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, stat
 
 		extraSuffix := len(header.Extra) - extraSeal
 		if !bytes.Equal(header.Extra[extraVanity:extraSuffix], validatorsBytes) {
-			return errMismatchingEpochValidators
+			return systemTxs, usedGas, errMismatchingEpochValidators
 		}
 	}
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -708,12 +707,12 @@ func (p *Parlia) Finalize(config *params.ChainConfig, header *types.Header, stat
 	val := header.Coinbase
 	err = p.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
 	if err != nil {
-		return err
+		return systemTxs, usedGas, err
 	}
 	// if len(*systemTxs) > 0 {
 	// 	return errors.New("the length of systemTxs do not match")
 	// }
-	return nil
+	return systemTxs, usedGas, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
@@ -729,7 +728,7 @@ func (p *Parlia) FinalizeAndAssemble(config *params.ChainConfig, header *types.H
 		receipts = make([]*types.Receipt, 0)
 	}
 	if header.Number.Cmp(common.Big1) == 0 {
-		err := p.initContract(state, header, cx, txs, receipts, nil, &header.GasUsed, true)
+		err := p.initContract(state, header, cx, txs, receipts, nil, header.GasUsed, true)
 		if err != nil {
 			log.Error("init contract failed 2")
 		}
@@ -749,14 +748,14 @@ func (p *Parlia) FinalizeAndAssemble(config *params.ChainConfig, header *types.H
 			}
 		}
 		if !signedRecently {
-			err = p.slash(spoiledVal, state, header, cx, txs, receipts, nil, &header.GasUsed, true)
+			err = p.slash(spoiledVal, state, header, cx, txs, receipts, nil, header.GasUsed, true)
 			if err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
 				log.Error("slash validator failed 2", "block hash", header.Hash(), "address", spoiledVal)
 			}
 		}
 	}
-	err := p.distributeIncoming(p.val, state, header, cx, txs, receipts, nil, &header.GasUsed, true)
+	err := p.distributeIncoming(p.val, state, header, cx, txs, receipts, nil, header.GasUsed, true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -987,7 +986,7 @@ func (p *Parlia) getCurrentValidators(blockHash common.Hash, syscall consensus.S
 
 // slash spoiled validators
 func (p *Parlia) distributeIncoming(val common.Address, state *state.IntraBlockState, header *types.Header, chain chainContext,
-	txs []types.Transaction, receipts types.Receipts, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	txs []types.Transaction, receipts types.Receipts, receivedTxs []types.Transaction, usedGas uint64, mining bool) error {
 	coinbase := header.Coinbase
 	balance := state.GetBalance(consensus.SystemAddress)
 	if balance.Cmp(u256.Num0) <= 0 {
@@ -1016,7 +1015,7 @@ func (p *Parlia) distributeIncoming(val common.Address, state *state.IntraBlockS
 
 // slash spoiled validators
 func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, header *types.Header, chain chainContext,
-	txs []types.Transaction, receipts types.Receipts, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	txs []types.Transaction, receipts types.Receipts, receivedTxs []types.Transaction, usedGas uint64, mining bool) error {
 	// method
 	method := "slash"
 	// get packed data
@@ -1035,7 +1034,7 @@ func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, 
 
 // init contract
 func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header, chain chainContext,
-	txs []types.Transaction, receipts types.Receipts, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	txs []types.Transaction, receipts types.Receipts, receivedTxs []types.Transaction, usedGas uint64, mining bool) error {
 	// method
 	method := "init"
 	// contracts
@@ -1067,7 +1066,7 @@ func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header
 }
 
 func (p *Parlia) distributeToSystem(amount *uint256.Int, state *state.IntraBlockState, header *types.Header, chain chainContext,
-	txs []types.Transaction, receipts types.Receipts, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	txs []types.Transaction, receipts types.Receipts, receivedTxs []types.Transaction, usedGas uint64, mining bool) error {
 	// get system message
 	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), nil, amount)
 	// apply message
@@ -1077,7 +1076,7 @@ func (p *Parlia) distributeToSystem(amount *uint256.Int, state *state.IntraBlock
 // slash spoiled validators
 func (p *Parlia) distributeToValidator(amount *uint256.Int, validator common.Address,
 	state *state.IntraBlockState, header *types.Header, chain chainContext,
-	txs []types.Transaction, receipts types.Receipts, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	txs []types.Transaction, receipts types.Receipts, receivedTxs []types.Transaction, usedGas uint64, mining bool) error {
 	// method
 	method := "deposit"
 
@@ -1115,7 +1114,7 @@ func (p *Parlia) applyTransaction(
 	header *types.Header,
 	chainContext chainContext,
 	txs []types.Transaction, receipts types.Receipts,
-	receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool,
+	receivedTxs []types.Transaction, usedGas uint64, mining bool,
 ) (err error) {
 	nonce := state.GetNonce(msg.From())
 	var expectedTx types.Transaction
@@ -1136,14 +1135,14 @@ func (p *Parlia) applyTransaction(
 			return err
 		}
 	} else {
-		if receivedTxs == nil || len(*receivedTxs) == 0 || (*receivedTxs)[0] == nil {
+		if receivedTxs == nil || len(receivedTxs) == 0 || (receivedTxs)[0] == nil {
 			return errors.New("supposed to get a actual transaction, but get none")
 		}
 
-		actualTx := (*receivedTxs)[0]
+		actualTx := (receivedTxs)[0]
 
-		if !bytes.Equal(p.signer.Hash(*actualTx).Bytes(), expectedHash.Bytes()) {
-			actualHash := (*actualTx).Hash()
+		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+			actualHash := (actualTx).Hash()
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualHash.String(),
 				initExpectedTx.Nonce,
 				initExpectedTx.To.String(),
@@ -1153,9 +1152,9 @@ func (p *Parlia) applyTransaction(
 				hex.EncodeToString(initExpectedTx.Data),
 			)
 		}
-		expectedTx = *actualTx
+		expectedTx = actualTx
 		// move to next
-		*receivedTxs = (*receivedTxs)[1:]
+		receivedTxs = (receivedTxs)[1:]
 	}
 	state.Prepare(expectedTx.Hash(), common.Hash{}, len(txs))
 	_, err = applyMessage(msg, state, header, p.chainConfig, chainContext)
