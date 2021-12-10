@@ -1167,30 +1167,11 @@ func (p *Parlia) applyTransaction(
 		*receivedTxs = (*receivedTxs)[1:]
 	}
 	state.Prepare(expectedTx.Hash(), common.Hash{}, len(txs))
-	gasUsed, err := applyMessage(msg, state, header, p.chainConfig, chainContext)
+	_, err := applyMessage(msg, state, header, p.chainConfig, chainContext)
 	if err != nil {
 		return err
 	}
-	txs = append(txs, expectedTx)
-	// var root []byte
-	if p.chainConfig.IsByzantiumBigInt(header.Number) {
-		// state.Finalise(true)
-	} else {
-		// Covalent todo: Is this needed? We will have to resolve it
-		// root = state.IntermediateRoot(p.chainConfig.IsEIP158BigInt(header.Number)).Bytes()
-	}
-	*usedGas += gasUsed
-	receipt := types.NewReceipt(false, *usedGas)
-	receipt.TxHash = expectedTx.Hash()
-	receipt.GasUsed = gasUsed
 
-	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = state.GetLogs(expectedTx.Hash())
-	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockHash = state.BlockHash()
-	receipt.BlockNumber = header.Number
-	receipt.TransactionIndex = uint(state.TxIndex())
-	receipts = append(receipts, receipt)
 	state.SetNonce(msg.From(), nonce+1)
 	return nil
 }
