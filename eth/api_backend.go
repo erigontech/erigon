@@ -16,17 +16,13 @@
 
 package eth
 
-import (
-	"github.com/ledgerwatch/erigon/eth/gasprice"
-)
-
 /*
 // EthAPIBackend implements ethapi.Backend for full nodes
 type EthAPIBackend struct {
 	extRPCEnabled       bool
 	allowUnprotectedTxs bool
 	eth                 *Ethereum
-	gpo *gasprice.Oracle
+	gpo                 *gasprice.Oracle
 }
 
 // ChainConfig returns the active chain configuration.
