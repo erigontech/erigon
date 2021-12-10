@@ -221,6 +221,7 @@ type HeaderDownload struct {
 	lastProcessedPayload   uint64      // The last header number inserted when processing the chain backwards
 	expectedHash           common.Hash // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
 	nextBlockNumberRequest uint64      // next block height to request
+	missingBlockNumber     uint64      // missing block number
 	backwards              bool        // True if the chain is syncing backwards or not
 }
 

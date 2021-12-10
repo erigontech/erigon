@@ -617,12 +617,22 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 		return nil
 	}
 	// Assemble the request
-	return &HeaderRequest{
-		Hash:    common.Hash{},
-		Number:  hd.nextBlockNumberRequest,
-		Length:  192,
-		Skip:    0,
-		Reverse: true,
+	if hd.missingBlockNumber > 0 {
+		return &HeaderRequest{
+			Hash:    common.Hash{},
+			Number:  hd.missingBlockNumber,
+			Length:  192,
+			Skip:    0,
+			Reverse: true,
+		}
+	} else {
+		return &HeaderRequest{
+			Hash:    common.Hash{},
+			Number:  hd.nextBlockNumberRequest,
+			Length:  192,
+			Skip:    0,
+			Reverse: true,
+		}
 	}
 
 }
@@ -631,7 +641,9 @@ func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout u
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.backwards {
-		hd.nextBlockNumberRequest -= 191
+		if hd.missingBlockNumber == 0 {
+			hd.nextBlockNumberRequest -= 192
+		}
 		return
 	}
 	anchor, ok := hd.anchors[req.Hash]
@@ -791,7 +803,7 @@ func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollec
 		hd.expectedHash = header.ParentHash
 		hd.insertList = hd.insertList[1:]
 	}
-	hd.nextBlockNumberRequest = hd.lastProcessedPayload
+	hd.missingBlockNumber = hd.lastProcessedPayload - 1
 	return false, nil
 }
 
@@ -806,6 +818,10 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment) {
 	defer hd.lock.Unlock()
 	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
+		// If we found the block number we were missing, we can just dismiss it
+		if segmentFragment.Header.Number.Uint64() == hd.missingBlockNumber {
+			hd.missingBlockNumber = 0
+		}
 		hd.insertList = append(hd.insertList, &Link{header: segmentFragment.Header})
 	}
 }
