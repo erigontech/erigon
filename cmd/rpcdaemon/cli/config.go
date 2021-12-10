@@ -56,6 +56,7 @@ type Flags struct {
 	RpcAllowListFilePath   string
 	RpcBatchConcurrency    uint
 	TraceCompatibility     bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolV2               bool
 	TxPoolApiAddr          string
 	TevmEnabled            bool
 	StateCache             kvcache.CoherentConfig
