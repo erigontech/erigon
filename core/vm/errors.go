@@ -40,6 +40,7 @@ var (
 	ErrInvalidRetsub            = errors.New("invalid retsub")
 	ErrReturnStackExceeded      = errors.New("return stack limit reached")
 	ErrInvalidCode              = errors.New("invalid code")
+	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

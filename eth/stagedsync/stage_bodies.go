@@ -9,12 +9,14 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -29,6 +31,8 @@ type BodiesCfg struct {
 	timeout         int
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
+	snapshots       *snapshotsync.AllSnapshots
+	blockReader     interfaces.FullBlockReader
 }
 
 func StageBodiesCfg(
@@ -40,8 +44,10 @@ func StageBodiesCfg(
 	timeout int,
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
+	snapshots *snapshotsync.AllSnapshots,
+	blockReader interfaces.FullBlockReader,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -55,7 +61,6 @@ func BodiesForward(
 ) error {
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
-
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -66,6 +71,15 @@ func BodiesForward(
 		defer tx.Rollback()
 	}
 	timeout := cfg.timeout
+
+	if cfg.snapshots != nil {
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
+			s.BlockNumber = cfg.snapshots.BlocksAvailable()
+		}
+	}
 	// This will update bd.maxProgress
 	if _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
@@ -114,7 +128,7 @@ Loop:
 		if req == nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("request more bodies: %w", err)
 			}
@@ -136,7 +150,7 @@ Loop:
 		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("request more bodies: %w", err)
 			}

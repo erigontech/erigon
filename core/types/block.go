@@ -486,18 +486,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for Bloom: %d", len(b))
 	}
 	copy(h.Bloom[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Difficulty: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Difficulty: %d", len(b))
-	}
 	h.Difficulty = new(big.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Number: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Number: %d", len(b))
 	}
 	h.Number = new(big.Int).SetBytes(b)
 	if h.GasLimit, err = s.Uint(); err != nil {
@@ -536,7 +530,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("wrong size for Nonce: %d", len(b))
 		}
 		copy(h.Nonce[:], b)
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.Uint256Bytes(); err != nil {
 			if errors.Is(err, rlp.EOL) {
 				h.BaseFee = nil
 				h.Eip1559 = false
@@ -546,9 +540,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 				return nil
 			}
 			return fmt.Errorf("read BaseFee: %w", err)
-		}
-		if len(b) > 32 {
-			return fmt.Errorf("wrong size for BaseFee: %d", len(b))
 		}
 		h.Eip1559 = true
 		h.BaseFee = new(big.Int).SetBytes(b)

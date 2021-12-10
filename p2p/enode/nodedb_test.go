@@ -323,7 +323,7 @@ func TestDBPersistency(t *testing.T) {
 	}
 	db.Close()
 
-	// Reopen the database and check the value
+	// ReopenSegments the database and check the value
 	db, err = OpenDB(filepath.Join(root, "database"))
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)

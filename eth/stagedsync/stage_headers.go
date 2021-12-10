@@ -9,16 +9,20 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 
 	"github.com/ledgerwatch/log/v3"
@@ -27,6 +31,7 @@ import (
 type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
+	statusCh          chan privateapi.ExecutionStatus
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
@@ -35,11 +40,14 @@ type HeadersCfg struct {
 	noP2PDiscovery    bool
 	reverseDownloadCh chan types.Header
 	waitingPosHeaders *bool
+	snapshots         *snapshotsync.AllSnapshots
+	blockReader       interfaces.FullBlockReader
 }
 
 func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
+	statusCh chan privateapi.ExecutionStatus,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
@@ -48,10 +56,13 @@ func StageHeadersCfg(
 	noP2PDiscovery bool,
 	reverseDownloadCh chan types.Header,
 	waitingPosHeaders *bool,
+	snapshots *snapshotsync.AllSnapshots,
+	blockReader interfaces.FullBlockReader,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
+		statusCh:          statusCh,
 		chainConfig:       chainConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
@@ -60,6 +71,8 @@ func StageHeadersCfg(
 		noP2PDiscovery:    noP2PDiscovery,
 		reverseDownloadCh: reverseDownloadCh,
 		waitingPosHeaders: waitingPosHeaders,
+		snapshots:         snapshots,
+		blockReader:       blockReader,
 	}
 }
 
@@ -103,7 +116,7 @@ func SpawnStageHeaders(
 	}
 }
 
-// HeadersDownwards progresses Headers stage in the downward direction
+// HeadersDownward progresses Headers stage in the downward direction
 func HeadersDownward(
 	s *StageState,
 	u Unwinder,
@@ -118,7 +131,25 @@ func HeadersDownward(
 	log.Info("Waiting for payloads...")
 	header := <-cfg.reverseDownloadCh
 	*cfg.waitingPosHeaders = false
+
+	defer tx.Commit()
+
+	headerNumber := header.Number.Uint64()
+
+	blockHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	if err != nil {
+		return err
+	}
+
 	// Do we need to unwind? (TODO)
+	if s.BlockNumber >= headerNumber && header.Hash() != blockHash {
+		u.UnwindTo(headerNumber-1, common.Hash{})
+		cfg.statusCh <- privateapi.ExecutionStatus{
+			HeadHash: header.ParentHash,
+			Status:   privateapi.Syncing,
+		}
+		return nil
+	}
 
 	// Write current payload
 	rawdb.WriteHeader(tx, &header)
@@ -149,6 +180,123 @@ func HeadersForward(
 	useExternalTx bool,
 ) error {
 	var headerProgress uint64
+
+	if cfg.snapshots != nil {
+		if !cfg.snapshots.AllSegmentsAvailable() {
+			// wait for Downloader service to download all expected snapshots
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+			for {
+				headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
+				if err != nil {
+					return err
+				}
+				expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+				if headers >= expect && bodies >= expect && txs >= expect {
+					if err := cfg.snapshots.ReopenSegments(); err != nil {
+						return err
+					}
+					if expect > cfg.snapshots.BlocksAvailable() {
+						return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+					}
+					cfg.snapshots.SetAllSegmentsAvailable(true)
+
+					break
+				}
+				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+				time.Sleep(10 * time.Second)
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+				default:
+				}
+			}
+		}
+
+		if !cfg.snapshots.AllIdxAvailable() {
+			if !cfg.snapshots.AllSegmentsAvailable() {
+				return fmt.Errorf("not all snapshot segments are available")
+			}
+
+			// wait for Downloader service to download all expected snapshots
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+			headers, bodies, txs, err := cfg.snapshots.IdxAvailability()
+			if err != nil {
+				return err
+			}
+			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+			if headers < expect || bodies < expect || txs < expect {
+				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+				if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
+					return err
+				}
+			}
+
+			if err := cfg.snapshots.ReopenIndices(); err != nil {
+				return err
+			}
+			if expect > cfg.snapshots.IndicesAvailable() {
+				return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+			}
+			cfg.snapshots.SetAllIdxAvailable(true)
+		}
+
+		c, _ := tx.Cursor(kv.HeaderTD)
+		count, _ := c.Count()
+		if count == 0 || count == 1 { // genesis does write 1 record
+			logEvery := time.NewTicker(logInterval)
+			defer logEvery.Stop()
+
+			tx.ClearBucket(kv.HeaderTD)
+			var lastHeader *types.Header
+			//total  difficulty write
+			td := big.NewInt(0)
+			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+				td.Add(td, header.Difficulty)
+				/*
+					if header.Eip3675 {
+						return nil
+					}
+
+					if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
+						return rawdb.MarkTransition(tx, blockNum)
+					}
+				*/
+				// TODO: append
+				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
+				lastHeader = header
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
+				default:
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			tx.ClearBucket(kv.HeaderCanonical)
+			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+				return err
+			}
+		}
+
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+				return err
+			}
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
+			s.BlockNumber = cfg.snapshots.BlocksAvailable()
+		}
+	}
+
 	var err error
 
 	if !useExternalTx {
@@ -170,7 +318,7 @@ func HeadersForward(
 	defer logEvery.Stop()
 	if hash == (common.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx); err != nil {
+		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader); err != nil {
 			return err
 		}
 		if !useExternalTx {
@@ -193,7 +341,7 @@ func HeadersForward(
 		return err
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx})
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	var sentToPeer bool
 	stopped := false
@@ -246,8 +394,7 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
 		}
 
@@ -288,7 +435,7 @@ Loop:
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	} else if headerInserter.GetHighest() != 0 {
-		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx); err != nil {
+		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
 	}
@@ -306,7 +453,7 @@ Loop:
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx, headerReader interfaces.FullBlockReader) error {
 	if height == 0 {
 		return nil
 	}
@@ -319,7 +466,11 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
-		ancestor := rawdb.ReadHeader(tx, ancestorHash, ancestorHeight)
+
+		ancestor, err := headerReader.Header(context.Background(), tx, ancestorHash, ancestorHeight)
+		if err != nil {
+			return err
+		}
 		if ancestor == nil {
 			return fmt.Errorf("ancestor is nil. height %d, hash %x", ancestorHeight, ancestorHash)
 		}
@@ -464,19 +615,36 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 }
 
 type chainReader struct {
-	config *params.ChainConfig
-	tx     kv.RwTx
+	config      *params.ChainConfig
+	tx          kv.RwTx
+	blockReader interfaces.FullBlockReader
 }
 
 func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
 func (cr chainReader) CurrentHeader() *types.Header { panic("") }
 func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
+		return h
+	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
 func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+	if cr.blockReader != nil {
+		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
+		return h
+	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
+
 }
 func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	if cr.blockReader != nil {
+		number := rawdb.ReadHeaderNumber(cr.tx, hash)
+		if number == nil {
+			return nil
+		}
+		return cr.GetHeader(hash, *number)
+	}
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }

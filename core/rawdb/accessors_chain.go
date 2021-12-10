@@ -326,12 +326,6 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
-	c, err := db.RwCursor(kv.EthTx)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
@@ -343,7 +337,7 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 		}
 
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := c.Append(txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
+		if err := db.Append(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
 			return err
 		}
 	}

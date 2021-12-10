@@ -538,6 +538,11 @@ var (
 		Name:  "experimental.snapshot",
 		Usage: "Enabling experimental snapshot sync",
 	}
+
+	HealthCheckFlag = cli.BoolFlag{
+		Name:  "healthcheck",
+		Usage: "Enabling grpc health check",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
@@ -1099,7 +1104,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setClique(ctx *cli.Context, cfg *params.SnapshotConfig, datadir string) {
+func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir string) {
 	cfg.CheckpointInterval = ctx.GlobalUint64(CliqueSnapshotCheckpointIntervalFlag.Name)
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)

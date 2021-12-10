@@ -117,9 +117,9 @@ func init() {
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled bool
-	Dir     string
-	Seeding bool
+	Enabled             bool
+	Dir                 string
+	ChainSnapshotConfig *params.SnapshotsConfig
 }
 
 // Config contains configuration options for ETH protocol.
@@ -137,9 +137,10 @@ type Config struct {
 
 	P2PEnabled bool
 
-	Prune        prune.Mode
-	BatchSize    datasize.ByteSize // Batch size for execution stage
-	BadBlockHash common.Hash       // hash of the block marked as bad
+	Prune     prune.Mode
+	BatchSize datasize.ByteSize // Batch size for execution stage
+
+	BadBlockHash common.Hash // hash of the block marked as bad
 
 	Snapshot Snapshot
 
@@ -158,7 +159,7 @@ type Config struct {
 	// Ethash options
 	Ethash ethash.Config
 
-	Clique params.SnapshotConfig
+	Clique params.ConsensusSnapshotConfig
 	Aura   params.AuRaConfig
 	Parlia   params.ParliaConfig
 
@@ -208,7 +209,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			}, notify, noverify)
 			eng = engine
 		}
-	case *params.SnapshotConfig:
+	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
 		}

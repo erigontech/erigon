@@ -249,20 +249,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 
-	// setting notifier to support streaming events to rpc daemon
-	var mg *snapshotsync.SnapshotMigrator
-	if config.Snapshot.Enabled {
-		currentSnapshotBlock, currentInfohash, err := snapshotsync.GetSnapshotInfo(chainKv)
-		if err != nil {
-			return nil, err
-		}
-		mg = snapshotsync.NewMigrator(config.Snapshot.Dir, currentSnapshotBlock, currentInfohash)
-		err = mg.RemoveNonCurrentSnapshots()
-		if err != nil {
-			log.Error("Remove non current snapshot", "err", err)
-		}
-	}
-
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
 			sentryClient, err := download.GrpcSentryClient(backend.downloadCtx, addr)
@@ -362,7 +348,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
-		allSnapshots, err := snapshotsync.OpenAll(config.Snapshot.Dir)
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, params.KnownSnapshots(chainConfig.ChainName))
 		if err != nil {
 			return nil, err
 		}
@@ -403,7 +389,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			miningRPC,
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
-			creds)
+			creds,
+			stack.Config().HealthCheck)
 		if err != nil {
 			return nil, err
 		}
@@ -433,7 +420,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					log.Error("txpool rpc mined block broadcast", "err", err)
 				}
-				if err := backend.downloadServer.Hd.AddMinedBlock(b); err != nil {
+				if err := backend.downloadServer.Hd.AddMinedHeader(b.Header()); err != nil {
 					log.Error("add mined block to header downloader", "err", err)
 				}
 				if err := backend.downloadServer.Bd.AddMinedBlock(b); err != nil {

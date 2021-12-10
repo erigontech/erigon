@@ -512,7 +512,7 @@ func (c *ChainConfig) IsHeaderWithSeal() bool {
 	return c.Consensus == AuRaConsensus
 }
 
-type SnapshotConfig struct {
+type ConsensusSnapshotConfig struct {
 	CheckpointInterval uint64 // Number of blocks after which to save the vote snapshot to the database
 	InmemorySnapshots  int    // Number of recent vote snapshots to keep in memory
 	InmemorySignatures int    // Number of recent block signatures to keep in memory
@@ -522,12 +522,12 @@ type SnapshotConfig struct {
 
 const cliquePath = "clique"
 
-func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *SnapshotConfig {
+func NewSnapshotConfig(checkpointInterval uint64, inmemorySnapshots int, inmemorySignatures int, inmemory bool, dbPath string) *ConsensusSnapshotConfig {
 	if len(dbPath) == 0 {
 		dbPath = paths.DefaultDataDir()
 	}
 
-	return &SnapshotConfig{
+	return &ConsensusSnapshotConfig{
 		checkpointInterval,
 		inmemorySnapshots,
 		inmemorySignatures,

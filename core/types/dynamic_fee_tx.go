@@ -378,28 +378,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for ChainID: %d", len(b))
 	}
 	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
 	tx.Tip = new(uint256.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -415,11 +406,8 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
@@ -431,29 +419,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode V
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	return s.ListEnd()
-
 }
 
 // AsMessage returns the transaction as a core.Message.
@@ -554,6 +532,10 @@ func (tx DynamicFeeTransaction) GetSender() (common.Address, bool) {
 
 func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
 	tx.from.Store(addr)
+}
+
+func (tx DynamicFeeTransaction) IsStarkNet() bool {
+	return false
 }
 
 // NewTransaction creates an unsigned eip1559 transaction.

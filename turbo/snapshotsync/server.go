@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -55,9 +58,131 @@ type SNDownloaderServer struct {
 }
 
 func (s *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*emptypb.Empty, error) {
-	if err := s.db.Update(ctx, func(tx kv.RwTx) error {
-		return s.t.AddSnapshotsTorrents(ctx, tx, request.NetworkId, FromSnapshotTypes(request.Type))
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
+	defer cancel()
+	eg := errgroup.Group{}
+
+	networkId := request.NetworkId
+	mode := FromSnapshotTypes(request.Type)
+
+	var headerSpec, bodySpec, stateSpec, receiptSpec *torrentSpecFromDb
+
+	if err := s.db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		headerSpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_headers, networkId)
+		if err != nil {
+			return err
+		}
+		bodySpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_bodies, networkId)
+		if err != nil {
+			return err
+		}
+		stateSpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_state, networkId)
+		if err != nil {
+			return err
+		}
+		receiptSpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_receipts, networkId)
+		if err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
+		return nil, err
+	}
+
+	if mode.Headers {
+		eg.Go(func() error {
+			var newSpec *torrentSpecFromDb
+			var err error
+			newSpec, err = s.t.AddTorrent(ctx, headerSpec)
+			if err != nil {
+				return fmt.Errorf("add torrent: %w", err)
+			}
+			if newSpec != nil {
+				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
+				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
+					return saveTorrentSpec(tx, newSpec)
+				}); err != nil {
+					return err
+				}
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
+	if mode.Bodies {
+		eg.Go(func() error {
+			var newSpec *torrentSpecFromDb
+			var err error
+			newSpec, err = s.t.AddTorrent(ctx, bodySpec)
+			if err != nil {
+				return fmt.Errorf("add torrent: %w", err)
+			}
+			if newSpec != nil {
+				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
+				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
+					return saveTorrentSpec(tx, newSpec)
+				}); err != nil {
+					return err
+				}
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
+	if mode.State {
+		eg.Go(func() error {
+			var newSpec *torrentSpecFromDb
+			var err error
+			newSpec, err = s.t.AddTorrent(ctx, stateSpec)
+			if err != nil {
+				return fmt.Errorf("add torrent: %w", err)
+			}
+			if newSpec != nil {
+				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
+				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
+					return saveTorrentSpec(tx, newSpec)
+				}); err != nil {
+					return err
+				}
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+
+	if mode.Receipts {
+		eg.Go(func() error {
+			var newSpec *torrentSpecFromDb
+			var err error
+			newSpec, err = s.t.AddTorrent(ctx, receiptSpec)
+			if err != nil {
+				return fmt.Errorf("add torrent: %w", err)
+			}
+			if newSpec != nil {
+				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
+				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
+					return saveTorrentSpec(tx, newSpec)
+				}); err != nil {
+					return err
+				}
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	err := eg.Wait()
+	if err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
