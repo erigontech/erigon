@@ -347,17 +347,3 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 	v = new(uint256.Int).Sub(v, u256.Num35)
 	return v.Div(v, u256.Num2)
 }
-
-// Hash returns the hash to be signed by the sender.
-// It does not uniquely identify the transaction.
-func (sg Signer) Hash(tx Transaction) common.Hash {
-	return rlpHash([]interface{}{
-		tx.GetNonce(),
-		tx.GetPrice(),
-		tx.GetGas(),
-		tx.GetTo(),
-		tx.GetValue(),
-		tx.GetData(),
-		tx.GetChainID(), uint(0), uint(0),
-	})
-}

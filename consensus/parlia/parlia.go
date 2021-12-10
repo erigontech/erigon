@@ -1128,7 +1128,7 @@ func (p *Parlia) applyTransaction(
 		return expectedTx
 	}(initExpectedTx)
 
-	expectedHash := p.signer.Hash(expectedTx)
+	expectedHash := expectedTx.SigningHash(p.chainConfig.ChainID)
 	if msg.From() == p.val && mining {
 		expectedTx, err = p.signTxFnLegacy(msg.From(), initExpectedTx, p.chainConfig.ChainID)
 		if err != nil {
@@ -1141,7 +1141,7 @@ func (p *Parlia) applyTransaction(
 
 		actualTx := (receivedTxs)[0]
 
-		if !bytes.Equal(p.signer.Hash(actualTx).Bytes(), expectedHash.Bytes()) {
+		if !bytes.Equal(expectedTx.SigningHash(p.chainConfig.ChainID).Bytes(), expectedHash.Bytes()) {
 			actualHash := (actualTx).Hash()
 			return fmt.Errorf("expected tx hash %v, get %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s", expectedHash.String(), actualHash.String(),
 				initExpectedTx.Nonce,
