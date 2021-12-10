@@ -35,6 +35,7 @@ var activators = map[int]func(*JumpTable){
 	1884: enable1884,
 	1344: enable1344,
 	3540: enable3540,
+	3670: enable3670,
 }
 
 // EnableEIP enables the given EIP on the config.
@@ -200,5 +201,9 @@ func enable3860(jt *JumpTable) {
 }
 
 func enable3540(jt *JumpTable) {
+	// Do nothing.
+}
+
+func enable3670(jt *JumpTable) {
 	// Do nothing.
 }

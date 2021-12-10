@@ -49,6 +49,8 @@ type operation struct {
 	memorySize memorySizeFunc
 
 	writes bool // determines whether this a state modifying operation
+
+	undefined bool
 }
 
 var (
@@ -1436,6 +1438,12 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:    0,
 			memorySize: memoryReturn,
 		},
+		INVALID: {
+			execute:     opInvalid,
+			constantGas: 0,
+			minStack:    minStack(0, 0),
+			maxStack:    maxStack(0, 0),
+		},
 		SELFDESTRUCT: {
 			execute:    opSuicide,
 			dynamicGas: gasSelfdestruct,
@@ -1450,7 +1458,7 @@ func newFrontierInstructionSet() JumpTable {
 	// Fill all unassigned slots with opUndefined.
 	for i, entry := range tbl {
 		if entry == nil {
-			tbl[i] = &operation{execute: opUndefined, maxStack: maxStack(0, 0)}
+			tbl[i] = &operation{execute: opUndefined, maxStack: maxStack(0, 0), undefined: true}
 		}
 	}
 

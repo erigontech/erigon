@@ -378,9 +378,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	var header EOF1Header
 	if evm.chainRules.IsShanghai && hasEOFMagic(codeAndHash.code) {
 		var err error
-		header, err = readEOF1Header(codeAndHash.code)
+		header, err = validateEOF(codeAndHash.code, evm.interpreter.cfg.JumpTable)
 		if err != nil {
-			return nil, common.Address{}, gas, ErrInvalidCodeFormat
+			return nil, common.Address{}, gas, ErrInvalidEOFCode
 		}
 	}
 	// Create a new account on the state
@@ -407,10 +407,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	if err == nil && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
-			// Allow only valid EOF1 if EIP-3540 is enabled.
+			// Allow only valid EOF1 if EIP-3540 and EIP-3670 are enabled.
 			if hasEOFMagic(ret) {
-				if !validateEOF(ret) {
-					err = ErrInvalidCodeFormat
+				_, err = validateEOF(ret, evm.interpreter.cfg.JumpTable)
+				if err != nil {
+					err = ErrInvalidEOFCode
 				}
 			} else {
 				// Reject non-EOF code starting with 0xEF.

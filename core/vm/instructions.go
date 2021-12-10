@@ -858,6 +858,10 @@ func opStop(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	return nil, errStopToken
 }
 
+func opInvalid(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	return nil, &ErrInvalidOpCode{opcode: INVALID}
+}
+
 func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
