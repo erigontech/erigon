@@ -21,9 +21,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	// "github.com/ledgerwatch/erigon/cmd/rpcdaemon"
 	"github.com/ledgerwatch/erigon/common"
-	// "github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -35,12 +33,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	// "github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	// "github.com/ledgerwatch/erigon/trie"
 	"github.com/ledgerwatch/log/v3"
 )
 

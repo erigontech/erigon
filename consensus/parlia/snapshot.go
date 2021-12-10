@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	// "encoding/json"
 	"errors"
 	"math/big"
 	"sort"
@@ -32,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	// "github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 )
