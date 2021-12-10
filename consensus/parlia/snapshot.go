@@ -31,14 +31,12 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 // Snapshot is the state of the validatorSet at a given point.
 type Snapshot struct {
 	config   *params.ParliaConfig // Consensus engine parameters to fine tune behavior
-	ethAPI   *ethapi.PublicBlockChainAPI
 	sigCache *lru.ARCCache // Cache of recent block signatures to speed up ecrecover
 
 	Number           uint64                      `json:"number"`             // Block number where the snapshot was created
@@ -57,11 +55,9 @@ func newSnapshot(
 	number uint64,
 	hash common.Hash,
 	validators []common.Address,
-	ethAPI *ethapi.PublicBlockChainAPI,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:           config,
-		ethAPI:           ethAPI,
 		sigCache:         sigCache,
 		Number:           number,
 		Hash:             hash,
@@ -85,7 +81,7 @@ func (s validatorsAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 const parliaSnapshot = "ParliaSnapshot"
 
 // // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash common.Hash, ethAPI *ethapi.PublicBlockChainAPI) (*Snapshot, error) {
+func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -102,7 +98,6 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 	}
 	snap.config = config
 	snap.sigCache = sigCache
-	snap.ethAPI = ethAPI
 
 	return snap, nil
 }
@@ -123,7 +118,6 @@ func (s *Snapshot) store(db kv.RwDB) error {
 func (s *Snapshot) copy() *Snapshot {
 	cpy := &Snapshot{
 		config:           s.config,
-		ethAPI:           s.ethAPI,
 		sigCache:         s.sigCache,
 		Number:           s.Number,
 		Hash:             s.Hash,

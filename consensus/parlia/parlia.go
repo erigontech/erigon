@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -207,7 +206,6 @@ type Parlia struct {
 
 	lock sync.RWMutex // Protects the signer fields
 
-	ethAPI          *ethapi.PublicBlockChainAPI
 	validatorSetABI abi.ABI
 	slashABI        abi.ABI
 
@@ -219,7 +217,6 @@ type Parlia struct {
 func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
-	ethAPI *ethapi.PublicBlockChainAPI,
 	genesisHash common.Hash,
 ) *Parlia {
 	// get parlia config
@@ -252,7 +249,6 @@ func New(
 		config:          parliaConfig,
 		genesisHash:     genesisHash,
 		db:              db,
-		ethAPI:          ethAPI,
 		recentSnaps:     recentSnaps,
 		signatures:      signatures,
 		validatorSetABI: vABI,
@@ -448,7 +444,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash, p.ethAPI); err == nil {
+			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -470,7 +466,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				}
 
 				// new snap shot
-				snap = newSnapshot(p.config, p.signatures, number, hash, validators, p.ethAPI)
+				snap = newSnapshot(p.config, p.signatures, number, hash, validators)
 				if err := snap.store(p.db); err != nil {
 					return nil, err
 				}
