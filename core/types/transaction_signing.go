@@ -277,22 +277,6 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 	return R, S, V, nil
 }
 
-// EIP155Signer implements Signer using the EIP-155 rules. This accepts transactions which
-// are replay-protected as well as unprotected homestead transactions.
-type EIP155Signer struct {
-	chainId, chainIdMul *big.Int
-}
-
-func NewEIP155Signer(chainId *big.Int) EIP155Signer {
-	if chainId == nil {
-		chainId = new(big.Int)
-	}
-	return EIP155Signer{
-		chainId:    chainId,
-		chainIdMul: new(big.Int).Mul(chainId, big.NewInt(2)),
-	}
-}
-
 func (sg Signer) ChainID() *uint256.Int {
 	return &sg.chainID
 }
