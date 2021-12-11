@@ -198,6 +198,10 @@ func (sdb *IntraBlockState) GetLogs(hash common.Hash) []*types.Log {
 	return sdb.logs[hash]
 }
 
+func (sdb *IntraBlockState) BlockHash() common.Hash {
+	return sdb.bhash
+}
+
 func (sdb *IntraBlockState) Logs() []*types.Log {
 	var logs []*types.Log
 	for _, lgs := range sdb.logs {
