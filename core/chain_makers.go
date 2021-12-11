@@ -444,3 +444,4 @@ func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header      
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }

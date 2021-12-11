@@ -31,6 +31,10 @@ func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
+func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
+	return nil
+}
+
 // The thing only that changes beetwen normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
 func TestVerifyHeaderDifficulty(t *testing.T) {
