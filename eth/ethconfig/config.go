@@ -29,6 +29,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -198,7 +199,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			log.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
 		default:
-			engine := ethash.New(ethash.Config{
+			eng = ethash.New(ethash.Config{
 				CachesInMem:      consensusCfg.CachesInMem,
 				CachesLockMmap:   consensusCfg.CachesLockMmap,
 				DatasetDir:       consensusCfg.DatasetDir,
@@ -206,7 +207,6 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, notify, noverify)
-			eng = engine
 		}
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
@@ -230,5 +230,9 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		panic("unknown config" + spew.Sdump(config))
 	}
 
-	return eng
+	if chainConfig.TerminalTotalDifficulty == nil {
+		return eng
+	} else {
+		return serenity.New(eng) // the Merge
+	}
 }
