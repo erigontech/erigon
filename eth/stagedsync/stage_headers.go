@@ -225,11 +225,12 @@ func HeadersDownward(
 	cfg.hd.SetCanonicalHashesCollector(canonicalHeadersCollector)
 	defer headerCollector.Close()
 	defer canonicalHeadersCollector.Close()
+	var req headerdownload.HeaderRequest
 	for !stopped {
 		sentToPeer := false
 		for !sentToPeer {
-			req := cfg.hd.RequestMoreHeadersForPOS()
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			req = cfg.hd.RequestMoreHeadersForPOS()
+			_, sentToPeer = cfg.headerReqSend(ctx, &req)
 		}
 		// Load headers into the database
 		announces := cfg.hd.GrabAnnounces()

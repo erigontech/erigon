@@ -572,12 +572,12 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) RequestMoreHeadersForPOS() *HeaderRequest {
+func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	// Assemble the request
-	return &HeaderRequest{
-		Hash:    hd.expectedHash,
+	return HeaderRequest{
+		Hash:    common.Hash{},
 		Number:  hd.lastProcessedPayload - 1,
 		Length:  192,
 		Skip:    0,
