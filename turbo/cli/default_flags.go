@@ -24,6 +24,7 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolAccountQueueFlag,
 	utils.TxPoolGlobalQueueFlag,
 	utils.TxPoolLifetimeFlag,
+	utils.TxPoolTraceSendersFlag,
 	PruneFlag,
 	PruneHistoryFlag,
 	PruneReceiptFlag,

@@ -310,6 +310,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.AccountSlots = config.TxPool.AccountSlots
 		cfg.LogEvery = 1 * time.Minute
 		cfg.CommitEvery = 5 * time.Minute
+		cfg.TracedSenders = config.TxPool.TracedSenders
 
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
