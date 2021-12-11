@@ -496,8 +496,15 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 				}
 			}
 		} else if penaltyKind == headerdownload.NoPenalty && cs.Hd.GetBackwards() {
+			tx, err := cs.db.BeginRo(ctx)
+			defer tx.Rollback()
+			if err != nil {
+				return err
+			}
 			for _, segment := range segments {
-				cs.Hd.ProcessSegmentPOS(segment)
+				if err := cs.Hd.ProcessSegmentPOS(segment, tx); err != nil {
+					return err
+				}
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{

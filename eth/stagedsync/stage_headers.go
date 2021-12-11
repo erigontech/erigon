@@ -182,27 +182,10 @@ func HeadersDownward(
 	cfg.hd.SetExpectedHash(header.ParentHash)
 	cfg.hd.SetFetching(true)
 	defer cfg.hd.SetFetching(false)
-	headerProgress := cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
-	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := rawdb.ReadCanonicalHash(tx, headerProgress)
-	if err != nil {
-		return err
-	}
+
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	if hash == (common.Hash{}) {
-		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader); err != nil {
-			return err
-		}
-		if !useExternalTx {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
 
 	// Allow other stages to run 1 cycle if no network available
 	if initialCycle && cfg.noP2PDiscovery {
@@ -238,6 +221,8 @@ func HeadersDownward(
 	}()
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	cfg.hd.SetHeadersCollector(headerCollector)
+	cfg.hd.SetCanonicalHashesCollector(canonicalHeadersCollector)
 	defer headerCollector.Close()
 	defer canonicalHeadersCollector.Close()
 	for !stopped {
@@ -246,19 +231,12 @@ func HeadersDownward(
 			req := cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 		}
-		cfg.hd.UpdateNextRequest()
-
 		// Load headers into the database
-		var inSync bool
-		if inSync, err = cfg.hd.InsertHeadersBackwards(tx, headerCollector, canonicalHeadersCollector, logPrefix, logEvery.C); err != nil {
-			return err
-		}
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
-		if inSync { // We do not break unless there best header changed
-			s.Update(tx, header.Number.Uint64())
+		if cfg.hd.Synced() { // We do not break unless there best header changed
 			break
 		}
 	}
@@ -270,8 +248,11 @@ func HeadersDownward(
 	}
 	if s.BlockNumber >= cfg.hd.Progress() {
 		u.UnwindTo(cfg.hd.Progress(), common.Hash{})
+	} else {
+		if err := s.Update(tx, header.Number.Uint64()); err != nil {
+			return err
+		}
 	}
-	// Downward sync if we need to process more (TODO)
 	return tx.Commit()
 }
 

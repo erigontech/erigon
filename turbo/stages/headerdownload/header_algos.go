@@ -576,24 +576,13 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	// Assemble the request
-	if hd.missingBlockNumber > 0 {
-		return &HeaderRequest{
-			Hash:    common.Hash{},
-			Number:  hd.missingBlockNumber,
-			Length:  192,
-			Skip:    0,
-			Reverse: true,
-		}
-	} else {
-		return &HeaderRequest{
-			Hash:    common.Hash{},
-			Number:  hd.nextBlockNumberRequest,
-			Length:  192,
-			Skip:    0,
-			Reverse: true,
-		}
+	return &HeaderRequest{
+		Hash:    hd.expectedHash,
+		Number:  hd.lastProcessedPayload - 1,
+		Length:  192,
+		Skip:    0,
+		Reverse: true,
 	}
-
 }
 
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
@@ -602,18 +591,6 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeo
 	req.Anchor.timeouts++
 	req.Anchor.nextRetryTime = currentTime + timeout
 	heap.Fix(hd.anchorQueue, req.Anchor.idx)
-}
-
-func (hd *HeaderDownload) UpdateNextRequest() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	if hd.missingBlockNumber == 0 {
-		if hd.nextBlockNumberRequest < 192 {
-			hd.nextBlockNumberRequest = 0
-		} else {
-			hd.nextBlockNumberRequest -= 192
-		}
-	}
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
@@ -719,73 +696,46 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, headerRaw 
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
 
-func (hd *HeaderDownload) InsertHeadersBackwards(tx kv.RwTx, canonicalHashCollector *etl.Collector, headerCollector *etl.Collector, logPrefix string, logChannel <-chan time.Time) (bool, error) {
-	if len(hd.insertList) == 0 {
-		return false, nil
-	}
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	sort.Slice(hd.insertList, func(i, j int) bool {
-		return hd.insertList[i].header.Number.Uint64() > hd.insertList[j].header.Number.Uint64()
-	})
-	for len(hd.insertList) > 0 {
-		header := hd.insertList[0].header
-		if header.Number.Uint64() >= hd.lastProcessedPayload {
-			hd.insertList = hd.insertList[1:]
-			continue
-		}
-		// If we miss some headers or an header results to be invalid, we ask for them again
-		if header.Number.Uint64() != hd.lastProcessedPayload-1 {
-			break
-		}
-		if header.Hash() != hd.expectedHash {
-			hd.insertList = hd.insertList[1:]
-			break
-		}
-		// Write the encoded header
-		data, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			log.Crit("Failed to RLP encode header", "err", err)
-		}
-		if err := headerCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), data); err != nil {
-			return false, err
-		}
-		if err := canonicalHashCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
-			return false, err
-		}
-		hd.lastProcessedPayload--
-
-		canonical, err := rawdb.ReadCanonicalHash(tx, hd.lastProcessedPayload-1)
-		if err != nil {
-			return false, err
-		}
-		if canonical == header.ParentHash {
-			return true, nil
-		}
-		hd.expectedHash = header.ParentHash
-		hd.insertList = hd.insertList[1:]
-	}
-	hd.missingBlockNumber = hd.lastProcessedPayload - 1
-	return false, nil
-}
-
 func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.expectedHash = hash
 }
 
-func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment) {
+func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
+	if len(segment) == 0 {
+		return nil
+	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	log.Trace("Appending...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
+	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
+		header := segmentFragment.Header
 		// If we found the block number we were missing, we can just dismiss it
-		if segmentFragment.Header.Number.Uint64() == hd.missingBlockNumber {
-			hd.missingBlockNumber = 0
+		if header.Hash() != hd.expectedHash {
+			return nil
 		}
-		hd.insertList = append(hd.insertList, &Link{header: segmentFragment.Header})
+		currentCanonical, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
+		if err != nil {
+			return err
+		}
+		if currentCanonical == hd.expectedHash || hd.lastProcessedPayload == 1 {
+			hd.synced = true
+		}
+		data, err := rlp.EncodeToBytes(header)
+		if err != nil {
+			log.Crit("Failed to RLP encode header", "err", err)
+		}
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), data); err != nil {
+			return err
+		}
+		if err := hd.canonicalHashesCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
+			return err
+		}
+		hd.expectedHash = segmentFragment.Header.ParentHash
+		hd.lastProcessedPayload = header.Number.Uint64()
 	}
+	return nil
 }
 
 // GrabAnnounces - returns all available announces and forget them
@@ -1079,7 +1029,18 @@ func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.lastProcessedPayload = lastProcessed
-	hd.nextBlockNumberRequest = lastProcessed - 1
+}
+
+func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.headersCollector = collector
+}
+
+func (hd *HeaderDownload) SetCanonicalHashesCollector(collector *etl.Collector) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.canonicalHashesCollector = collector
 }
 
 func (hd *HeaderDownload) SetBackwards(backwards bool) {
@@ -1092,6 +1053,12 @@ func (hd *HeaderDownload) GetBackwards() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.backwards
+}
+
+func (hd *HeaderDownload) Synced() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.synced
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {
