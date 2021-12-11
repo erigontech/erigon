@@ -217,7 +217,6 @@ func HeadersDownward(
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
-	var sentToPeer bool
 	stopped := false
 	prevProgress := header.Number.Uint64()
 	go func() {
@@ -239,26 +238,15 @@ func HeadersDownward(
 	}()
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer headerCollector.Close()
+	defer canonicalHeadersCollector.Close()
 	for !stopped {
-		currentTime := uint64(time.Now().Unix())
-		req := cfg.hd.RequestMoreHeadersForPOS(currentTime)
-		if req != nil {
+		sentToPeer := false
+		for !sentToPeer {
+			req := cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-				log.Trace("Sent request", "height", req.Number)
-			}
 		}
-
-		req = cfg.hd.RequestMoreHeadersForPOS(currentTime)
-
-		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
-				log.Trace("Sent request", "height", req.Number)
-			}
-		}
+		cfg.hd.UpdateNextRequest()
 
 		// Load headers into the database
 		var inSync bool

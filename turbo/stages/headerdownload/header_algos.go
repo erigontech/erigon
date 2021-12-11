@@ -572,13 +572,9 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRequest {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	if hd.anchorQueue.Len() == 0 {
-		log.Trace("Empty anchor queue")
-		return nil
-	}
+func (hd *HeaderDownload) RequestMoreHeadersForPOS() *HeaderRequest {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
 	// Assemble the request
 	if hd.missingBlockNumber > 0 {
 		return &HeaderRequest{
@@ -603,6 +599,14 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) *HeaderRe
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	req.Anchor.timeouts++
+	req.Anchor.nextRetryTime = currentTime + timeout
+	heap.Fix(hd.anchorQueue, req.Anchor.idx)
+}
+
+func (hd *HeaderDownload) UpdateNextRequest() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
 	if hd.missingBlockNumber == 0 {
 		if hd.nextBlockNumberRequest < 192 {
 			hd.nextBlockNumberRequest = 0
@@ -610,9 +614,6 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeo
 			hd.nextBlockNumberRequest -= 192
 		}
 	}
-	req.Anchor.timeouts++
-	req.Anchor.nextRetryTime = currentTime + timeout
-	heap.Fix(hd.anchorQueue, req.Anchor.idx)
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
@@ -1088,8 +1089,8 @@ func (hd *HeaderDownload) SetBackwards(backwards bool) {
 }
 
 func (hd *HeaderDownload) GetBackwards() bool {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
 	return hd.backwards
 }
 
