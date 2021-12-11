@@ -251,21 +251,6 @@ func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	return c.verifyHeader(chain, header, nil)
 }
 
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
-// method returns a quit channel to abort the operations and a results channel to
-// retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
-	if len(headers) == 0 {
-		return nil
-	}
-	for i, header := range headers {
-		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type VerifyHeaderResponse struct {
 	Results chan error
 	Cancel  func()

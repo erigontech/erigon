@@ -89,12 +89,6 @@ type Engine interface {
 	// via the VerifySeal method.
 	VerifyHeader(chain ChainHeaderReader, header *types.Header, seal bool) error
 
-	// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
-	// concurrently. The method returns a quit channel to abort the operations and
-	// a results channel to retrieve the async verifications (the order is that of
-	// the input slice).
-	VerifyHeaders(chain ChainHeaderReader, headers []*types.Header, seals []bool) error
-
 	// VerifyUncles verifies that the given block's uncles conform to the consensus
 	// rules of a given engine.
 	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error

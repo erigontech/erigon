@@ -22,14 +22,11 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -115,58 +112,6 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 	}
 	// Sanity checks passed, do a proper verification
 	return ethash.verifyHeader(chain, header, parent, false, seal)
-}
-
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
-// concurrently. The method returns a quit channel to abort the operations and
-// a results channel to retrieve the async verifications.
-func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	if len(headers) == 0 {
-		return nil
-	}
-
-	// Spawn as many workers as allowed threads
-	workers := runtime.GOMAXPROCS(0)
-	if len(headers) < workers {
-		workers = len(headers)
-	}
-
-	// Create a task channel and spawn the verifiers
-	var (
-		errors = make([]error, len(headers))
-	)
-
-	wg := sync.WaitGroup{}
-
-	input := new(int64)
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer debug.LogPanic()
-			defer wg.Done()
-			var index int64
-			for {
-				index = atomic.AddInt64(input, 1) - 1
-				if int(index) > len(headers)-1 {
-					return
-				}
-				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
-				if errors[index] != nil {
-					return
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	for _, err := range errors {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int) error {
