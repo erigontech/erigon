@@ -42,22 +42,22 @@ var (
 //
 // Note: After the Merge the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
 type Serenity struct {
-	ethOne consensus.Engine // Original consensus engine used in eth1, e.g. ethash or clique
+	eth1Engine consensus.Engine // Original consensus engine used in eth1, e.g. ethash or clique
 }
 
 // New creates a new instance of the Serenity Engine with the given embedded eth1 engine.
-func New(ethOne consensus.Engine) *Serenity {
-	if _, ok := ethOne.(*Serenity); ok {
+func New(eth1Engine consensus.Engine) *Serenity {
+	if _, ok := eth1Engine.(*Serenity); ok {
 		panic("nested consensus engine")
 	}
-	return &Serenity{ethOne: ethOne}
+	return &Serenity{eth1Engine: eth1Engine}
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 func (s *Serenity) Author(header *types.Header) (common.Address, error) {
 	if !IsPoSHeader(header) {
-		return s.ethOne.Author(header)
+		return s.eth1Engine.Author(header)
 	}
 	return header.Coinbase, nil
 }
@@ -70,7 +70,7 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 		return err
 	}
 	if !reached {
-		return s.ethOne.VerifyHeader(chain, header, seal)
+		return s.eth1Engine.VerifyHeader(chain, header, seal)
 	}
 	// Short circuit if the parent is not known
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
@@ -85,7 +85,7 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 // uncles as this consensus mechanism doesn't permit uncles.
 func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
 	if !IsPoSHeader(header) {
-		return s.ethOne.VerifyUncles(chain, header, uncles)
+		return s.eth1Engine.VerifyUncles(chain, header, uncles)
 	}
 	if len(uncles) > 0 {
 		return errors.New("uncles not allowed")
@@ -100,7 +100,7 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 		return err
 	}
 	if !reached {
-		return s.ethOne.Prepare(chain, header)
+		return s.eth1Engine.Prepare(chain, header)
 	}
 	header.Difficulty = SerenityDifficulty
 	header.Nonce = SerenityNonce
@@ -111,7 +111,7 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 	txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error) {
 	if !IsPoSHeader(header) {
-		return s.ethOne.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
 	}
 	return nil, 0, nil
 }
@@ -121,13 +121,13 @@ func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types
 	receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall, call consensus.Call) (*types.Block, []*types.Receipt, error) {
 	if !IsPoSHeader(header) {
-		return s.ethOne.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
+		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
 	}
 	return types.NewBlock(header, txs, uncles, receipts), receipts, nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
-	return s.ethOne.SealHash(header)
+	return s.eth1Engine.SealHash(header)
 }
 
 func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
@@ -136,7 +136,7 @@ func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, paren
 		return nil
 	}
 	if !reached {
-		return s.ethOne.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal)
+		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal)
 	}
 	return SerenityDifficulty
 }
@@ -184,7 +184,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 
 func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	if !IsPoSHeader(block.Header()) {
-		return s.ethOne.Seal(chain, block, results, stop)
+		return s.eth1Engine.Seal(chain, block, results, stop)
 	}
 	return nil
 }
@@ -197,11 +197,11 @@ func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainH
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {
-	return s.ethOne.APIs(chain)
+	return s.eth1Engine.APIs(chain)
 }
 
 func (s *Serenity) Close() error {
-	return s.ethOne.Close()
+	return s.eth1Engine.Close()
 }
 
 // IsPoSHeader reports the header belongs to the PoS-stage with some special fields.

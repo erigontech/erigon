@@ -46,8 +46,8 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 
 	parent := &types.Header{}
 
-	var ethOne consensus.Engine
-	serenity := New(ethOne)
+	var eth1Engine consensus.Engine
+	serenity := New(eth1Engine)
 
 	err := serenity.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidDifficulty {
@@ -68,8 +68,8 @@ func TestVerifyHeaderNonce(t *testing.T) {
 
 	parent := &types.Header{}
 
-	var ethOne consensus.Engine
-	serenity := New(ethOne)
+	var eth1Engine consensus.Engine
+	serenity := New(eth1Engine)
 
 	err := serenity.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidNonce {
