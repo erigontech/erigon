@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -40,11 +41,13 @@ func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
 func TestVerifyHeaderDifficulty(t *testing.T) {
 	header := &types.Header{
 		Difficulty: big.NewInt(1),
+		Time:       1,
 	}
 
 	parent := &types.Header{}
 
-	serenity := New()
+	var ethOne consensus.Engine
+	serenity := New(ethOne)
 
 	err := serenity.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidDifficulty {
@@ -60,11 +63,13 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	header := &types.Header{
 		Nonce:      types.BlockNonce{1, 0, 0, 0, 0, 0, 0, 0},
 		Difficulty: big.NewInt(0),
+		Time:       1,
 	}
 
 	parent := &types.Header{}
 
-	serenity := New()
+	var ethOne consensus.Engine
+	serenity := New(ethOne)
 
 	err := serenity.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidNonce {
