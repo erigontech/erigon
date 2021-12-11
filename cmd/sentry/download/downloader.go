@@ -353,6 +353,7 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 		1024*1024, /* linkLimit */
 		engine,
 	)
+
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}

@@ -243,7 +243,7 @@ func HeadersDownward(
 	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
-	if err := canonicalHeadersCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	if err := canonicalHeadersCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
 		return err
 	}
 	if s.BlockNumber >= cfg.hd.Progress() {
