@@ -471,39 +471,41 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 		})
 	}
 	if segments, penaltyKind, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
-		if penaltyKind == headerdownload.NoPenalty && !cs.Hd.GetBackwards() {
-			var canRequestMore bool
-			for _, segment := range segments {
-				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
-				canRequestMore = canRequestMore || requestMore
-				if len(penalties) > 0 {
-					cs.Penalize(ctx, penalties)
+		if penaltyKind == headerdownload.NoPenalty {
+			if cs.Hd.GetBackwards() {
+				tx, err := cs.db.BeginRo(ctx)
+				defer tx.Rollback()
+				if err != nil {
+					return err
 				}
-			}
-
-			if canRequestMore {
-				currentTime := uint64(time.Now().Unix())
-				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
-				if req != nil {
-					if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
-						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-						cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-						log.Trace("Sent request", "height", req.Number)
+				for _, segment := range segments {
+					if err := cs.Hd.ProcessSegmentPOS(segment, tx); err != nil {
+						return err
 					}
 				}
-				if len(penalties) > 0 {
-					cs.Penalize(ctx, penalties)
+			} else {
+				var canRequestMore bool
+				for _, segment := range segments {
+					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
+					canRequestMore = canRequestMore || requestMore
+					if len(penalties) > 0 {
+						cs.Penalize(ctx, penalties)
+					}
 				}
-			}
-		} else if penaltyKind == headerdownload.NoPenalty && cs.Hd.GetBackwards() {
-			tx, err := cs.db.BeginRo(ctx)
-			defer tx.Rollback()
-			if err != nil {
-				return err
-			}
-			for _, segment := range segments {
-				if err := cs.Hd.ProcessSegmentPOS(segment, tx); err != nil {
-					return err
+
+				if canRequestMore {
+					currentTime := uint64(time.Now().Unix())
+					req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
+					if req != nil {
+						if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+							// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+							cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+							log.Trace("Sent request", "height", req.Number)
+						}
+					}
+					if len(penalties) > 0 {
+						cs.Penalize(ctx, penalties)
+					}
 				}
 			}
 		} else {
