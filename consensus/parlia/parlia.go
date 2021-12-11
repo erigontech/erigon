@@ -380,9 +380,8 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	}
 
 	// Verify that the gas limit is <= 2^63-1
-	capacity := uint64(0x7fffffffffffffff)
-	if header.GasLimit > capacity {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, capacity)
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
