@@ -31,12 +31,18 @@ import (
 
 type CommonTx struct {
 	TransactionMisc
+
+	ChainID *uint256.Int
 	Nonce   uint64          // nonce of sender account
 	Gas     uint64          // gas limit
 	To      *common.Address `rlp:"nil"` // nil means contract creation
 	Value   *uint256.Int    // wei amount
 	Data    []byte          // contract invocation input data
 	V, R, S uint256.Int     // signature values
+}
+
+func (ct CommonTx) GetChainID() *uint256.Int {
+	return ct.ChainID
 }
 
 func (ct CommonTx) GetNonce() uint64 {
@@ -59,8 +65,27 @@ func (ct CommonTx) GetData() []byte {
 	return ct.Data
 }
 
+func (ct CommonTx) GetSender() (common.Address, bool) {
+	if sc := ct.from.Load(); sc != nil {
+		return sc.(common.Address), true
+	}
+	return common.Address{}, false
+}
+
+func (ct *CommonTx) SetSender(addr common.Address) {
+	ct.from.Store(addr)
+}
+
+func (ct CommonTx) Protected() bool {
+	return true
+}
+
 func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
+}
+
+func (ct CommonTx) IsStarkNet() bool {
+	return false
 }
 
 // LegacyTx is the transaction data of regular Ethereum transactions.
@@ -516,19 +541,4 @@ func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
 	}
 	tx.from.Store(addr)
 	return addr, nil
-}
-
-func (tx LegacyTx) GetSender() (common.Address, bool) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
-func (tx *LegacyTx) SetSender(addr common.Address) {
-	tx.from.Store(addr)
-}
-
-func (tx LegacyTx) IsStarkNet() bool {
-	return false
 }

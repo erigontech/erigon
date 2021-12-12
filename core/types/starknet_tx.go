@@ -14,7 +14,6 @@ import (
 type StarknetTransaction struct {
 	CommonTx
 
-	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
@@ -111,10 +110,6 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (tx StarknetTransaction) GetChainID() *uint256.Int {
-	panic("implement me")
-}
-
 func (tx StarknetTransaction) GetPrice() *uint256.Int {
 	panic("implement me")
 }
@@ -188,10 +183,6 @@ func (tx StarknetTransaction) GetAccessList() AccessList {
 	panic("implement me")
 }
 
-func (tx StarknetTransaction) Protected() bool {
-	panic("implement me")
-}
-
 func (tx StarknetTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	panic("implement me")
 }
@@ -210,10 +201,6 @@ func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
 }
 
 func (tx StarknetTransaction) Sender(signer Signer) (common.Address, error) {
-	panic("implement me")
-}
-
-func (tx StarknetTransaction) SetSender(address common.Address) {
 	panic("implement me")
 }
 
@@ -402,14 +389,14 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 			TransactionMisc: TransactionMisc{
 				time: tx.time,
 			},
-			Nonce: tx.Nonce,
-			To:    tx.To,
-			Data:  common.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
-			Value: new(uint256.Int),
+			ChainID: new(uint256.Int),
+			Nonce:   tx.Nonce,
+			To:      tx.To,
+			Data:    common.CopyBytes(tx.Data),
+			Gas:     tx.Gas,
+			Value:   new(uint256.Int),
 		},
 		AccessList: make(AccessList, len(tx.AccessList)),
-		ChainID:    new(uint256.Int),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}

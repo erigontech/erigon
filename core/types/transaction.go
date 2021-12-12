@@ -115,13 +115,6 @@ func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
 }
 
-func (tm TransactionMisc) GetSender() (common.Address, bool) {
-	if sc := tm.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
 func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 	kind, size, err := s.Kind()
 	if err != nil {

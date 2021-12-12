@@ -50,13 +50,13 @@ func generateDynamicFeeTransaction() string {
 	buf := bytes.NewBuffer(nil)
 	types.DynamicFeeTransaction{
 		CommonTx: types.CommonTx{
-			Nonce: 1,
-			Value: uint256.NewInt(1),
-			Gas:   1,
+			ChainID: new(uint256.Int),
+			Nonce:   1,
+			Value:   uint256.NewInt(1),
+			Gas:     1,
 		},
-		ChainID: new(uint256.Int),
-		Tip:     new(uint256.Int),
-		FeeCap:  new(uint256.Int),
+		Tip:    new(uint256.Int),
+		FeeCap: new(uint256.Int),
 	}.MarshalBinary(buf)
 
 	return hexutil.Encode(buf.Bytes())
@@ -66,14 +66,14 @@ func generateStarknetTransaction() string {
 	buf := bytes.NewBuffer(nil)
 	types.StarknetTransaction{
 		CommonTx: types.CommonTx{
-			Nonce: 1,
-			Value: uint256.NewInt(1),
-			Gas:   1,
-			To:    &common.Address{},
+			ChainID: new(uint256.Int),
+			Nonce:   1,
+			Value:   uint256.NewInt(1),
+			Gas:     1,
+			To:      &common.Address{},
 		},
-		ChainID: new(uint256.Int),
-		Tip:     new(uint256.Int),
-		FeeCap:  new(uint256.Int),
+		Tip:    new(uint256.Int),
+		FeeCap: new(uint256.Int),
 	}.MarshalBinary(buf)
 
 	return hexutil.Encode(buf.Bytes())
