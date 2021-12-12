@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -85,28 +84,29 @@ var rootCmd = &cobra.Command{
 		}
 
 		go snapshotsync.MainLoop(ctx, bittorrentServer)
+		/*
+			go func() {
+				for {
+					select {
+					case <-cmd.Context().Done():
+						return
+					default:
+					}
 
-		go func() {
-			for {
-				select {
-				case <-cmd.Context().Done():
-					return
-				default:
-				}
-
-				snapshots, err := bittorrentServer.Snapshots(ctx, &proto_downloader.SnapshotsRequest{})
-				if err != nil {
-					log.Error("get snapshots", "err", err)
+					snapshots, err := bittorrentServer.Snapshots(ctx, &proto_downloader.SnapshotsRequest{})
+					if err != nil {
+						log.Error("get snapshots", "err", err)
+						time.Sleep(time.Minute)
+						continue
+					}
+					stats := bittorrentServer.Stats(context.Background())
+					for _, v := range snapshots.Info {
+						log.Info("Snapshot "+v.Path, "%", v.Readiness, "peers", stats[v.Path].ConnectedSeeders)
+					}
 					time.Sleep(time.Minute)
-					continue
 				}
-				stats := bittorrentServer.Stats(context.Background())
-				for _, v := range snapshots.Info {
-					log.Info("Snapshot "+v.Path, "%", v.Readiness, "peers", stats[v.Path].ConnectedSeeders)
-				}
-				time.Sleep(time.Minute)
-			}
-		}()
+			}()
+		*/
 
 		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil, healthCheck)
 		if err != nil {
