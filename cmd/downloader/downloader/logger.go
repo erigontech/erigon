@@ -30,30 +30,38 @@ func (b adapterLogger) Log(msg lg.Msg) {
 
 	switch lvl {
 	case lg.Debug:
-		log.Info(msg.String())
+		log.Debug(msg.String())
 	case lg.Info:
-		log.Info(msg.String())
+		str := msg.String()
+		if strings.Contains(str, "EOF") { // suppress useless errors
+			break
+		}
+
+		log.Info(str)
 	case lg.Warning:
-		if strings.Contains(msg.String(), "could not find offer for id") { // suppress useless errors
+		str := msg.String()
+		if strings.Contains(str, "could not find offer for id") { // suppress useless errors
 			break
 		}
 
-		log.Warn(msg.String())
+		log.Warn(str)
 	case lg.Error:
-		if strings.Contains(msg.String(), "EOF") { // suppress useless errors
+		str := msg.String()
+		if strings.Contains(str, "EOF") { // suppress useless errors
 			break
 		}
 
-		log.Error(msg.String())
+		log.Error(str)
 	case lg.Critical:
-		if strings.Contains(msg.String(), "EOF") { // suppress useless errors
+		str := msg.String()
+		if strings.Contains(str, "EOF") { // suppress useless errors
 			break
 		}
-		if strings.Contains(msg.String(), "don't want conns") { // suppress useless errors
+		if strings.Contains(str, "don't want conns") { // suppress useless errors
 			break
 		}
 
-		log.Error(msg.String())
+		log.Error(str)
 	default:
 		log.Warn("unknown log type", "msg", msg.String())
 	}
