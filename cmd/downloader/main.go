@@ -10,7 +10,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	proto_snap "github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -84,6 +84,8 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("load: %w", err)
 		}
 
+		go snapshotsync.MainLoop(ctx, bittorrentServer)
+
 		go func() {
 			for {
 				select {
@@ -92,7 +94,7 @@ var rootCmd = &cobra.Command{
 				default:
 				}
 
-				snapshots, err := bittorrentServer.Snapshots(ctx, &proto_snap.SnapshotsRequest{})
+				snapshots, err := bittorrentServer.Snapshots(ctx, &proto_downloader.SnapshotsRequest{})
 				if err != nil {
 					log.Error("get snapshots", "err", err)
 					time.Sleep(time.Minute)
@@ -105,6 +107,7 @@ var rootCmd = &cobra.Command{
 				time.Sleep(time.Minute)
 			}
 		}()
+
 		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil, healthCheck)
 		if err != nil {
 			return err
@@ -151,7 +154,7 @@ func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *cr
 	grpcServer := grpc.NewServer(opts...)
 	reflection.Register(grpcServer) // Register reflection service on gRPC server.
 	if snServer != nil {
-		proto_snap.RegisterDownloaderServer(grpcServer, snServer)
+		proto_downloader.RegisterDownloaderServer(grpcServer, snServer)
 	}
 	var healthServer *health.Server
 	if healthCheck {

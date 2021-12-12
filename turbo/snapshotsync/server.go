@@ -9,11 +9,11 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/core/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -22,7 +22,7 @@ var (
 	ErrNotSupportedSnapshot  = errors.New("not supported snapshot for this network id")
 )
 var (
-	_ snapshotsync.DownloaderServer = &SNDownloaderServer{}
+	_ proto_downloader.DownloaderServer = &SNDownloaderServer{}
 )
 
 func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
@@ -53,23 +53,6 @@ func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
 	return sn, nil
 }
 
-type SNDownloaderServer struct {
-	snapshotsync.UnimplementedDownloaderServer
-	t  *Client
-	db kv.RwDB
-}
-
-func (s *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadRequest) (*emptypb.Empty, error) {
-	infoHashes := Proto2InfoHashes(request.TorrentHashes)
-
-	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
-	defer cancel()
-	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes); err != nil {
-		return nil, err
-	}
-	return &emptypb.Empty{}, nil
-}
-
 func (s *SNDownloaderServer) Load(ctx context.Context) error {
 	if err := BuildTorrentFilesIfNeed(ctx, s.t.snapshotsDir); err != nil {
 		return err
@@ -81,21 +64,42 @@ func (s *SNDownloaderServer) Load(ctx context.Context) error {
 	return nil
 }
 
-func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
-	reply := snapshotsync.SnapshotsInfoReply{}
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
+type SNDownloaderServer struct {
+	proto_downloader.UnimplementedDownloaderServer
+	t  *Client
+	db kv.RwDB
+}
+
+func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+	infoHashes := Proto2InfoHashes(request.TorrentHashes)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
+	defer cancel()
+	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes); err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
-	resp, err := s.t.GetSnapshots(tx)
-	if err != nil {
-		return nil, err
+	return &emptypb.Empty{}, nil
+}
+
+func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *proto_downloader.SnapshotsRequest) (*proto_downloader.SnapshotsInfoReply, error) {
+	torrents := s.t.Cli.Torrents()
+	infoItems := make([]*proto_downloader.SnapshotsInfo, len(torrents))
+	for i, t := range torrents {
+		readiness := int32(0)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-t.GotInfo():
+			readiness = int32(100 * (float64(t.BytesCompleted()) / float64(t.Info().TotalLength())))
+		default:
+		}
+
+		infoItems[i] = &proto_downloader.SnapshotsInfo{
+			Readiness: readiness,
+			Path:      t.Name(),
+		}
 	}
-	for i := range resp {
-		reply.Info = append(reply.Info, resp[i])
-	}
-	return &reply, nil
+	return &proto_downloader.SnapshotsInfoReply{Info: infoItems}, nil
 }
 
 func (s *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
