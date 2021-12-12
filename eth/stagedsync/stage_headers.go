@@ -239,6 +239,7 @@ func HeadersDownward(
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
 			if !sentToPeer {
 				timer := time.NewTimer(30 * time.Millisecond)
+				<-timer.C
 				timer.Stop()
 			}
 		}
