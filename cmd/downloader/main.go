@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +11,8 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -72,7 +75,30 @@ var rootCmd = &cobra.Command{
 		snapshotsDir := path.Join(datadir, "snapshots")
 		log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
 
-		bittorrentServer, err := downloader.NewServer(snapshotsDir, seeding)
+		db := mdbx.MustOpen(snapshotsDir + "/db")
+		var t *downloader.Client
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
+			if err != nil {
+				return fmt.Errorf("get peer id: %w", err)
+			}
+			t, err = downloader.New(snapshotsDir, seeding, string(peerID))
+			if err != nil {
+				return err
+			}
+			if len(peerID) == 0 {
+				err = t.SavePeerID(tx)
+				if err != nil {
+					return fmt.Errorf("save peer id: %w", err)
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		defer t.Close()
+
+		bittorrentServer, err := downloader.NewServer(db, t)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
@@ -84,29 +110,6 @@ var rootCmd = &cobra.Command{
 		}
 
 		go downloader.MainLoop(ctx, bittorrentServer)
-		/*
-			go func() {
-				for {
-					select {
-					case <-cmd.Context().Done():
-						return
-					default:
-					}
-
-					snapshots, err := bittorrentServer.Snapshots(ctx, &proto_downloader.SnapshotsRequest{})
-					if err != nil {
-						log.Error("get snapshots", "err", err)
-						time.Sleep(time.Minute)
-						continue
-					}
-					stats := bittorrentServer.Stats(context.Background())
-					for _, v := range snapshots.Info {
-						log.Info("Snapshot "+v.Path, "%", v.Readiness, "peers", stats[v.Path].ConnectedSeeders)
-					}
-					time.Sleep(time.Minute)
-				}
-			}()
-		*/
 
 		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil, healthCheck)
 		if err != nil {

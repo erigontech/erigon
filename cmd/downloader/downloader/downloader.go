@@ -18,8 +18,9 @@ import (
 )
 
 type Client struct {
-	Cli          *torrent.Client
-	snapshotsDir string
+	Cli                  *torrent.Client
+	pieceCompletionStore storage.PieceCompletion
+	snapshotsDir         string
 }
 
 func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
@@ -83,8 +84,9 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	*/
 
 	return &Client{
-		Cli:          torrentClient,
-		snapshotsDir: snapshotsDir,
+		Cli:                  torrentClient,
+		pieceCompletionStore: progressStore,
+		snapshotsDir:         snapshotsDir,
 	}, nil
 }
 
@@ -116,6 +118,7 @@ func (cli *Client) SavePeerID(db kv.Putter) error {
 }
 
 func (cli *Client) Close() {
+	cli.pieceCompletionStore.Close()
 	cli.Cli.Close()
 }
 

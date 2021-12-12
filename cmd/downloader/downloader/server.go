@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -12,7 +11,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -25,31 +23,11 @@ var (
 	_ proto_downloader.DownloaderServer = &SNDownloaderServer{}
 )
 
-func NewServer(dir string, seeding bool) (*SNDownloaderServer, error) {
-	db := mdbx.MustOpen(dir + "/db")
+func NewServer(db kv.RwDB, client *Client) (*SNDownloaderServer, error) {
 	sn := &SNDownloaderServer{
 		db: db,
+		t:  client,
 	}
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-		if err != nil {
-			return fmt.Errorf("get peer id: %w", err)
-		}
-		sn.t, err = New(dir, seeding, string(peerID))
-		if err != nil {
-			return err
-		}
-		if len(peerID) == 0 {
-			err = sn.t.SavePeerID(tx)
-			if err != nil {
-				return fmt.Errorf("save peer id: %w", err)
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
 	return sn, nil
 }
 
