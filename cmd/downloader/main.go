@@ -102,11 +102,10 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
-		log.Info("Load")
 
-		err = bittorrentServer.Load(ctx)
+		err = downloader.Start(ctx, snapshotsDir, t.Cli)
 		if err != nil {
-			return fmt.Errorf("load: %w", err)
+			return fmt.Errorf("start: %w", err)
 		}
 
 		go downloader.MainLoop(ctx, bittorrentServer)

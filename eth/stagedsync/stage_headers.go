@@ -11,6 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -24,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/log/v3"
 )
@@ -40,8 +42,10 @@ type HeadersCfg struct {
 	noP2PDiscovery    bool
 	reverseDownloadCh chan types.Header
 	waitingPosHeaders *bool
-	snapshots         *snapshotsync.AllSnapshots
-	blockReader       interfaces.FullBlockReader
+
+	snapshots          *snapshotsync.AllSnapshots
+	snapshotDownloader proto_downloader.DownloaderClient
+	blockReader        interfaces.FullBlockReader
 }
 
 func StageHeadersCfg(
@@ -57,22 +61,24 @@ func StageHeadersCfg(
 	reverseDownloadCh chan types.Header,
 	waitingPosHeaders *bool,
 	snapshots *snapshotsync.AllSnapshots,
+	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                db,
-		hd:                headerDownload,
-		statusCh:          statusCh,
-		chainConfig:       chainConfig,
-		headerReqSend:     headerReqSend,
-		announceNewHashes: announceNewHashes,
-		penalize:          penalize,
-		batchSize:         batchSize,
-		noP2PDiscovery:    noP2PDiscovery,
-		reverseDownloadCh: reverseDownloadCh,
-		waitingPosHeaders: waitingPosHeaders,
-		snapshots:         snapshots,
-		blockReader:       blockReader,
+		db:                 db,
+		hd:                 headerDownload,
+		statusCh:           statusCh,
+		chainConfig:        chainConfig,
+		headerReqSend:      headerReqSend,
+		announceNewHashes:  announceNewHashes,
+		penalize:           penalize,
+		batchSize:          batchSize,
+		noP2PDiscovery:     noP2PDiscovery,
+		reverseDownloadCh:  reverseDownloadCh,
+		waitingPosHeaders:  waitingPosHeaders,
+		snapshots:          snapshots,
+		snapshotDownloader: snapshotDownloader,
+		blockReader:        blockReader,
 	}
 }
 
@@ -186,6 +192,29 @@ func HeadersForward(
 			// wait for Downloader service to download all expected snapshots
 			logEvery := time.NewTicker(logInterval)
 			defer logEvery.Stop()
+
+			for {
+				if reply, err := cfg.snapshotDownloader.Snapshots(ctx, &proto_downloader.SnapshotsRequest{}, grpc.WaitForReady(true)); err != nil {
+					log.Warn("Error while waiting for snapshots progress", "err", err)
+					time.Sleep(10 * time.Second)
+					continue
+				} else {
+					progress := int32(0)
+					allReady := true
+					for _, in := range reply.Info {
+						progress += in.Readiness
+						allReady = allReady && in.Readiness == 100
+					}
+					progress /= int32(len(reply.Info))
+					if allReady {
+						break
+					}
+					log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", progress))
+					time.Sleep(10 * time.Second)
+				}
+				break
+			}
+
 			for {
 				headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
 				if err != nil {

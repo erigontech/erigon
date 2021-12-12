@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -1098,7 +1098,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	blockDownloaderWindow := 65536
-	downloadServer, err := download.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
+	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
 	if err != nil {
 		panic(err)
 	}
@@ -1111,7 +1111,11 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, chainConfig.TerminalTotalDifficulty, downloadServer, tmpdir, nil, nil, nil, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
+		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
+		nil, nil, nil, nil,
+		nil,
+	)
 	if err != nil {
 		panic(err)
 	}

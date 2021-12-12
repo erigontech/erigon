@@ -412,6 +412,11 @@ var (
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
+	DownloaderAddrFlag = cli.StringFlag{
+		Name:  "downloader.api.addr",
+		Value: "127.0.0.1:9093",
+		Usage: "downloader address '<host>:<port>'",
+	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
@@ -890,6 +895,10 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setDataDir(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
+
+	if ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+		cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
+	}
 }
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {

@@ -10,9 +10,10 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -224,12 +225,13 @@ func NewStagedSync(
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
 	terminalTotalDifficulty *big.Int,
-	controlServer *download.ControlServerImpl,
+	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan types.Header,
 	statusCh chan privateapi.ExecutionStatus,
 	waitingForPOSHeaders *bool,
+	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.AllSnapshots
@@ -254,6 +256,7 @@ func NewStagedSync(
 			reverseDownloadCh,
 			waitingForPOSHeaders,
 			allSnapshots,
+			snapshotDownloader,
 			blockReader,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,

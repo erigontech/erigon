@@ -20,7 +20,6 @@ import (
 type Client struct {
 	Cli                  *torrent.Client
 	pieceCompletionStore storage.PieceCompletion
-	snapshotsDir         string
 }
 
 func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
@@ -45,48 +44,11 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 		return nil, fmt.Errorf("fail to start: %w", err)
 	}
 
-	//log.Info(fmt.Sprintf("Torrent protocol listen: %s,  my IP: %s", publicIP, GetOutboundIP()))
 	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", seeding, torrentClient.PeerID()))
-
-	/*
-		{
-			if err := BuildTorrentFilesIfNeed(context.Background(), snapshotsDir); err != nil {
-				return nil, err
-			}
-			preverifiedHashes := snapshothashes.Goerli
-			if err := AddTorrentFiles(context.Background(), snapshotsDir, torrentClient, preverifiedHashes); err != nil {
-				return nil, err
-			}
-
-			infoHashes := make([]metainfo.Hash, len(preverifiedHashes))
-			i := 0
-			for _, hashStr := range preverifiedHashes {
-				infoHashes[i] = metainfo.NewHashFromHex(hashStr)
-				i++
-			}
-			if err := ResolveAbsentTorrents(context.Background(), torrentClient, infoHashes); err != nil {
-				return nil, err
-			}
-			if err := CreateAbsentTorrentFiles(context.Background(), torrentClient, snapshotsDir); err != nil {
-				return nil, err
-			}
-			if err := DownloadAll(context.Background(), torrentClient); err != nil {
-				return nil, err
-			}
-			if err := Seed(context.Background(), torrentClient); err != nil {
-				return nil, err
-			}
-
-			torrentClient.Close()
-			progressStore.Close()
-			panic(1)
-		}
-	*/
 
 	return &Client{
 		Cli:                  torrentClient,
 		pieceCompletionStore: progressStore,
-		snapshotsDir:         snapshotsDir,
 	}, nil
 }
 
