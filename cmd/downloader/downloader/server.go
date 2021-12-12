@@ -79,6 +79,7 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 	for _, t := range s.t.Cli.Torrents() {
 		t.AllowDataDownload()
 		t.AllowDataUpload()
+		t.DownloadAll()
 	}
 	return &emptypb.Empty{}, nil
 }

@@ -108,7 +108,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("start: %w", err)
 		}
 
-		go downloader.MainLoop(ctx, bittorrentServer)
+		go downloader.MainLoop(ctx, t.Cli)
 
 		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil, healthCheck)
 		if err != nil {

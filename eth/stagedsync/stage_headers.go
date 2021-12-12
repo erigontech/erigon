@@ -206,7 +206,6 @@ func HeadersForward(
 					}
 					progress /= int32(len(reply.Info))
 					if allReady {
-						fmt.Printf("allReady\n")
 						break
 					}
 					log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", progress))

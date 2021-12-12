@@ -58,7 +58,7 @@ func ForEachTorrentFile(root string, walker func(torrentFileName string) error) 
 		return err
 	}
 	for _, f := range files {
-		torrentFileName := filepath.Join(root, f+".torrent")
+		torrentFileName := filepath.Join(root, f)
 		if _, err := os.Stat(torrentFileName); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
@@ -81,7 +81,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 		return err
 	}
 	for i, f := range files {
-		torrentFileName := path.Join(root, f+".torrent")
+		torrentFileName := path.Join(root, f)
 		if _, err := os.Stat(torrentFileName); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return err

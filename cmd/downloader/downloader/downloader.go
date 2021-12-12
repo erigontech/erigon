@@ -89,24 +89,91 @@ func (cli *Client) PeerID() []byte {
 	return peerID[:]
 }
 
-func MainLoop(ctx context.Context, srv *SNDownloaderServer) {
-	torrentClient := srv.t.Cli
+func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
+	interval := time.Second * 5
+	logEvery := time.NewTicker(interval)
+	defer logEvery.Stop()
 	for {
+		var prevBytesReadUsefulData, aggByteRate int64
 		select {
 		case <-ctx.Done():
 			return
-		default:
-		}
+		case <-logEvery.C:
+			torrents := torrentClient.Torrents()
+			allComplete := true
+			allGotInfo := true
+			for _, t := range torrents {
+				select {
+				case <-t.GotInfo(): // all good
+				default:
+					allGotInfo = false
+					t.AllowDataDownload()
+					t.AllowDataUpload()
+				}
+				allComplete = allComplete && t.Complete.Bool()
+			}
+			if !allGotInfo {
+				log.Info("[torrent] Waiting for torrents metadata")
+				continue
+			}
+			if allComplete {
+				peers := map[torrent.PeerID]struct{}{}
+				for _, t := range torrentClient.Torrents() {
+					for _, peer := range t.PeerConns() {
+						peers[peer.PeerID] = struct{}{}
+					}
+				}
+				log.Info("[torrent] Seeding", "peers", len(peers), "torrents", len(torrents))
+				continue
+			}
 
-		if err := DownloadAll(ctx, torrentClient); err != nil {
-			log.Error("DownloadAll", "err", err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		if err := Seed(ctx, torrentClient); err != nil {
-			log.Error("Seed", "err", err)
-			time.Sleep(5 * time.Second)
-			continue
+			var aggBytesCompleted, aggLen int64
+			//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
+			peers := map[torrent.PeerID]*torrent.PeerConn{}
+
+			for _, t := range torrents {
+				stats := t.Stats()
+				/*
+					var completedPieces, partialPieces int
+					psrs := t.PieceStateRuns()
+					for _, r := range psrs {
+						if r.Complete {
+							completedPieces += r.Length
+						}
+						if r.Partial {
+							partialPieces += r.Length
+						}
+					}
+					aggCompletedPieces += completedPieces
+					aggPartialPieces += partialPieces
+					aggNumPieces = t.NumPieces()
+				*/
+
+				byteRate := int64(time.Second)
+				bytesReadUsefulData := stats.BytesReadUsefulData.Int64()
+				byteRate *= stats.BytesReadUsefulData.Int64() - prevBytesReadUsefulData
+				byteRate /= int64(interval)
+				aggByteRate += byteRate
+
+				prevBytesReadUsefulData = bytesReadUsefulData
+				aggBytesCompleted += t.BytesCompleted()
+				aggLen += t.Length()
+
+				for _, peer := range t.PeerConns() {
+					peers[peer.PeerID] = peer
+				}
+
+			}
+
+			line := fmt.Sprintf(
+				"[torrent] Downloading: %d%%, %v/s, peers: %d",
+				int(100*(float64(aggBytesCompleted)/float64(aggLen))),
+				//humanize.Bytes(uint64(aggBytesCompleted)),
+				//	humanize.Bytes(uint64(aggLen)),
+				humanize.Bytes(uint64(aggByteRate)),
+				len(peers),
+			)
+			log.Info(line)
 		}
 	}
 }
@@ -164,35 +231,6 @@ func CreateAbsentTorrentFiles(ctx context.Context, torrentClient *torrent.Client
 		}
 	}
 	return nil
-}
-
-func DownloadAll(ctx context.Context, torrentClient *torrent.Client) error {
-	for _, t := range torrentClient.Torrents() {
-		t.DownloadAll()
-	}
-	waitForDownloadAll(ctx, torrentClient)
-	return nil
-}
-
-func Seed(ctx context.Context, torrentClient *torrent.Client) error {
-	interval := 30 * time.Second
-	logEvery := time.NewTicker(interval)
-	defer logEvery.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			peers := map[torrent.PeerID]struct{}{}
-			for _, t := range torrentClient.Torrents() {
-				for _, peer := range t.PeerConns() {
-					peers[peer.PeerID] = struct{}{}
-				}
-			}
-			log.Info("[torrent] Seeding", "peers", len(peers))
-		}
-	}
 }
 
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
@@ -259,74 +297,4 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 		}
 	}()
 	torrentClient.WaitAll() // wait for checksum verify
-}
-
-func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		interval := time.Second * 5
-		logEvery := time.NewTicker(interval)
-		defer logEvery.Stop()
-
-		var prevBytesReadUsefulData, aggByteRate int64
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				var aggBytesCompleted, aggLen int64
-				//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
-				peers := map[torrent.PeerID]*torrent.PeerConn{}
-
-				for _, t := range torrentClient.Torrents() {
-					stats := t.Stats()
-					/*
-						var completedPieces, partialPieces int
-						psrs := t.PieceStateRuns()
-						for _, r := range psrs {
-							if r.Complete {
-								completedPieces += r.Length
-							}
-							if r.Partial {
-								partialPieces += r.Length
-							}
-						}
-						aggCompletedPieces += completedPieces
-						aggPartialPieces += partialPieces
-						aggNumPieces = t.NumPieces()
-					*/
-
-					byteRate := int64(time.Second)
-					bytesReadUsefulData := stats.BytesReadUsefulData.Int64()
-					byteRate *= stats.BytesReadUsefulData.Int64() - prevBytesReadUsefulData
-					byteRate /= int64(interval)
-					aggByteRate += byteRate
-
-					prevBytesReadUsefulData = bytesReadUsefulData
-					aggBytesCompleted += t.BytesCompleted()
-					aggLen += t.Length()
-
-					for _, peer := range t.PeerConns() {
-						peers[peer.PeerID] = peer
-					}
-
-				}
-
-				line := fmt.Sprintf(
-					"[torrent] Download: %d%%, %v/s, peers: %d",
-					int(100*(float64(aggBytesCompleted)/float64(aggLen))),
-					//humanize.Bytes(uint64(aggBytesCompleted)),
-					//	humanize.Bytes(uint64(aggLen)),
-					humanize.Bytes(uint64(aggByteRate)),
-					len(peers),
-				)
-				log.Info(line)
-			}
-		}
-	}()
-
-	torrentClient.WaitAll()
 }
