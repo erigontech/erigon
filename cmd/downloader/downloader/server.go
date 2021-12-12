@@ -76,6 +76,10 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes); err != nil {
 		return nil, err
 	}
+	for _, t := range s.t.Cli.Torrents() {
+		t.AllowDataDownload()
+		t.AllowDataUpload()
+	}
 	return &emptypb.Empty{}, nil
 }
 
