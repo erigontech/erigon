@@ -3,20 +3,15 @@ package downloader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -84,59 +79,44 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 	return &emptypb.Empty{}, nil
 }
 
-func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *proto_downloader.SnapshotsRequest) (*proto_downloader.SnapshotsReply, error) {
+func (s *SNDownloaderServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
 	torrents := s.t.Cli.Torrents()
-	infoItems := make([]*proto_downloader.SnapshotInfo, len(torrents))
-	for i, t := range torrents {
-		readiness := int32(0)
+	reply := &proto_downloader.StatsReply{Completed: true}
+
+	peers := map[torrent.PeerID]struct{}{}
+
+	for _, t := range torrents {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-t.GotInfo():
-			readiness = int32(100 * (float64(t.BytesCompleted()) / float64(t.Info().TotalLength())))
-			if readiness == 100 && !t.Complete.Bool() {
-				readiness = 99
+			reply.BytesCompleted += uint64(t.BytesCompleted())
+			reply.BytesTotal += uint64(t.Info().TotalLength())
+			reply.Completed = reply.Completed && t.Complete.Bool()
+			for _, peer := range t.PeerConns() {
+				peers[peer.PeerID] = struct{}{}
 			}
 		default:
-		}
-
-		infoItems[i] = &proto_downloader.SnapshotInfo{
-			Readiness: readiness,
-			Path:      t.Name(),
+			reply.Completed = false
 		}
 	}
-	return &proto_downloader.SnapshotsReply{Info: infoItems}, nil
+
+	reply.Peers = int32(len(peers))
+	reply.Progress = int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
+	if reply.Progress == 100 && !reply.Completed {
+		reply.Progress = 99
+	}
+	return reply, nil
 }
 
-func (s *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
-	stats := map[string]torrent.TorrentStats{}
-	torrents := s.t.Cli.Torrents()
-	for _, t := range torrents {
-		stats[t.Name()] = t.Stats()
-	}
-	return stats
-}
-
-func GrpcClient(ctx context.Context, downloaderAddr string) (proto_downloader.DownloaderClient, error) {
-	// creating grpc client connection
-	var dialOpts []grpc.DialOption
-
-	backoffCfg := backoff.DefaultConfig
-	backoffCfg.BaseDelay = 500 * time.Millisecond
-	backoffCfg.MaxDelay = 10 * time.Second
-	dialOpts = []grpc.DialOption{
-		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
-	}
-
-	dialOpts = append(dialOpts, grpc.WithInsecure())
-	conn, err := grpc.DialContext(ctx, downloaderAddr, dialOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("creating client connection to sentry P2P: %w", err)
-	}
-	return proto_downloader.NewDownloaderClient(conn), nil
-}
+//func (s *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
+//	stats := map[string]torrent.TorrentStats{}
+//	torrents := s.t.Cli.Torrents()
+//	for _, t := range torrents {
+//		stats[t.Name()] = t.Stats()
+//	}
+//	return stats
+//}
 
 func Proto2InfoHashes(in []*prototypes.H160) []metainfo.Hash {
 	infoHashes := make([]metainfo.Hash, len(in))
