@@ -2,10 +2,15 @@ module github.com/ledgerwatch/erigon
 
 go 1.16
 
+replace (
+	github.com/ledgerwatch/erigon-lib => ./../erigon-lib
+)
+
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
 	github.com/VictoriaMetrics/metrics v1.18.1
+	github.com/anacrolix/go-libutp v1.0.4
 	github.com/anacrolix/log v0.10.0
 	github.com/anacrolix/torrent v1.38.0
 	github.com/btcsuite/btcd v0.21.0-beta

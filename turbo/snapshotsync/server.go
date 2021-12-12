@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
+	"github.com/ledgerwatch/erigon/core/snapshothashes"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -57,140 +59,26 @@ type SNDownloaderServer struct {
 	db kv.RwDB
 }
 
-func (s *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadSnapshotRequest) (*emptypb.Empty, error) {
+func (s *SNDownloaderServer) Download(ctx context.Context, request *snapshotsync.DownloadRequest) (*emptypb.Empty, error) {
+	infoHashes := Proto2InfoHashes(request.TorrentHashes)
+
 	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
 	defer cancel()
-	eg := errgroup.Group{}
-
-	networkId := request.NetworkId
-	mode := FromSnapshotTypes(request.Type)
-
-	var headerSpec, bodySpec, stateSpec, receiptSpec *torrentSpecFromDb
-
-	if err := s.db.View(ctx, func(tx kv.Tx) error {
-		var err error
-		headerSpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_headers, networkId)
-		if err != nil {
-			return err
-		}
-		bodySpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_bodies, networkId)
-		if err != nil {
-			return err
-		}
-		stateSpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_state, networkId)
-		if err != nil {
-			return err
-		}
-		receiptSpec, err = getTorrentSpec(tx, snapshotsync.SnapshotType_receipts, networkId)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
-	if mode.Headers {
-		eg.Go(func() error {
-			var newSpec *torrentSpecFromDb
-			var err error
-			newSpec, err = s.t.AddTorrent(ctx, headerSpec)
-			if err != nil {
-				return fmt.Errorf("add torrent: %w", err)
-			}
-			if newSpec != nil {
-				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
-				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
-					return saveTorrentSpec(tx, newSpec)
-				}); err != nil {
-					return err
-				}
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	if mode.Bodies {
-		eg.Go(func() error {
-			var newSpec *torrentSpecFromDb
-			var err error
-			newSpec, err = s.t.AddTorrent(ctx, bodySpec)
-			if err != nil {
-				return fmt.Errorf("add torrent: %w", err)
-			}
-			if newSpec != nil {
-				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
-				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
-					return saveTorrentSpec(tx, newSpec)
-				}); err != nil {
-					return err
-				}
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	if mode.State {
-		eg.Go(func() error {
-			var newSpec *torrentSpecFromDb
-			var err error
-			newSpec, err = s.t.AddTorrent(ctx, stateSpec)
-			if err != nil {
-				return fmt.Errorf("add torrent: %w", err)
-			}
-			if newSpec != nil {
-				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
-				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
-					return saveTorrentSpec(tx, newSpec)
-				}); err != nil {
-					return err
-				}
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-
-	if mode.Receipts {
-		eg.Go(func() error {
-			var newSpec *torrentSpecFromDb
-			var err error
-			newSpec, err = s.t.AddTorrent(ctx, receiptSpec)
-			if err != nil {
-				return fmt.Errorf("add torrent: %w", err)
-			}
-			if newSpec != nil {
-				log.Info("Save spec", "snapshot", newSpec.snapshotType.String())
-				if err = s.db.Update(ctx, func(tx kv.RwTx) error {
-					return saveTorrentSpec(tx, newSpec)
-				}); err != nil {
-					return err
-				}
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-	err := eg.Wait()
-	if err != nil {
+	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes); err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
 }
-func (s *SNDownloaderServer) Load() error {
-	return s.db.View(context.Background(), func(tx kv.Tx) error {
-		return s.t.Load(tx)
-	})
+
+func (s *SNDownloaderServer) Load(ctx context.Context) error {
+	if err := BuildTorrentFilesIfNeed(ctx, s.t.snapshotsDir); err != nil {
+		return err
+	}
+	preverifiedHashes := snapshothashes.Goerli // TODO: remove hard-coded hashes from downloader
+	if err := AddTorrentFiles(ctx, s.t.snapshotsDir, s.t.Cli, preverifiedHashes); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsync.SnapshotsRequest) (*snapshotsync.SnapshotsInfoReply, error) {
@@ -200,7 +88,7 @@ func (s *SNDownloaderServer) Snapshots(ctx context.Context, request *snapshotsyn
 		return nil, err
 	}
 	defer tx.Rollback()
-	resp, err := s.t.GetSnapshots(tx, request.NetworkId)
+	resp, err := s.t.GetSnapshots(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -217,4 +105,24 @@ func (s *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.Torre
 		stats[t.Name()] = t.Stats()
 	}
 	return stats
+}
+
+func Proto2InfoHashes(in []*prototypes.H160) []metainfo.Hash {
+	infoHashes := make([]metainfo.Hash, len(in))
+	i := 0
+	for _, h := range in {
+		infoHashes[i] = gointerfaces.ConvertH160toAddress(h)
+		i++
+	}
+	return infoHashes
+}
+
+func InfoHashes2Proto(in []metainfo.Hash) []*prototypes.H160 {
+	infoHashes := make([]*prototypes.H160, len(in))
+	i := 0
+	for _, h := range in {
+		infoHashes[i] = gointerfaces.ConvertAddressToH160(h)
+		i++
+	}
+	return infoHashes
 }

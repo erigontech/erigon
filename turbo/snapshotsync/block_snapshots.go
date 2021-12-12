@@ -313,7 +313,6 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 			expectedTxsAmount = bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount) - b.BaseTxId
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
-		fmt.Printf("create: %s\n", f)
 		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, expectedTxsAmount); err != nil {
 			return err
 		}

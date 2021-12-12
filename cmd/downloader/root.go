@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -79,20 +78,12 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("new server: %w", err)
 		}
 		log.Info("Load")
-		err = bittorrentServer.Load()
+
+		err = bittorrentServer.Load(ctx)
 		if err != nil {
 			return fmt.Errorf("load: %w", err)
 		}
 
-		go func() {
-			_, err := bittorrentServer.Download(ctx, &proto_snap.DownloadSnapshotRequest{
-				NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
-				Type:      snapshotsync.GetAvailableSnapshotTypes(params.MainnetChainConfig.ChainID.Uint64()),
-			})
-			if err != nil {
-				log.Error("Download failed", "err", err, "networkID", params.MainnetChainConfig.ChainID.Uint64())
-			}
-		}()
 		go func() {
 			for {
 				select {
@@ -101,9 +92,7 @@ var rootCmd = &cobra.Command{
 				default:
 				}
 
-				snapshots, err := bittorrentServer.Snapshots(ctx, &proto_snap.SnapshotsRequest{
-					NetworkId: params.MainnetChainConfig.ChainID.Uint64(),
-				})
+				snapshots, err := bittorrentServer.Snapshots(ctx, &proto_snap.SnapshotsRequest{})
 				if err != nil {
 					log.Error("get snapshots", "err", err)
 					time.Sleep(time.Minute)
@@ -111,7 +100,7 @@ var rootCmd = &cobra.Command{
 				}
 				stats := bittorrentServer.Stats(context.Background())
 				for _, v := range snapshots.Info {
-					log.Info("Snapshot "+v.Type.String(), "%", v.Readiness, "peers", stats[v.Type.String()].ConnectedSeeders)
+					log.Info("Snapshot "+v.Path, "%", v.Readiness, "peers", stats[v.Path].ConnectedSeeders)
 				}
 				time.Sleep(time.Minute)
 			}

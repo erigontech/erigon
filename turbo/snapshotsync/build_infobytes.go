@@ -2,6 +2,7 @@ package snapshotsync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -12,9 +13,21 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/erigon/core/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
 )
+
+func CreateTorrentFileIfNotExists(root string, info *metainfo.Info) error {
+	torrentFileName := filepath.Join(root, info.Name+".torrent")
+	if _, err := os.Stat(torrentFileName); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return CreateTorrentFile(root, info)
+		}
+		return err
+	}
+	return nil
+}
 
 func CreateTorrentFile(root string, info *metainfo.Info) error {
 	infoBytes, err := bencode.Marshal(info)
@@ -25,10 +38,9 @@ func CreateTorrentFile(root string, info *metainfo.Info) error {
 		CreationDate: time.Now().Unix(),
 		CreatedBy:    "erigon",
 		InfoBytes:    infoBytes,
-		//AnnounceList: Trackers,
+		AnnounceList: Trackers,
 	}
 	torrentFileName := filepath.Join(root, info.Name+".torrent")
-	fmt.Printf("create: %s\n", torrentFileName)
 
 	file, err := os.Create(torrentFileName)
 	if err != nil {
@@ -43,7 +55,7 @@ func CreateTorrentFile(root string, info *metainfo.Info) error {
 }
 
 func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
-	logEvery := time.NewTicker(120 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	var files []string
@@ -127,7 +139,7 @@ func BuildMetaToml(snapshotsDir string) error {
 		}
 	}
 
-	metaFile := PreverifiedSnapshotHashes{Segments: map[string]string{}}
+	metaFile := snapshothashes.Preverified{}
 	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
@@ -135,7 +147,7 @@ func BuildMetaToml(snapshotsDir string) error {
 		}
 
 		_, fileName := path.Split(torrentFilePath)
-		metaFile.Segments[fileName] = mi.HashInfoBytes().String()
+		metaFile[fileName] = mi.HashInfoBytes().String()
 		return nil
 	}); err != nil {
 		return err
@@ -144,6 +156,11 @@ func BuildMetaToml(snapshotsDir string) error {
 	if err != nil {
 		return err
 	}
+	b2, err := json.Marshal(metaFile)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s\n", b2)
 	if err := ioutil.WriteFile(metaFilePath, b, 0600); err != nil {
 		return err
 	}
