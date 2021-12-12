@@ -13,7 +13,6 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -144,48 +143,6 @@ func MainLoop(ctx context.Context, srv *SNDownloaderServer) {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-	}
-}
-
-func (cli *Client) Download() {
-	log.Info("Start snapshot downloading")
-	torrents := cli.Cli.Torrents()
-	for i := range torrents {
-		t := torrents[i]
-		go func(t *torrent.Torrent) {
-			defer debug.LogPanic()
-			t.AllowDataDownload()
-			t.DownloadAll()
-
-			tt := time.Now()
-			prev := t.BytesCompleted()
-		dwn:
-			for {
-				if t.Info().TotalLength()-t.BytesCompleted() == 0 {
-					log.Info("Dowloaded", "snapshot", t.Name(), "t", time.Since(tt))
-					break dwn
-				} else {
-					stats := t.Stats()
-					log.Info("Downloading snapshot",
-						"snapshot", t.Name(),
-						"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
-						"mb", t.BytesCompleted()/1024/1024,
-						"diff(kb)", (t.BytesCompleted()-prev)/1024,
-						"seeders", stats.ConnectedSeeders,
-						"active", stats.ActivePeers,
-						"total", stats.TotalPeers)
-					prev = t.BytesCompleted()
-					time.Sleep(time.Second * 10)
-
-				}
-
-			}
-		}(t)
-	}
-	cli.Cli.WaitAll()
-
-	for _, t := range cli.Cli.Torrents() {
-		log.Info("Snapshot seeding", "name", t.Name(), "seeding", t.Seeding())
 	}
 }
 
@@ -350,31 +307,6 @@ func waitForDownloadAll(ctx context.Context, torrentClient *torrent.Client) {
 
 		var prevBytesReadUsefulData, aggByteRate int64
 
-		/*
-			tt := time.Now()
-				prev := t.BytesCompleted()
-			dwn:
-				for {
-					if t.Info().TotalLength()-t.BytesCompleted() == 0 {
-						log.Info("Dowloaded", "snapshot", t.Name(), "t", time.Since(tt))
-						break dwn
-					} else {
-						stats := t.Stats()
-						log.Info("Downloading snapshot",
-							"snapshot", t.Name(),
-							"%", int(100*(float64(t.BytesCompleted())/float64(t.Info().TotalLength()))),
-							"mb", t.BytesCompleted()/1024/1024,
-							"diff(kb)", (t.BytesCompleted()-prev)/1024,
-							"seeders", stats.ConnectedSeeders,
-							"active", stats.ActivePeers,
-							"total", stats.TotalPeers)
-						prev = t.BytesCompleted()
-						time.Sleep(time.Second * 10)
-
-					}
-
-				}
-		*/
 		for {
 			select {
 			case <-ctx.Done():
