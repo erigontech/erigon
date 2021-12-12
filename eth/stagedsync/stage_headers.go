@@ -269,7 +269,7 @@ func HeadersDownward(
 	}); err != nil {
 		return err
 	}
-	if err = canonicalHeadersCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
+	if err = canonicalHeadersCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
