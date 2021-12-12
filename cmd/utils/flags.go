@@ -896,9 +896,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
 
-	if ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
-	}
+	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 }
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {

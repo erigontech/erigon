@@ -303,33 +303,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	config.BodyDownloadTimeoutSeconds = 30
 
-	if len(stack.Config().DownloaderAddr) > 0 {
-		backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			preverified := snapshothashes.Goerli
-			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
-			i := 0
-			for filePath, infoHashStr := range snapshothashes.Mainnet {
-				req.Items[i] = &proto_downloader.DownloadItem{
-					TorrentHash: downloadergrpc.String2Proto(infoHashStr),
-					Path:        filePath,
-				}
-				i++
-			}
-			for {
-				if _, err := backend.downloaderClient.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
-					log.Error("Can't call downloader", "err", err)
-					time.Sleep(30 * time.Second)
-					continue
-				}
-				break
-			}
-		}()
-	}
-
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
 	if !config.TxPool.Disable {
@@ -378,6 +351,33 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+		// connect to Downloader
+		backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
+		if err != nil {
+			return nil, err
+		}
+		go func() {
+			preverified := snapshothashes.Goerli
+			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+			i := 0
+			for filePath, infoHashStr := range preverified {
+				req.Items[i] = &proto_downloader.DownloadItem{
+					TorrentHash: downloadergrpc.String2Proto(infoHashStr),
+					Path:        filePath,
+				}
+				i++
+			}
+			for {
+				if _, err := backend.downloaderClient.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
+					log.Error("Can't call downloader", "err", err)
+					time.Sleep(30 * time.Second)
+					continue
+				}
+				break
+			}
+		}()
+
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}

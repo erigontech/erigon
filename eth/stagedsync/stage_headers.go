@@ -24,9 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"google.golang.org/grpc"
-
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -194,8 +193,11 @@ func HeadersForward(
 			defer logEvery.Stop()
 
 			for {
-				if reply, err := cfg.snapshotDownloader.Snapshots(ctx, &proto_downloader.SnapshotsRequest{}, grpc.WaitForReady(true)); err != nil {
+				if reply, err := cfg.snapshotDownloader.Snapshots(ctx, &proto_downloader.SnapshotsRequest{}); err != nil {
 					log.Warn("Error while waiting for snapshots progress", "err", err)
+					time.Sleep(10 * time.Second)
+					continue
+				} else if len(reply.Info) < len(snapshothashes.Goerli) {
 					time.Sleep(10 * time.Second)
 					continue
 				} else {
