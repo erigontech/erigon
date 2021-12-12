@@ -376,22 +376,28 @@ Loop:
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				cfg.hd.SentRequest(req, currentTime, 5 /* timeout */)
+				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
-		cfg.penalize(ctx, penalties)
+		if len(penalties) > 0 {
+			cfg.penalize(ctx, penalties)
+		}
 		maxRequests := 64 // Limit number of requests sent per round to let some headers to be inserted into the database
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					cfg.hd.SentRequest(req, currentTime, 5 /*timeout */)
+					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+					cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
 				}
 			}
-			cfg.penalize(ctx, penalties)
+			if len(penalties) > 0 {
+				cfg.penalize(ctx, penalties)
+			}
 			maxRequests--
 		}
 

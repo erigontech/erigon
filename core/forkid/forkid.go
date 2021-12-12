@@ -76,6 +76,28 @@ func NewIDFromForks(forks []uint64, genesis common.Hash, head uint64) ID {
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
+func NextForkHash(config *params.ChainConfig, genesis common.Hash, head uint64) [4]byte {
+	// Calculate the starting checksum from the genesis hash
+	hash := crc32.ChecksumIEEE(genesis[:])
+
+	// Calculate the current fork checksum and the next fork block
+	var next uint64
+	for _, fork := range GatherForks(config) {
+		if fork <= head {
+			// Fork already passed, checksum the previous hash and the fork number
+			hash = checksumUpdate(hash, fork)
+			continue
+		}
+		next = fork
+		break
+	}
+	if next == 0 {
+		return checksumToBytes(hash)
+	} else {
+		return checksumToBytes(checksumUpdate(hash, next))
+	}
+}
+
 // NewFilter creates a filter that returns if a fork ID should be rejected or notI
 // based on the local chain's status.
 func NewFilter(config *params.ChainConfig, genesis common.Hash, head func() uint64) Filter {
