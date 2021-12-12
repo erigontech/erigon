@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+package txpool;
+
+option go_package = "./txpool;txpool";
+
+message TxHashes { repeated types.H256 hashes = 1; }
+
+message AddRequest { repeated bytes rlpTxs = 1; }
+
+enum ImportResult {
+  SUCCESS = 0;
+  ALREADY_EXISTS = 1;
+  FEE_TOO_LOW = 2;
+  STALE = 3;
+  INVALID = 4;
+  INTERNAL_ERROR = 5;
+}
+
+message AddReply { repeated ImportResult imported = 1; repeated string errors = 2; }
+
+message TransactionsRequest { repeated types.H256 hashes = 1; }
+message TransactionsReply { repeated bytes rlpTxs = 1; }
+
+message OnAddRequest {}
+message OnAddReply {
+  repeated bytes rplTxs = 1;
+}
+
+message AllRequest {}
+message AllReply {
+  enum Type {
+    PENDING = 0; // All currently processable transactions
+    QUEUED = 1;  // Queued but non-processable transactions
+    BASE_FEE = 2;  // BaseFee not enough baseFee non-processable transactions
+  }
+  message Tx {
+    Type type = 1;
+    bytes sender = 2;
+    bytes rlpTx = 3;
+  }
+  repeated Tx txs = 1;
+}
+
+message PendingReply {
+  message Tx {
+    bytes sender = 1;
+    bytes rlpTx = 2;
+    bool isLocal = 3;
+  }
+  repeated Tx txs = 1;
+}
+
+message StatusRequest {}
+message StatusReply {
+  uint32 pendingCount = 1;
+  uint32 queuedCount = 2;
+  uint32 baseFeeCount = 3;
+}
+
+message NonceRequest {
+   types.H160 address = 1;
+ }
+ message NonceReply {
+   bool found = 1;
+   uint64 nonce = 2;
+ }
+
+service Txpool {
+  // Version returns the service version number
+  rpc Version(google.protobuf.Empty) returns (types.VersionReply);
+  // preserves incoming order, changes amount, unknown hashes will be omitted
+  rpc FindUnknown(TxHashes) returns (TxHashes);
+  // Expecting signed transactions. Preserves incoming order and amount
+  // Adding txs as local (use P2P to add remote txs)
+  rpc Add(AddRequest) returns (AddReply);
+  // preserves incoming order and amount, if some transaction doesn't exists in pool - returns nil in this slot
+  rpc Transactions(TransactionsRequest) returns (TransactionsReply);
+  // returns all transactions from tx pool
+  rpc All(AllRequest) returns (AllReply);
+  // Returns all pending (processable) transactions, in ready-for-mining order
+  rpc Pending(google.protobuf.Empty) returns (PendingReply);
+  // subscribe to new transactions add event
+  rpc OnAdd(OnAddRequest) returns (stream OnAddReply);
+  // returns high level status
+  rpc Status(StatusRequest) returns (StatusReply);
+  // returns nonce for given account
+  rpc Nonce(NonceRequest) returns (NonceReply);
+}

@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+import "google/protobuf/descriptor.proto";
+
+package types;
+
+option go_package = "./types;types";
+
+/* Service-level versioning shall use a 3-part version number (M.m.p) following semver rules */
+/* 1. MAJOR version (M): increment when you make incompatible changes                        */
+/* 2. MINOR version (m): increment when you add functionality in backward compatible manner  */
+/* 3. PATCH version (p): increment when you make backward compatible bug fixes               */
+
+// Extensions of file-level options for service versioning: should *not* be modified
+extend google.protobuf.FileOptions {
+  uint32 service_major_version = 50001;
+  uint32 service_minor_version = 50002;
+  uint32 service_patch_version = 50003;
+}
+
+message H128 {
+  uint64 hi = 1;
+  uint64 lo = 2;
+}
+
+message H160 {
+  H128 hi = 1;
+  uint32 lo = 2;
+}
+
+message H256 {
+  H128 hi = 1;
+  H128 lo = 2;
+}
+
+message H512 {
+  H256 hi = 1;
+  H256 lo = 2;
+}
+
+message H1024 {
+  H512 hi = 1;
+  H512 lo = 2;
+}
+
+message H2048 {
+  H1024 hi = 1;
+  H1024 lo = 2;
+}
+// Reply message containing the current service version on the service side
+message VersionReply {
+  uint32 major = 1;
+  uint32 minor = 2;
+  uint32 patch = 3;
+}
+
+message ExecutionPayload {
+  types.H256 parentHash = 1;
+  types.H160 coinbase = 2;
+  types.H256 stateRoot = 3;
+  types.H256 receiptRoot = 4;
+  types.H2048 logsBloom = 5;
+  types.H256 random = 6;
+  uint64 blockNumber = 7;
+  uint64 gasLimit = 8;
+  uint64 gasUsed = 9;
+  uint64 timestamp = 10;
+  types.H256 extraData = 11;
+  types.H256 baseFeePerGas = 12;
+  types.H256 blockHash = 13;
+  /*
+    Array of transaction objects, each object is a byte list. 
+    See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.2/src/engine/interop/specification.md
+  */
+  repeated bytes transactions = 14;
+}
+
+message NodeInfoPorts {
+  uint32 discovery = 1;
+  uint32 listener = 2;
+}
+
+message NodeInfoReply {
+  string id = 1;
+  string name = 2;
+  string enode = 3;
+  string enr = 4;
+  NodeInfoPorts ports = 5;
+  string listenerAddr = 6;
+  bytes protocols = 7;
+}

@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "web3/common.proto";
+import "types/types.proto";
+
+package web3;
+
+message CallData {
+  optional types.H160 from = 1;
+  uint64 gas = 3;
+  uint64 gas_price = 4;
+  types.H256 hash = 5;
+  bytes input = 6;
+  optional types.H160 to = 8;
+  types.H256 value = 9;
+}
+
+message CallAction {
+  Action action = 1;
+  types.H160 from = 2;
+  uint64 gas = 3;
+  bytes input = 4;
+  types.H160 to = 5;
+  types.H256 value = 6;
+}
+
+message CreateAction {}
+
+message SelfdestructAction {}
+
+message Action {
+  oneof action {
+    CallAction call = 1;
+    CreateAction create = 2;
+    SelfdestructAction selfdestruct = 3;
+  }
+}
+
+message Trace {
+  Action action = 1;
+  TraceResult result = 2;
+  Subtraces uint64 = 3;
+  repeated types.H160 trace_address = 4;
+}
+
+message TraceResult {}
+message Subtraces {}
+message StateDiff {}
+message VmTrace {}
+
+message FullTrace {
+  Trace trace = 1;
+  StateDiff state_diff = 2;
+  VmTrace vm_trace = 3;
+}
+
+message CallRequest { repeated CallData call_data = 1; }
+
+message CallResponse { repeated Trace traces = 1; }
+
+service TraceApi { rpc Call(CallRequest) returns (CallResponse); }
