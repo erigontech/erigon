@@ -10,10 +10,10 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -72,7 +72,7 @@ var rootCmd = &cobra.Command{
 		snapshotsDir := path.Join(datadir, "snapshots")
 		log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
 
-		bittorrentServer, err := snapshotsync.NewServer(snapshotsDir, seeding)
+		bittorrentServer, err := downloader.NewServer(snapshotsDir, seeding)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
@@ -83,7 +83,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("load: %w", err)
 		}
 
-		go snapshotsync.MainLoop(ctx, bittorrentServer)
+		go downloader.MainLoop(ctx, bittorrentServer)
 		/*
 			go func() {
 				for {
@@ -119,7 +119,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func StartGrpc(snServer *snapshotsync.SNDownloaderServer, addr string, creds *credentials.TransportCredentials, healthCheck bool) (*grpc.Server, error) {
+func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *credentials.TransportCredentials, healthCheck bool) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)

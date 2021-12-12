@@ -1,4 +1,4 @@
-package snapshotsync
+package downloader
 
 import (
 	"context"
