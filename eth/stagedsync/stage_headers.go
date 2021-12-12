@@ -219,7 +219,7 @@ func HeadersDownward(
 	var req headerdownload.HeaderRequest
 	for !stopped {
 		sentToPeer := false
-		maxRequests := 64
+		maxRequests := 4096
 		for !sentToPeer && !stopped && maxRequests != 0 {
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
@@ -234,7 +234,7 @@ func HeadersDownward(
 			stopped = true
 		}
 		// Sleep and check for logs
-		timer := time.NewTimer(30 * time.Millisecond)
+		timer := time.NewTimer(2 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			stopped = true
