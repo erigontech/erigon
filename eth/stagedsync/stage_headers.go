@@ -217,10 +217,10 @@ func HeadersDownward(
 	}()
 
 	var req headerdownload.HeaderRequest
-	maxRequests := 64
-	for !stopped && maxRequests != 0 {
+	for !stopped {
 		sentToPeer := false
-		for !sentToPeer && !stopped {
+		maxRequests := 64
+		for !sentToPeer && !stopped && maxRequests != 0 {
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
 			maxRequests--
