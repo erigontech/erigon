@@ -81,7 +81,7 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 
 func (s *SNDownloaderServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
 	torrents := s.t.Cli.Torrents()
-	reply := &proto_downloader.StatsReply{Completed: true}
+	reply := &proto_downloader.StatsReply{Completed: true, Torrents: int32(len(torrents))}
 
 	peers := map[torrent.PeerID]struct{}{}
 

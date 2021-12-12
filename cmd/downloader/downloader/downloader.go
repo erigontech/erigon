@@ -104,8 +104,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				case <-t.GotInfo(): // all good
 				default:
 					allGotInfo = false
-					t.AllowDataDownload()
-					t.AllowDataUpload()
+					//t.AllowDataDownload()
+					//t.AllowDataUpload()
 				}
 				allComplete = allComplete && t.Complete.Bool()
 			}

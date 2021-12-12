@@ -196,7 +196,7 @@ func HeadersForward(
 				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 					log.Warn("Error while waiting for snapshots progress", "err", err)
 				} else if int(reply.Torrents) < len(snapshothashes.Goerli) {
-					//noop
+					log.Warn("Downloader has not enough snapshots (yet)")
 				} else if reply.Completed {
 					break
 				} else {
