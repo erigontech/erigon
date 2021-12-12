@@ -28,9 +28,6 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
-	//torrentConfig.DisableWebtorrent = true
-	//torrentConfig.DisableWebseeds = true
-	//torrentConfig.NoDHT = true
 
 	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
 	if err != nil {
