@@ -174,7 +174,7 @@ func HeadersDownward(
 		}
 		return tx.Commit()
 	}
-	cfg.hd.SetBackwards(true)
+	cfg.hd.SetPOSSync(true)
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
@@ -182,6 +182,7 @@ func HeadersDownward(
 	cfg.hd.SetExpectedHash(header.ParentHash)
 	cfg.hd.SetFetching(true)
 	defer cfg.hd.SetFetching(false)
+	defer cfg.hd.Unsync()
 	logPrefix := s.LogPrefix()
 
 	logEvery := time.NewTicker(logInterval)
@@ -422,7 +423,7 @@ func HeadersForward(
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
-	cfg.hd.SetBackwards(false)
+	cfg.hd.SetPOSSync(false)
 	cfg.hd.SetFetching(true)
 	defer cfg.hd.SetFetching(false)
 	headerProgress = cfg.hd.Progress()

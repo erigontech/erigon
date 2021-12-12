@@ -224,7 +224,7 @@ type HeaderDownload struct {
 	lastProcessedPayload     uint64         // The last header number inserted when processing the chain backwards
 	expectedHash             common.Hash    // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
 	synced                   bool           // if we found a canonical hash during backward sync, in this case our sync process is done
-	backwards                bool           // True if the chain is syncing backwards or not
+	posSync                  bool           // True if the chain is syncing backwards or not
 	headersCollector         *etl.Collector // ETL collector for headers
 	canonicalHashesCollector *etl.Collector // ETL collector for canonical hashes
 }

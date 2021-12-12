@@ -473,7 +473,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 	}
 	if segments, penaltyKind, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
 		if penaltyKind == headerdownload.NoPenalty {
-			if cs.Hd.GetBackwards() {
+			if cs.Hd.POSSync() {
 				tx, err := cs.db.BeginRo(ctx)
 				defer tx.Rollback()
 				if err != nil {

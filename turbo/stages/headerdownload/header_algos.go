@@ -751,7 +751,7 @@ func (hd *HeaderDownload) GrabAnnounces() []Announce {
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	if hd.backwards {
+	if hd.posSync {
 		return hd.lastProcessedPayload
 	} else {
 		return hd.highestInDb
@@ -1032,6 +1032,12 @@ func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
 	hd.lastProcessedPayload = lastProcessed
 }
 
+func (hd *HeaderDownload) Unsync() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.synced = false
+}
+
 func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -1044,16 +1050,16 @@ func (hd *HeaderDownload) SetCanonicalHashesCollector(collector *etl.Collector) 
 	hd.canonicalHashesCollector = collector
 }
 
-func (hd *HeaderDownload) SetBackwards(backwards bool) {
+func (hd *HeaderDownload) SetPOSSync(posSync bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.backwards = backwards
+	hd.posSync = posSync
 }
 
-func (hd *HeaderDownload) GetBackwards() bool {
+func (hd *HeaderDownload) POSSync() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.backwards
+	return hd.posSync
 }
 
 func (hd *HeaderDownload) Synced() bool {
