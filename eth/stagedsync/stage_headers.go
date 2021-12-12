@@ -181,8 +181,6 @@ func HeadersDownward(
 	cfg.hd.SetProcessed(header.Number.Uint64())
 	cfg.hd.SetExpectedHash(header.ParentHash)
 	cfg.hd.SetFetching(true)
-	defer cfg.hd.SetFetching(false)
-	defer cfg.hd.Unsync()
 	logPrefix := s.LogPrefix()
 
 	logEvery := time.NewTicker(logInterval)
@@ -203,46 +201,29 @@ func HeadersDownward(
 
 	stopped := false
 	prevProgress := header.Number.Uint64()
-	doneCh := make(chan bool)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				doneCh <- true
-				return
-			case <-logEvery.C:
-				diff := prevProgress - cfg.hd.Progress()
-				if cfg.hd.Progress() <= prevProgress {
-					log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
-						"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
-					prevProgress = cfg.hd.Progress()
-				}
-			case <-doneCh:
-				return
-			}
-		}
-	}()
+
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	cfg.hd.SetHeadersCollector(headerCollector)
 	cfg.hd.SetCanonicalHashesCollector(canonicalHeadersCollector)
+	// Cleanup after we finish backward sync
 	defer func() {
 		headerCollector.Close()
 		canonicalHeadersCollector.Close()
 		cfg.hd.SetHeadersCollector(nil)
 		cfg.hd.SetCanonicalHashesCollector(nil)
+		cfg.hd.Unsync()
+		cfg.hd.SetFetching(false)
 	}()
+
 	var req headerdownload.HeaderRequest
-	for !stopped {
+	maxRequests := 64
+	for !stopped && maxRequests != 0 {
 		sentToPeer := false
 		for !sentToPeer && !stopped {
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
-			if !sentToPeer {
-				timer := time.NewTimer(30 * time.Millisecond)
-				<-timer.C
-				timer.Stop()
-			}
+			maxRequests--
 		}
 		// Load headers into the database
 		announces := cfg.hd.GrabAnnounces()
@@ -252,17 +233,29 @@ func HeadersDownward(
 		if cfg.hd.Synced() { // We do not break unless there best header changed
 			stopped = true
 		}
+		// Sleep and check for logs
+		timer := time.NewTimer(30 * time.Millisecond)
 		select {
-		case <-doneCh:
+		case <-ctx.Done():
 			stopped = true
-		default:
+		case <-logEvery.C:
+			diff := prevProgress - cfg.hd.Progress()
+			if cfg.hd.Progress() <= prevProgress {
+				log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
+					"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
+				prevProgress = cfg.hd.Progress()
+			}
+		case <-timer.C:
+			log.Trace("RequestQueueTime (header) ticked")
 		}
+		// Cleanup timer
+		timer.Stop()
 	}
 	// If the user stopped it, we dont update anything
 	if !cfg.hd.Synced() {
 		return nil
 	}
-	doneCh <- true
+
 	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
