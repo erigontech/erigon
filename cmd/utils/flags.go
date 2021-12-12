@@ -538,6 +538,11 @@ var (
 		Usage: "a path to clique db folder",
 		Value: "",
 	}
+
+	HealthCheckFlag = cli.BoolFlag{
+		Name:  "healthcheck",
+		Usage: "Enabling grpc health check",
+	}
 )
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}

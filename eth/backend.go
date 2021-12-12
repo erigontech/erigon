@@ -404,7 +404,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			miningRPC,
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
-			creds)
+			creds,
+			stack.Config().HealthCheck)
 		if err != nil {
 			return nil, err
 		}
