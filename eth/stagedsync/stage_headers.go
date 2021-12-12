@@ -201,10 +201,13 @@ func HeadersForward(
 					progress := int32(0)
 					allReady := true
 					for _, in := range reply.Info {
+						fmt.Printf(" in.Readiness: %d\n", in.Readiness)
 						progress += in.Readiness
 						allReady = allReady && in.Readiness == 100
 					}
-					progress /= int32(len(reply.Info))
+					fmt.Printf(" progress: %d\n", progress)
+					progress = progress / int32(len(reply.Info))
+					fmt.Printf(" progress: %d\n", progress)
 					if allReady {
 						break
 					}
