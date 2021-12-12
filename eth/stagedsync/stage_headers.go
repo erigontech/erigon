@@ -217,20 +217,30 @@ func HeadersDownward(
 				}
 			}
 			timer.Stop()
+			if stopped {
+				return
+			}
 		}
 	}()
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	cfg.hd.SetHeadersCollector(headerCollector)
 	cfg.hd.SetCanonicalHashesCollector(canonicalHeadersCollector)
-	defer headerCollector.Close()
-	defer canonicalHeadersCollector.Close()
+	defer func() {
+		headerCollector.Close()
+		canonicalHeadersCollector.Close()
+		cfg.hd.SetHeadersCollector(nil)
+		cfg.hd.SetCanonicalHashesCollector(nil)
+	}()
 	var req headerdownload.HeaderRequest
 	for !stopped {
 		sentToPeer := false
-		for !sentToPeer {
+		for !sentToPeer && !stopped {
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
+			if !sentToPeer {
+				time.Sleep(30 * time.Millisecond)
+			}
 		}
 		// Load headers into the database
 		announces := cfg.hd.GrabAnnounces()
@@ -238,13 +248,25 @@ func HeadersDownward(
 			cfg.announceNewHashes(ctx, announces)
 		}
 		if cfg.hd.Synced() { // We do not break unless there best header changed
-			break
+			stopped = true
 		}
 	}
-	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	// If the user stopped it, we dont update anything
+	if !cfg.hd.Synced() {
+		return nil
+	}
+	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	}); err != nil {
 		return err
 	}
-	if err := canonicalHeadersCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+	if err = canonicalHeadersCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	}); err != nil {
 		return err
 	}
 	if s.BlockNumber >= cfg.hd.Progress() {

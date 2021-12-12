@@ -708,6 +708,10 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	// Handle request after closing collectors
+	if hd.canonicalHashesCollector == nil || hd.headersCollector == nil {
+		return nil
+	}
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
@@ -721,12 +725,9 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 		}
 		if currentCanonical == hd.expectedHash || hd.lastProcessedPayload == 1 {
 			hd.synced = true
+			return nil
 		}
-		data, err := rlp.EncodeToBytes(header)
-		if err != nil {
-			log.Crit("Failed to RLP encode header", "err", err)
-		}
-		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), data); err != nil {
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
 			return err
 		}
 		if err := hd.canonicalHashesCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
