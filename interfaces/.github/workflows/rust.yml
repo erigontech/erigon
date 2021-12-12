@@ -1,0 +1,51 @@
+on: [push, pull_request]
+
+name: Rust
+
+jobs:
+  ci:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macOS-latest]
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check --config merge_imports=true
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-hack
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: hack
+          args: check --all --ignore-private --each-feature --no-dev-deps
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: --all --all-targets --all-features
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings

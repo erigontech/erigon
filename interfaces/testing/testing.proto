@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package testing;
+
+option go_package = "./testing;testing";
+
+message TestCaseNumber {
+    uint64 count = 1;
+}
+
+message TestReport {
+    // End of test signal
+    bool end = 1;
+    // Indication whether the report is about success of part of the test, or failure
+    bool success = 2;
+    string log = 3;
+}
+
+service TestDriver {
+  // Returns number of available integration test caes in the test driver
+  rpc TestCaseCount(google.protobuf.Empty) returns (TestCaseNumber);
+  // Ask the test driver to start the test case with given number. As test case progresses, the driver sends reports via the stream
+  // Test drivier also notifies about the end of test case via the stream
+  rpc StartTestCase(TestCaseNumber) returns (stream TestReport);
+}

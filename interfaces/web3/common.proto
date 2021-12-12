@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+import "types/types.proto";
+
+package web3;
+
+message CanonicalTransactionData {
+  types.H256 block_hash = 1;
+  uint64 block_number = 2;
+  uint64 index = 3;
+}
+
+message Transaction {
+  optional types.H160 to = 1;
+  uint64 gas = 2;
+  uint64 gas_price = 3;
+  types.H256 hash = 4;
+  bytes input = 5;
+  uint64 nonce = 6;
+  types.H256 value = 7;
+  types.H160 from = 8;
+  uint32 v = 9;
+  types.H256 r = 10;
+  types.H256 s = 11;
+}
+
+message StoredTransaction {
+  optional CanonicalTransactionData canonical_data = 1;
+  Transaction transaction = 2;
+}
+
+message BlockBase {
+  uint64 number = 1;
+  types.H256 hash = 2;
+  types.H256 parent_hash = 3;
+  uint64 nonce = 4;
+  types.H256 ommer_root = 5;
+  types.H256 state_root = 6;
+  types.H256 receipt_root = 7;
+  types.H160 coinbase = 8;
+  uint64 difficulty = 9;
+  uint64 total_difficulty = 10;
+  bytes extra_data = 11;
+  uint64 size = 12;
+  uint64 gas_limit = 13;
+  uint64 gas_used = 14;
+  uint64 timestamp = 15;
+  repeated types.H256 ommers = 16;
+}
+
+message LightBlock {
+  BlockBase base = 1;
+  repeated types.H256 transaction_hashes = 2;
+}
+
+message FullBlock {
+  BlockBase base = 1;
+  repeated Transaction transactions = 2;
+}
