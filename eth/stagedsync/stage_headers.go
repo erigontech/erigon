@@ -195,11 +195,8 @@ func HeadersForward(
 			for {
 				if reply, err := cfg.snapshotDownloader.Snapshots(ctx, &proto_downloader.SnapshotsRequest{}); err != nil {
 					log.Warn("Error while waiting for snapshots progress", "err", err)
-					time.Sleep(10 * time.Second)
-					continue
 				} else if len(reply.Info) < len(snapshothashes.Goerli) {
-					time.Sleep(10 * time.Second)
-					continue
+					//noop
 				} else {
 					progress := int32(0)
 					allReady := true
@@ -209,12 +206,12 @@ func HeadersForward(
 					}
 					progress /= int32(len(reply.Info))
 					if allReady {
+						fmt.Printf("allReady\n")
 						break
 					}
 					log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", progress))
-					time.Sleep(10 * time.Second)
 				}
-				break
+				time.Sleep(10 * time.Second)
 			}
 
 			for {
