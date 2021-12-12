@@ -7,3 +7,6 @@
 [submodule "turbo/snapshotsync/snapshothashes/erigon-snapshots"]
 	path = turbo/snapshotsync/snapshothashes/erigon-snapshots
 	url = https://github.com/ledgerwatch/erigon-snapshot.git
+[submodule "turbo/snapshotsync/trackers/trackerslist"]
+	path = turbo/snapshotsync/trackers/trackerslist
+	url = https://github.com/ngosang/trackerslist.git
