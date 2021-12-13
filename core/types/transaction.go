@@ -44,7 +44,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
-	CairoType
+	StarknetType
 )
 
 // Transaction is an Ethereum transaction.
@@ -115,13 +115,6 @@ func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
 }
 
-func (tm TransactionMisc) GetSender() (common.Address, bool) {
-	if sc := tm.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
 func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 	kind, size, err := s.Kind()
 	if err != nil {
@@ -158,8 +151,8 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		tx = t
-	case CairoType:
-		t := &CairoTransaction{}
+	case StarknetType:
+		t := &StarknetTransaction{}
 		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}

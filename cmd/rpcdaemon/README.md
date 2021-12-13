@@ -42,7 +42,7 @@ it's much faster than TCP access. Provide both `--datadir` and `--private.api.ad
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+./build/bin/rpcdaemon --datadir=<your_data_dir> --txpool.api.addr=localhost:9090 --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 Note that we've also specified which RPC namespaces to enable in the above command by `--http.api` flag.
@@ -55,7 +55,7 @@ To start the daemon remotely - just don't set `--datadir` flag:
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=0.0.0.0:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --txpool.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 The daemon should respond with something like:

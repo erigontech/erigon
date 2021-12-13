@@ -78,13 +78,13 @@ var (
 	)
 
 	dynFeeTx = &DynamicFeeTransaction{
-		ChainID: u256.Num1,
 		CommonTx: CommonTx{
-			Nonce: 3,
-			To:    &testAddr,
-			Value: uint256.NewInt(10),
-			Gas:   25000,
-			Data:  common.FromHex("5544"),
+			ChainID: u256.Num1,
+			Nonce:   3,
+			To:      &testAddr,
+			Value:   uint256.NewInt(10),
+			Gas:     25000,
+			Data:    common.FromHex("5544"),
 		},
 		Tip:    uint256.NewInt(1),
 		FeeCap: uint256.NewInt(1),

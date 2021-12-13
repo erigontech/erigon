@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -43,5 +44,7 @@ func (api *StarknetImpl) SendRawTransaction(ctx context.Context, encodedTx hexut
 		return hash, fmt.Errorf("%s: %s", txPoolProto.ImportResult_name[int32(res.Imported[0])], res.Errors[0])
 	}
 
-	return common.Hash{}, err
+	log.Info("Submitted contract creation", "hash", txn.Hash().Hex(), "nonce", txn.GetNonce(), "value", txn.GetValue())
+
+	return txn.Hash(), nil
 }

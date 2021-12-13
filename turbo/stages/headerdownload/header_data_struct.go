@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -219,6 +220,13 @@ type HeaderDownload struct {
 	topSeenHeight      uint64
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
+	// proof-of-stake
+	lastProcessedPayload     uint64         // The last header number inserted when processing the chain backwards
+	expectedHash             common.Hash    // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	synced                   bool           // if we found a canonical hash during backward sync, in this case our sync process is done
+	posSync                  bool           // True if the chain is syncing backwards or not
+	headersCollector         *etl.Collector // ETL collector for headers
+	canonicalHashesCollector *etl.Collector // ETL collector for canonical hashes
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
