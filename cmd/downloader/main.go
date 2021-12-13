@@ -16,9 +16,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -79,6 +82,14 @@ var rootCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		var cc *params.ChainConfig
+		{
+			chaindataDir := path.Join(datadir, "chaindata")
+			chaindata := mdbx.MustOpenRo(chaindataDir)
+			cc = tool.ChainConfigFromDB(chaindata)
+			chaindata.Close()
+		}
+
 		snapshotsDir := path.Join(datadir, "snapshots")
 		log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
 
@@ -110,7 +121,8 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("new server: %w", err)
 		}
 
-		err = downloader.Start(ctx, snapshotsDir, t.Cli)
+		snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
+		err = downloader.Start(ctx, snapshotsDir, t.Cli, snapshotsCfg)
 		if err != nil {
 			return fmt.Errorf("start: %w", err)
 		}

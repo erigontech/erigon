@@ -39,12 +39,11 @@ func Stop(torrentClient *torrent.Client) {
 	}
 }
 
-func Start(ctx context.Context, snapshotDir string, torrentClient *torrent.Client) error {
+func Start(ctx context.Context, snapshotDir string, torrentClient *torrent.Client, config *snapshothashes.Config) error {
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
-	preverifiedHashes := snapshothashes.Goerli // TODO: remove hard-coded hashes from downloader
-	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient, preverifiedHashes); err != nil {
+	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient, config.Preverified); err != nil {
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {

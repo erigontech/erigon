@@ -593,13 +593,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	// TODO: save AllSegmentsAvailable flag to DB? (to allow Erigon start without Downloader)
 
+	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
 	if !cfg.snapshots.AllSegmentsAvailable() {
 		// wait for Downloader service to download all expected snapshots
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
 		{ // send all hashes to the Downloader service
-			preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
+			preverified := snapshotsCfg.Preverified
 			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
 			i := 0
 			for filePath, infoHashStr := range preverified {
@@ -623,7 +624,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		for {
 			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if int(reply.Torrents) < len(snapshothashes.Goerli) {
+			} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
 				log.Warn("Downloader has not enough snapshots (yet)")
 			} else if reply.Completed {
 				break
