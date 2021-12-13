@@ -301,10 +301,6 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 
 		var expectedTxsAmount uint64
 		{
-			fmt.Printf("is nil: %t\n", sn != nil)
-			fmt.Printf("is nil: %t\n", sn.Bodies != nil)
-			fmt.Printf("is nil: %t\n", sn.Bodies.Idx != nil)
-			fmt.Printf("is nil: %d,%d\n", sn.From, sn.To)
 			off := sn.Bodies.Idx.Lookup2(sn.To - 1 - sn.From)
 			gg.Reset(off)
 
