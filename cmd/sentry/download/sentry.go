@@ -35,6 +35,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -453,7 +455,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl) (*grpc.Server, error) {
+func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl, healthCheck bool) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry gRPC server", "on", sentryAddr)
 	listenConfig := net.ListenConfig{
@@ -468,7 +470,16 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerIm
 	}
 	grpcServer := grpcutil.NewServer(100, nil)
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
+	var healthServer *health.Server
+	if healthCheck {
+		healthServer = health.NewServer()
+		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	}
+
 	go func() {
+		if healthCheck {
+			defer healthServer.Shutdown()
+		}
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry gRPC server fail", "err", err1)
 		}
@@ -545,7 +556,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint) error {
+func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
 	if err := os.MkdirAll(datadir, 0744); err != nil {
 		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
 	}
@@ -553,7 +564,7 @@ func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.C
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 
-	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer)
+	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
 	if err != nil {
 		return err
 	}

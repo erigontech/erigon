@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -21,6 +22,7 @@ import (
 // present to allow potential reorgs
 type Link struct {
 	header      *types.Header
+	headerRaw   []byte
 	next        []*Link     // Allows iteration over links in ascending block height order
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
@@ -75,16 +77,35 @@ func (lq *LinkQueue) Pop() interface{} {
 	return x
 }
 
+// Anchor represents a header that we do not yet have, but that we would like to have soon
+// anchors are created when we know the hash of the header (from its children), and we can
+// also derive its blockheight (also from its children), but the corresponding header
+// either has not been requested yet, or has not been delivered yet.
+// It is possible for one anchor to reference multiple links, because more than one
+// header may share the same parent header. In such cases, `links` field will contain
+// more than one pointer.
 type Anchor struct {
-	peerID      enode.ID
-	links       []*Link     // Links attached immediately to this anchor
-	parentHash  common.Hash // Hash of the header this anchor can be connected to (to disappear)
-	blockHeight uint64
-	timestamp   uint64 // Zero when anchor has just been created, otherwise timestamps when timeout on this anchor request expires
-	timeouts    int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
-	idx         int    // Index of the anchor in the queue to be able to modify specific items
+	peerID        enode.ID
+	links         []*Link     // Links attached immediately to this anchor
+	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
+	blockHeight   uint64
+	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is neeeded
+	timeouts      int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
+	idx           int    // Index of the anchor in the queue to be able to modify specific items
 }
 
+// AnchorQueue is a priority queue of anchors that priorises by the time when
+// another retry on the extending the anchor needs to be attempted
+// Every time anchor's extension is requested, the `nextRetryTime` is reset
+// to 5 seconds in the future, and when it expires, and the anchor is still
+// retry is made
+// It implement heap.Interface to be useable by the standard library `heap`
+// as a priority queue (implemented as a binary heap)
+// As anchors are moved around in the binary heap, they internally track their
+// position in the heap (using `idx` field). This feature allows updating
+// the heap (using `Fix` function) in situations when anchor is accessed not
+// throught the priority queue, but through the map `anchor` in the
+// HeaderDownloader type.
 type AnchorQueue []*Anchor
 
 func (aq AnchorQueue) Len() int {
@@ -92,11 +113,11 @@ func (aq AnchorQueue) Len() int {
 }
 
 func (aq AnchorQueue) Less(i, j int) bool {
-	if aq[i].timestamp == aq[j].timestamp {
-		// When timestamps are the same, we prioritise low block height anchors
+	if aq[i].nextRetryTime == aq[j].nextRetryTime {
+		// When next retry times are the same, we prioritise low block height anchors
 		return aq[i].blockHeight < aq[j].blockHeight
 	}
-	return aq[i].timestamp < aq[j].timestamp
+	return aq[i].nextRetryTime < aq[j].nextRetryTime
 }
 
 func (aq AnchorQueue) Swap(i, j int) {
@@ -160,6 +181,7 @@ type HeaderRequest struct {
 	Length  uint64
 	Skip    uint64
 	Reverse bool
+	Anchor  *Anchor
 }
 
 type PenaltyItem struct {
@@ -198,6 +220,13 @@ type HeaderDownload struct {
 	topSeenHeight      uint64
 	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool // Set when the stage that is actively fetching the headers is in progress
+	// proof-of-stake
+	lastProcessedPayload     uint64         // The last header number inserted when processing the chain backwards
+	expectedHash             common.Hash    // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	synced                   bool           // if we found a canonical hash during backward sync, in this case our sync process is done
+	posSync                  bool           // True if the chain is syncing backwards or not
+	headersCollector         *etl.Collector // ETL collector for headers
+	canonicalHashesCollector *etl.Collector // ETL collector for canonical hashes
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header

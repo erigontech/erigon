@@ -617,14 +617,3 @@ func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
-
-func (tx AccessListTx) GetSender() (common.Address, bool) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
-func (tx *AccessListTx) SetSender(addr common.Address) {
-	tx.from.Store(addr)
-}

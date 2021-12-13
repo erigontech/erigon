@@ -27,6 +27,7 @@ var (
 	nodiscover   bool // disable sentry's discovery mechanism
 	protocol     string
 	netRestrict  string // CIDR to restrict peering to
+	healthCheck  bool
 )
 
 func init() {
@@ -49,6 +50,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
 	rootCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
 	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -77,7 +79,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return download.Sentry(datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p))
+		return download.Sentry(datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
 	},
 }
 

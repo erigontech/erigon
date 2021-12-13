@@ -28,6 +28,10 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
+var (
+	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+)
+
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
 type ChainHeaderReader interface {
@@ -45,6 +49,9 @@ type ChainHeaderReader interface {
 
 	// GetHeaderByHash retrieves a block header from the database by its hash.
 	GetHeaderByHash(hash common.Hash) *types.Header
+
+	// GetTd retrieves the total difficulty from the database by hash and number.
+	GetTd(hash common.Hash, number uint64) *big.Int
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -82,12 +89,6 @@ type Engine interface {
 	// via the VerifySeal method.
 	VerifyHeader(chain ChainHeaderReader, header *types.Header, seal bool) error
 
-	// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
-	// concurrently. The method returns a quit channel to abort the operations and
-	// a results channel to retrieve the async verifications (the order is that of
-	// the input slice).
-	VerifyHeaders(chain ChainHeaderReader, headers []*types.Header, seals []bool) error
-
 	// VerifyUncles verifies that the given block's uncles conform to the consensus
 	// rules of a given engine.
 	VerifyUncles(chain ChainReader, header *types.Header, uncles []*types.Header) error
@@ -104,7 +105,7 @@ type Engine interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall) error
+	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -112,7 +113,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
-		uncles []*types.Header, receipts types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, error)
+		uncles []*types.Header, receipts types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, []*types.Receipt, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -143,4 +144,14 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
+}
+
+// PoSA is a consensus engine based on proof-of-stake-authority used by Binance Smart Chain.
+type PoSA interface {
+	Engine
+
+	IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error)
+	IsSystemContract(to *common.Address) bool
+	EnoughDistance(chain ChainReader, header *types.Header) bool
+	IsLocalBlock(header *types.Header) bool
 }

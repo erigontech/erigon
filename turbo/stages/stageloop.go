@@ -244,6 +244,7 @@ func NewStagedSync(
 		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
 			db,
 			controlServer.Hd,
+			statusCh,
 			*controlServer.ChainConfig,
 			controlServer.SendHeaderRequest,
 			controlServer.PropagateNewBlockHashes,
@@ -254,6 +255,7 @@ func NewStagedSync(
 			waitingForPOSHeaders,
 			allSnapshots,
 			blockReader,
+			tmpdir,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,

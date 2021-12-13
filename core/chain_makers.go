@@ -285,7 +285,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -444,3 +444,4 @@ func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header      
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }

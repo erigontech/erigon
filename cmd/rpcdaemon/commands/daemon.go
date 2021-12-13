@@ -27,6 +27,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db, eth)
+	starknetImpl := NewStarknetAPI(base, db, txPool)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
@@ -92,6 +93,13 @@ func APIList(ctx context.Context, db kv.RoDB,
 				Namespace: "erigon",
 				Public:    true,
 				Service:   ErigonAPI(erigonImpl),
+				Version:   "1.0",
+			})
+		case "starknet":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "starknet",
+				Public:    true,
+				Service:   StarknetAPI(starknetImpl),
 				Version:   "1.0",
 			})
 		case "engine":

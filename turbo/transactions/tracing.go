@@ -65,7 +65,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(vmenv.ChainRules, state.NewNoopWriter())
+		_ = statedb.FinalizeTx(vmenv.ChainRules(), state.NewNoopWriter())
 	}
 	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }
@@ -241,7 +241,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 				address = common.Hash(scope.Stack.Data[scope.Stack.Len()-1].Bytes32())
 				value   uint256.Int
 			)
-			env.IntraBlockState.GetState(scope.Contract.Address(), &address, &value)
+			env.IntraBlockState().GetState(scope.Contract.Address(), &address, &value)
 			l.storage[scope.Contract.Address()][address] = common.Hash(value.Bytes32())
 			outputStorage = true
 		}

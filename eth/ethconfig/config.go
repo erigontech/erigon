@@ -29,6 +29,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/params"
@@ -159,6 +161,7 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   params.AuRaConfig
+	Parlia params.ParliaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -180,7 +183,7 @@ type Config struct {
 	SyncLoopThrottle time.Duration
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, genesisHash common.Hash) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -196,7 +199,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			log.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
 		default:
-			engine := ethash.New(ethash.Config{
+			eng = ethash.New(ethash.Config{
 				CachesInMem:      consensusCfg.CachesInMem,
 				CachesLockMmap:   consensusCfg.CachesLockMmap,
 				DatasetDir:       consensusCfg.DatasetDir,
@@ -204,11 +207,14 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, notify, noverify)
-			eng = engine
 		}
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
+		}
+	case *params.ParliaConfig:
+		if chainConfig.Parlia != nil {
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), genesisHash)
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
@@ -224,5 +230,9 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		panic("unknown config" + spew.Sdump(config))
 	}
 
-	return eng
+	if chainConfig.TerminalTotalDifficulty == nil {
+		return eng
+	} else {
+		return serenity.New(eng) // the Merge
+	}
 }

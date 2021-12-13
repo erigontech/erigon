@@ -160,6 +160,9 @@ type Config struct {
 	TLSCACert           string
 
 	MdbxAugumentLimit uint64
+
+	// HealthCheck enables standard grpc health check
+	HealthCheck bool
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into

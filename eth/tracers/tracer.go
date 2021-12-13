@@ -581,14 +581,14 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, from common.Address, to common.Addr
 	jst.ctx["to"] = to
 	jst.ctx["input"] = input
 	jst.ctx["gas"] = gas
-	jst.ctx["gasPrice"] = env.TxContext.GasPrice
+	jst.ctx["gasPrice"] = env.TxContext().GasPrice
 	jst.ctx["value"] = value
 	// Initialize the context
-	jst.ctx["block"] = env.Context.BlockNumber
-	jst.dbWrapper.db = env.IntraBlockState
+	jst.ctx["block"] = env.Context().BlockNumber
+	jst.dbWrapper.db = env.IntraBlockState()
 	// Compute intrinsic gas
-	isHomestead := env.ChainConfig().IsHomestead(env.Context.BlockNumber)
-	isIstanbul := env.ChainConfig().IsIstanbul(env.Context.BlockNumber)
+	isHomestead := env.ChainConfig().IsHomestead(env.Context().BlockNumber)
+	isIstanbul := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
 	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
 	if err != nil {
 		return
@@ -615,7 +615,7 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 	*jst.gasValue = uint(gas)
 	*jst.costValue = uint(cost)
 	*jst.depthValue = uint(depth)
-	*jst.refundValue = uint(env.IntraBlockState.GetRefund())
+	*jst.refundValue = uint(env.IntraBlockState().GetRefund())
 
 	jst.errorValue = nil
 	if err != nil {

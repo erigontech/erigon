@@ -230,10 +230,10 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		statedb.RevertToSnapshot(snapshot)
 	}
 
-	if err = statedb.FinalizeTx(evm.ChainRules, w); err != nil {
+	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(evm.ChainRules, w); err != nil {
+	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
 		return nil, common.Hash{}, err
 	}
 	// Generate hashed state
@@ -419,4 +419,8 @@ func rlpHash(x interface{}) (h common.Hash) {
 	}
 	hw.Sum(h[:0])
 	return h
+}
+
+func vmTestBlockHash(n uint64) common.Hash {
+	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
 }

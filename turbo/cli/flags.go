@@ -149,6 +149,11 @@ var (
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
 		Value: "",
 	}
+
+	HealthCheckFlag = cli.BoolFlag{
+		Name:  "healthcheck",
+		Usage: "Enable grpc health check",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -300,4 +305,5 @@ func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 		cfg.TLSKeyFile = keyFile
 		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
+	cfg.HealthCheck = ctx.GlobalBool(HealthCheckFlag.Name)
 }

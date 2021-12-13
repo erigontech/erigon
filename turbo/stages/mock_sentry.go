@@ -275,6 +275,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
 			mock.downloader.Hd,
+			make(chan privateapi.ExecutionStatus),
 			*mock.ChainConfig,
 			sendHeaderRequest,
 			propagateNewBlockHashes,
@@ -285,6 +286,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			nil,
 			allSnapshots,
 			blockReader,
+			mock.tmpdir,
 		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,

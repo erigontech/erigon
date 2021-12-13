@@ -19,9 +19,11 @@ package tests
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -48,31 +50,36 @@ type ttForks struct {
 }
 
 type ttFork struct {
-	Exception string         `json:"exception"`
-	Sender    common.Address `json:"sender"`
-	Hash      common.Hash    `json:"hash"`
+	Exception    string                `json:"exception"`
+	Sender       common.Address        `json:"sender"`
+	Hash         common.Hash           `json:"hash"`
+	IntrinsicGas *math.HexOrDecimal256 `json:"intrinsicGas"`
 }
 
 func (tt *TransactionTest) Run(config *params.ChainConfig) error {
-	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, isHomestead bool, isIstanbul bool) (*common.Address, *common.Hash, error) {
+	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, isHomestead bool, isIstanbul bool) (*common.Address, *common.Hash, uint64, error) {
 		tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpData), 0))
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		sender, err := tx.Sender(signer)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		// Intrinsic gas
 		requiredGas, err := core.IntrinsicGas(tx.GetData(), tx.GetAccessList(), tx.GetTo() == nil, isHomestead, isIstanbul)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		if requiredGas > tx.GetGas() {
-			return nil, nil, fmt.Errorf("insufficient gas ( %d < %d )", tx.GetGas(), requiredGas)
+			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", tx.GetGas(), requiredGas)
+		}
+		// EIP-2681: Limit account nonce to 2^64-1
+		if tx.GetNonce()+1 < tx.GetNonce() {
+			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", core.ErrNonceMax, tx.GetNonce())
 		}
 		h := tx.Hash()
-		return &sender, &h, nil
+		return &sender, &h, requiredGas, nil
 	}
 
 	for _, testcase := range []struct {
@@ -93,7 +100,7 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 		{"Berlin", types.LatestSignerForChainID(config.ChainID), tt.Forks.Berlin, true, true},
 		{"London", types.LatestSignerForChainID(config.ChainID), tt.Forks.London, true, true},
 	} {
-		sender, txhash, err := validateTx(tt.RLP, *testcase.signer, testcase.isHomestead, testcase.isIstanbul)
+		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, testcase.isHomestead, testcase.isIstanbul)
 
 		if testcase.fork.Exception != "" {
 			if err == nil {
@@ -116,6 +123,9 @@ func (tt *TransactionTest) Run(config *params.ChainConfig) error {
 		}
 		if *txhash != common.Hash(testcase.fork.Hash) {
 			return fmt.Errorf("hash mismatch: got %x, want %x", *txhash, testcase.fork.Hash)
+		}
+		if new(big.Int).SetUint64(intrinsicGas).Cmp((*big.Int)(testcase.fork.IntrinsicGas)) != 0 {
+			return fmt.Errorf("intrinsic gas mismatch: got %x, want %x", intrinsicGas, (*big.Int)(testcase.fork.IntrinsicGas))
 		}
 	}
 	return nil

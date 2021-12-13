@@ -277,7 +277,6 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Add
 	if gas > 500000000 {
 		gas = 500000001 - (0x8000000000000000 - gas)
 	}
-	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d\n", depth, from, to, create, input, gas, value)
 	trace := &ParityTrace{}
 	if create {
 		trResult := &CreateTraceResult{}
@@ -962,7 +961,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		sdMap := make(map[common.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
-		if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
+		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 			return nil, err
 		}
 		// Create initial IntraBlockState, we will compare it with ibs (IntraBlockState after the transaction)
@@ -1185,18 +1184,18 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			sdMap := make(map[common.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd := &StateDiff{sdMap: sdMap}
-			if err = ibs.FinalizeTx(evm.ChainRules, sd); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
 				return nil, err
 			}
 			sd.CompareStates(initialIbs, ibs)
-			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
 				return nil, err
 			}
 		} else {
-			if err = ibs.FinalizeTx(evm.ChainRules, noop); err != nil {
+			if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 				return nil, err
 			}
-			if err = ibs.CommitBlock(evm.ChainRules, cachedWriter); err != nil {
+			if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
 				return nil, err
 			}
 		}
