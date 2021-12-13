@@ -113,14 +113,14 @@ func SpawnStageHeaders(
 	}
 
 	if isTrans {
-		return HeadersDownward(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
-		return HeadersForward(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
 }
 
 // HeadersDownward progresses Headers stage in the downward direction
-func HeadersDownward(
+func HeadersPOS(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
@@ -281,7 +281,7 @@ func HeadersDownward(
 }
 
 // HeadersForward progresses Headers stage in the forward direction
-func HeadersForward(
+func HeadersPOW(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
