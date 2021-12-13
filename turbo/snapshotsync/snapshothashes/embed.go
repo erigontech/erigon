@@ -3,6 +3,8 @@ package snapshothashes
 import (
 	_ "embed"
 	"encoding/json"
+
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 //go:embed erigon-snapshots/mainnet.json
@@ -20,4 +22,28 @@ func fromJson(in []byte) (out Preverified) {
 		panic(err)
 	}
 	return out
+}
+
+var (
+	MainnetChainSnapshotConfig = &Config{}
+	GoerliChainSnapshotConfig  = &Config{
+		ExpectBlocks: 5_900_000 - 1,
+		Preverified:  Goerli,
+	}
+)
+
+type Config struct {
+	ExpectBlocks uint64
+	Preverified  Preverified
+}
+
+func KnownSnapshots(networkName string) *Config {
+	switch networkName {
+	case networkname.MainnetChainName:
+		return MainnetChainSnapshotConfig
+	case networkname.GoerliChainName:
+		return GoerliChainSnapshotConfig
+	default:
+		return nil
+	}
 }

@@ -7,12 +7,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/stretchr/testify/require"
 )
 
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
-	cfg := params.KnownSnapshots(params.MainnetChainName)
+	cfg := params.KnownSnapshots(networkname.MainnetChainName)
 	createFile := func(from, to uint64, name SnapshotType) {
 		c, err := compress.NewCompressor("test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100)
 		require.NoError(err)

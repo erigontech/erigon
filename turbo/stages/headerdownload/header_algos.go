@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -438,10 +438,10 @@ func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 	var encodings []string
 	var height uint64
 	switch chain {
-	case params.MainnetChainName:
+	case networkname.MainnetChainName:
 		encodings = mainnetPreverifiedHashes
 		height = mainnetPreverifiedHeight
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:

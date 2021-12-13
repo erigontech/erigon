@@ -30,8 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -92,7 +92,7 @@ type AllSnapshots struct {
 	segmentsAvailable    uint64
 	idxAvailable         uint64
 	blocks               []*BlocksSnapshot
-	cfg                  *params.SnapshotsConfig
+	cfg                  *snapshothashes.Config
 }
 
 // NewAllSnapshots - opens all snapshots. But to simplify everything:
@@ -100,20 +100,20 @@ type AllSnapshots struct {
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func NewAllSnapshots(dir string, cfg *params.SnapshotsConfig) *AllSnapshots {
+func NewAllSnapshots(dir string, cfg *snapshothashes.Config) *AllSnapshots {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		panic(err)
 	}
 	return &AllSnapshots{dir: dir, cfg: cfg}
 }
 
-func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig { return s.cfg }
-func (s *AllSnapshots) AllSegmentsAvailable() bool                   { return s.allSegmentsAvailable }
-func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)               { s.allSegmentsAvailable = v }
-func (s *AllSnapshots) BlocksAvailable() uint64                      { return s.segmentsAvailable }
-func (s *AllSnapshots) AllIdxAvailable() bool                        { return s.allIdxAvailable }
-func (s *AllSnapshots) SetAllIdxAvailable(v bool)                    { s.allIdxAvailable = v }
-func (s *AllSnapshots) IndicesAvailable() uint64                     { return s.idxAvailable }
+func (s *AllSnapshots) ChainSnapshotConfig() *snapshothashes.Config { return s.cfg }
+func (s *AllSnapshots) AllSegmentsAvailable() bool                  { return s.allSegmentsAvailable }
+func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)              { s.allSegmentsAvailable = v }
+func (s *AllSnapshots) BlocksAvailable() uint64                     { return s.segmentsAvailable }
+func (s *AllSnapshots) AllIdxAvailable() bool                       { return s.allIdxAvailable }
+func (s *AllSnapshots) SetAllIdxAvailable(v bool)                   { s.allIdxAvailable = v }
+func (s *AllSnapshots) IndicesAvailable() uint64                    { return s.idxAvailable }
 
 func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
 	if headers, err = latestSegment(s.dir, Headers); err != nil {

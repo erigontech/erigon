@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -996,25 +997,25 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 
 	var genesis *core.Genesis
 	switch chain {
-	case "", params.MainnetChainName:
+	case "", networkname.MainnetChainName:
 		chainConfig = params.MainnetChainConfig
 		genesis = core.DefaultGenesisBlock()
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		chainConfig = params.RopstenChainConfig
 		genesis = core.DefaultRopstenGenesisBlock()
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		chainConfig = params.GoerliChainConfig
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.SokolChainName:
+	case networkname.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
-	case params.KovanChainName:
+	case networkname.KovanChainName:
 		chainConfig = params.KovanChainConfig
 		genesis = core.DefaultKovanGenesisBlock()
-	case params.FermionChainName:
+	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
 	}

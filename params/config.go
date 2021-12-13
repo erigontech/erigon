@@ -23,18 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
-)
-
-const (
-	MainnetChainName = "mainnet"
-	RopstenChainName = "ropsten"
-	RinkebyChainName = "rinkeby"
-	GoerliChainName  = "goerli"
-	DevChainName     = "dev"
-	ErigonMineName   = "erigonmine"
-	SokolChainName   = "sokol"
-	KovanChainName   = "kovan"
-	FermionChainName = "fermion"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type ConsensusType string
@@ -70,7 +59,7 @@ var (
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
-		ChainName:           MainnetChainName,
+		ChainName:           networkname.MainnetChainName,
 		ChainID:             big.NewInt(1),
 		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(1_150_000),
@@ -94,7 +83,7 @@ var (
 
 	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
 	RopstenChainConfig = &ChainConfig{
-		ChainName:           RopstenChainName,
+		ChainName:           networkname.RopstenChainName,
 		ChainID:             big.NewInt(3),
 		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -117,7 +106,7 @@ var (
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
 	RinkebyChainConfig = &ChainConfig{
-		ChainName:           RinkebyChainName,
+		ChainName:           networkname.RinkebyChainName,
 		ChainID:             big.NewInt(4),
 		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(1),
@@ -143,7 +132,7 @@ var (
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
 	GoerliChainConfig = &ChainConfig{
-		ChainName:           GoerliChainName,
+		ChainName:           networkname.GoerliChainName,
 		ChainID:             big.NewInt(5),
 		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -167,7 +156,7 @@ var (
 
 	// MainnetChainConfig is the chain parameters to run a PoW dev net to test Erigon mining
 	ErigonChainConfig = &ChainConfig{
-		ChainName:           ErigonMineName,
+		ChainName:           networkname.ErigonMineName,
 		ChainID:             new(big.Int).SetBytes([]byte("erigon-mine")),
 		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -188,7 +177,7 @@ var (
 	}
 
 	SokolChainConfig = &ChainConfig{
-		ChainName:      SokolChainName,
+		ChainName:      networkname.SokolChainName,
 		ChainID:        big.NewInt(77),
 		Consensus:      AuRaConsensus,
 		HomesteadBlock: big.NewInt(0),
@@ -252,7 +241,7 @@ var (
 	}
 
 	KovanChainConfig = &ChainConfig{
-		ChainName:           KovanChainName,
+		ChainName:           networkname.KovanChainName,
 		ChainID:             big.NewInt(42),
 		Consensus:           AuRaConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -273,7 +262,7 @@ var (
 	}
 
 	FermionChainConfig = &ChainConfig{
-		ChainName:           FermionChainName,
+		ChainName:           networkname.FermionChainName,
 		ChainID:             big.NewInt(1212120),
 		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),

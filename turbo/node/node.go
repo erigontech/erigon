@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
 
@@ -52,19 +53,19 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		log.Info("Starting Erigon on Ropsten testnet...")
 
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		log.Info("Starting Erigon on Rinkeby testnet...")
 
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		log.Info("Starting Erigon on Görli testnet...")
 
-	case params.DevChainName:
+	case networkname.DevChainName:
 		log.Info("Starting Erigon in ephemeral dev mode...")
 
-	case "", params.MainnetChainName:
+	case "", networkname.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
 			log.Info("Starting Erigon on Ethereum mainnet...")
 		}

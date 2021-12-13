@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"path"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -31,21 +33,26 @@ var (
 	datadir           string
 	seeding           bool
 	downloaderApiAddr string
-	healthCheck       bool
 )
 
 func init() {
 	flags := append(debug.Flags, utils.MetricFlags...)
 	utils.CobraFlags(rootCmd, flags)
 
-	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
-	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
-		panic(err)
-	}
+	withDatadir(rootCmd)
 
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
-	rootCmd.Flags().BoolVar(&healthCheck, "healthcheck", false, "Enable grpc health check")
+
+	withDatadir(printInfoHashes)
+	rootCmd.AddCommand(printInfoHashes)
+}
+
+func withDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
+		panic(err)
+	}
 }
 
 func main() {
@@ -110,7 +117,7 @@ var rootCmd = &cobra.Command{
 
 		go downloader.MainLoop(ctx, t.Cli)
 
-		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil, healthCheck)
+		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil)
 		if err != nil {
 			return err
 		}
@@ -121,7 +128,37 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *credentials.TransportCredentials, healthCheck bool) (*grpc.Server, error) {
+var printInfoHashes = &cobra.Command{
+	Use:     "print_info_hashes",
+	Example: "go run ./cmd/downloader print_info_hashes --datadir <your_datadir> ",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		snapshotsDir := path.Join(datadir, "snapshots")
+
+		res := map[string]string{}
+		if err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+			mi, err := metainfo.LoadFromFile(torrentFilePath)
+			if err != nil {
+				return err
+			}
+			info, err := mi.UnmarshalInfo()
+			if err != nil {
+				return err
+			}
+			res[info.Name] = mi.HashInfoBytes().String()
+			return nil
+		}); err != nil {
+			return err
+		}
+		b, err := json.Marshal(res)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", b)
+		return nil
+	},
+}
+
+func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
@@ -158,20 +195,16 @@ func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *cred
 	if snServer != nil {
 		proto_downloader.RegisterDownloaderServer(grpcServer, snServer)
 	}
-	var healthServer *health.Server
-	if healthCheck {
-		healthServer = health.NewServer()
-		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-	}
 
 	//if metrics.Enabled {
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+
 	go func() {
-		if healthCheck {
-			defer healthServer.Shutdown()
-		}
+		defer healthServer.Shutdown()
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("gRPC server stop", "err", err)
 		}

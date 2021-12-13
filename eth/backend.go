@@ -70,6 +70,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -345,7 +346,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, params.KnownSnapshots(chainConfig.ChainName))
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, snapshothashes.KnownSnapshots(chainConfig.ChainName))
 		if err != nil {
 			return nil, err
 		}

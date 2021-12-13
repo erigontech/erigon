@@ -112,62 +112,6 @@ func BuildInfoBytesForFile(root string, fileName string) (*metainfo.Info, error)
 	return info, nil
 }
 
-/*
-//nolint
-func BuildMetaToml(snapshotsDir string) error {
-	//TODO: check existence
-	metaFilePath := path.Join(snapshotsDir, "meta.toml")
-	if _, err := os.Stat(metaFilePath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		info, err := BuildInfoBytesForFile(snapshotsDir, "meta.toml")
-		if err != nil {
-			return err
-		}
-		if err := CreateTorrentFile(snapshotsDir, info); err != nil {
-			return err
-		}
-	}
-
-	metaFile := snapshothashes.Preverified{}
-	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
-		mi, err := metainfo.LoadFromFile(torrentFilePath)
-		if err != nil {
-			return err
-		}
-
-		_, fileName := path.Split(torrentFilePath)
-		metaFile[fileName] = mi.HashInfoBytes().String()
-		return nil
-	}); err != nil {
-		return err
-	}
-	b, err := toml.Marshal(metaFile)
-	if err != nil {
-		return err
-	}
-	b2, err := json.Marshal(metaFile)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s\n", b2)
-	if err := ioutil.WriteFile(metaFilePath, b, 0600); err != nil {
-		return err
-	}
-	info, err := BuildInfoBytesForFile(snapshotsDir, "meta.toml")
-	if err != nil {
-		return err
-	}
-	if err := CreateTorrentFile(snapshotsDir, info); err != nil {
-		return err
-	}
-	//hh, _ := common.HashData(b) // sign?
-	//fmt.Printf("%s,%x\n", b, hh)
-	return nil
-}
-*/
-
 func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
 	torrentFileName := filepath.Join(root, info.Name+".torrent")
 	if _, err := os.Stat(torrentFileName); err != nil {

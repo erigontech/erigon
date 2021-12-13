@@ -591,13 +591,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
+	// TODO: save AllSegmentsAvailable flag to DB? (to allow Erigon start without Downloader)
+
 	if !cfg.snapshots.AllSegmentsAvailable() {
 		// wait for Downloader service to download all expected snapshots
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
 		{ // send all hashes to the Downloader service
-			preverified := snapshothashes.Goerli
+			preverified := snapshothashes.KnownSnapshots(cfg.chainConfig.ChainName).Preverified
 			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
 			i := 0
 			for filePath, infoHashStr := range preverified {
@@ -685,6 +687,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		if err := cfg.snapshots.ReopenIndices(); err != nil {
+			panic(err)
 			return err
 		}
 		if expect > cfg.snapshots.IndicesAvailable() {
