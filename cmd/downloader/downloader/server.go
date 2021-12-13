@@ -111,15 +111,6 @@ func (s *SNDownloaderServer) Stats(ctx context.Context, request *proto_downloade
 	return reply, nil
 }
 
-//func (s *SNDownloaderServer) Stats(ctx context.Context) map[string]torrent.TorrentStats {
-//	stats := map[string]torrent.TorrentStats{}
-//	torrents := s.t.Cli.Torrents()
-//	for _, t := range torrents {
-//		stats[t.Name()] = t.Stats()
-//	}
-//	return stats
-//}
-
 func Proto2InfoHashes(in []*prototypes.H160) []metainfo.Hash {
 	infoHashes := make([]metainfo.Hash, len(in))
 	i := 0
