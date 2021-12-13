@@ -107,12 +107,12 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 	feeCap, _ := uint256.FromBig(block.BaseFee())
 	var tx2 Transaction = &DynamicFeeTransaction{
-		ChainID: u256.Num1,
 		CommonTx: CommonTx{
-			Nonce: 0,
-			To:    &to,
-			Gas:   123457,
-			Data:  []byte{},
+			ChainID: u256.Num1,
+			Nonce:   0,
+			To:      &to,
+			Gas:     123457,
+			Data:    []byte{},
 		},
 		FeeCap:     feeCap,
 		Tip:        u256.Num0,

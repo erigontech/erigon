@@ -41,7 +41,7 @@ func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, 
 	enc := make([]byte, hex.EncodedLen(len(contract)))
 	hex.Encode(enc, contract)
 
-	tx := types.CairoTransaction{
+	tx := types.StarknetTransaction{
 		CommonTx: types.CommonTx{
 			Nonce: 1,
 			Value: uint256.NewInt(1),
