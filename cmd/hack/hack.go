@@ -60,6 +60,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/wcharczuk/go-chart/v2"
@@ -2654,7 +2655,7 @@ func checkBlockSnapshot(chaindata string) error {
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
 
-	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), params.KnownSnapshots(chainConfig.ChainName))
+	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), snapshothashes.KnownConfig(chainConfig.ChainName))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
