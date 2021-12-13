@@ -21,7 +21,6 @@ import (
 // amount of network announcements, but can't go over 2Mb
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 const DefaultPieceSize = 2 * 1024 * 1024
-const MdbxFilename = "mdbx.dat"
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
