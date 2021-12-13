@@ -599,7 +599,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		defer logEvery.Stop()
 
 		{ // send all hashes to the Downloader service
-			preverified := snapshothashes.KnownSnapshots(cfg.chainConfig.ChainName).Preverified
+			preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
 			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
 			i := 0
 			for filePath, infoHashStr := range preverified {
@@ -687,7 +687,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		if err := cfg.snapshots.ReopenIndices(); err != nil {
-			panic(err)
 			return err
 		}
 		if expect > cfg.snapshots.IndicesAvailable() {

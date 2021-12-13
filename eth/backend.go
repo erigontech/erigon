@@ -346,7 +346,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, snapshothashes.KnownSnapshots(chainConfig.ChainName))
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, snapshothashes.KnownConfig(chainConfig.ChainName))
 		if err != nil {
 			return nil, err
 		}

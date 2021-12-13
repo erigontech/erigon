@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -1032,7 +1033,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 				Enabled: true,
 				Dir:     path.Join(datadir, "snapshots"),
 			}
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, params.KnownSnapshots(cc.ChainName))
+			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, snapshothashes.KnownConfig(cc.ChainName))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}

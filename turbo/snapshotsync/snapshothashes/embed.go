@@ -37,7 +37,7 @@ type Config struct {
 	Preverified  Preverified
 }
 
-func KnownSnapshots(networkName string) *Config {
+func KnownConfig(networkName string) *Config {
 	switch networkName {
 	case networkname.MainnetChainName:
 		return MainnetChainSnapshotConfig
