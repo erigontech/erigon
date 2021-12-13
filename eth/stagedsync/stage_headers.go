@@ -766,6 +766,14 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
+func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	td, err := rawdb.ReadTd(cr.tx, hash, number)
+	if err != nil {
+		log.Error("ReadTd failed", "err", err)
+		return nil
+	}
+	return td
+}
 
 type epochReader struct {
 	tx kv.RwTx
