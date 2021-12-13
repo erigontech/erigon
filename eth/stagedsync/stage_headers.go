@@ -13,6 +13,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -184,150 +185,11 @@ func HeadersForward(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	var headerProgress uint64
-
-	if cfg.snapshots != nil {
-		if !cfg.snapshots.AllSegmentsAvailable() {
-			// wait for Downloader service to download all expected snapshots
-			logEvery := time.NewTicker(logInterval)
-			defer logEvery.Stop()
-
-			for {
-				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-					log.Warn("Error while waiting for snapshots progress", "err", err)
-				} else if int(reply.Torrents) < len(snapshothashes.Goerli) {
-					log.Warn("Downloader has not enough snapshots (yet)")
-				} else if reply.Completed {
-					break
-				} else {
-					readiness := int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
-					log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", readiness))
-				}
-				time.Sleep(10 * time.Second)
-			}
-
-			for {
-				headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
-				if err != nil {
-					return err
-				}
-				expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-				if headers >= expect && bodies >= expect && txs >= expect {
-					if err := cfg.snapshots.ReopenSegments(); err != nil {
-						return err
-					}
-					if expect > cfg.snapshots.BlocksAvailable() {
-						return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
-					}
-					cfg.snapshots.SetAllSegmentsAvailable(true)
-
-					break
-				}
-				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
-				time.Sleep(10 * time.Second)
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
-				default:
-				}
-			}
-		}
-
-		if !cfg.snapshots.AllIdxAvailable() {
-			if !cfg.snapshots.AllSegmentsAvailable() {
-				return fmt.Errorf("not all snapshot segments are available")
-			}
-
-			// wait for Downloader service to download all expected snapshots
-			logEvery := time.NewTicker(logInterval)
-			defer logEvery.Stop()
-			headers, bodies, txs, err := cfg.snapshots.IdxAvailability()
-			if err != nil {
-				return err
-			}
-			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
-			if headers < expect || bodies < expect || txs < expect {
-				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
-					return err
-				}
-			}
-
-			if err := cfg.snapshots.ReopenIndices(); err != nil {
-				return err
-			}
-			if expect > cfg.snapshots.IndicesAvailable() {
-				return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
-			}
-			cfg.snapshots.SetAllIdxAvailable(true)
-		}
-
-		c, _ := tx.Cursor(kv.HeaderTD)
-		count, _ := c.Count()
-		if count == 0 || count == 1 { // genesis does write 1 record
-			logEvery := time.NewTicker(logInterval)
-			defer logEvery.Stop()
-
-			tx.ClearBucket(kv.HeaderTD)
-			var lastHeader *types.Header
-			//total  difficulty write
-			td := big.NewInt(0)
-			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
-				td.Add(td, header.Difficulty)
-				/*
-					if header.Eip3675 {
-						return nil
-					}
-
-					if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
-						return rawdb.MarkTransition(tx, blockNum)
-					}
-				*/
-				// TODO: append
-				rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
-				lastHeader = header
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
-				default:
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			tx.ClearBucket(kv.HeaderCanonical)
-			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
-				return err
-			}
-
-			sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
-			if !ok {
-				return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
-			}
-
-			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			lastTxnID := sn.Transactions.Idx.BaseDataID() + uint64(sn.Transactions.Segment.Count())
-			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-				return err
-			}
-		}
-
-		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-			if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
-				return err
-			}
-			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
-				return err
-			}
-			s.BlockNumber = cfg.snapshots.BlocksAvailable()
-		}
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg); err != nil {
+		return err
 	}
 
+	var headerProgress uint64
 	var err error
 
 	if !useExternalTx {
@@ -720,6 +582,181 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 		if err = tx.Commit(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
+	if cfg.snapshots == nil {
+		return nil
+	}
+
+	if !cfg.snapshots.AllSegmentsAvailable() {
+		// wait for Downloader service to download all expected snapshots
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		{ // send all hashes to the Downloader service
+			preverified := snapshothashes.Goerli
+			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+			i := 0
+			for filePath, infoHashStr := range preverified {
+				req.Items[i] = &proto_downloader.DownloadItem{
+					TorrentHash: downloadergrpc.String2Proto(infoHashStr),
+					Path:        filePath,
+				}
+				i++
+			}
+			for {
+				if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
+					log.Error("[Snapshots] Can't call downloader", "err", err)
+					time.Sleep(10 * time.Second)
+					continue
+				}
+				break
+			}
+		}
+
+		// Print download progress until all segments are available
+		for {
+			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+				log.Warn("Error while waiting for snapshots progress", "err", err)
+			} else if int(reply.Torrents) < len(snapshothashes.Goerli) {
+				log.Warn("Downloader has not enough snapshots (yet)")
+			} else if reply.Completed {
+				break
+			} else {
+				readiness := int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
+				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", readiness))
+			}
+			time.Sleep(10 * time.Second)
+		}
+
+		// Open segments
+		for {
+			headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
+			if err != nil {
+				return err
+			}
+			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+			if headers >= expect && bodies >= expect && txs >= expect {
+				if err := cfg.snapshots.ReopenSegments(); err != nil {
+					return err
+				}
+				if expect > cfg.snapshots.BlocksAvailable() {
+					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+				}
+				cfg.snapshots.SetAllSegmentsAvailable(true)
+
+				break
+			}
+			log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+			time.Sleep(10 * time.Second)
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
+			default:
+			}
+		}
+	}
+
+	// Create .idx files
+	if !cfg.snapshots.AllIdxAvailable() {
+		if !cfg.snapshots.AllSegmentsAvailable() {
+			return fmt.Errorf("not all snapshot segments are available")
+		}
+
+		// wait for Downloader service to download all expected snapshots
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+		headers, bodies, txs, err := cfg.snapshots.IdxAvailability()
+		if err != nil {
+			return err
+		}
+		expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+		if headers < expect || bodies < expect || txs < expect {
+			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+			if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
+				return err
+			}
+		}
+
+		if err := cfg.snapshots.ReopenIndices(); err != nil {
+			return err
+		}
+		if expect > cfg.snapshots.IndicesAvailable() {
+			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
+		}
+		cfg.snapshots.SetAllIdxAvailable(true)
+	}
+
+	// Fill kv.HeaderTD table from snapshots
+	c, _ := tx.Cursor(kv.HeaderTD)
+	count, _ := c.Count()
+	if count == 0 || count == 1 { // genesis does write 1 record
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		tx.ClearBucket(kv.HeaderTD)
+		var lastHeader *types.Header
+		//total  difficulty write
+		td := big.NewInt(0)
+		if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+			td.Add(td, header.Difficulty)
+			/*
+				if header.Eip3675 {
+					return nil
+				}
+
+				if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
+					return rawdb.MarkTransition(tx, blockNum)
+				}
+			*/
+			// TODO: append
+			rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
+			lastHeader = header
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Writing total difficulty index for snapshots", s.LogPrefix()), "block_num", header.Number.Uint64())
+			default:
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		// Fill kv.HeaderCanonical table from snapshots
+		tx.ClearBucket(kv.HeaderCanonical)
+		if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+			return err
+		}
+
+		sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+		if !ok {
+			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+		}
+
+		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+		lastTxnID := sn.Transactions.Idx.BaseDataID() + uint64(sn.Transactions.Segment.Count())
+		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+			return err
+		}
+	}
+
+	// Add last headers from snapshots to HeaderDownloader (as persistent links)
+	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+		if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+			return err
+		}
+		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+			return err
+		}
+		s.BlockNumber = cfg.snapshots.BlocksAvailable()
 	}
 	return nil
 }

@@ -98,19 +98,17 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 		case <-logEvery.C:
 			torrents := torrentClient.Torrents()
 			allComplete := true
-			allGotInfo := true
+			gotInfo := 0
 			for _, t := range torrents {
 				select {
 				case <-t.GotInfo(): // all good
+					gotInfo++
 				default:
-					allGotInfo = false
-					//t.AllowDataDownload()
-					//t.AllowDataUpload()
 				}
 				allComplete = allComplete && t.Complete.Bool()
 			}
-			if !allGotInfo {
-				log.Info("[torrent] Waiting for torrents metadata")
+			if gotInfo < len(torrents) {
+				log.Info(fmt.Sprintf("[torrent] Waiting for torrents metadata: %d/%d", gotInfo, len(torrents)))
 				continue
 			}
 			if allComplete {
@@ -221,17 +219,8 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 	return nil
 }
 
-func CreateAbsentTorrentFiles(ctx context.Context, torrentClient *torrent.Client, snapshotDir string) error {
-	for _, t := range torrentClient.Torrents() {
-		if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash) error {
+func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	wg := &sync.WaitGroup{}
 	for _, infoHash := range preverifiedHashes {
@@ -255,6 +244,8 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 				t.Drop()
 				return
 			case <-t.GotInfo():
+				mi := t.Metainfo()
+				_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
 			}
 		}(t, infoHash)
 	}

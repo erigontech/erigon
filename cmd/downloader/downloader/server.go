@@ -23,10 +23,11 @@ var (
 	_ proto_downloader.DownloaderServer = &SNDownloaderServer{}
 )
 
-func NewServer(db kv.RwDB, client *Client) (*SNDownloaderServer, error) {
+func NewServer(db kv.RwDB, client *Client, snapshotDir string) (*SNDownloaderServer, error) {
 	sn := &SNDownloaderServer{
-		db: db,
-		t:  client,
+		db:          db,
+		t:           client,
+		snapshotDir: snapshotDir,
 	}
 	return sn, nil
 }
@@ -56,8 +57,9 @@ func Start(ctx context.Context, snapshotDir string, torrentClient *torrent.Clien
 
 type SNDownloaderServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	t  *Client
-	db kv.RwDB
+	t           *Client
+	db          kv.RwDB
+	snapshotDir string
 }
 
 func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
@@ -68,7 +70,7 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
 	defer cancel()
-	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes); err != nil {
+	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes, s.snapshotDir); err != nil {
 		return nil, err
 	}
 	for _, t := range s.t.Cli.Torrents() {

@@ -70,7 +70,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -357,27 +356,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		go func() {
-			preverified := snapshothashes.Goerli
-			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
-			i := 0
-			for filePath, infoHashStr := range preverified {
-				req.Items[i] = &proto_downloader.DownloadItem{
-					TorrentHash: downloadergrpc.String2Proto(infoHashStr),
-					Path:        filePath,
-				}
-				i++
-			}
-			for {
-				if _, err := backend.downloaderClient.Download(ctx, req, grpc.WaitForReady(true)); err != nil {
-					log.Error("Can't call downloader", "err", err)
-					time.Sleep(30 * time.Second)
-					continue
-				}
-				break
-			}
-		}()
-
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}

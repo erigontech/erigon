@@ -98,7 +98,7 @@ var rootCmd = &cobra.Command{
 		}
 		defer t.Close()
 
-		bittorrentServer, err := downloader.NewServer(db, t)
+		bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
 		if err != nil {
 			return fmt.Errorf("new server: %w", err)
 		}
