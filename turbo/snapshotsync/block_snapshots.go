@@ -294,26 +294,31 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 	for _, sn := range s.blocks {
 		gg := sn.Bodies.Segment.MakeGetter()
 		buf, _ := gg.Next(nil)
-		b := &types.BodyForStorage{}
-		if err := rlp.DecodeBytes(buf, b); err != nil {
+		firstBody := &types.BodyForStorage{}
+		if err := rlp.DecodeBytes(buf, firstBody); err != nil {
 			return err
 		}
 
 		var expectedTxsAmount uint64
 		{
+			fmt.Printf("is nil: %t\n", sn == nil)
+			fmt.Printf("is nil: %t\n", sn.Bodies == nil)
+			fmt.Printf("is nil: %t\n", sn.Bodies.Idx == nil)
 			off := sn.Bodies.Idx.Lookup2(sn.To - 1 - sn.From)
+			fmt.Printf("is nil: %d\n", off)
 			gg.Reset(off)
 
-			buf, _ = gg.Next(nil)
-			bodyForStorage := new(types.BodyForStorage)
-			err := rlp.DecodeBytes(buf, bodyForStorage)
+			buf, _ = gg.Next(buf[:0])
+			fmt.Printf("is buf: %x\n", buf)
+			lastBody := new(types.BodyForStorage)
+			err := rlp.DecodeBytes(buf, lastBody)
 			if err != nil {
 				panic(err)
 			}
-			expectedTxsAmount = bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount) - b.BaseTxId
+			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
-		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, expectedTxsAmount); err != nil {
+		if err := TransactionsHashIdx(chainID, firstBody.BaseTxId, f, expectedTxsAmount); err != nil {
 			return err
 		}
 	}
