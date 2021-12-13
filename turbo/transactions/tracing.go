@@ -100,7 +100,11 @@ func TraceTx(
 			}
 		}
 		// Constuct the JavaScript tracer to execute with
-		if tracer, err = tracers.New(*config.Tracer, txCtx); err != nil {
+		if tracer, err = tracers.New(*config.Tracer, &tracers.Context{
+			BlockHash: common.Hash{},
+			TxIndex:   0,
+			TxHash:    txCtx.TxHash,
+		}); err != nil {
 			stream.WriteNil()
 			return err
 		}
