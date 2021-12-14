@@ -88,7 +88,7 @@ func TestTracer(t *testing.T) {
 			BlockNumber:     1,
 			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
-		tracer, err := New(code, ctx.txCtx)
+		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -140,7 +140,7 @@ func TestHalt(t *testing.T) {
 
 	timeout := errors.New("stahp")
 	vmctx := testCtx()
-	tracer, err := New("{step: function() { while(1); }, result: function() { return null; }}", vmctx.txCtx)
+	tracer, err := New("{step: function() { while(1); }, result: function() { return null; }}", new(Context))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +156,7 @@ func TestHalt(t *testing.T) {
 }
 
 func TestHaltBetweenSteps(t *testing.T) {
-	vmctx := testCtx()
-	tracer, err := New("{step: function() {}, fault: function() {}, result: function() { return null; }}", vmctx.txCtx)
+	tracer, err := New("{step: function() {}, fault: function() {}, result: function() { return null; }}", new(Context))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +190,7 @@ func TestNoStepExec(t *testing.T) {
 	execTracer := func(code string) []byte {
 		t.Helper()
 		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
-		tracer, err := New(code, ctx.txCtx)
+		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)
 		}
