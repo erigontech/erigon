@@ -24,7 +24,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
-	trackers.Best, trackers.Ws, //trackers.Udp, trackers.Https, trackers.Http,
+	trackers.Best, trackers.Ws, trackers.Udp, trackers.Https, trackers.Http,
 }
 
 func allTorrentFiles(dir string) ([]string, error) {
@@ -169,4 +169,9 @@ func CreateTorrentFile(root string, info *metainfo.Info, mi *metainfo.MetaInfo) 
 		return err
 	}
 	return nil
+}
+
+func segmentFileNameFromTorrentFileName(in string) string {
+	ext := filepath.Ext(in)
+	return in[0 : len(in)-len(ext)]
 }

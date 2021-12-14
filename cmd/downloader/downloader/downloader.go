@@ -55,7 +55,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	// debug
 	torrentConfig.Debug = false
 	torrentConfig.Logger = NewAdapterLogger()
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Debug)
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -104,6 +104,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				case <-t.GotInfo(): // all good
 					gotInfo++
 				default:
+					t.AllowDataUpload()
+					t.AllowDataDownload()
 				}
 				allComplete = allComplete && t.Complete.Bool()
 			}
@@ -198,7 +200,8 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 
 		// skip non-preverified files
 		_, torrentFileName := filepath.Split(torrentFilePath)
-		hashString, ok := preverifiedHashes[torrentFileName]
+		segmentFileName := segmentFileNameFromTorrentFileName(torrentFileName)
+		hashString, ok := preverifiedHashes[segmentFileName]
 		if !ok {
 			return nil
 		}
