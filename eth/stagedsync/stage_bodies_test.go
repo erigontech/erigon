@@ -18,7 +18,7 @@ import (
 func TestBodiesUnwind(t *testing.T) {
 	require, ctx := require.New(t), context.Background()
 	_, tx := memdb.NewTestTx(t)
-	txn := &types.DynamicFeeTransaction{ChainID: u256.N1, Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
+	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
 	require.NoError(err)

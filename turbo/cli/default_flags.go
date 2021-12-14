@@ -85,5 +85,6 @@ var DefaultFlags = []cli.Flag{
 	utils.MinerNoVerfiyFlag,
 	utils.MinerSigningKeyFileFlag,
 	utils.SentryAddrFlag,
+	utils.DownloaderAddrFlag,
 	HealthCheckFlag,
 }

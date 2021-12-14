@@ -1,6 +1,8 @@
 package stagedsync
 
 import (
+	"math/big"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -56,4 +58,14 @@ func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 // HasBlock retrieves a block from the database by hash and number.
 func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
 	return rawdb.HasBlock(cr.Db, hash, number)
+}
+
+// GetTd retrieves the total difficulty from the database by hash and number.
+func (cr ChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	td, err := rawdb.ReadTd(cr.Db, hash, number)
+	if err != nil {
+		log.Error("ReadTd failed", "err", err)
+		return nil
+	}
+	return td
 }
