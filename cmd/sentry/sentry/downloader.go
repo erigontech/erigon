@@ -1,4 +1,4 @@
-package download
+package sentry
 
 import (
 	"bytes"
@@ -753,9 +753,7 @@ func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
 	}
 }
 
-// Methods of Core called by sentry
-
-func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
+func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 

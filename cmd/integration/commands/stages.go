@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -33,7 +33,9 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -996,25 +998,25 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 
 	var genesis *core.Genesis
 	switch chain {
-	case "", params.MainnetChainName:
+	case "", networkname.MainnetChainName:
 		chainConfig = params.MainnetChainConfig
 		genesis = core.DefaultGenesisBlock()
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		chainConfig = params.RopstenChainConfig
 		genesis = core.DefaultRopstenGenesisBlock()
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		chainConfig = params.GoerliChainConfig
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.SokolChainName:
+	case networkname.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
-	case params.KovanChainName:
+	case networkname.KovanChainName:
 		chainConfig = params.KovanChainConfig
 		genesis = core.DefaultKovanGenesisBlock()
-	case params.FermionChainName:
+	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
 	}
@@ -1031,11 +1033,11 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 				Enabled: true,
 				Dir:     path.Join(datadir, "snapshots"),
 			}
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, params.KnownSnapshots(cc.ChainName))
+			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, snapshothashes.KnownConfig(cc.ChainName))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}
-			if err := _allSnapshotsSingleton.ReopenIndices(); err != nil {
+			if err := _allSnapshotsSingleton.ReopenSomeIndices(snapshotsync.AllSnapshotTypes...); err != nil {
 				panic(err)
 			}
 		}
@@ -1098,7 +1100,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
 	blockDownloaderWindow := 65536
-	downloadServer, err := download.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
+	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow)
 	if err != nil {
 		panic(err)
 	}
@@ -1111,7 +1113,11 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, chainConfig.TerminalTotalDifficulty, downloadServer, tmpdir, nil, nil, nil, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
+		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
+		nil, nil, nil, nil,
+		nil,
+	)
 	if err != nil {
 		panic(err)
 	}

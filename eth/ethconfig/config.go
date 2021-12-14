@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -119,7 +120,7 @@ func init() {
 type Snapshot struct {
 	Enabled             bool
 	Dir                 string
-	ChainSnapshotConfig *params.SnapshotsConfig
+	ChainSnapshotConfig *snapshothashes.Config
 }
 
 // Config contains configuration options for ETH protocol.

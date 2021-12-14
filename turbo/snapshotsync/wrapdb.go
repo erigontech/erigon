@@ -1,5 +1,6 @@
 package snapshotsync
 
+/*
 import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/snapshotsync"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -56,3 +57,4 @@ func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[snapshotsync.Snapsh
 
 	return snKV.Open(), nil
 }
+*/

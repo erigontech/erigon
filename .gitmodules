@@ -4,3 +4,9 @@
 [submodule "libmdbx"]
 	path = libmdbx
 	url = https://github.com/erthink/libmdbx
+[submodule "turbo/snapshotsync/snapshothashes/erigon-snapshots"]
+	path = turbo/snapshotsync/snapshothashes/erigon-snapshots
+	url = https://github.com/ledgerwatch/erigon-snapshot.git
+[submodule "cmd/downloader/trackers/trackerslist"]
+	path = cmd/downloader/trackers/trackerslist
+	url = https://github.com/ngosang/trackerslist.git
