@@ -710,60 +710,6 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 	return nil
 }
 
-// WaitForDownloader - wait for Downloader service to download all expected snapshots
-// for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
-	const readyKey = "snapshots_ready"
-	v, err := tx.GetOne(kv.DatabaseInfo, []byte(readyKey))
-	if err != nil {
-		return err
-	}
-	if len(v) == 1 && v[0] == 1 {
-		return nil
-	}
-	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
-
-	// send all hashes to the Downloader service
-	preverified := snapshotsCfg.Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
-	i := 0
-	for filePath, infoHashStr := range preverified {
-		req.Items[i] = &proto_downloader.DownloadItem{
-			TorrentHash: downloadergrpc.String2Proto(infoHashStr),
-			Path:        filePath,
-		}
-		i++
-	}
-	for {
-		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
-			log.Error("[Snapshots] Can't call downloader", "err", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
-	}
-
-	// Print download progress until all segments are available
-	for {
-		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
-			log.Warn("Downloader has not enough snapshots (yet)")
-		} else if reply.Completed {
-			break
-		} else {
-			readiness := int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
-			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", readiness))
-		}
-		time.Sleep(10 * time.Second)
-	}
-
-	if err := tx.Put(kv.DatabaseInfo, []byte(readyKey), []byte{1}); err != nil {
-		return err
-	}
-	return nil
-}
-
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	if cfg.snapshots == nil {
 		return nil
@@ -905,5 +851,59 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
 	}
 
+	return nil
+}
+
+// WaitForDownloader - wait for Downloader service to download all expected snapshots
+// for MVP we sync with Downloader only once, in future will send new snapshots also
+func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
+	const readyKey = "snapshots_ready"
+	v, err := tx.GetOne(kv.DatabaseInfo, []byte(readyKey))
+	if err != nil {
+		return err
+	}
+	if len(v) == 1 && v[0] == 1 {
+		return nil
+	}
+	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
+
+	// send all hashes to the Downloader service
+	preverified := snapshotsCfg.Preverified
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+	i := 0
+	for filePath, infoHashStr := range preverified {
+		req.Items[i] = &proto_downloader.DownloadItem{
+			TorrentHash: downloadergrpc.String2Proto(infoHashStr),
+			Path:        filePath,
+		}
+		i++
+	}
+	for {
+		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
+			log.Error("[Snapshots] Can't call downloader", "err", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+		break
+	}
+
+	// Print download progress until all segments are available
+	for {
+		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			log.Warn("Error while waiting for snapshots progress", "err", err)
+		} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
+			log.Warn("Downloader has not enough snapshots (yet)")
+		} else if reply.Completed {
+			break
+		} else {
+			readiness := int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
+			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", readiness))
+		}
+		time.Sleep(10 * time.Second)
+	}
+
+	if err := tx.Put(kv.DatabaseInfo, []byte(readyKey), []byte{1}); err != nil {
+		return err
+	}
 	return nil
 }
