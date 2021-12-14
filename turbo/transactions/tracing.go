@@ -203,7 +203,7 @@ func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsonite
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment

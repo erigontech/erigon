@@ -138,7 +138,7 @@ func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompi
 	}
 }
 
-func (a *AccessListTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 }
 
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.

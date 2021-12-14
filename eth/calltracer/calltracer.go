@@ -29,7 +29,7 @@ func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTr
 	}
 }
 
-func (ct *CallTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (ct *CallTracer) CaptureStart(evm *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 	ct.froms[from] = struct{}{}
 
 	created, ok := ct.tos[to]

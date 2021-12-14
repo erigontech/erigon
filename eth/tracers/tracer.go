@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -30,7 +31,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -292,8 +292,6 @@ func (cw *contractWrapper) pushObject(vm *duktape.Context) {
 // Tracer provides an implementation of Tracer that evaluates a Javascript
 // function for each VM execution step.
 type Tracer struct {
-	inited bool // Flag whether the context was already inited from the EVM
-
 	vm *duktape.Context // Javascript VM instance
 
 	tracerObject int // Stack index of the tracer JavaScript object
@@ -545,7 +543,7 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 	if depth != 0 {
 		return
 	}
@@ -558,77 +556,63 @@ func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Addres
 	jst.ctx["input"] = input
 	jst.ctx["gas"] = gas
 	jst.ctx["value"] = value
+
+	// Initialize the context
+	jst.ctx["block"] = env.Context().BlockNumber
+	jst.dbWrapper.db = env.IntraBlockState()
+	// Compute intrinsic gas
+	isHomestead := env.ChainConfig().IsHomestead(env.Context().BlockNumber)
+	isIstanbul := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
+	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
+	if err != nil {
+		return
+	}
+	jst.ctx["intrinsicGas"] = intrinsicGas
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
 func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rdata []byte, depth int, err error) {
-	stack := scope.Stack
-	memory := scope.Memory
-	contract := scope.Contract
+	if jst.err != nil {
+		return
+	}
+	// If tracing was interrupted, set the error and stop
+	if atomic.LoadUint32(&jst.interrupt) > 0 {
+		jst.err = jst.reason
+		return
+	}
+	jst.opWrapper.op = op
+	jst.stackWrapper.stack = scope.Stack
+	jst.memoryWrapper.memory = scope.Memory
+	jst.contractWrapper.contract = scope.Contract
 
-	if jst.err == nil {
-		// Initialize the context if it wasn't done yet
-		if !jst.inited {
-			// Update list of precompiles based on current block
-			rules := env.ChainConfig().Rules(env.Context().BlockNumber)
-			jst.activePrecompiles = vm.ActivePrecompiles(rules)
+	*jst.pcValue = uint(pc)
+	*jst.gasValue = uint(gas)
+	*jst.costValue = uint(cost)
+	*jst.depthValue = uint(depth)
+	*jst.refundValue = uint(env.IntraBlockState().GetRefund())
 
-			jst.ctx["block"] = env.Context().BlockNumber
-			// Compute intrinsic gas
-			isHomestead := env.ChainRules().IsHomestead
-			isIstanbul := env.ChainRules().IsIstanbul
-			var input []byte
-			if data, ok := jst.ctx["input"].([]byte); ok {
-				input = data
-			}
-			intrinsicGas, err1 := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
-			if err1 != nil {
-				return
-			}
-			jst.ctx["intrinsicGas"] = intrinsicGas
-			jst.inited = true
-		}
-		// If tracing was interrupted, set the error and stop
-		if atomic.LoadUint32(&jst.interrupt) > 0 {
-			jst.err = jst.reason
-			return
-		}
-		jst.opWrapper.op = op
-		jst.stackWrapper.stack = stack
-		jst.memoryWrapper.memory = memory
-		jst.contractWrapper.contract = contract
-		jst.dbWrapper.db = env.IntraBlockState()
+	jst.errorValue = nil
+	if err != nil {
+		jst.errorValue = new(string)
+		*jst.errorValue = err.Error()
+	}
 
-		*jst.pcValue = uint(pc)
-		*jst.gasValue = uint(gas)
-		*jst.costValue = uint(cost)
-		*jst.depthValue = uint(depth)
-		*jst.refundValue = uint(env.IntraBlockState().GetRefund())
-
-		jst.errorValue = nil
-		if err != nil {
-			jst.errorValue = new(string)
-			*jst.errorValue = err.Error()
-		}
-		_, err := jst.call("step", "log", "db")
-		if err != nil {
-			jst.err = wrapError("step", err)
-		}
+	if _, err := jst.call("step", "log", "db"); err != nil {
+		jst.err = wrapError("step", err)
 	}
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
 func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
-	if jst.err == nil {
-		// Apart from the error, everything matches the previous invocation
-		jst.errorValue = new(string)
-		*jst.errorValue = err.Error()
-
-		_, err := jst.call("fault", "log", "db")
-		if err != nil {
-			jst.err = wrapError("fault", err)
-		}
+	if jst.err != nil {
+		return
+	}
+	// Apart from the error, everything matches the previous invocation
+	jst.errorValue = new(string)
+	*jst.errorValue = err.Error()
+	if _, err := jst.call("fault", "log", "db"); err != nil {
+		jst.err = wrapError("fault", err)
 	}
 }
 
