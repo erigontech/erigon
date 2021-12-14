@@ -81,63 +81,78 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
-		var cc *params.ChainConfig
-		{
-			chaindataDir := path.Join(datadir, "chaindata")
-			chaindata := mdbx.MustOpenRo(chaindataDir)
-			cc = tool.ChainConfigFromDB(chaindata)
-			chaindata.Close()
-		}
-
-		snapshotsDir := path.Join(datadir, "snapshots")
-		log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
-
-		db := mdbx.MustOpen(snapshotsDir + "/db")
-		var t *downloader.Client
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-			if err != nil {
-				return fmt.Errorf("get peer id: %w", err)
-			}
-			t, err = downloader.New(snapshotsDir, seeding, string(peerID))
-			if err != nil {
-				return err
-			}
-			if len(peerID) == 0 {
-				err = t.SavePeerID(tx)
-				if err != nil {
-					return fmt.Errorf("save peer id: %w", err)
-				}
-			}
+		if err := Downloader(cmd.Context(), cmd); err != nil {
+			log.Error("Downloader", "err", err)
 			return nil
-		}); err != nil {
-			return err
 		}
-		defer t.Close()
-
-		bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
-		if err != nil {
-			return fmt.Errorf("new server: %w", err)
-		}
-
-		snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-		err = downloader.Start(ctx, snapshotsDir, t.Cli, snapshotsCfg)
-		if err != nil {
-			return fmt.Errorf("start: %w", err)
-		}
-
-		go downloader.MainLoop(ctx, t.Cli)
-
-		grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil)
-		if err != nil {
-			return err
-		}
-		<-cmd.Context().Done()
-		grpcServer.GracefulStop()
-
 		return nil
 	},
+}
+
+func Downloader(ctx context.Context, cmd *cobra.Command) error {
+	var cc *params.ChainConfig
+	{
+		chaindataDir := path.Join(datadir, "chaindata")
+		if err := os.MkdirAll(chaindataDir, 0755); err != nil {
+			return err
+		}
+		chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
+		if err != nil {
+			return fmt.Errorf("%w, path: %s", err, chaindataDir)
+		}
+		cc = tool.ChainConfigFromDB(chaindata)
+		chaindata.Close()
+	}
+
+	snapshotsDir := path.Join(datadir, "snapshots")
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
+	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
+		return err
+	}
+
+	db := mdbx.MustOpen(snapshotsDir + "/db")
+	var t *downloader.Client
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
+		if err != nil {
+			return fmt.Errorf("get peer id: %w", err)
+		}
+		t, err = downloader.New(snapshotsDir, seeding, string(peerID))
+		if err != nil {
+			return err
+		}
+		if len(peerID) == 0 {
+			err = t.SavePeerID(tx)
+			if err != nil {
+				return fmt.Errorf("save peer id: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	defer t.Close()
+
+	bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
+	if err != nil {
+		return fmt.Errorf("new server: %w", err)
+	}
+
+	snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
+	err = downloader.Start(ctx, snapshotsDir, t.Cli, snapshotsCfg)
+	if err != nil {
+		return fmt.Errorf("start: %w", err)
+	}
+
+	go downloader.MainLoop(ctx, t.Cli)
+
+	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil)
+	if err != nil {
+		return err
+	}
+	<-cmd.Context().Done()
+	grpcServer.GracefulStop()
+	return nil
 }
 
 var printInfoHashes = &cobra.Command{
