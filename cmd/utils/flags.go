@@ -215,6 +215,11 @@ var (
 		Usage: "Maximum amount of time non-executable transaction are queued",
 		Value: ethconfig.Defaults.TxPool.Lifetime,
 	}
+	TxPoolTraceSendersFlag = cli.StringFlag{
+		Name:  "txpool.trace.senders",
+		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
+		Value: "",
+	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
 		Name:  "mine",
@@ -1034,6 +1039,15 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 	if ctx.GlobalIsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.GlobalDuration(TxPoolLifetimeFlag.Name)
+	}
+	if ctx.GlobalIsSet(TxPoolTraceSendersFlag.Name) {
+		// Parse the command separated flag
+		senderHexes := SplitAndTrim(ctx.GlobalString(TxPoolTraceSendersFlag.Name))
+		cfg.TracedSenders = make([]string, len(senderHexes))
+		for i, senderHex := range senderHexes {
+			sender := common.HexToAddress(senderHex)
+			cfg.TracedSenders[i] = string(sender[:])
+		}
 	}
 }
 
