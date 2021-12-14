@@ -34,6 +34,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -368,7 +370,11 @@ func StartGrpc(txPoolServer txpool_proto.TxpoolServer, miningServer txpool_proto
 	//	grpc_prometheus.Register(grpcServer)
 	//}
 
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+
 	go func() {
+		defer healthServer.Shutdown()
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}

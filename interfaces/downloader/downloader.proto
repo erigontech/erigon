@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "types/types.proto";
+
+option go_package = "./downloader;downloader";
+
+package downloader;
+
+service Downloader {
+  rpc Download (DownloadRequest) returns (google.protobuf.Empty) {}
+  rpc Stats (StatsRequest) returns (StatsReply) {}
+}
+
+message DownloadItem {
+  string path = 1;
+  types.H160 torrent_hash = 2; // single hash will be resolved as magnet link
+}
+message DownloadRequest {
+  repeated DownloadItem items = 1; // single hash will be resolved as magnet link
+}
+
+
+message StatsRequest {
+}
+
+message StatsReply {
+  bool completed = 1;
+  int32 progress = 2;
+  int32 peers = 3;
+  int32 torrents = 4;
+  uint64 bytesCompleted = 5;
+  uint64 bytesTotal = 6;
+}

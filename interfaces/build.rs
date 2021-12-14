@@ -29,7 +29,7 @@ fn main() {
     }
 
     if cfg!(feature = "snapshotsync") {
-        protos.push("snapshot_downloader/external_downloader.proto");
+        protos.push("downloader/downloader.proto");
     }
 
     if cfg!(feature = "txpool") {

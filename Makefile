@@ -32,7 +32,7 @@ grpc:
 		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		p2psentry/sentry.proto \
 		remote/kv.proto remote/ethbackend.proto \
-		snapshot_downloader/external_downloader.proto \
+		downloader/downloader.proto \
 		consensus_engine/consensus.proto \
 		testing/testing.proto \
 		txpool/txpool.proto txpool/mining.proto
