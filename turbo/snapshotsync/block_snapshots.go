@@ -139,7 +139,12 @@ func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error
 	}
 	return
 }
-func (s *AllSnapshots) ReopenIndices(types ...SnapshotType) error {
+
+func (s *AllSnapshots) ReopenIndices() error {
+	return s.ReopenSomeIndices(AllSnapshotTypes...)
+}
+
+func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) error {
 	for _, bs := range s.blocks {
 		for _, snapshotType := range types {
 			switch snapshotType {
@@ -298,7 +303,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 	}
 
 	// hack to read first block body - to get baseTxId from there
-	if err := s.ReopenIndices(Headers, Bodies); err != nil {
+	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
 	}
 

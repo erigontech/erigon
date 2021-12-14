@@ -1037,7 +1037,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}
-			if err := _allSnapshotsSingleton.ReopenIndices(snapshotsync.AllSnapshotTypes...); err != nil {
+			if err := _allSnapshotsSingleton.ReopenSomeIndices(snapshotsync.AllSnapshotTypes...); err != nil {
 				panic(err)
 			}
 		}
