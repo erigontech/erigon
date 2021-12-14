@@ -47,6 +47,26 @@ func allTorrentFiles(dir string) ([]string, error) {
 	}
 	return res, nil
 }
+func allSegmentFiles(dir string) ([]string, error) {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range files {
+		if !snapshotsync.IsCorrectFileName(f.Name()) {
+			continue
+		}
+		if f.Size() == 0 {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
+			continue
+		}
+		res = append(res, f.Name())
+	}
+	return res, nil
+}
 
 func ForEachTorrentFile(root string, walker func(torrentFileName string) error) error {
 	files, err := allTorrentFiles(root)
@@ -68,17 +88,17 @@ func ForEachTorrentFile(root string, walker func(torrentFileName string) error) 
 	return nil
 }
 
-// BuildTorrentFilesIfNeed - does scan files (big IO) if some .torrent file doesn't exists
+// BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
 func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := allTorrentFiles(root)
+	files, err := allSegmentFiles(root)
 	if err != nil {
 		return err
 	}
 	for i, f := range files {
-		torrentFileName := path.Join(root, f)
+		torrentFileName := path.Join(root, f+".torrent")
 		if _, err := os.Stat(torrentFileName); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return err
