@@ -812,7 +812,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 		}
 
-		if err := cfg.snapshots.ReopenIndices(); err != nil {
+		if err := cfg.snapshots.ReopenIndices(snapshotsync.AllSnapshotTypes...); err != nil {
 			return err
 		}
 		if expect > cfg.snapshots.IndicesAvailable() {

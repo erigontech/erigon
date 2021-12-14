@@ -2657,7 +2657,7 @@ func checkBlockSnapshot(chaindata string) error {
 
 	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), snapshothashes.KnownConfig(chainConfig.ChainName))
 	snapshots.ReopenSegments()
-	snapshots.ReopenIndices()
+	snapshots.ReopenIndices(snapshotsync.AllSnapshotTypes...)
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
 	//	panic(err)
 	//}
