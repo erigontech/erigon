@@ -84,6 +84,7 @@ type TxSlot struct {
 	value          uint256.Int // Value transferred by the transaction
 	IdHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
 	senderID       uint64      // SenderID - require external mapping to it's address
+	traced         bool        // Whether transaction needs to be traced throughout transcation pool code and generate debug printing
 	creation       bool        // Set to true if "To" field of the transation is not set
 	dataLen        int         // Length of transaction's data (for calculation of intrinsic gas)
 	dataNonZeroLen int

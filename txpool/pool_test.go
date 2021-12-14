@@ -19,6 +19,7 @@ package txpool
 import (
 	"container/heap"
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -303,5 +304,128 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		nonce, ok := pool.NonceFromAddress(addr)
 		assert.True(ok)
 		assert.Equal(uint64(3), nonce)
+	}
+}
+
+func TestReverseNonces(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan Hashes, 100)
+	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+
+	cfg := DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1)
+	assert.NoError(err)
+	require.True(pool != nil)
+	ctx := context.Background()
+	var txID uint64
+	_ = coreDB.View(ctx, func(tx kv.Tx) error {
+		txID = tx.ViewID()
+		return nil
+	})
+	pendingBaseFee := uint64(1_000_000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		DatabaseViewID:      txID,
+		PendingBlockBaseFee: pendingBaseFee,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+	addr[0] = 1
+	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	assert.NoError(err)
+	// 1. Send high fee transaction with nonce gap
+	{
+		var txSlots TxSlots
+		txSlot := &TxSlot{
+			tip:    500_000,
+			feeCap: 3_000_000,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot.IdHash[0] = 1
+		txSlots.Append(txSlot, addr[:], true)
+
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+	}
+	fmt.Printf("AFTER TX 1\n")
+	select {
+	case hashes := <-ch:
+		for i := 0; i < hashes.Len(); i++ {
+			fmt.Printf("propagated hash %x\n", hashes.At(i))
+		}
+	default:
+
+	}
+	// 2. Send low fee (below base fee) transaction without nonce gap
+	{
+		var txSlots TxSlots
+		txSlot := &TxSlot{
+			tip:    500_000,
+			feeCap: 500_000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 2
+		txSlots.Append(txSlot, addr[:], true)
+
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+	}
+	fmt.Printf("AFTER TX 2\n")
+	select {
+	case hashes := <-ch:
+		for i := 0; i < hashes.Len(); i++ {
+			fmt.Printf("propagated hash %x\n", hashes.At(i))
+		}
+	default:
+
+	}
+
+	{
+		var txSlots TxSlots
+		txSlot := &TxSlot{
+			tip:    600_000,
+			feeCap: 3_000_000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 3
+		txSlots.Append(txSlot, addr[:], true)
+
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+	}
+	fmt.Printf("AFTER TX 3\n")
+	select {
+	case hashes := <-ch:
+		for i := 0; i < hashes.Len(); i++ {
+			fmt.Printf("propagated hash %x\n", hashes.At(i))
+		}
+	default:
+
 	}
 }
