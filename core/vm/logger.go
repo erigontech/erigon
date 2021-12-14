@@ -219,7 +219,6 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 	// create a new snapshot of the EVM.
 	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, env.IntraBlockState().GetRefund(), err}
 	l.logs = append(l.logs, log)
-	return
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault

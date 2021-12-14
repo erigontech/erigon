@@ -335,7 +335,6 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)
 	ot.traceStack = append(ot.traceStack, trace)
-	return
 }
 
 func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
@@ -409,7 +408,6 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 	if depth > 0 {
 		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	}
-	return
 }
 
 func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
@@ -519,7 +517,6 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 			ot.lastVmOp.Ex = nil
 		}
 	}
-	return
 }
 
 func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {

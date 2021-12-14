@@ -657,7 +657,6 @@ func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64,
 	if err != nil {
 		jst.ctx["error"] = err.Error()
 	}
-	return
 }
 
 func (jst *Tracer) CaptureSelfDestruct(from, to common.Address, value *big.Int) {
