@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, difficulty DifficultyCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -50,19 +50,6 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, block
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneBodiesStage(p, tx, bodies, ctx)
-			},
-		},
-		{
-			ID:          stages.TotalDifficulty,
-			Description: "Compute total difficulty",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnDifficultyStage(s, tx, difficulty, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindDifficultyStage(u, tx, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneDifficultyStage(p, tx, ctx)
 			},
 		},
 		{

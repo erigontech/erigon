@@ -603,10 +603,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		if err = s.Update(tx, maxNum); err != nil {
 			return err
 		}
-		// When we forward sync, total difficulty is updated within headers processing
-		if err = stages.SaveStageProgress(tx, stages.TotalDifficulty, maxNum); err != nil {
-			return err
-		}
 	}
 	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
@@ -798,15 +794,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		td := big.NewInt(0)
 		if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
 			td.Add(td, header.Difficulty)
-			/*
-				if header.Eip3675 {
-					return nil
-				}
-
-				if td.Cmp(cfg.terminalTotalDifficulty) > 0 {
-					return rawdb.MarkTransition(tx, blockNum)
-				}
-			*/
 			// TODO: append
 			rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
 			lastHeader = header
