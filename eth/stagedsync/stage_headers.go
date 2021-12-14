@@ -346,6 +346,10 @@ func HeadersPOW(
 	if err != nil {
 		return err
 	}
+	fmt.Printf("readTD: %d,%x, %d\n", headerProgress, hash, localTd)
+	if localTd == nil {
+		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
+	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
