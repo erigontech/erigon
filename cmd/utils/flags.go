@@ -408,11 +408,6 @@ var (
 		Usage: "Network listening port",
 		Value: 30303,
 	}
-	ListenPort65Flag = cli.IntFlag{
-		Name:  "p2p.eth65.port",
-		Usage: "ETH65 Network listening port",
-		Value: 30304,
-	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -704,8 +699,6 @@ func appendUrlListNodes(nodes []*enode.Node, urls []string, nodeType string, log
 func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, trustedPeers []string, port, protocol uint) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
-	case eth.ETH65:
-		enodeDBPath = path.Join(datadir, "nodes", "eth65")
 	case eth.ETH66:
 		enodeDBPath = path.Join(datadir, "nodes", "eth66")
 	default:
@@ -772,9 +765,6 @@ func nodeKey(keyfile string) *ecdsa.PrivateKey {
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPortFlag.Name))
-	}
-	if ctx.GlobalIsSet(ListenPort65Flag.Name) {
-		cfg.ListenAddr65 = fmt.Sprintf(":%d", ctx.GlobalInt(ListenPort65Flag.Name))
 	}
 	if ctx.GlobalIsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.GlobalString(SentryAddrFlag.Name))
