@@ -82,7 +82,7 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 }
 
 func TestTracer(t *testing.T) {
-	execTracer := func(code string) []byte {
+	execTracer := func(code string) ([]byte, string) {
 		t.Helper()
 		ctx := &vmContext{blockCtx: vm.BlockContext{
 			BlockNumber:     1,
@@ -94,13 +94,14 @@ func TestTracer(t *testing.T) {
 		}
 		ret, err := runTrace(tracer, ctx)
 		if err != nil {
-			t.Fatal(err)
+			return nil, err.Error()
 		}
-		return ret
+		return ret, ""
 	}
 	for i, tt := range []struct {
 		code string
 		want string
+		fail string
 	}{
 		{ // tests that we don't panic on bad arguments to memory access
 			code: "{depths: [], step: function(log) { this.depths.push(log.memory.slice(-1,-2)); }, fault: function() {}, result: function() { return this.depths; }}",
@@ -123,10 +124,13 @@ func TestTracer(t *testing.T) {
 		}, { // tests intrinsic gas
 			code: "{depths: [], step: function() {}, fault: function() {}, result: function(ctx) { return ctx.gasPrice+'.'+ctx.gasUsed+'.'+ctx.intrinsicGas; }}",
 			want: `"100000.6.21000"`,
+		}, { // tests too deep object / serialization crash
+			code: "{step: function() {}, fault: function() {}, result: function() { var o={}; var x=o; for (var i=0; i<1000; i++){	o.foo={}; o=o.foo; } return x; }}",
+			fail: "RangeError: json encode recursion limit    in server-side tracer function 'result'",
 		},
 	} {
-		if have := execTracer(tt.code); tt.want != string(have) {
-			t.Errorf("testcase %d: expected return value to be %s got %s\n\tcode: %v", i, tt.want, string(have), tt.code)
+		if have, err := execTracer(tt.code); tt.want != string(have) || tt.fail != err {
+			t.Errorf("testcase %d: expected return value to be '%s' got '%s', error to be '%s' got '%s'\n\tcode: %v", i, tt.want, string(have), tt.fail, err, tt.code)
 		}
 	}
 }
