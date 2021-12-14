@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -571,6 +572,19 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
+func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	// Assemble the request
+	return HeaderRequest{
+		Hash:    common.Hash{},
+		Number:  hd.lastProcessedPayload - 1,
+		Length:  192,
+		Skip:    0,
+		Reverse: true,
+	}
+}
+
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -682,6 +696,49 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, headerRaw 
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
 }
 
+func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.expectedHash = hash
+}
+
+func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
+	if len(segment) == 0 {
+		return nil
+	}
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	// Handle request after closing collectors
+	if hd.canonicalHashesCollector == nil || hd.headersCollector == nil {
+		return nil
+	}
+	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
+	for _, segmentFragment := range segment {
+		header := segmentFragment.Header
+		// If we found the block number we were missing, we can just dismiss it
+		if header.Hash() != hd.expectedHash {
+			return nil
+		}
+		currentCanonical, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
+		if err != nil {
+			return err
+		}
+		if currentCanonical == hd.expectedHash || hd.lastProcessedPayload == 1 {
+			hd.synced = true
+			return nil
+		}
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
+			return err
+		}
+		if err := hd.canonicalHashesCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
+			return err
+		}
+		hd.expectedHash = segmentFragment.Header.ParentHash
+		hd.lastProcessedPayload = header.Number.Uint64()
+	}
+	return nil
+}
+
 // GrabAnnounces - returns all available announces and forget them
 func (hd *HeaderDownload) GrabAnnounces() []Announce {
 	hd.lock.Lock()
@@ -694,7 +751,11 @@ func (hd *HeaderDownload) GrabAnnounces() []Announce {
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.highestInDb
+	if hd.posSync {
+		return hd.lastProcessedPayload
+	} else {
+		return hd.highestInDb
+	}
 }
 
 func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
@@ -963,6 +1024,48 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.fetching = fetching
+}
+
+func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.lastProcessedPayload = lastProcessed
+}
+
+func (hd *HeaderDownload) Unsync() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.synced = false
+}
+
+func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.headersCollector = collector
+}
+
+func (hd *HeaderDownload) SetCanonicalHashesCollector(collector *etl.Collector) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.canonicalHashesCollector = collector
+}
+
+func (hd *HeaderDownload) SetPOSSync(posSync bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posSync = posSync
+}
+
+func (hd *HeaderDownload) POSSync() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.posSync
+}
+
+func (hd *HeaderDownload) Synced() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.synced
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {
