@@ -545,9 +545,9 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) error {
+func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 	if depth != 0 {
-		return nil
+		return
 	}
 	jst.ctx["type"] = "CALL"
 	if create {
@@ -558,12 +558,14 @@ func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Addres
 	jst.ctx["input"] = input
 	jst.ctx["gas"] = gas
 	jst.ctx["value"] = value
-
-	return nil
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, rdata []byte, contract *vm.Contract, depth int, err error) error {
+func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rdata []byte, depth int, err error) {
+	stack := scope.Stack
+	memory := scope.Memory
+	contract := scope.Contract
+
 	if jst.err == nil {
 		// Initialize the context if it wasn't done yet
 		if !jst.inited {
@@ -581,7 +583,7 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 			}
 			intrinsicGas, err1 := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul)
 			if err1 != nil {
-				return err1
+				return
 			}
 			jst.ctx["intrinsicGas"] = intrinsicGas
 			jst.inited = true
@@ -589,7 +591,7 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		// If tracing was interrupted, set the error and stop
 		if atomic.LoadUint32(&jst.interrupt) > 0 {
 			jst.err = jst.reason
-			return nil
+			return
 		}
 		jst.opWrapper.op = op
 		jst.stackWrapper.stack = stack
@@ -613,12 +615,11 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 			jst.err = wrapError("step", err)
 		}
 	}
-	return nil
 }
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, depth int, err error) error {
+func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 	if jst.err == nil {
 		// Apart from the error, everything matches the previous invocation
 		jst.errorValue = new(string)
@@ -629,13 +630,12 @@ func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 			jst.err = wrapError("fault", err)
 		}
 	}
-	return nil
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) error {
+func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 	if depth != 0 {
-		return nil
+		return
 	}
 	jst.ctx["output"] = output
 	jst.ctx["time"] = t.String()
@@ -644,7 +644,7 @@ func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64,
 	if err != nil {
 		jst.ctx["error"] = err.Error()
 	}
-	return nil
+	return
 }
 
 func (jst *Tracer) CaptureSelfDestruct(from, to common.Address, value *big.Int) {
