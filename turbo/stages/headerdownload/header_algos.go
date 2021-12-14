@@ -616,9 +616,11 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
+type FeedHeaderFuncType func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error)
+
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error), terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFuncType, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
@@ -800,7 +802,7 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
+func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) FeedHeaderFuncType {
 	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
 		return hi.FeedHeader(db, headerReader, header, headerRaw, hash, blockHeight, terminalTotalDifficulty)
 	}
@@ -889,7 +891,7 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 			hi.unwindPoint = forkingPoint
 			hi.unwind = true
 		}
-		// This makes sure we end up chosing the chain with the max total difficulty
+		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
