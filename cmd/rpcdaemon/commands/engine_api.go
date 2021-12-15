@@ -164,7 +164,7 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []commo
 	}
 	defer tx.Rollback()
 
-	var blockHashToBody map[common.Hash]types.Body
+	blockHashToBody := make(map[common.Hash]types.Body)
 
 	for _, hash := range blockHashes {
 		if block, err := e.blockByHashWithSenders(tx, hash); err != nil {
