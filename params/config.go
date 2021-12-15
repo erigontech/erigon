@@ -556,7 +556,7 @@ func (c *ChainConfig) String() string {
 		engine = "unknown"
 	}
 
-	if c.ConsensusType == ParliaConsensus {
+	if c.Consensus == ParliaConsensus {
 		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
