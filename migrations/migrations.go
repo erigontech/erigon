@@ -31,12 +31,6 @@ import (
 // - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
-		headerPrefixToSeparateBuckets,
-		removeCliqueBucket,
-		dbSchemaVersion,
-		fixSequences,
-		storageMode,
-		setPruneType,
 		dbSchemaVersion5,
 	},
 	kv.TxPoolDB: {},
