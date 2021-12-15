@@ -24,6 +24,7 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolAccountQueueFlag,
 	utils.TxPoolGlobalQueueFlag,
 	utils.TxPoolLifetimeFlag,
+	utils.TxPoolTraceSendersFlag,
 	PruneFlag,
 	PruneHistoryFlag,
 	PruneReceiptFlag,
@@ -47,7 +48,6 @@ var DefaultFlags = []cli.Flag{
 	SyncLoopThrottleFlag,
 	BadBlockFlag,
 	utils.ListenPortFlag,
-	utils.ListenPort65Flag,
 	utils.NATFlag,
 	utils.NoDiscoverFlag,
 	utils.DiscoveryV5Flag,
@@ -84,4 +84,5 @@ var DefaultFlags = []cli.Flag{
 	utils.MinerNoVerfiyFlag,
 	utils.MinerSigningKeyFileFlag,
 	utils.SentryAddrFlag,
+	HealthCheckFlag,
 }

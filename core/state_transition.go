@@ -203,12 +203,21 @@ func (st *StateTransition) to() common.Address {
 func (st *StateTransition) buyGas(gasBailout bool) error {
 	mgval := st.sharedBuyGas
 	mgval.SetUint64(st.msg.Gas())
-	mgval = mgval.Mul(mgval, st.gasPrice)
+	mgval, overflow := mgval.MulOverflow(mgval, st.gasPrice)
+	if overflow {
+		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+	}
 	balanceCheck := mgval
 	if st.gasFeeCap != nil {
 		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
-		balanceCheck = balanceCheck.Mul(balanceCheck, st.gasFeeCap)
-		balanceCheck.Add(balanceCheck, st.value)
+		balanceCheck, overflow = balanceCheck.MulOverflow(balanceCheck, st.gasFeeCap)
+		if overflow {
+			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		}
+		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, st.value)
+		if overflow {
+			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		}
 	}
 	if have, want := st.state.GetBalance(st.msg.From()), balanceCheck; have.Cmp(want) < 0 {
 		if !gasBailout {

@@ -148,8 +148,7 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	_, _, err := core.OverrideGenesisBlock(tx, g)
-	if err != nil {
+	if _, _, err := g.WriteGenesisState(tx); err != nil {
 		return err
 	}
 	return nil

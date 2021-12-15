@@ -25,6 +25,7 @@ import (
 	"os"
 	"path"
 	"reflect"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -34,8 +35,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
@@ -282,16 +285,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		server66 := download.NewSentryServer(backend.downloadCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
-		cfg65 := stack.Config().P2P
-		cfg65.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth65")
-		d65, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
-		}
-		cfg65.ListenAddr = cfg65.ListenAddr65
-		server65 := download.NewSentryServer(backend.downloadCtx, d65, readNodeInfo, &cfg65, eth.ETH65)
-		backend.sentryServers = append(backend.sentryServers, server65)
-		backend.sentries = append(backend.sentries, direct.NewSentryClientDirect(eth.ETH65, server65))
 		go func() {
 			logEvery := time.NewTicker(120 * time.Second)
 			defer logEvery.Stop()
@@ -331,6 +324,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		cfg.AccountSlots = config.TxPool.AccountSlots
 		cfg.LogEvery = 1 * time.Minute
 		cfg.CommitEvery = 5 * time.Minute
+		cfg.TracedSenders = config.TxPool.TracedSenders
 
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
@@ -401,7 +395,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			miningRPC,
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
-			creds)
+			creds,
+			stack.Config().HealthCheck)
 		if err != nil {
 			return nil, err
 		}
@@ -660,6 +655,29 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	}
 
 	return sentryPc, nil
+}
+
+func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
+	if limit == 0 || limit > len(s.sentries) {
+		limit = len(s.sentries)
+	}
+
+	nodes := make([]*prototypes.NodeInfoReply, 0, limit)
+	for i := 0; i < limit; i++ {
+		sc := s.sentries[i]
+
+		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
+		if err != nil {
+			log.Error("sentry nodeInfo", "err", err)
+		}
+
+		nodes = append(nodes, nodeInfo)
+	}
+
+	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
+	sort.Sort(nodesInfo)
+
+	return nodesInfo, nil
 }
 
 // Protocols returns all the currently configured

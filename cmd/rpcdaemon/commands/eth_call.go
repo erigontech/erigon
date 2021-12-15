@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -14,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
@@ -21,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
@@ -275,4 +281,128 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
 	var stub interface{}
 	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
+}
+
+// accessListResult returns an optional accesslist
+// Its the result of the `debug_createAccessList` RPC call.
+// It contains an error if the transaction itself failed.
+type accessListResult struct {
+	Accesslist *types.AccessList `json:"accessList"`
+	Error      string            `json:"error,omitempty"`
+	GasUsed    hexutil.Uint64    `json:"gasUsed"`
+}
+
+// CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
+// If the accesslist creation fails an error is returned.
+// If the transaction itself fails, an vmErr is returned.
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.BaseAPI.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	var stateReader state.StateReader
+	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		cacheView, err := api.stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
+	} else {
+		stateReader = state.NewPlainState(tx, blockNumber)
+	}
+	state := state.New(stateReader)
+
+	header := block.Header()
+	// If the gas amount is not set, extract this as it will depend on access
+	// lists and we'll need to reestimate every time
+	nogas := args.Gas == nil
+
+	var to common.Address
+	if args.To != nil {
+		to = *args.To
+	} else {
+		// Require nonce to calculate address of created contract
+		if args.Nonce == nil {
+			var nonce uint64
+			reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
+				Address: gointerfaces.ConvertAddressToH160(*args.From),
+			}, &grpc.EmptyCallOption{})
+			if err != nil {
+				return nil, err
+			}
+			if reply.Found {
+				nonce = reply.Nonce + 1
+			}
+			args.Nonce = (*hexutil.Uint64)(&nonce)
+		}
+		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
+	}
+	// Retrieve the precompiles since they don't need to be added to the access list
+	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
+
+	// Create an initial tracer
+	prevTracer := logger.NewAccessListTracer(nil, *args.From, to, precompiles)
+	if args.AccessList != nil {
+		prevTracer = logger.NewAccessListTracer(*args.AccessList, *args.From, to, precompiles)
+	}
+	for {
+		// Retrieve the current access list to expand
+		accessList := prevTracer.AccessList()
+		log.Trace("Creating access list", "input", accessList)
+
+		// If no gas amount was specified, each unique access list needs it's own
+		// gas calculation. This is quite expensive, but we need to be accurate
+		// and it's convered by the sender only anyway.
+		if nogas {
+			args.Gas = nil
+		}
+		// Set the accesslist to the last al
+		args.AccessList = &accessList
+		baseFee, _ := uint256.FromBig(header.BaseFee)
+		msg, err := args.ToMessage(api.GasCap, baseFee)
+		if err != nil {
+			return nil, err
+		}
+
+		// Apply the transaction with the access list tracer
+		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
+		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
+
+		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
+		gp := new(core.GasPool).AddGas(msg.Gas())
+		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			return nil, err
+		}
+		if tracer.Equal(prevTracer) {
+			var errString string
+			if res.Err != nil {
+				errString = res.Err.Error()
+			}
+			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: (hexutil.Uint64)(res.UsedGas)}, nil
+		}
+		prevTracer = tracer
+	}
 }

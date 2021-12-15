@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"path"
 	"time"
@@ -29,34 +30,40 @@ import (
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	grpcHealth "google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 )
 
 type Flags struct {
-	PrivateApiAddr       string
-	SingleNodeMode       bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
-	Datadir              string
-	Chaindata            string
-	HttpListenAddress    string
-	TLSCertfile          string
-	TLSCACert            string
-	TLSKeyFile           string
-	HttpPort             int
-	HttpCORSDomain       []string
-	HttpVirtualHost      []string
-	HttpCompression      bool
-	API                  []string
-	Gascap               uint64
-	MaxTraces            uint64
-	WebsocketEnabled     bool
-	WebsocketCompression bool
-	RpcAllowListFilePath string
-	RpcBatchConcurrency  uint
-	TraceCompatibility   bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolV2             bool
-	TxPoolApiAddr        string
-	TevmEnabled          bool
-	StateCache           kvcache.CoherentConfig
+	PrivateApiAddr         string
+	SingleNodeMode         bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
+	Datadir                string
+	Chaindata              string
+	HttpListenAddress      string
+	TLSCertfile            string
+	TLSCACert              string
+	TLSKeyFile             string
+	HttpPort               int
+	HttpCORSDomain         []string
+	HttpVirtualHost        []string
+	HttpCompression        bool
+	API                    []string
+	Gascap                 uint64
+	MaxTraces              uint64
+	WebsocketEnabled       bool
+	WebsocketCompression   bool
+	RpcAllowListFilePath   string
+	RpcBatchConcurrency    uint
+	TraceCompatibility     bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolV2               bool
+	TxPoolApiAddr          string
+	TevmEnabled            bool
+	StateCache             kvcache.CoherentConfig
+	GRPCServerEnabled      bool
+	GRPCListenAddress      string
+	GRPCPort               int
+	GRPCHealthCheckEnabled bool
 }
 
 var rootCmd = &cobra.Command{
@@ -90,6 +97,10 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
+	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -329,8 +340,29 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
+	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
+	var (
+		healthServer *grpcHealth.Server
+		grpcServer   *grpc.Server
+		grpcListener net.Listener
+		grpcEndpoint string
+	)
+	if cfg.GRPCServerEnabled {
+		grpcEndpoint = fmt.Sprintf("%s:%d", cfg.GRPCListenAddress, cfg.GRPCPort)
+		if grpcListener, err = net.Listen("tcp", grpcEndpoint); err != nil {
+			return fmt.Errorf("could not start GRPC listener: %w", err)
+		}
+		grpcServer = grpc.NewServer()
+		if cfg.GRPCHealthCheckEnabled {
+			healthServer = grpcHealth.NewServer()
+			grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+		}
+		go grpcServer.Serve(grpcListener)
+		info = append(info, "grpc.port", cfg.GRPCPort)
+	}
 
-	log.Info("HTTP endpoint opened", "url", httpEndpoint, "ws", cfg.WebsocketEnabled, "ws.compression", cfg.WebsocketCompression)
+	log.Info("HTTP endpoint opened", info...)
 
 	defer func() {
 		srv.Stop()
@@ -338,6 +370,15 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+
+		if cfg.GRPCServerEnabled {
+			if cfg.GRPCHealthCheckEnabled {
+				healthServer.Shutdown()
+			}
+			grpcServer.GracefulStop()
+			_ = grpcListener.Close()
+			log.Info("GRPC endpoint closed", "url", grpcEndpoint)
+		}
 	}()
 	<-ctx.Done()
 	log.Info("Exiting...")

@@ -81,6 +81,7 @@ type EthAPI interface {
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
+	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
