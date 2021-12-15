@@ -117,8 +117,13 @@ devnettest:
 
 db-tools:
 	@echo "Building db-tools"
-	rm -rf libmdbx # hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+
+	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	rm -rf libmdbx
+	rm -rf cmd/downloader/trackers/trackerslist
+	rm -rf cturbo/snapshotsync/snapshothashes/erigon-snapshots
 	git submodule update --init --recursive --force
+
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
