@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -138,10 +137,9 @@ var (
 	errNotSupported = errors.New("validator mode is not supported")
 )
 
-// SignerFn is a signer callback function to request a header to be signed by a
+// SignFn is a signer callback function to request a header to be signed by a
 // backing account.
-type SignerFn func(accounts.Account, string, []byte) ([]byte, error)
-type SignerTxFn func(accounts.Account, *types.Transaction, *big.Int) (*types.Transaction, error)
+type SignFn func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
 func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (common.Address, error) {
@@ -200,14 +198,14 @@ func encodeSigHeader(w io.Writer, header *types.Header, chainId *big.Int) {
 	}
 }
 
-// ParliaRLP returns the rlp bytes which needs to be signed for the parlia
+// parliaRLP returns the rlp bytes which needs to be signed for the parlia
 // sealing. The RLP to sign consists of the entire header apart from the 65 byte signature
 // contained at the end of the extra data.
 //
 // Note, the method requires the extra data to be at least 65 bytes, otherwise it
 // panics. This is done to avoid accidentally using both forms (signature present
 // or not), which could be abused to produce different hashes for the same header.
-func ParliaRLP(header *types.Header, chainId *big.Int) []byte {
+func parliaRLP(header *types.Header, chainId *big.Int) []byte {
 	b := new(bytes.Buffer)
 	encodeSigHeader(b, header, chainId)
 	return b.Bytes()
@@ -224,9 +222,8 @@ type Parlia struct {
 
 	signer *types.Signer
 
-	val      common.Address // Ethereum address of the signing key
-	signFn   SignerFn       // Signer function to authorize hashes with
-	signTxFn SignerTxFn
+	val    common.Address // Ethereum address of the signing key
+	signFn SignFn         // Signer function to authorize hashes with
 
 	lock sync.RWMutex // Protects the signer fields
 
@@ -580,8 +577,56 @@ func (p *Parlia) VerifyUncles(chain consensus.ChainReader, header *types.Header,
 
 // Prepare initializes the consensus fields of a block header according to the
 // rules of a particular engine. The changes are executed inline.
-func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return errNotSupported
+func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) error {
+	header.Coinbase = p.val
+	header.Nonce = types.BlockNonce{}
+
+	number := header.Number.Uint64()
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	if err != nil {
+		return err
+	}
+
+	// Set the correct difficulty
+	header.Difficulty = CalcDifficulty(snap, p.val)
+
+	// Ensure the extra data has all it's components
+	if len(header.Extra) < extraVanity-nextForkHashSize {
+		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-nextForkHashSize-len(header.Extra))...)
+	}
+	header.Extra = header.Extra[:extraVanity-nextForkHashSize]
+	nextForkHash := forkid.NextForkHash(p.chainConfig, p.genesisHash, number)
+	header.Extra = append(header.Extra, nextForkHash[:]...)
+
+	parent := chain.GetHeader(header.ParentHash, number-1)
+	if parent == nil {
+		return consensus.ErrUnknownAncestor
+	}
+
+	if number%p.config.Epoch == 0 {
+		newValidators, err := p.getCurrentValidators(parent, ibs)
+		if err != nil {
+			return err
+		}
+		// sort validator by address
+		sort.Sort(validatorsAscending(newValidators))
+		for _, validator := range newValidators {
+			header.Extra = append(header.Extra, validator.Bytes()...)
+		}
+	}
+
+	// add extra seal space
+	header.Extra = append(header.Extra, make([]byte, extraSeal)...)
+
+	// Mix digest is reserved for now, set to empty
+	header.MixDigest = common.Hash{}
+
+	// Ensure the timestamp has the correct delay
+	header.Time = p.blockTimeForRamanujanFork(snap, header, parent)
+	if header.Time < uint64(time.Now().Unix()) {
+		header.Time = uint64(time.Now().Unix())
+	}
+	return nil
 }
 
 // Initialize runs any pre-transaction state modifications (e.g. epoch start)
@@ -699,13 +744,12 @@ func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerTxFn) {
+func (p *Parlia) Authorize(val common.Address, signFn SignFn) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	p.val = val
 	p.signFn = signFn
-	p.signTxFn = signTxFn
 }
 
 // Seal generates a new sealing request for the given input block and pushes
@@ -714,7 +758,83 @@ func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerT
 // Note, the method returns immediately and will send the result async. More
 // than one result may also be returned depending on the consensus algorithm.
 func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return errNotSupported
+	header := block.Header()
+
+	// Sealing the genesis block is not supported
+	number := header.Number.Uint64()
+	if number == 0 {
+		return errUnknownBlock
+	}
+	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
+	if p.config.Period == 0 && len(block.Transactions()) == 0 {
+		log.Info("Sealing paused, waiting for transactions")
+		return nil
+	}
+	// Don't hold the val fields for the entire sealing procedure
+	p.lock.RLock()
+	val, signFn := p.val, p.signFn
+	p.lock.RUnlock()
+
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	if err != nil {
+		return err
+	}
+
+	// Bail out if we're unauthorized to sign a block
+	if _, authorized := snap.Validators[val]; !authorized {
+		return errUnauthorizedValidator
+	}
+
+	// If we're amongst the recent signers, wait for the next block
+	for seen, recent := range snap.Recents {
+		if recent == val {
+			// Signer is among recents, only wait if the current block doesn't shift it out
+			if limit := uint64(len(snap.Validators)/2 + 1); number < limit || seen > number-limit {
+				log.Info("Signed recently, must wait for others")
+				return nil
+			}
+		}
+	}
+
+	// Sweet, the protocol permits us to sign the block, wait for our time
+	delay := p.delayForRamanujanFork(snap, header)
+
+	log.Info("Sealing block with", "number", number, "delay", delay, "headerDifficulty", header.Difficulty, "val", val.Hex())
+
+	// Sign all the things!
+	sig, err := signFn(val, parliaRLP(header, p.chainConfig.ChainID), p.chainConfig.ChainID)
+	if err != nil {
+		return err
+	}
+	copy(header.Extra[len(header.Extra)-extraSeal:], sig)
+
+	// Wait until sealing is terminated or delay timeout.
+	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	go func() {
+		select {
+		case <-stop:
+			return
+		case <-time.After(delay):
+		}
+		if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
+			log.Info("Waiting for received in turn block to process")
+			select {
+			case <-stop:
+				log.Info("Received block process finished, abort block seal")
+				return
+			case <-time.After(time.Duration(processBackOffTime) * time.Second):
+				log.Info("Process backoff time exhausted, start to seal block")
+			}
+		}
+
+		select {
+		case results <- block.WithSeal(header):
+		default:
+			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
+		}
+	}()
+
+	return nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -782,6 +902,22 @@ func (p *Parlia) IsSystemContract(to *common.Address) bool {
 	return isToSystemContract(*to)
 }
 
+func (p *Parlia) shouldWaitForCurrentBlockProcess(chain consensus.ChainHeaderReader, header *types.Header, snap *Snapshot) bool {
+	if header.Difficulty.Cmp(diffInTurn) == 0 {
+		return false
+	}
+
+	highestVerifiedHeader := chain.CurrentHeader()
+	if highestVerifiedHeader == nil {
+		return false
+	}
+
+	if header.ParentHash == highestVerifiedHeader.ParentHash {
+		return true
+	}
+	return false
+}
+
 func (p *Parlia) EnoughDistance(chain consensus.ChainReader, header *types.Header) bool {
 	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 	if err != nil {
@@ -813,7 +949,7 @@ func (p *Parlia) Close() error {
 // ==========================  interaction with contract/account =========
 
 // getCurrentValidators get current validators
-func (p *Parlia) getCurrentValidators(header *types.Header, state *state.IntraBlockState) ([]common.Address, error) {
+func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBlockState) ([]common.Address, error) {
 	// method
 	method := "getValidators"
 	data, err := p.validatorSetABI.Pack(method)
@@ -824,7 +960,7 @@ func (p *Parlia) getCurrentValidators(header *types.Header, state *state.IntraBl
 	// call
 	msgData := (hexutil.Bytes)(data)
 	toAddress := common.HexToAddress(systemcontracts.ValidatorContract)
-	_, returnData, err := systemCall(header.Coinbase, toAddress, msgData[:], *p.chainConfig, state, header, p, u256.Num0)
+	_, returnData, err := systemCall(header.Coinbase, toAddress, msgData[:], *p.chainConfig, ibs, header, p, u256.Num0)
 	if err != nil {
 		return nil, err
 	}
@@ -967,11 +1103,15 @@ func (p *Parlia) applyTransaction(
 	expectedTx := types.Transaction(types.NewTransaction(nonce, to, value, math.MaxUint64/2, u256.Num0, data))
 	expectedHash := expectedTx.SigningHash(p.chainConfig.ChainID)
 	if from == p.val && mining {
-		return errNotSupported
-		//expectedTx, err = p.signTxFn(accounts.Account{Address: msg.From()}, expectedTx, p.chainConfig.ChainID)
-		//if err != nil {
-		//	return err
-		//}
+		signature, err := p.signFn(from, expectedTx.SigningHash(p.chainConfig.ChainID).Bytes(), p.chainConfig.ChainID)
+		if err != nil {
+			return err
+		}
+		signer := types.LatestSignerForChainID(p.chainConfig.ChainID)
+		expectedTx, err = expectedTx.WithSignature(*signer, signature)
+		if err != nil {
+			return err
+		}
 	} else {
 		if receivedTxs == nil || len(*receivedTxs) == 0 || (*receivedTxs)[0] == nil {
 			return errors.New("supposed to get a actual transaction, but get none")

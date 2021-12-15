@@ -86,7 +86,7 @@ func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Heade
 }
 
 // Prepare makes sure difficulty and nonce are correct
-func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	header.Difficulty = SerenityDifficulty
 	header.Nonce = types.BlockNonce{}
 	return nil
