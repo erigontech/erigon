@@ -95,20 +95,10 @@ evm:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
-seeder:
-	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+downloader:
+	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
-
-sndownloader:
-	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
-
-tracker:
-	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
+	@echo "Run \"$(GOBIN)/downloader\" to seed snapshots."
 
 devnettest:
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
