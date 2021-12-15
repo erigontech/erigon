@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/big"
 	"path"
+	"sort"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -360,13 +362,19 @@ var (
 		IstanbulBlock:       big.NewInt(2722000),
 		MuirGlacierBlock:    big.NewInt(2722000),
 		BerlinBlock:         big.NewInt(13996000),
+		LondonBlock:         big.NewInt(22640000),
 		Bor: &BorConfig{
-			Period:                2,
-			ProducerDelay:         6,
-			Sprint:                64,
-			BackupMultiplier:      2,
-			ValidatorContract:     "0x0000000000000000000000000000000000001000",
+			Period: map[string]uint64{
+				"0": 2,
+			}, ProducerDelay: 6,
+			Sprint: 64,
+			BackupMultiplier: map[string]uint64{
+				"0": 2,
+			}, ValidatorContract: "0x0000000000000000000000000000000000001000",
 			StateReceiverContract: "0x0000000000000000000000000000000000001001",
+			BurntContract: map[string]string{
+				"22640000": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",
+			},
 			BlockAlloc: map[string]interface{}{
 				// write as interface since that is how it is decoded in genesis
 				"22244000": map[string]interface{}{
@@ -395,11 +403,13 @@ var (
 		MuirGlacierBlock:    big.NewInt(3395000),
 		BerlinBlock:         big.NewInt(14750000),
 		Bor: &BorConfig{
-			Period:                2,
-			ProducerDelay:         6,
-			Sprint:                64,
-			BackupMultiplier:      2,
-			ValidatorContract:     "0x0000000000000000000000000000000000001000",
+			Period: map[string]uint64{
+				"0": 2,
+			}, ProducerDelay: 6,
+			Sprint: 64,
+			BackupMultiplier: map[string]uint64{
+				"0": 2,
+			}, ValidatorContract: "0x0000000000000000000000000000000000001000",
 			StateReceiverContract: "0x0000000000000000000000000000000000001001",
 			OverrideStateSyncRecords: map[string]int{
 				"14949120": 8,
@@ -411,6 +421,9 @@ var (
 				"14953728": 0,
 				"14953792": 0,
 				"14953856": 0,
+			},
+			BurntContract: map[string]string{
+				"0": "0x0000000000000000000000000000000000000000",
 			},
 			BlockAlloc: map[string]interface{}{
 				// write as interface since that is how it is decoded in genesis
@@ -541,20 +554,61 @@ func (c *CliqueConfig) String() string {
 
 // BorConfig is the consensus engine configs for Matic bor based sealing.
 type BorConfig struct {
-	Period                uint64 `json:"period"`                // Number of seconds between blocks to enforce
-	ProducerDelay         uint64 `json:"producerDelay"`         // Number of seconds delay between two producer interval
-	Sprint                uint64 `json:"sprint"`                // Epoch length to proposer
-	BackupMultiplier      uint64 `json:"backupMultiplier"`      // Backup multiplier to determine the wiggle time
-	ValidatorContract     string `json:"validatorContract"`     // Validator set contract
-	StateReceiverContract string `json:"stateReceiverContract"` // State receiver contract
+	Period                map[string]uint64 `json:"period"`                // Number of seconds between blocks to enforce
+	ProducerDelay         uint64            `json:"producerDelay"`         // Number of seconds delay between two producer interval
+	Sprint                uint64            `json:"sprint"`                // Epoch length to proposer
+	BackupMultiplier      map[string]uint64 `json:"backupMultiplier"`      // Backup multiplier to determine the wiggle time
+	ValidatorContract     string            `json:"validatorContract"`     // Validator set contract
+	StateReceiverContract string            `json:"stateReceiverContract"` // State receiver contract
 
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
+	BurntContract            map[string]string      `json:"burntContract"` // governance contract where the token will be sent to and burnt in london fork
 }
 
 // String implements the stringer interface, returning the consensus engine details.
 func (b *BorConfig) String() string {
 	return "bor"
+}
+
+func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
+	return c.calculateBorConfigHelper(c.BackupMultiplier, number)
+}
+
+func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
+	return c.calculateBorConfigHelper(c.Period, number)
+}
+
+func (c *BorConfig) calculateBorConfigHelper(field map[string]uint64, number uint64) uint64 {
+	keys := make([]string, 0, len(field))
+	for k := range field {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i := 0; i < len(keys)-1; i++ {
+		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
+		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
+		if number > valUint && number < valUintNext {
+			return field[keys[i]]
+		}
+	}
+	return field[keys[len(keys)-1]]
+}
+
+func (c *BorConfig) CalculateBurntContract(number uint64) string {
+	keys := make([]string, 0, len(c.BurntContract))
+	for k := range c.BurntContract {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for i := 0; i < len(keys)-1; i++ {
+		valUint, _ := strconv.ParseUint(keys[i], 10, 64)
+		valUintNext, _ := strconv.ParseUint(keys[i+1], 10, 64)
+		if number > valUint && number < valUintNext {
+			return c.BurntContract[keys[i]]
+		}
+	}
+	return c.BurntContract[keys[len(keys)-1]]
 }
 
 // String implements the fmt.Stringer interface.
