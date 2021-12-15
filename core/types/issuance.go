@@ -13,7 +13,16 @@ type BlockIssuance struct {
 	TotalBurnt  *big.Int `json:"totalBurnt"`
 }
 
-func Encode(data []byte) (BlockIssuance, error) {
+func NewBlockIssuance() BlockIssuance {
+	return BlockIssuance{
+		BlockReward: big.NewInt(0),
+		UncleReward: big.NewInt(0),
+		Issuance:    big.NewInt(0),
+		TotalIssued: big.NewInt(0),
+		TotalBurnt:  big.NewInt(0),
+	}
+}
+func DecodeBlockIssuance(data []byte) (BlockIssuance, error) {
 	var issuance BlockIssuance
 	err := json.Unmarshal(data, &issuance)
 	return issuance, err

@@ -20,6 +20,7 @@ import (
 var (
 	SerenityDifficulty = common.Big0        // Serenity block's difficulty is always 0.
 	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
+	RewardSerenity     = big.NewInt(300000000000000000)
 )
 
 var (

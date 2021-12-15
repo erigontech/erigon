@@ -34,6 +34,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -467,7 +469,27 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
-	return block, statedb, nil
+	// Issuance is the sum of allocs
+	genesisIssuance := types.NewBlockIssuance()
+	for _, account := range g.Alloc {
+		genesisIssuance.Issuance.Add(genesisIssuance.Issuance, account.Balance)
+	}
+
+	// BlockReward can be present at genesis
+	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) >= 0 {
+		// Proof-of-stake is 0.3 ether per block
+		genesisIssuance.BlockReward.Set(serenity.RewardSerenity)
+	} else if g.Config.Consensus == params.EtHashConsensus {
+		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
+		// Set BlockReward
+		genesisIssuance.BlockReward.Set(blockReward.ToBig())
+	} else if g.Config.Consensus != params.CliqueConsensus {
+		return block, statedb, nil // If we do not support issuance for this consensus engine
+	}
+	genesisIssuance.Issuance.Add(genesisIssuance.Issuance, genesisIssuance.BlockReward)
+	genesisIssuance.TotalIssued.Set(genesisIssuance.Issuance)
+
+	return block, statedb, rawdb.WriteIssuance(tx, 0, genesisIssuance)
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.

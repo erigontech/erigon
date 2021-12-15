@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -1046,6 +1047,23 @@ func ReadBlockByHash(db kv.Tx, hash common.Hash) (*types.Block, error) {
 		return nil, nil
 	}
 	return ReadBlock(db, hash, *number), nil
+}
+
+func ReadIssuance(db kv.Getter, number uint64) (types.BlockIssuance, error) {
+	data, err := db.GetOne(kv.Issuance, dbutils.EncodeBlockNumber(number))
+	if err != nil {
+		return types.BlockIssuance{}, err
+	}
+
+	return types.DecodeBlockIssuance(data)
+}
+
+func WriteIssuance(db kv.Putter, number uint64, issuance types.BlockIssuance) error {
+	data, err := json.Marshal(issuance)
+	if err != nil {
+		return err
+	}
+	return db.Put(kv.Issuance, dbutils.EncodeBlockNumber(number), data)
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
