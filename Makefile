@@ -111,7 +111,7 @@ db-tools:
 	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
 	rm -rf libmdbx
 	rm -rf cmd/downloader/trackers/trackerslist
-	rm -rf cturbo/snapshotsync/snapshothashes/erigon-snapshots
+	rm -rf turbo/snapshotsync/snapshothashes/erigon-snapshots
 	git submodule update --init --recursive --force
 
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
