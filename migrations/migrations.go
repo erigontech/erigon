@@ -127,7 +127,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
 		if err != nil {
-			return fmt.Errorf("reading applied migrations", err)
+			return fmt.Errorf("reading applied migrations: %w", err)
 		}
 		existingVersion, err = tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
 		if err != nil {
@@ -137,7 +137,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 			return fmt.Errorf("incorrect length of DB schema version: %d", len(existingVersion))
 		}
 		if len(existingVersion) == 12 {
-			major := binary.BigEndian.Uint32(existingVersion[:])
+			major := binary.BigEndian.Uint32(existingVersion)
 			minor := binary.BigEndian.Uint32(existingVersion[4:])
 			if major > kv.DBSchemaVersion.Major {
 				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
