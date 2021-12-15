@@ -46,7 +46,7 @@ type EngineAPI interface {
 	ForkchoiceUpdatedV1(context.Context, struct{}, *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
-	GetPayloadBodiesV1(ctx context.Context, blockHashes []common.Hash) ([]*types.Body, error)
+	GetPayloadBodiesV1(ctx context.Context, blockHashes []common.Hash) (map[common.Hash]types.Body, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -156,6 +156,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64)
 	}, nil
 }
 
+// GetPayloadBodiesV1 gets a list of blockHashes and returns a map of blockhash => block body
 func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []common.Hash) (map[common.Hash]types.Body, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
