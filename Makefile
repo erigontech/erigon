@@ -98,7 +98,7 @@ evm:
 downloader:
 	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/downloader\" to seed snapshots."
+	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
 
 devnettest:
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
