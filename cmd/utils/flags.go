@@ -855,9 +855,15 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		setSigKey(ctx, cfg)
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == params.FermionChainName {
+	chainsWithValidatorMode := map[string]bool{
+		params.FermionChainName: true,
+		params.BSCChainName:     true,
+		params.RialtoChainName:  true,
+		params.ChapelChainName:  true,
+	}
+	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
-			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, params.FermionChainName, MiningEnabledFlag.Name))
+			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
 		}
 		setSigKey(ctx, cfg)
 		if cfg.Miner.SigKey != nil {
