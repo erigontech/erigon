@@ -595,12 +595,14 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	var urls []string
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case params.MainnetChainName:
+			urls = params.MainnetBootnodes
 		case params.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case params.RinkebyChainName:
@@ -1375,8 +1377,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		log.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer)
-		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
+		cfg.Genesis = core.DefaultChapelGenesisBlock()
+		extraData := make([]byte, 32+20+65)
+		copy(extraData[32:], developer[:])
+		cfg.Genesis.ExtraData = extraData
+		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Parlia.Period)
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}

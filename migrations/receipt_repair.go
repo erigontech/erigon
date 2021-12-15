@@ -116,7 +116,7 @@ var ReceiptRepair = Migration{
 
 			getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 			contractHasTEVM := ethdb.GetHasTEVM(tx)
-			receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
+			block, receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
 			if err1 != nil {
 				return err1
 			}
@@ -148,8 +148,15 @@ var ReceiptRepair = Migration{
 	},
 }
 
-func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
+func runBlock(
+	ibs *state.IntraBlockState,
+	txnWriter state.StateWriter,
+	blockWriter state.StateWriter,
+	chainConfig *params.ChainConfig,
+	getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error),
+	block *types.Block,
+	vmConfig vm.Config,
+) (*types.Block, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
@@ -163,21 +170,22 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+			return nil, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
 
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
-			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
+		txs := block.Transactions()
+		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, &txs, block.Uncles(), &receipts, nil, nil, nil, nil); err != nil {
+			return nil, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
-
+		block = types.NewBlock(block.Header(), txs, block.Uncles(), receipts)
 		if err := ibs.CommitBlock(chainConfig.Rules(header.Number.Uint64()), blockWriter); err != nil {
-			return nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
+			return nil, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 	}
 
-	return receipts, nil
+	return block, receipts, nil
 }

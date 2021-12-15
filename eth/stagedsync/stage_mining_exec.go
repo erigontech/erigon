@@ -2,7 +2,6 @@ package stagedsync
 
 import (
 	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -11,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -66,6 +66,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	if cfg.chainConfig.DAOForkSupport && cfg.chainConfig.DAOForkBlock != nil && cfg.chainConfig.DAOForkBlock.Cmp(current.Header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	systemcontracts.UpgradeBuildInSystemContract(&cfg.chainConfig, current.Header.Number, ibs)
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
@@ -107,7 +108,17 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		}
 	}
 
-	if _, err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, nil, nil, nil, new(uint64)); err != nil {
+	if current.Uncles == nil {
+		current.Uncles = []*types.Header{}
+	}
+	if current.Txs == nil {
+		current.Txs = []types.Transaction{}
+	}
+	if current.Receipts == nil {
+		current.Receipts = types.Receipts{}
+	}
+	err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, &current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, &current.Receipts, nil, nil, new(uint64), true)
+	if err != nil {
 		return err
 	}
 

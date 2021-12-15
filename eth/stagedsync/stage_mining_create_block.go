@@ -28,7 +28,7 @@ import (
 type MiningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
-	Txs      []types.Transaction
+	Txs      types.Transactions
 	Receipts types.Receipts
 
 	LocalTxs  types.TransactionsStream
