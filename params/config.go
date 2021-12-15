@@ -32,6 +32,7 @@ const (
 	AuRaConsensus   ConsensusType = "aura"
 	EtHashConsensus ConsensusType = "ethash"
 	CliqueConsensus ConsensusType = "clique"
+	ParliaConsensus ConsensusType = "parlia"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -300,6 +301,7 @@ var (
 	BSCMainnetChainConfig = &ChainConfig{
 		ChainName:           networkname.BSCMainnetChainName,
 		ChainID:             big.NewInt(56),
+		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -320,6 +322,7 @@ var (
 
 	ChapelChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(97),
+		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -340,6 +343,7 @@ var (
 
 	RialtoChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(1417),
+		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -463,7 +467,7 @@ type ChainConfig struct {
 	ChainName string
 	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash or clique
+	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash, clique, or parlia
 
 	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
 
@@ -552,7 +556,7 @@ func (c *ChainConfig) String() string {
 		engine = "unknown"
 	}
 
-	if c.ChainName == networkname.BSCMainnetChainName {
+	if c.ConsensusType == ParliaConsensus {
 		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
@@ -562,7 +566,7 @@ func (c *ChainConfig) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v , Muir Glacier: %v, Ramanujan: %v, Niels: %v, MirrorSync: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v , Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -575,9 +579,6 @@ func (c *ChainConfig) String() string {
 		c.PetersburgBlock,
 		c.IstanbulBlock,
 		c.MuirGlacierBlock,
-		c.RamanujanBlock,
-		c.NielsBlock,
-		c.MirrorSyncBlock,
 		c.BerlinBlock,
 		c.LondonBlock,
 		c.ArrowGlacierBlock,
