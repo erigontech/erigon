@@ -14,15 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package logger
+package vm
 
 import (
-	"math/big"
-	"time"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
+	"math/big"
+	"time"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
@@ -97,7 +95,7 @@ func (al accessList) equal(other accessList) bool {
 func (al accessList) accessList() types.AccessList {
 	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
-		tuple := types.AccessTuple{Address: addr, StorageKeys: []common.Hash{}}
+		tuple := types.AccessTuple{Address: addr}
 		for slot := range slots {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
@@ -106,11 +104,17 @@ func (al accessList) accessList() types.AccessList {
 	return acl
 }
 
+var _ Tracer = (*AccessListTracer)(nil)
+
 // AccessListTracer is a tracer that accumulates touched accounts and storage
 // slots into an internal set.
 type AccessListTracer struct {
 	excl map[common.Address]struct{} // Set of account to exclude from the list
 	list accessList                  // Set of accounts and storage slots touched
+}
+
+func (a *AccessListTracer) CaptureAccountWrite(account common.Address) error {
+	panic("implement me")
 }
 
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
@@ -138,44 +142,41 @@ func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompi
 	}
 }
 
-func (a *AccessListTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
-}
-
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.
-func (a *AccessListTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (a *AccessListTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	stack := scope.Stack
-	contract := scope.Contract
-
-	stackData := stack.Data
-	stackLen := len(stackData)
-	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
-		slot := common.Hash(stackData[stackLen-1].Bytes32())
-		a.list.addSlot(contract.Address(), slot)
+	if (op == SLOAD || op == SSTORE) && stack.Len() >= 1 {
+		slot := common.Hash(stack.Data[stack.Len()-1].Bytes32())
+		a.list.addSlot(scope.Contract.Address(), slot)
 	}
-	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
-		addr := common.Address(stackData[stackLen-1].Bytes20())
+	if (op == EXTCODECOPY || op == EXTCODEHASH || op == EXTCODESIZE || op == BALANCE || op == SELFDESTRUCT) && stack.Len() >= 1 {
+		addr := common.Address(stack.Data[stack.Len()-1].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 		}
 	}
-	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
-		addr := common.Address(stackData[stackLen-2].Bytes20())
+	if (op == DELEGATECALL || op == CALL || op == STATICCALL || op == CALLCODE) && stack.Len() >= 5 {
+		addr := common.Address(stack.Data[stack.Len()-2].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 		}
 	}
 }
 
-func (*AccessListTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (*AccessListTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
+
 func (*AccessListTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
-func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+
+func (a *AccessListTracer) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+	panic("implement me")
 }
-func (*AccessListTracer) CaptureAccountRead(account common.Address) error {
-	return nil
+
+func (a *AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
 }
-func (*AccessListTracer) CaptureAccountWrite(account common.Address) error {
+
+func (a *AccessListTracer) CaptureAccountRead(account common.Address) error {
 	return nil
 }
 
