@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -823,7 +824,7 @@ func (p *Parlia) getCurrentValidators(header *types.Header, state *state.IntraBl
 	// call
 	msgData := (hexutil.Bytes)(data)
 	toAddress := common.HexToAddress(systemcontracts.ValidatorContract)
-	_, returnData, err := core.SysCallContract(header.Coinbase, toAddress, msgData[:], *p.chainConfig, state, header, p, u256.Num0)
+	_, returnData, err := systemCall(header.Coinbase, toAddress, msgData[:], *p.chainConfig, state, header, p, u256.Num0)
 	if err != nil {
 		return nil, err
 	}
@@ -1000,7 +1001,7 @@ func (p *Parlia) applyTransaction(
 		*receivedTxs = (*receivedTxs)[1:]
 	}
 	ibs.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
-	gasUsed, _, err := core.SysCallContract(from, to, data, *p.chainConfig, ibs, header, p, value)
+	gasUsed, _, err := systemCall(from, to, data, *p.chainConfig, ibs, header, p, value)
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
@@ -1020,16 +1021,32 @@ func (p *Parlia) applyTransaction(
 	return nil
 }
 
-// chain context
-type chainContext struct {
-	Chain  consensus.ChainHeaderReader
-	parlia consensus.Engine
-}
-
-func (c chainContext) Engine() consensus.Engine {
-	return c.parlia
-}
-
-func (c chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return c.Chain.GetHeader(hash, number)
+func systemCall(from, contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine, value *uint256.Int) (gasUsed uint64, returnData []byte, err error) {
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	msg := types.NewMessage(
+		from,
+		&contract,
+		0, value,
+		math.MaxUint64/2, u256.Num0,
+		nil, nil,
+		data, nil, false,
+	)
+	vmConfig := vm.Config{NoReceipts: true}
+	// Create a new context to be used in the EVM environment
+	blockContext := core.NewEVMBlockContext(header, nil, engine, &from, nil)
+	evm := vm.NewEVM(blockContext, core.NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
+	ret, leftOverGas, err := evm.Call(
+		vm.AccountRef(msg.From()),
+		*msg.To(),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		false,
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+	return msg.Gas() - leftOverGas, ret, nil
 }

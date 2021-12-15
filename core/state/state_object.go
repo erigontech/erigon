@@ -367,6 +367,7 @@ func (so *stateObject) CodeHash() []byte {
 }
 
 func (so *stateObject) Balance() *uint256.Int {
+	// It's better to return copy of balance, otherwise it might cause shadow changes
 	return so.data.Balance.Clone()
 }
 

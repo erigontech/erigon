@@ -633,7 +633,7 @@ func (s *ValidatorSafeContract) getListSyscall(caller consensus.SystemCall) (*Si
 	if err != nil {
 		panic(err)
 	}
-	_, out, err := caller(s.contractAddress, packed)
+	out, err := caller(s.contractAddress, packed)
 	if err != nil {
 		panic(err)
 	}
@@ -651,7 +651,7 @@ func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call cons
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller consensus.SystemCall) error {
 	data := common.FromHex("75286211")
-	_, _, err := caller(s.contractAddress, data)
+	_, err := caller(s.contractAddress, data)
 	if err != nil {
 		return err
 	}

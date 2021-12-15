@@ -776,10 +776,6 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	return nil
 }
 
-func (sdb *IntraBlockState) GetStateWriter() StateWriter {
-	return sdb.stateReader.(StateWriter)
-}
-
 func (sdb *IntraBlockState) Print(chainRules params.Rules) {
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]

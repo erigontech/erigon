@@ -68,8 +68,6 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	return &signer
 }
 
-
-
 func MakeFrontierSigner() *Signer {
 	var signer Signer
 	signer.maleable = true

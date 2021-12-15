@@ -20,8 +20,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"os"
 	"time"
@@ -187,36 +185,30 @@ func ExecuteBlockEphemerally(
 	return receipts, nil
 }
 
-func SysCallContract(from, contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine, value *uint256.Int) (gasUsed uint64, returnData []byte, err error) {
+func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+	gp := new(GasPool).AddGas(50_000_000)
+
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+
 	msg := types.NewMessage(
-		from,
+		state.SystemAddress,
 		&contract,
-		0, value,
-		math.MaxUint64/2, u256.Num0,
+		0, u256.Num0,
+		50_000_000, u256.Num0,
 		nil, nil,
 		data, nil, false,
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &from, nil)
+	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	ret, leftOverGas, err := evm.Call(
-		vm.AccountRef(msg.From()),
-		*msg.To(),
-		msg.Data(),
-		msg.Gas(),
-		msg.Value(),
-		false,
-	)
-
-	//res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
-	return msg.Gas() - leftOverGas, ret, nil
+	return res.ReturnData, nil
 }
 
 // from the null sender, with 50M gas.
@@ -256,21 +248,21 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 }
 
 func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, gasUsed *uint64) (*types.Block, error) {
-	//ibs.Print(cc.Rules(header.Number.Uint64()))
-	//fmt.Printf("====tx processing end====\n")
-	//if posa := engine.(consensus.PoSA); posa != nil {
-	//	posa.FinalizeAndAssemble()
-	//}
-
+	
+	// We're doing this hack for BSC to avoid changing consensus interfaces. BSC modifies txs and receipts by appending
+	// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
+	// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
+	// used by system transactions we just override. Of course, we write used by block gas back. It also always true
+	// that used gas by block is always equal to original's block header gas, and it's checked by receipts root verification
+	// otherwise it causes block verification error.
 	header.GasUsed = *gasUsed
-	block, err := engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, *receipts, e, headerReader, nil, nil)
+	block, err := engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, *receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+		return SysCallContract(contract, data, *cc, ibs, header, engine)
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
 	*gasUsed = header.GasUsed
-	//fmt.Printf("====finalize start %d====\n", header.Number.Uint64())
-	//ibs.Print(cc.Rules(header.Number.Uint64()))
-	//fmt.Printf("====finalize end====\n")
 
 	var originalSystemAcc *accounts.Account
 
@@ -305,12 +297,8 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) (gasUsed uint64, returnData []byte, err error) {
-		panic("not implemented")
+	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
+		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	})
-	//fmt.Printf("====InitializeBlockExecution start %d====\n", header.Number.Uint64())
-	//ibs.Print(cc.Rules(header.Number.Uint64()))
-	//fmt.Printf("====InitializeBlockExecution end====\n")
-
 	return nil
 }

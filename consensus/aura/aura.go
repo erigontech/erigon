@@ -1342,7 +1342,7 @@ func callBlockRewardAbi(contractAddr common.Address, syscall consensus.SystemCal
 	if err != nil {
 		panic(err)
 	}
-	_, out, err := syscall(contractAddr, packed)
+	out, err := syscall(contractAddr, packed)
 	if err != nil {
 		panic(err)
 	}
