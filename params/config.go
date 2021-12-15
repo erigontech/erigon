@@ -556,6 +556,7 @@ func (c *ChainConfig) String() string {
 		engine = "unknown"
 	}
 
+	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
 		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Engine: %v}",
 			c.ChainID,
