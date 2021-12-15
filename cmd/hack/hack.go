@@ -2191,7 +2191,9 @@ func reducedict(name string, segmentFileName string) error {
 		return err
 	}
 	close(ch)
+	wordsCount := i
 	wg.Wait()
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Done", "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
@@ -2285,17 +2287,22 @@ func reducedict(name string, segmentFileName string) error {
 		return err
 	}
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
-	// First, output dictionary
+	// 1-st, output dictionary
+	binary.BigEndian.PutUint64(numBuf, wordsCount) // Dictionary size
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	// 2-nd, output dictionary
 	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Secondly, output directory root
+	// 3-rd, output directory root
 	binary.BigEndian.PutUint64(numBuf, root.offset)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Thirdly, output pattern cutoff offset
+	// 4-th, output pattern cutoff offset
 	binary.BigEndian.PutUint64(numBuf, patternCutoff)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
