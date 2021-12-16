@@ -364,6 +364,7 @@ var (
 		BerlinBlock:         big.NewInt(13996000),
 		LondonBlock:         big.NewInt(22640000),
 		Bor: &BorConfig{
+			JaipurBlock: 22770000,
 			Period: map[string]uint64{
 				"0": 2,
 			}, ProducerDelay: 6,
@@ -564,6 +565,7 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 	BurntContract            map[string]string      `json:"burntContract"` // governance contract where the token will be sent to and burnt in london fork
+	JaipurBlock              uint64                 `json:"jaipurBlock"`   // Jaipur switch block (nil = no fork, 0 = already on jaipur)
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -577,6 +579,10 @@ func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
 
 func (c *BorConfig) CalculatePeriod(number uint64) uint64 {
 	return c.calculateBorConfigHelper(c.Period, number)
+}
+
+func (c *BorConfig) IsJaipur(number uint64) bool {
+	return number >= c.JaipurBlock
 }
 
 func (c *BorConfig) calculateBorConfigHelper(field map[string]uint64, number uint64) uint64 {
