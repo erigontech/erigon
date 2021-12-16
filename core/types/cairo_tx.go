@@ -3,14 +3,12 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rlp"
 	"io"
 	"math/big"
 	"math/bits"
-
-	"github.com/holiman/uint256"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type CairoTransaction struct {

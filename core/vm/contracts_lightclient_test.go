@@ -5,9 +5,8 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/erigon/core/vm/lightclient"
+	"github.com/stretchr/testify/require"
 )
 
 const (

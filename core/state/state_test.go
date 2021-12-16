@@ -24,9 +24,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	checker "gopkg.in/check.v1"
-
 	"github.com/ledgerwatch/erigon/params"
+	checker "gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"

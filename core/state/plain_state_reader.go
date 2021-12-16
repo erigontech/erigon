@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"

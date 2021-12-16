@@ -1,12 +1,10 @@
 package core
 
 import (
-	"testing"
-
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/require"
-
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestDefaultBSCGenesisBlock(t *testing.T) {

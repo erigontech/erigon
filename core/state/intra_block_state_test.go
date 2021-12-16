@@ -31,9 +31,8 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"gopkg.in/check.v1"
-
 	"github.com/ledgerwatch/erigon/params"
+	"gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"

@@ -24,15 +24,14 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
 )
 
 // Tests block header storage and retrieval operations.

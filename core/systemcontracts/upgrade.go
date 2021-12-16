@@ -3,9 +3,8 @@ package systemcontracts
 import (
 	"encoding/hex"
 	"fmt"
-	"math/big"
-
 	"github.com/ledgerwatch/log/v3"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"

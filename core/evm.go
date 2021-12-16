@@ -21,7 +21,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/serenity"

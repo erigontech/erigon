@@ -29,7 +29,6 @@ import (
 	"time"
 
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
