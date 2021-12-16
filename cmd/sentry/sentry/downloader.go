@@ -80,7 +80,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Warn("[RecvUploadMessage]", "err", err)
+			log.Debug("[RecvUploadMessage]", "err", err)
 			continue
 		}
 	}
