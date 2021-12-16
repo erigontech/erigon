@@ -2,8 +2,11 @@ package commands
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -32,14 +35,57 @@ import (
 //}
 
 // Issuance implements erigon_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
-func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (types.BlockIssuance, error) {
+func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return types.BlockIssuance{}, err
+		return Issuance{}, err
 	}
 	defer tx.Rollback()
 
-	return rawdb.ReadIssuance(tx, uint64(blockNr.Int64()))
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return Issuance{}, err
+	}
+	if chainConfig.Ethash == nil {
+		// Clique for example has no issuance
+		return Issuance{}, nil
+	}
+
+	block, err := api.getBlockByRPCNumber(tx, blockNr)
+	if err != nil {
+		return Issuance{}, err
+	}
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	issuance := minerReward
+	for _, r := range uncleRewards {
+		p := r // avoids warning?
+		issuance.Add(&issuance, &p)
+	}
+
+	var ret Issuance
+	ret.BlockReward = minerReward.ToBig()
+	ret.Issuance = issuance.ToBig()
+	issuance.Sub(&issuance, &minerReward)
+	ret.UncleReward = issuance.ToBig()
+	// Compute how much was burnt
+	if block.Header().BaseFee != nil {
+		ret.Burnt = block.Header().BaseFee
+		ret.Burnt.Mul(block.Header().BaseFee, big.NewInt(int64(len(block.Transactions()))))
+	} else {
+		ret.Burnt = common.Big0
+	}
+	// Compute totalIssued, totalBurnt and the supply of eth
+	ret.TotalIssued, err = rawdb.ReadTotalIssued(tx, uint64(blockNr))
+	if err != nil {
+		return Issuance{}, err
+	}
+	ret.TotalBurnt, err = rawdb.ReadTotalBurnt(tx, uint64(blockNr))
+	if err != nil {
+		return Issuance{}, err
+	}
+	ret.Supply = new(big.Int).Set(ret.TotalIssued)
+	ret.Supply.Sub(ret.Supply, ret.TotalBurnt)
+	return ret, nil
 }
 
 func (api *ErigonImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
@@ -52,7 +98,11 @@ func (api *ErigonImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*
 
 // Issuance structure to return information about issuance
 type Issuance struct {
-	BlockReward string `json:"blockReward,omitempty"`
-	UncleReward string `json:"uncleReward,omitempty"`
-	Issuance    string `json:"issuance,omitempty"`
+	BlockReward *big.Int `json:"blockReward"` // Block reward for given block
+	UncleReward *big.Int `json:"uncleReward"` // Uncle reward for gived block
+	Issuance    *big.Int `json:"issuance"`    // Total amount of wei created in the block
+	Burnt       *big.Int `json:"burnt"`       // Total amount of wei burned in the block
+	TotalIssued *big.Int `json:"totalIssued"` // Total amount of wei created in total so far
+	TotalBurnt  *big.Int `json:"totalBurnt"`  // Total amount of wei burnt so far
+	Supply      *big.Int `json:"supply"`      // Difference beetwen total burnt and total issued
 }

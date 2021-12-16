@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -1049,21 +1048,30 @@ func ReadBlockByHash(db kv.Tx, hash common.Hash) (*types.Block, error) {
 	return ReadBlock(db, hash, *number), nil
 }
 
-func ReadIssuance(db kv.Getter, number uint64) (types.BlockIssuance, error) {
+func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
 	data, err := db.GetOne(kv.Issuance, dbutils.EncodeBlockNumber(number))
 	if err != nil {
-		return types.BlockIssuance{}, err
+		return nil, err
 	}
 
-	return types.DecodeBlockIssuance(data)
+	return new(big.Int).SetBytes(data), nil
 }
 
-func WriteIssuance(db kv.Putter, number uint64, issuance types.BlockIssuance) error {
-	data, err := json.Marshal(issuance)
+func WriteTotalIssued(db kv.Putter, number uint64, totalIssued *big.Int) error {
+	return db.Put(kv.Issuance, dbutils.EncodeBlockNumber(number), totalIssued.Bytes())
+}
+
+func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
+	data, err := db.GetOne(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return db.Put(kv.Issuance, dbutils.EncodeBlockNumber(number), data)
+
+	return new(big.Int).SetBytes(data), nil
+}
+
+func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
+	return db.Put(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...), totalBurnt.Bytes())
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {

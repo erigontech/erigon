@@ -474,24 +474,24 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 		return block, statedb, nil
 	}
 	// Issuance is the sum of allocs
-	genesisIssuance := types.NewBlockIssuance()
+	genesisIssuance := big.NewInt(0)
 	for _, account := range g.Alloc {
-		genesisIssuance.Issuance.Add(genesisIssuance.Issuance, account.Balance)
+		genesisIssuance.Add(genesisIssuance, account.Balance)
 	}
 
 	// BlockReward can be present at genesis
 	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 		// Proof-of-stake is 0.3 ether per block (TODO: revisit)
-		genesisIssuance.BlockReward.Set(serenity.RewardSerenity)
+		genesisIssuance.Add(genesisIssuance, serenity.RewardSerenity)
 	} else {
 		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
 		// Set BlockReward
-		genesisIssuance.BlockReward.Set(blockReward.ToBig())
+		genesisIssuance.Add(genesisIssuance, blockReward.ToBig())
 	}
-	genesisIssuance.Issuance.Add(genesisIssuance.Issuance, genesisIssuance.BlockReward)
-	genesisIssuance.TotalIssued.Set(genesisIssuance.Issuance)
-
-	return block, statedb, rawdb.WriteIssuance(tx, 0, genesisIssuance)
+	if err := rawdb.WriteTotalIssued(tx, 0, genesisIssuance); err != nil {
+		return nil, nil, err
+	}
+	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, common.Big0)
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.

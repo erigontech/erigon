@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
@@ -62,12 +61,11 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	// Read previous issuance
-	netIssuance := big.NewInt(0)
-	blockIssuance, err := rawdb.ReadIssuance(tx, s.BlockNumber)
+	totalIssued, err := rawdb.ReadTotalIssued(tx, s.BlockNumber)
+	totalBurnt, err := rawdb.ReadTotalBurnt(tx, s.BlockNumber)
 	if err != nil {
 		return err
 	}
-	netIssuance.Set(blockIssuance.Issuance)
 
 	stopped := false
 	prevProgress := s.BlockNumber
@@ -87,40 +85,33 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		if header == nil {
 			return fmt.Errorf("could not find block header for number: %d", currentBlockNumber)
 		}
-		// Computations
-		issuance := types.NewBlockIssuance()
 
-		// TotalBurnt: len(Transactions) * baseFee
+		burnt := big.NewInt(0)
+		// burnt: len(Transactions) * baseFee
 		if header.BaseFee != nil {
-			issuance.TotalBurnt.Set(header.BaseFee)
-			issuance.TotalBurnt.Mul(issuance.TotalBurnt, big.NewInt(int64(len(body.Transactions))))
+			burnt.Set(header.BaseFee)
+			burnt.Mul(burnt, big.NewInt(int64(len(body.Transactions))))
 		}
 
 		// TotalIssued, BlockReward and UncleReward, depends on consensus engine
 		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 			// Proof-of-stake is 0.3 ether per block
-			issuance.TotalIssued.Set(serenity.RewardSerenity)
-			issuance.BlockReward.Set(serenity.RewardSerenity)
+			totalIssued.Add(totalIssued, serenity.RewardSerenity)
 		} else {
 			blockReward, uncleRewards := ethash.AccumulateRewards(cfg.chainConfig, header, body.Uncles)
 			// Set BlockReward
-			issuance.BlockReward.Set(blockReward.ToBig())
+			totalIssued.Add(totalIssued, blockReward.ToBig())
 			// Compute uncleRewards
-			issuance.TotalIssued.Set(issuance.BlockReward)
 			for _, uncleReward := range uncleRewards {
-				issuance.UncleReward.Add(issuance.UncleReward, uncleReward.ToBig())
+				totalIssued.Add(totalIssued, uncleReward.ToBig())
 			}
-			// Compute totalIssued: uncleReward + blockReward
-			issuance.TotalIssued.Add(issuance.BlockReward, issuance.UncleReward)
 		}
-		// Compute issuance
-		issuance.Issuance.Set(netIssuance)
-		issuance.Issuance.Add(issuance.Issuance, issuance.TotalIssued)
-		issuance.Issuance.Sub(issuance.Issuance, issuance.TotalBurnt)
-		// Update net issuance
-		netIssuance.Set(issuance.Issuance)
+		totalBurnt.Add(totalBurnt, burnt)
 		// Write to database
-		if err := rawdb.WriteIssuance(tx, currentBlockNumber, issuance); err != nil {
+		if err := rawdb.WriteTotalIssued(tx, currentBlockNumber, totalIssued); err != nil {
+			return err
+		}
+		if err := rawdb.WriteTotalBurnt(tx, currentBlockNumber, totalBurnt); err != nil {
 			return err
 		}
 		// Sleep and check for logs

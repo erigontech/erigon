@@ -27,7 +27,7 @@ type ErigonAPI interface {
 	// Issuance / reward related (see ./erigon_issuance.go)
 	// BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 	// UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
-	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (types.BlockIssuance, error)
+	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error)
