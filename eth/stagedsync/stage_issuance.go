@@ -78,7 +78,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		if err != nil {
 			return err
 		}
-		body := rawdb.ReadBodyWithTransactions(tx, hash, currentBlockNumber)
+		body, _, _ := rawdb.ReadBody(tx, hash, currentBlockNumber)
 		if body == nil {
 			return fmt.Errorf("could not find block body for number: %d", currentBlockNumber)
 		}
@@ -92,7 +92,6 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		// burnt: len(Transactions) * baseFee * gasUsed
 		if header.BaseFee != nil {
 			burnt.Set(header.BaseFee)
-			burnt.Mul(burnt, big.NewInt(int64(len(body.Transactions))))
 			burnt.Mul(burnt, big.NewInt(int64(header.GasUsed)))
 		}
 		// TotalIssued, BlockReward and UncleReward, depends on consensus engine

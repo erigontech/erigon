@@ -32,7 +32,6 @@ var (
 	Headers             SyncStage = "Headers"             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
 	BlockHashes         SyncStage = "BlockHashes"         // Headers Number are written, fills blockHash => number bucket
 	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
-	Issuance            SyncStage = "Issuance"            // Compute ether issuance for each block
 	TotalDifficulty     SyncStage = "TotalDifficulty"     // TotalDifficulty for each block is calculated.
 	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written
 	Execution           SyncStage = "Execution"           // Executing each block w/o buildinf a trie
@@ -44,6 +43,7 @@ var (
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
+	Issuance            SyncStage = "WatchTheBurn"        // Compute ether issuance for each block
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"

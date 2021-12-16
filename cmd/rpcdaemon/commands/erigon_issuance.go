@@ -60,7 +60,7 @@ func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber
 		return Issuance{}, fmt.Errorf("could not find block header")
 	}
 
-	body := rawdb.ReadBodyWithTransactions(tx, hash, uint64(blockNr))
+	body, _, _ := rawdb.ReadBody(tx, hash, uint64(blockNr))
 	if body == nil {
 		return Issuance{}, fmt.Errorf("could not find block body")
 	}
@@ -80,7 +80,6 @@ func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber
 	// Compute how much was burnt
 	if header.BaseFee != nil {
 		ret.Burnt = header.BaseFee
-		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(len(body.Transactions))))
 		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(header.GasUsed)))
 	} else {
 		ret.Burnt = common.Big0
