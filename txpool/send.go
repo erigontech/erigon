@@ -65,9 +65,9 @@ func (f *Send) notifyTests() {
 	}
 }
 
-func (f *Send) BroadcastPooledTxs(rlps [][]byte, hashes Hashes) (hashSentTo, txSentTo []int) {
+func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 	defer f.notifyTests()
-	if len(hashes) == 0 {
+	if len(rlps) == 0 {
 		return
 	}
 	txSentTo = make([]int, len(rlps))
@@ -94,7 +94,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, hashes Hashes) (hashSentTo, txS
 					}
 					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
 					if err != nil {
-						log.Warn("[txpool.send] BroadcastLocalTxs", "err", err)
+						log.Debug("[txpool.send] BroadcastPooledTxs", "err", err)
 					}
 					if peers != nil {
 						for j := prev; j <= i; j++ {
@@ -107,8 +107,13 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, hashes Hashes) (hashSentTo, txS
 			size = 0
 		}
 	}
+	return
+}
+
+func (f *Send) AnnouncePooledTxs(hashes Hashes) (hashSentTo []int) {
+	defer f.notifyTests()
 	hashSentTo = make([]int, len(hashes)/32)
-	prev = 0
+	prev := 0
 	for len(hashes) > 0 {
 		var pending Hashes
 		if len(hashes) > p2pTxPacketLimit {
@@ -135,7 +140,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte, hashes Hashes) (hashSentTo, txS
 				}
 				peers, err := sentryClient.SendMessageToAll(f.ctx, hashes66, &grpc.EmptyCallOption{})
 				if err != nil {
-					log.Warn("[txpool.send] BroadcastLocalPooledTxs", "err", err)
+					log.Debug("[txpool.send] AnnouncePooledTxs", "err", err)
 				}
 				if peers != nil {
 					for j, l := prev, pending.Len(); j < prev+l; j++ {
