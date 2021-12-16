@@ -156,7 +156,7 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []b
 	_ = pos
 	return encodeBuf
 }
-func EncodePooledTransactions65(txsRlp [][]byte, encodeBuf []byte) []byte {
+func EncodeTransactions(txsRlp [][]byte, encodeBuf []byte) []byte {
 	pos := 0
 	dataLen := 0
 	for i := range txsRlp {
@@ -184,7 +184,7 @@ func EncodePooledTransactions65(txsRlp [][]byte, encodeBuf []byte) []byte {
 	return encodeBuf
 }
 
-func ParsePooledTransactions65(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots) (newPos int, err error) {
+func ParseTransactions(payload []byte, pos int, ctx *TxParseContext, txSlots *TxSlots) (newPos int, err error) {
 	pos, _, err = rlp.List(payload, pos)
 	if err != nil {
 		return 0, err

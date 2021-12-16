@@ -98,6 +98,14 @@ func toHashes(h ...byte) (out Hashes) {
 	return out
 }
 
+func testRlps(num int) [][]byte {
+	rlps := make([][]byte, num)
+	for i := 0; i < num; i++ {
+		rlps[i] = []byte{1}
+	}
+	return rlps
+}
+
 func toPeerIDs(h ...byte) (out []PeerID) {
 	for i := range h {
 		hash := [32]byte{h[i]}

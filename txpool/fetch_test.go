@@ -71,13 +71,18 @@ func TestSendTxPropagate(t *testing.T) {
 	t.Run("few remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
-		send.BroadcastRemotePooledTxs(toHashes(1, 42))
+		send.BroadcastPooledTxs(testRlps(2), toHashes(1, 42))
 
-		calls := m.SendMessageToRandomPeersCalls()
-		require.Equal(t, 1, len(calls))
-		first := calls[0].SendMessageToRandomPeersRequest.Data
-		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, first.Id)
-		assert.Equal(t, 68, len(first.Data))
+		calls1 := m.SendMessageToRandomPeersCalls()
+		require.Equal(t, 1, len(calls1))
+		calls2 := m.SendMessageToAllCalls()
+		require.Equal(t, 1, len(calls2))
+		first := calls1[0].SendMessageToRandomPeersRequest.Data
+		assert.Equal(t, sentry.MessageId_TRANSACTIONS_66, first.Id)
+		assert.Equal(t, 5, len(first.Data))
+		second := calls2[0].OutboundMessageData
+		assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, second.Id)
+		assert.Equal(t, 68, len(second.Data))
 	})
 	t.Run("much remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
@@ -87,13 +92,18 @@ func TestSendTxPropagate(t *testing.T) {
 			b := []byte(fmt.Sprintf("%x", i))
 			copy(list[i:i+32], b)
 		}
-		send.BroadcastRemotePooledTxs(list)
-		calls := m.SendMessageToRandomPeersCalls()
-		require.Equal(t, 3, len(calls))
+		send.BroadcastPooledTxs(testRlps(len(list)/32), list)
+		calls1 := m.SendMessageToRandomPeersCalls()
+		require.Equal(t, 1, len(calls1))
+		calls2 := m.SendMessageToAllCalls()
+		require.Equal(t, 3, len(calls2))
+		call1 := calls1[0].SendMessageToRandomPeersRequest.Data
+		require.Equal(t, sentry.MessageId_TRANSACTIONS_66, call1.Id)
+		require.True(t, len(call1.Data) > 0)
 		for i := 0; i < 3; i++ {
-			call := calls[i].SendMessageToRandomPeersRequest.Data
-			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, call.Id)
-			require.True(t, len(call.Data) > 0)
+			call2 := calls2[i].OutboundMessageData
+			require.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, call2.Id)
+			require.True(t, len(call2.Data) > 0)
 		}
 	})
 	t.Run("few local byHash", func(t *testing.T) {
@@ -102,7 +112,7 @@ func TestSendTxPropagate(t *testing.T) {
 			return &sentry.SentPeers{Peers: make([]*types.H256, 5)}, nil
 		}
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
-		send.BroadcastLocalPooledTxs(toHashes(1, 42))
+		send.BroadcastPooledTxs(testRlps(2), toHashes(1, 42))
 
 		calls := m.SendMessageToAllCalls()
 		require.Equal(t, 1, len(calls))

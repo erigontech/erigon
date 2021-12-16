@@ -17,12 +17,14 @@
 package txpool
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"math/bits"
+	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -440,6 +442,44 @@ type Hashes []byte // flatten list of 32-byte hashes
 
 func (h Hashes) At(i int) []byte { return h[i*length.Hash : (i+1)*length.Hash] }
 func (h Hashes) Len() int        { return len(h) / length.Hash }
+func (h Hashes) Less(i, j int) bool {
+	return bytes.Compare(h[i*length.Hash:(i+1)*length.Hash], h[j*length.Hash:(j+1)*length.Hash]) < 0
+}
+func (h Hashes) Swap(i, j int) {
+	ii := i * length.Hash
+	jj := j * length.Hash
+	for k := 0; k < length.Hash; k++ {
+		h[ii], h[jj] = h[jj], h[ii]
+		ii++
+		jj++
+	}
+}
+
+// DedupCopy sorts hashes, and creates deduplicated copy
+func (h Hashes) DedupCopy() Hashes {
+	if len(h) == 0 {
+		return h
+	}
+	sort.Sort(h)
+	unique := 1
+	for i := length.Hash; i < len(h); i += length.Hash {
+		if !bytes.Equal(h[i:i+length.Hash], h[i-length.Hash:i]) {
+			unique++
+		}
+	}
+	c := make(Hashes, unique*length.Hash)
+	copy(c[:], h[0:length.Hash])
+	dest := length.Hash
+	for i := dest; i < len(h); i += length.Hash {
+		if !bytes.Equal(h[i:i+length.Hash], h[i-length.Hash:i]) {
+			if dest != i {
+				copy(c[dest:dest+length.Hash], h[i:i+length.Hash])
+			}
+			dest += length.Hash
+		}
+	}
+	return c
+}
 
 type Addresses []byte // flatten list of 20-byte addresses
 
