@@ -626,6 +626,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
+		case networkname.BSCMainnetChainName:
+			urls = params.BSCMainnetBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -660,6 +662,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
+		case networkname.BSCMainnetChainName:
+			urls = params.BSCMainnetBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -1141,6 +1145,10 @@ func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
 	cfg.DBPath = path.Join(datadir, "aura")
 }
 
+func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
+	cfg.DBPath = path.Join(datadir, "parlia")
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
@@ -1249,6 +1257,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setEthash(ctx, nodeConfig.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.DataDir)
 	setAuRa(ctx, &cfg.Aura, nodeConfig.DataDir)
+	setParlia(ctx, &cfg.Parlia, nodeConfig.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
@@ -1330,6 +1339,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 1212120
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
+	case networkname.BSCMainnetChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 56
+		}
+		cfg.Genesis = core.DefaultBSCMainnetGenesisBlock()
 	case networkname.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1408,6 +1422,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
+	case networkname.BSCMainnetChainName:
+		genesis = core.DefaultBSCMainnetGenesisBlock()
 	case networkname.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}
