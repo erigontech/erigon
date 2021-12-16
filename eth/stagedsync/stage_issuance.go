@@ -91,6 +91,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		if header.BaseFee != nil {
 			burnt.Set(header.BaseFee)
 			burnt.Mul(burnt, big.NewInt(int64(len(body.Transactions))))
+			burnt.Mul(burnt, big.NewInt(int64(header.GasUsed)))
 		}
 
 		// TotalIssued, BlockReward and UncleReward, depends on consensus engine

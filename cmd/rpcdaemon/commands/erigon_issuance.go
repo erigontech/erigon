@@ -71,6 +71,7 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 	if block.Header().BaseFee != nil {
 		ret.Burnt = block.Header().BaseFee
 		ret.Burnt.Mul(block.Header().BaseFee, big.NewInt(int64(len(block.Transactions()))))
+		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(block.Header().GasUsed)))
 	} else {
 		ret.Burnt = common.Big0
 	}
