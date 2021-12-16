@@ -188,7 +188,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 						},
 					}
 					if _, err := sentryClient.SendMessageById(f.ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-						log.Warn("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
+						log.Debug("[txpool.send] PropagatePooledTxsToPeersList", "err", err)
 					}
 				}
 			}
