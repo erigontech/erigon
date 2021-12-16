@@ -75,8 +75,9 @@ type TxPoolConfig struct {
 
 	GlobalBaseFeeQueue uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime    time.Duration // Maximum amount of time non-executable transaction are queued
-	StartOnInit bool
+	Lifetime      time.Duration // Maximum amount of time non-executable transaction are queued
+	StartOnInit   bool
+	TracedSenders []string // List of senders for which tx pool should print out debugging info
 }
 
 // DefaultTxPoolConfig contains the default configurations for the transaction

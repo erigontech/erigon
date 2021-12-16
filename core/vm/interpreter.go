@@ -51,12 +51,12 @@ type Interpreter interface {
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
 }
 
-// callCtx contains the things that are per-call, such as stack and memory,
+// ScopeContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
-type callCtx struct {
-	memory   *Memory
-	stack    *stack.Stack
-	contract *Contract
+type ScopeContext struct {
+	Memory   *Memory
+	Stack    *stack.Stack
+	Contract *Contract
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -197,10 +197,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = stack.New()
-		callContext = &callCtx{
-			memory:   mem,
-			stack:    locStack,
-			contract: contract,
+		callContext = &ScopeContext{
+			Memory:   mem,
+			Stack:    locStack,
+			Contract: contract,
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -225,9 +225,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
+					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 				} else {
-					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
+					in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, callContext, in.evm.depth, err)
 				}
 			}
 		}()
@@ -310,7 +310,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
 
