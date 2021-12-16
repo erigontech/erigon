@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"math/big"
 	"os"
 	"path"
@@ -167,7 +169,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
-	log.Info("Initialised chain configuration", "config", chainConfig)
+	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+	systemcontracts.GenesisHash = genesis.Hash()
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
@@ -199,6 +202,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else if chainConfig.Aura != nil {
 		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
+	} else if chainConfig.Parlia != nil {
+		consensusConfig = &config.Parlia
 	} else {
 		consensusConfig = &config.Ethash
 	}
@@ -542,6 +547,13 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
+	}
+	if _, ok := s.engine.(*parlia.Parlia); ok {
+		if cfg.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %w", err)
+		}
+		panic("validator mode for parlia consensus is not yet supported")
 	}
 
 	if s.chainConfig.ChainID.Uint64() > 10 {

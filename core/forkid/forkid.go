@@ -76,6 +76,72 @@ func NewIDFromForks(forks []uint64, genesis common.Hash, head uint64) ID {
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
+func NextForkHash(config *params.ChainConfig, genesis common.Hash, head uint64) [4]byte {
+	// Calculate the starting checksum from the genesis hash
+	hash := crc32.ChecksumIEEE(genesis[:])
+
+	// Calculate the current fork checksum and the next fork block
+	var next uint64
+	for _, fork := range gatherForks(config) {
+		if fork <= head {
+			// Fork already passed, checksum the previous hash and the fork number
+			hash = checksumUpdate(hash, fork)
+			continue
+		}
+		next = fork
+		break
+	}
+	if next == 0 {
+		return checksumToBytes(hash)
+	} else {
+		return checksumToBytes(checksumUpdate(hash, next))
+	}
+}
+
+// gatherForks gathers all the known forks and creates a sorted list out of them.
+func gatherForks(config *params.ChainConfig) []uint64 {
+	// Gather all the fork block numbers via reflection
+	kind := reflect.TypeOf(params.ChainConfig{})
+	conf := reflect.ValueOf(config).Elem()
+
+	var forks []uint64
+	for i := 0; i < kind.NumField(); i++ {
+		// Fetch the next field and skip non-fork rules
+		field := kind.Field(i)
+		if !strings.HasSuffix(field.Name, "Block") {
+			continue
+		}
+		if field.Type != reflect.TypeOf(new(big.Int)) {
+			continue
+		}
+		// Extract the fork rule block number and aggregate it
+		rule := conf.Field(i).Interface().(*big.Int)
+		if rule != nil {
+			forks = append(forks, rule.Uint64())
+		}
+	}
+	// Sort the fork block numbers to permit chronological XOR
+	for i := 0; i < len(forks); i++ {
+		for j := i + 1; j < len(forks); j++ {
+			if forks[i] > forks[j] {
+				forks[i], forks[j] = forks[j], forks[i]
+			}
+		}
+	}
+	// Deduplicate block numbers applying multiple forks
+	for i := 1; i < len(forks); i++ {
+		if forks[i] == forks[i-1] {
+			forks = append(forks[:i], forks[i+1:]...)
+			i--
+		}
+	}
+	// Skip any forks in block 0, that's the genesis ruleset
+	if len(forks) > 0 && forks[0] == 0 {
+		forks = forks[1:]
+	}
+	return forks
+}
+
 // NewFilter creates a filter that returns if a fork ID should be rejected or notI
 // based on the local chain's status.
 func NewFilter(config *params.ChainConfig, genesis common.Hash, head func() uint64) Filter {

@@ -1004,6 +1004,15 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case params.GoerliChainName:
 		chainConfig = params.GoerliChainConfig
 		genesis = core.DefaultGoerliGenesisBlock()
+	case params.BSCChainName:
+		chainConfig = params.BSCChainConfig
+		genesis = core.DefaultBSCGenesisBlock()
+	case params.ChapelChainName:
+		chainConfig = params.ChapelChainConfig
+		genesis = core.DefaultChapelGenesisBlock()
+	case params.RialtoChainName:
+		chainConfig = params.RialtoChainConfig
+		genesis = core.DefaultChapelGenesisBlock()
 	case params.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
@@ -1078,6 +1087,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, nil, false)
 	} else if chainConfig.Aura != nil {
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+	} else if chainConfig.Parlia != nil {
+		config := &ethconfig.Defaults
+		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}

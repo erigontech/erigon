@@ -54,16 +54,18 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	switch chain {
 	case params.RopstenChainName:
 		log.Info("Starting Erigon on Ropsten testnet...")
-
 	case params.RinkebyChainName:
 		log.Info("Starting Erigon on Rinkeby testnet...")
-
 	case params.GoerliChainName:
 		log.Info("Starting Erigon on Görli testnet...")
-
+	case params.BSCChainName:
+		log.Info("Starting Erigon on BSC mainnet...")
+	case params.ChapelChainName:
+		log.Info("Starting Erigon on Chapel testnet...")
+	case params.RialtoChainName:
+		log.Info("Starting Erigon on Chapel testnet...")
 	case params.DevChainName:
-		log.Info("Starting Erigon in ephemeral dev mode...")
-
+		log.Info("Starting Erigon in ephemerasl dev mode...")
 	case "", params.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
 			log.Info("Starting Erigon on Ethereum mainnet...")

@@ -183,14 +183,13 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.accessList = newAccessList()
 }
 
-func (sdb *IntraBlockState) AddLog(log *types.Log) {
+func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
-
-	log.TxHash = sdb.thash
-	log.BlockHash = sdb.bhash
-	log.TxIndex = uint(sdb.txIndex)
-	log.Index = sdb.logSize
-	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log)
+	log2.TxHash = sdb.thash
+	log2.BlockHash = sdb.bhash
+	log2.TxIndex = uint(sdb.txIndex)
+	log2.Index = sdb.logSize
+	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
 	sdb.logSize++
 }
 

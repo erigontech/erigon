@@ -144,3 +144,17 @@ type PoW interface {
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
 }
+
+var (
+	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+)
+
+type PoSA interface {
+	Engine
+
+	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
+	IsSystemContract(to *common.Address) bool
+	EnoughDistance(chain ChainReader, header *types.Header) bool
+	IsLocalBlock(header *types.Header) bool
+	AllowLightProcess(chain ChainReader, currentHeader *types.Header) bool
+}
