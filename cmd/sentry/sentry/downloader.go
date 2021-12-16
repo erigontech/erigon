@@ -450,7 +450,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H256, sentry direct.SentryClient) error {
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
-		return fmt.Errorf("decode 2 BlockHeadersPacket65: %w", err)
+		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Extract headers from the block
 	var highestBlock uint64
@@ -458,7 +458,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 	for _, header := range pkt {
 		headerRaw, err := rlpStream.Raw()
 		if err != nil {
-			return fmt.Errorf("decode 3 BlockHeadersPacket65: %w", err)
+			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
 		number := header.Number.Uint64()
 		if number > highestBlock {
@@ -630,7 +630,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
 		if !isPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 65: %w", err)
+			return fmt.Errorf("send header response 66: %w", err)
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}

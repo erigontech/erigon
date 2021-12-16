@@ -752,7 +752,8 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Data.Id]
 	if msgcode != eth.NewBlockMsg &&
 		msgcode != eth.NewBlockHashesMsg &&
-		msgcode != eth.NewPooledTransactionHashesMsg {
+		msgcode != eth.NewPooledTransactionHashesMsg &&
+		msgcode != eth.TransactionsMsg {
 		return reply, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
