@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	"github.com/valyala/fastjson"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/valyala/fastjson"
 )
 
 // txJSON is the JSON representation of transactions.

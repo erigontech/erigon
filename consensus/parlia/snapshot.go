@@ -23,11 +23,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"math/big"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+
 	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"

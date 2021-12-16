@@ -17,8 +17,9 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/erigon/params"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/holiman/uint256"
 

@@ -20,10 +20,11 @@ import (
 	"hash"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Config are the configuration options for the Interpreter

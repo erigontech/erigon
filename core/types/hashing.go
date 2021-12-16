@@ -22,12 +22,13 @@ import (
 	"io"
 	"sync"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"golang.org/x/crypto/sha3"
 )
 
 type DerivableList interface {

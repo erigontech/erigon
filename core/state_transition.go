@@ -18,13 +18,13 @@ package core
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/consensus"
 	"math"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
 	cmath "github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"

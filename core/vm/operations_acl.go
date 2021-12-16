@@ -20,6 +20,7 @@ import (
 	"errors"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"

@@ -19,10 +19,12 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"

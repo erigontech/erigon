@@ -24,6 +24,7 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
