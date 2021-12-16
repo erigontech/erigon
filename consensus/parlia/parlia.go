@@ -136,8 +136,6 @@ var (
 	// errRecentlySigned is returned if a header is signed by an authorized entity
 	// that already signed a header recently, thus is temporarily not allowed to.
 	errRecentlySigned = errors.New("recently signed")
-
-	errNotSupported = errors.New("validator mode is not supported")
 )
 
 // SignFn is a signer callback function to request a header to be signed by a
@@ -1127,6 +1125,9 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 	}
 	ibs.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
 	gasUsed, _, err := p.systemCall(from, to, data, ibs, header, value)
+	if err != nil {
+		return err
+	}
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)

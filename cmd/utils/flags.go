@@ -638,13 +638,14 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 // setBootstrapNodesV5 creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	var urls []string
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
-
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case params.MainnetChainName:
+			urls = params.MainnetBootnodes
 		case params.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case params.RinkebyChainName:
@@ -912,13 +913,13 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		cfg.NetRestrict = list
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
-		// --dev mode can't use p2p networking.
-		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
-		//cfg.ListenAddr = ":0"
-		//cfg.NoDiscovery = true
-		//cfg.DiscoveryV5 = false
-	}
+	//if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+	// --dev mode can't use p2p networking.
+	// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+	//cfg.ListenAddr = ":0"
+	//cfg.NoDiscovery = true
+	//cfg.DiscoveryV5 = false
+	//}
 }
 
 // SetNodeConfig applies node-related command line flags to the config.
