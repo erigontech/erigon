@@ -62,6 +62,10 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	defer logEvery.Stop()
 	// Read previous issuance
 	totalIssued, err := rawdb.ReadTotalIssued(tx, s.BlockNumber)
+	if err != nil {
+		return err
+	}
+
 	totalBurnt, err := rawdb.ReadTotalBurnt(tx, s.BlockNumber)
 	if err != nil {
 		return err
@@ -69,7 +73,8 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 
 	stopped := false
 	prevProgress := s.BlockNumber
-	for currentBlockNumber := s.BlockNumber + 1; currentBlockNumber < headNumber && !stopped; currentBlockNumber++ {
+	currentBlockNumber := s.BlockNumber + 1
+	for ; currentBlockNumber < headNumber && !stopped; currentBlockNumber++ {
 		// read body + transactions
 		hash, err := rawdb.ReadCanonicalHash(tx, currentBlockNumber)
 		if err != nil {
@@ -79,7 +84,6 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		if body == nil {
 			return fmt.Errorf("could not find block body for number: %d", currentBlockNumber)
 		}
-
 		header := rawdb.ReadHeader(tx, hash, currentBlockNumber)
 
 		if header == nil {
@@ -87,13 +91,12 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		}
 
 		burnt := big.NewInt(0)
-		// burnt: len(Transactions) * baseFee
+		// burnt: len(Transactions) * baseFee * gasUsed
 		if header.BaseFee != nil {
 			burnt.Set(header.BaseFee)
 			burnt.Mul(burnt, big.NewInt(int64(len(body.Transactions))))
 			burnt.Mul(burnt, big.NewInt(int64(header.GasUsed)))
 		}
-
 		// TotalIssued, BlockReward and UncleReward, depends on consensus engine
 		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 			// Proof-of-stake is 0.3 ether per block
@@ -116,12 +119,12 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			return err
 		}
 		// Sleep and check for logs
-		timer := time.NewTimer(1 * time.Microsecond)
+		timer := time.NewTimer(1 * time.Nanosecond)
 		select {
 		case <-ctx.Done():
 			stopped = true
 		case <-logEvery.C:
-			log.Info("Wrote Block Issuance",
+			log.Info(fmt.Sprintf("[%s] Wrote Block Issuance", s.LogPrefix()),
 				"now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
 		case <-timer.C:
@@ -130,7 +133,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		// Cleanup timer
 		timer.Stop()
 	}
-	if err = s.Update(tx, headNumber); err != nil {
+	if err = s.Update(tx, currentBlockNumber); err != nil {
 		return err
 	}
 	if !useExternalTx {

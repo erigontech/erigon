@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -35,7 +36,7 @@ import (
 //}
 
 // Issuance implements erigon_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
-func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return Issuance{}, err
@@ -50,12 +51,21 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 		// Clique for example has no issuance
 		return Issuance{}, nil
 	}
-
-	block, err := api.getBlockByRPCNumber(tx, blockNr)
+	hash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNr))
 	if err != nil {
 		return Issuance{}, err
 	}
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	header := rawdb.ReadHeader(tx, hash, uint64(blockNr))
+	if header == nil {
+		return Issuance{}, fmt.Errorf("could not find block header")
+	}
+
+	body := rawdb.ReadBodyWithTransactions(tx, hash, uint64(blockNr))
+	if body == nil {
+		return Issuance{}, fmt.Errorf("could not find block body")
+	}
+
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, header, body.Uncles)
 	issuance := minerReward
 	for _, r := range uncleRewards {
 		p := r // avoids warning?
@@ -68,10 +78,10 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 	issuance.Sub(&issuance, &minerReward)
 	ret.UncleReward = issuance.ToBig()
 	// Compute how much was burnt
-	if block.Header().BaseFee != nil {
-		ret.Burnt = block.Header().BaseFee
-		ret.Burnt.Mul(block.Header().BaseFee, big.NewInt(int64(len(block.Transactions()))))
-		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(block.Header().GasUsed)))
+	if header.BaseFee != nil {
+		ret.Burnt = header.BaseFee
+		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(len(body.Transactions))))
+		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(header.GasUsed)))
 	} else {
 		ret.Burnt = common.Big0
 	}
@@ -84,8 +94,9 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 	if err != nil {
 		return Issuance{}, err
 	}
-	ret.Supply = new(big.Int).Set(ret.TotalIssued)
-	ret.Supply.Sub(ret.Supply, ret.TotalBurnt)
+	if uint64(blockNr) == 0 {
+		ret.Issuance.Set(ret.TotalIssued)
+	}
 	return ret, nil
 }
 
@@ -105,5 +116,4 @@ type Issuance struct {
 	Burnt       *big.Int `json:"burnt"`       // Total amount of wei burned in the block
 	TotalIssued *big.Int `json:"totalIssued"` // Total amount of wei created in total so far
 	TotalBurnt  *big.Int `json:"totalBurnt"`  // Total amount of wei burnt so far
-	Supply      *big.Int `json:"supply"`      // Difference beetwen total burnt and total issued
 }
