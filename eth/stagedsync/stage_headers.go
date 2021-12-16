@@ -144,13 +144,14 @@ func HeadersPOS(
 
 	headerNumber := header.Number.Uint64()
 
-	blockHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
+		// TODO: err to statusCh
 		return err
 	}
 
-	// Do we need to unwind? (TODO)
-	if s.BlockNumber >= headerNumber && header.Hash() != blockHash {
+	// TODO: handle re-orgs properly
+	if s.BlockNumber >= headerNumber && header.Hash() != existingHash {
 		u.UnwindTo(headerNumber-1, common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			HeadHash: header.ParentHash,
@@ -162,15 +163,18 @@ func HeadersPOS(
 	// Write current payload
 	rawdb.WriteHeader(tx, &header)
 	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+		// TODO: err to statusCh
 		return err
 	}
 	// if we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
+		// TODO: err to statusCh
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
 		if err := s.Update(tx, header.Number.Uint64()); err != nil {
+			// TODO: err to statusCh
 			return err
 		}
 		// For the sake of simplicity we can just assume it will be valid for now. (TODO: move to execution stage)
@@ -178,10 +182,12 @@ func HeadersPOS(
 			Status:   privateapi.Valid,
 			HeadHash: header.Hash(),
 		}
+		// TODO: useExternalTx boilerplate
 		return tx.Commit()
 	}
 	cfg.hd.SetPOSSync(true)
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+		// TODO: err to statusCh
 		return err
 	}
 	cfg.hd.SetProcessed(header.Number.Uint64())
@@ -194,6 +200,7 @@ func HeadersPOS(
 
 	// Allow other stages to run 1 cycle if no network available
 	if initialCycle && cfg.noP2PDiscovery {
+		// TODO: update statusCh
 		return nil
 	}
 
@@ -257,7 +264,7 @@ func HeadersPOS(
 		// Cleanup timer
 		timer.Stop()
 	}
-	// If the user stopped it, we dont update anything
+	// If the user stopped it, we don't update anything
 	if !cfg.hd.Synced() {
 		return nil
 	}
@@ -283,6 +290,7 @@ func HeadersPOS(
 			return err
 		}
 	}
+	// TODO: useExternalTx boilerplate
 	return tx.Commit()
 }
 
