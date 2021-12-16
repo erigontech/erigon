@@ -804,17 +804,18 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 
 func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) FeedHeaderFuncType {
 	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
-		return hi.FeedHeader(db, headerReader, header, headerRaw, hash, blockHeight, terminalTotalDifficulty)
+		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight, terminalTotalDifficulty)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error) {
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return false, nil
 	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
+		// TODO: return correct isTrans
 		return false, nil
 	}
 	// Load parent header
@@ -912,6 +913,39 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 		return true, nil
 	}
 	return td.Cmp(terminalTotalDifficulty) >= 0, nil
+}
+
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, engine consensus.Engine, headerReader consensus.ChainHeaderReader, header *types.Header, hash common.Hash) error {
+	// TODO: engine.VerifyHeader(headerReader, header, true /* seal */)
+
+	blockHeight := header.Number.Uint64()
+	// TODO: do we need to check if the header is already inserted (oldH)?
+
+	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
+	if err != nil || parentTd == nil {
+		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+	}
+	td := new(big.Int).Add(parentTd, header.Difficulty)
+	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	}
+
+	headerRaw, err := rlp.EncodeToBytes(header)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to to RLP encode header %x %d: %v", hi.logPrefix, hash, blockHeight, err)
+	}
+	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
+		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+
+	if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
+		return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
+	}
+	if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
+		return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+	}
+
+	return nil
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {
