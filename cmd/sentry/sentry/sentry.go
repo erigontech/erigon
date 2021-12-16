@@ -704,19 +704,19 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
+
 	var lastErr error
-	for {
+	for retry := 0; retry < 16 && len(reply.Peers) == 0; retry++ { // limit number of retries
 		peerInfo, found := ss.findPeer(inreq.MinBlock)
 		if !found {
 			break
 		}
 		if err := ss.writePeer(peerInfo, msgcode, inreq.Data.Data); err != nil {
 			lastErr = fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerInfo.ID(), err)
-			continue
+		} else {
+			peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
+			reply.Peers = []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}
 		}
-		peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
-		reply.Peers = []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}
-		break
 	}
 	return reply, lastErr
 }
