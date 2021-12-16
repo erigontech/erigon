@@ -143,6 +143,7 @@ func HeadersPOS(
 	*cfg.waitingPosHeaders = false
 
 	headerNumber := header.Number.Uint64()
+	headerHash := header.Hash()
 
 	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
@@ -151,7 +152,7 @@ func HeadersPOS(
 	}
 
 	// TODO: handle re-orgs properly
-	if s.BlockNumber >= headerNumber && header.Hash() != existingHash {
+	if s.BlockNumber >= headerNumber && headerHash != existingHash {
 		u.UnwindTo(headerNumber-1, common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			HeadHash: header.ParentHash,
@@ -162,7 +163,7 @@ func HeadersPOS(
 
 	// Write current payload
 	rawdb.WriteHeader(tx, &header)
-	if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+	if err := rawdb.WriteCanonicalHash(tx, headerHash, headerNumber); err != nil {
 		// TODO: err to statusCh
 		return err
 	}
@@ -173,14 +174,14 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		if err := s.Update(tx, header.Number.Uint64()); err != nil {
+		if err := s.Update(tx, headerNumber); err != nil {
 			// TODO: err to statusCh
 			return err
 		}
 		// For the sake of simplicity we can just assume it will be valid for now. (TODO: move to execution stage)
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			Status:   privateapi.Valid,
-			HeadHash: header.Hash(),
+			HeadHash: headerHash,
 		}
 		// TODO: useExternalTx boilerplate
 		return tx.Commit()
@@ -190,7 +191,7 @@ func HeadersPOS(
 		// TODO: err to statusCh
 		return err
 	}
-	cfg.hd.SetProcessed(header.Number.Uint64())
+	cfg.hd.SetProcessed(headerNumber)
 	cfg.hd.SetExpectedHash(header.ParentHash)
 	cfg.hd.SetFetching(true)
 	logPrefix := s.LogPrefix()
@@ -208,12 +209,12 @@ func HeadersPOS(
 		Status:   privateapi.Syncing,
 		HeadHash: rawdb.ReadHeadBlockHash(tx),
 	}
-	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", header.Number.Uint64())
+	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
-	prevProgress := header.Number.Uint64()
+	prevProgress := headerNumber
 
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -250,7 +251,7 @@ func HeadersPOS(
 		case <-logEvery.C:
 			diff := prevProgress - cfg.hd.Progress()
 			if cfg.hd.Progress() <= prevProgress {
-				log.Info("Wrote Block Headers backwards", "from", header.Number.Uint64(),
+				log.Info("Wrote Block Headers backwards", "from", headerNumber,
 					"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
 				prevProgress = cfg.hd.Progress()
 			}
@@ -265,6 +266,7 @@ func HeadersPOS(
 		return nil
 	}
 
+	// TODO: FeedHeaderPoS instead of IdentityLoadFunc
 	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
@@ -272,6 +274,7 @@ func HeadersPOS(
 	}); err != nil {
 		return err
 	}
+	// TODO: remove canonicalHeadersCollector (use fixCanonicalChain instead)
 	if err = canonicalHeadersCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
@@ -282,7 +285,7 @@ func HeadersPOS(
 	if s.BlockNumber >= cfg.hd.Progress() {
 		u.UnwindTo(cfg.hd.Progress(), common.Hash{})
 	} else {
-		if err := s.Update(tx, header.Number.Uint64()); err != nil {
+		if err := s.Update(tx, headerNumber); err != nil {
 			return err
 		}
 	}
