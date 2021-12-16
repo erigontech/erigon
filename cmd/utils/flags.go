@@ -32,10 +32,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
+
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -52,7 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -913,9 +915,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
 		// --dev mode can't use p2p networking.
 		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
-		cfg.ListenAddr = ":0"
-		cfg.NoDiscovery = true
-		cfg.DiscoveryV5 = false
+		//cfg.ListenAddr = ":0"
+		//cfg.NoDiscovery = true
+		//cfg.DiscoveryV5 = false
 	}
 }
 
