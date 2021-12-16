@@ -47,8 +47,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	if !cfg.issuance || (cfg.chainConfig.Consensus != params.EtHashConsensus &&
-		cfg.chainConfig.Consensus != params.CliqueConsensus) {
+	if !cfg.issuance || cfg.chainConfig.Consensus != params.EtHashConsensus {
 		if err = s.Update(tx, headNumber); err != nil {
 			return err
 		}
@@ -80,13 +79,13 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		}
 		body := rawdb.ReadBodyWithTransactions(tx, hash, currentBlockNumber)
 		if body == nil {
-			return fmt.Errorf("Could not find block body for number: %d", currentBlockNumber)
+			return fmt.Errorf("could not find block body for number: %d", currentBlockNumber)
 		}
 
 		header := rawdb.ReadHeader(tx, hash, currentBlockNumber)
 
 		if header == nil {
-			return fmt.Errorf("Could not find block header for number: %d", currentBlockNumber)
+			return fmt.Errorf("could not find block header for number: %d", currentBlockNumber)
 		}
 		// Computations
 		issuance := types.NewBlockIssuance()
@@ -98,11 +97,11 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		}
 
 		// TotalIssued, BlockReward and UncleReward, depends on consensus engine
-		if header.Difficulty == serenity.SerenityDifficulty {
+		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 			// Proof-of-stake is 0.3 ether per block
 			issuance.TotalIssued.Set(serenity.RewardSerenity)
 			issuance.BlockReward.Set(serenity.RewardSerenity)
-		} else if cfg.chainConfig.Consensus == params.EtHashConsensus {
+		} else {
 			blockReward, uncleRewards := ethash.AccumulateRewards(cfg.chainConfig, header, body.Uncles)
 			// Set BlockReward
 			issuance.BlockReward.Set(blockReward.ToBig())
@@ -113,10 +112,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			}
 			// Compute totalIssued: uncleReward + blockReward
 			issuance.TotalIssued.Add(issuance.BlockReward, issuance.UncleReward)
-		} else if cfg.chainConfig.Consensus != params.CliqueConsensus {
-			return fmt.Errorf("consensus engine not supported")
 		}
-
 		// Compute issuance
 		issuance.Issuance.Set(netIssuance)
 		issuance.Issuance.Add(issuance.Issuance, issuance.TotalIssued)

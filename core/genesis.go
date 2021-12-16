@@ -469,6 +469,10 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteChainConfig(tx, block.Hash(), config); err != nil {
 		return nil, nil, err
 	}
+	// We support ethash/serenity for issuance (for now)
+	if g.Config.Consensus != params.EtHashConsensus {
+		return block, statedb, nil
+	}
 	// Issuance is the sum of allocs
 	genesisIssuance := types.NewBlockIssuance()
 	for _, account := range g.Alloc {
@@ -477,14 +481,12 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 
 	// BlockReward can be present at genesis
 	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
-		// Proof-of-stake is 0.3 ether per block
+		// Proof-of-stake is 0.3 ether per block (TODO: revisit)
 		genesisIssuance.BlockReward.Set(serenity.RewardSerenity)
-	} else if g.Config.Consensus == params.EtHashConsensus {
+	} else {
 		blockReward, _ := ethash.AccumulateRewards(g.Config, block.Header(), nil)
 		// Set BlockReward
 		genesisIssuance.BlockReward.Set(blockReward.ToBig())
-	} else if g.Config.Consensus != params.CliqueConsensus {
-		return block, statedb, nil // If we do not support issuance for this consensus engine
 	}
 	genesisIssuance.Issuance.Add(genesisIssuance.Issuance, genesisIssuance.BlockReward)
 	genesisIssuance.TotalIssued.Set(genesisIssuance.Issuance)
