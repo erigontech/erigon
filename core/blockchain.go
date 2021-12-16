@@ -248,7 +248,7 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 }
 
 func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, gasUsed *uint64) (*types.Block, error) {
-	
+
 	// We're doing this hack for BSC to avoid changing consensus interfaces. BSC modifies txs and receipts by appending
 	// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
 	// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
