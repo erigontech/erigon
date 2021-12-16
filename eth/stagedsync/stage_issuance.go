@@ -18,14 +18,12 @@ import (
 type IssuanceCfg struct {
 	db          kv.RwDB
 	chainConfig *params.ChainConfig
-	issuance    bool
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, issuance bool) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig) IssuanceCfg {
 	return IssuanceCfg{
 		db:          db,
 		chainConfig: chainConfig,
-		issuance:    issuance,
 	}
 }
 
@@ -46,7 +44,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	if !cfg.issuance || cfg.chainConfig.Consensus != params.EtHashConsensus {
+	if cfg.chainConfig.Consensus != params.EtHashConsensus {
 		if err = s.Update(tx, headNumber); err != nil {
 			return err
 		}
