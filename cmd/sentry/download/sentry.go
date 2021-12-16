@@ -691,21 +691,27 @@ func (ss *SentryServerImpl) findPeer(minBlock uint64) (string, *PeerInfo, bool) 
 }
 
 func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
-	peerID, peerInfo, found := ss.findPeer(inreq.MinBlock)
-	if !found {
-		return &proto_sentry.SentPeers{}, nil
-	}
+	reply := &proto_sentry.SentPeers{}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
 	if msgcode != eth.GetBlockHeadersMsg &&
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
 	}
-	if err := ss.writePeer(peerID, peerInfo, msgcode, inreq.Data.Data); err != nil {
-		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerID, err)
+	var lastErr error
+	for retry := 0; retry < 16 && len(reply.Peers) == 0; retry++ { // limit number of retries
+		peerID, peerInfo, found := ss.findPeer(inreq.MinBlock)
+		if !found {
+			break
+		}
+		if err := ss.writePeer(peerID, peerInfo, msgcode, inreq.Data.Data); err != nil {
+			lastErr = fmt.Errorf("sendMessageByMinBlock to peer %s: %w", peerID, err)
+		} else {
+			peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
+			reply.Peers = []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}
+		}
 	}
-	peerInfo.AddDeadline(time.Now().Add(30 * time.Second))
-	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}}, nil
+	return reply, lastErr
 }
 
 func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
@@ -738,7 +744,8 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	msgcode := eth.FromProto[ss.Protocol.Version][req.Data.Id]
 	if msgcode != eth.NewBlockMsg &&
 		msgcode != eth.NewBlockHashesMsg &&
-		msgcode != eth.NewPooledTransactionHashesMsg {
+		msgcode != eth.NewPooledTransactionHashesMsg &&
+		msgcode != eth.TransactionsMsg {
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
@@ -754,21 +761,18 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	// Send the block to a subset of our peers
 	sendToAmount := int(math.Sqrt(float64(amount)))
 	i := 0
-	var innerErr error
+	var lastErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
 	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		if err := ss.writePeer(peerID, peerInfo, msgcode, req.Data.Data); err != nil {
-			innerErr = err
+			lastErr = fmt.Errorf("sendMessageToRandomPeers to peer %s: %w", peerID, err)
 			return true
 		}
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		i++
 		return i < sendToAmount
 	})
-	if innerErr != nil {
-		return reply, fmt.Errorf("sendMessageToRandomPeers to peer %w", innerErr)
-	}
-	return reply, nil
+	return reply, lastErr
 }
 
 func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sentry.OutboundMessageData) (*proto_sentry.SentPeers, error) {
@@ -779,20 +783,17 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 		return &proto_sentry.SentPeers{}, fmt.Errorf("sendMessageToAll not implemented for message Id: %s", req.Id)
 	}
 
-	var innerErr error
+	var lastErr error
 	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
 	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		if err := ss.writePeer(peerID, peerInfo, msgcode, req.Data); err != nil {
-			innerErr = err
+			lastErr = fmt.Errorf("SendMessageToAll to peer %s: %w", peerID, err)
 			return true
 		}
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		return true
 	})
-	if innerErr != nil {
-		return reply, fmt.Errorf("sendMessageToRandomPeers to peer %w", innerErr)
-	}
-	return reply, nil
+	return reply, lastErr
 }
 
 func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
