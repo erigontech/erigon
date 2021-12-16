@@ -476,7 +476,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	}
 
 	// BlockReward can be present at genesis
-	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) >= 0 {
+	if block.Header().Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 		// Proof-of-stake is 0.3 ether per block
 		genesisIssuance.BlockReward.Set(serenity.RewardSerenity)
 	} else if g.Config.Consensus == params.EtHashConsensus {

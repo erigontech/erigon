@@ -47,7 +47,6 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	// is issuance enabled?
 	if !cfg.issuance || (cfg.chainConfig.Consensus != params.EtHashConsensus &&
 		cfg.chainConfig.Consensus != params.CliqueConsensus) {
 		if err = s.Update(tx, headNumber); err != nil {
