@@ -238,11 +238,7 @@ func HeadersPOS(
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
 			maxRequests--
 		}
-		// Load headers into the database
-		announces := cfg.hd.GrabAnnounces()
-		if len(announces) > 0 {
-			cfg.announceNewHashes(ctx, announces)
-		}
+
 		if cfg.hd.Synced() { // We do not break unless there best header changed
 			stopped = true
 		}
