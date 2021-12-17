@@ -26,21 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
-const (
-	MainnetChainName = "mainnet"
-	RopstenChainName = "ropsten"
-	RinkebyChainName = "rinkeby"
-	GoerliChainName  = "goerli"
-	BSCChainName     = "bsc"
-	ChapelChainName  = "chapel"
-	RialtoChainName  = "rialto"
-	DevChainName     = "dev"
-	ErigonMineName   = "erigonmine"
-	SokolChainName   = "sokol"
-	KovanChainName   = "kovan"
-	FermionChainName = "fermion"
-)
-
 type ConsensusType string
 
 const (
@@ -171,7 +156,7 @@ var (
 	}
 
 	BSCChainConfig = &ChainConfig{
-		ChainName:           BSCChainName,
+		ChainName:           networkname.BSCChainName,
 		ChainID:             big.NewInt(56),
 		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),

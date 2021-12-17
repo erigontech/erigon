@@ -614,7 +614,7 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
-		case params.MainnetChainName:
+		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
@@ -622,11 +622,11 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.BSCChainName:
+		case networkname.BSCChainName:
 			urls = params.BscBootnodes
-		case params.ChapelChainName:
+		case networkname.ChapelChainName:
 			urls = params.ChapelBootnodes
-		case params.RialtoChainName:
+		case networkname.RialtoChainName:
 			urls = params.RialtoBootnodes
 		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
@@ -655,7 +655,7 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
-		case params.MainnetChainName:
+		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
@@ -663,11 +663,11 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.BSCChainName:
+		case networkname.BSCChainName:
 			urls = params.BscBootnodes
-		case params.ChapelChainName:
+		case networkname.ChapelChainName:
 			urls = params.ChapelBootnodes
-		case params.RialtoChainName:
+		case networkname.RialtoChainName:
 			urls = params.RialtoBootnodes
 		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
@@ -694,11 +694,11 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
-		case params.BSCChainName:
+		case networkname.BSCChainName:
 			urls = params.BscStaticPeers
-		case params.ChapelChainName:
+		case networkname.ChapelChainName:
 			urls = params.ChapelStaticPeers
-		case params.RialtoChainName:
+		case networkname.RialtoChainName:
 			urls = params.RialtoStaticPeers
 		}
 	}
@@ -872,10 +872,10 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	chainsWithValidatorMode := map[string]bool{
-		params.FermionChainName: true,
-		params.BSCChainName:     true,
-		params.RialtoChainName:  true,
-		params.ChapelChainName:  true,
+		networkname.FermionChainName: true,
+		networkname.BSCChainName:     true,
+		networkname.RialtoChainName:  true,
+		networkname.ChapelChainName:  true,
 	}
 	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
@@ -1352,19 +1352,19 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.BSCChainName:
+	case networkname.BSCChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 56
 		}
 		cfg.Genesis = core.DefaultBSCGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
-	case params.ChapelChainName:
+	case networkname.ChapelChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 97
 		}
 		cfg.Genesis = core.DefaultChapelGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.ChapelGenesisHash)
-	case params.RialtoChainName:
+	case networkname.RialtoChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 97
 		}
@@ -1463,11 +1463,11 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case networkname.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.BSCChainName:
+	case networkname.BSCChainName:
 		genesis = core.DefaultBSCGenesisBlock()
-	case params.ChapelChainName:
+	case networkname.ChapelChainName:
 		genesis = core.DefaultChapelGenesisBlock()
-	case params.RialtoChainName:
+	case networkname.RialtoChainName:
 		genesis = core.DefaultRialtoGenesisBlock()
 	case networkname.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()

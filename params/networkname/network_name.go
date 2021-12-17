@@ -10,4 +10,7 @@ const (
 	SokolChainName   = "sokol"
 	KovanChainName   = "kovan"
 	FermionChainName = "fermion"
+	BSCChainName     = "bsc"
+	ChapelChainName  = "chapel"
+	RialtoChainName  = "rialto"
 )
