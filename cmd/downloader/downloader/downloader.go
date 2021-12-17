@@ -77,6 +77,9 @@ func (cli *Client) SavePeerID(db kv.Putter) error {
 }
 
 func (cli *Client) Close() {
+	for _, tr := range cli.Cli.Torrents() {
+		tr.Drop()
+	}
 	cli.pieceCompletionStore.Close()
 	cli.Cli.Close()
 }
