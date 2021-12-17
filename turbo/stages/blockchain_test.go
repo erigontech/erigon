@@ -1943,12 +1943,12 @@ func TestEIP1559Transition(t *testing.T) {
 			var chainID uint256.Int
 			chainID.SetFromBig(gspec.Config.ChainID)
 			var tx types.Transaction = &types.DynamicFeeTransaction{
-				ChainID: &chainID,
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
-					Data:  []byte{},
+					ChainID: &chainID,
+					Nonce:   0,
+					To:      &aa,
+					Gas:     30000,
+					Data:    []byte{},
 				},
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
 				Tip:        u256.Num2,

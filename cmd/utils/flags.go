@@ -37,6 +37,7 @@ import (
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/params/networkname"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -124,7 +125,7 @@ var (
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
 		Usage: "Name of the testnet to join",
-		Value: params.MainnetChainName,
+		Value: networkname.MainnetChainName,
 	}
 	IdentityFlag = cli.StringFlag{
 		Name:  "identity",
@@ -215,6 +216,11 @@ var (
 		Name:  "txpool.lifetime",
 		Usage: "Maximum amount of time non-executable transaction are queued",
 		Value: ethconfig.Defaults.TxPool.Lifetime,
+	}
+	TxPoolTraceSendersFlag = cli.StringFlag{
+		Name:  "txpool.trace.senders",
+		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
+		Value: "",
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -414,6 +420,11 @@ var (
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
+	DownloaderAddrFlag = cli.StringFlag{
+		Name:  "downloader.api.addr",
+		Value: "127.0.0.1:9093",
+		Usage: "downloader address '<host>:<port>'",
+	}
 	BootnodesFlag = cli.StringFlag{
 		Name:  "bootnodes",
 		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
@@ -603,27 +614,27 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
-		case params.MainnetChainName:
+		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
-		case params.RopstenChainName:
+		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
-		case params.RinkebyChainName:
+		case networkname.RinkebyChainName:
 			urls = params.RinkebyBootnodes
-		case params.GoerliChainName:
+		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.BSCChainName:
+		case networkname.BSCChainName:
 			urls = params.BscBootnodes
-		case params.ChapelChainName:
+		case networkname.ChapelChainName:
 			urls = params.ChapelBootnodes
-		case params.RialtoChainName:
+		case networkname.RialtoChainName:
 			urls = params.RialtoBootnodes
-		case params.ErigonMineName:
+		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.SokolChainName:
+		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case params.KovanChainName:
+		case networkname.KovanChainName:
 			urls = params.KovanBootnodes
-		case params.FermionChainName:
+		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
@@ -644,27 +655,27 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
-		case params.MainnetChainName:
+		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
-		case params.RopstenChainName:
+		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
-		case params.RinkebyChainName:
+		case networkname.RinkebyChainName:
 			urls = params.RinkebyBootnodes
-		case params.GoerliChainName:
+		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
-		case params.BSCChainName:
+		case networkname.BSCChainName:
 			urls = params.BscBootnodes
-		case params.ChapelChainName:
+		case networkname.ChapelChainName:
 			urls = params.ChapelBootnodes
-		case params.RialtoChainName:
+		case networkname.RialtoChainName:
 			urls = params.RialtoBootnodes
-		case params.ErigonMineName:
+		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
-		case params.SokolChainName:
+		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case params.KovanChainName:
+		case networkname.KovanChainName:
 			urls = params.KovanBootnodes
-		case params.FermionChainName:
+		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
@@ -683,11 +694,11 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
-		case params.BSCChainName:
+		case networkname.BSCChainName:
 			urls = params.BscStaticPeers
-		case params.ChapelChainName:
+		case networkname.ChapelChainName:
 			urls = params.ChapelStaticPeers
-		case params.RialtoChainName:
+		case networkname.RialtoChainName:
 			urls = params.RialtoStaticPeers
 		}
 	}
@@ -852,7 +863,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
 		if etherbase == "" {
 			cfg.Miner.SigKey = core.DevnetSignPrivateKey
 			cfg.Miner.Etherbase = core.DevnetEtherbase
@@ -861,10 +872,10 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	chainsWithValidatorMode := map[string]bool{
-		params.FermionChainName: true,
-		params.BSCChainName:     true,
-		params.RialtoChainName:  true,
-		params.ChapelChainName:  true,
+		networkname.FermionChainName: true,
+		networkname.BSCChainName:     true,
+		networkname.RialtoChainName:  true,
+		networkname.ChapelChainName:  true,
 	}
 	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
@@ -913,7 +924,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		cfg.NetRestrict = list
 	}
 
-	//if ctx.GlobalString(ChainFlag.Name) == params.DevChainName {
+	//if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
 	// --dev mode can't use p2p networking.
 	// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 	//cfg.ListenAddr = ":0"
@@ -927,6 +938,8 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setDataDir(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
+
+	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 }
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
@@ -942,17 +955,17 @@ func DataDirForNetwork(datadir string, network string) string {
 	}
 
 	switch network {
-	case params.DevChainName:
+	case networkname.DevChainName:
 		return "" // unless explicitly requested, use memory databases
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		return filepath.Join(datadir, "rinkeby")
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		filepath.Join(datadir, "goerli")
-	case params.SokolChainName:
+	case networkname.SokolChainName:
 		return filepath.Join(datadir, "sokol")
-	case params.KovanChainName:
+	case networkname.KovanChainName:
 		return filepath.Join(datadir, "kovan")
-	case params.FermionChainName:
+	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
 	default:
 		return datadir
@@ -1063,6 +1076,15 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	}
 	if ctx.GlobalIsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.GlobalDuration(TxPoolLifetimeFlag.Name)
+	}
+	if ctx.GlobalIsSet(TxPoolTraceSendersFlag.Name) {
+		// Parse the command separated flag
+		senderHexes := SplitAndTrim(ctx.GlobalString(TxPoolTraceSendersFlag.Name))
+		cfg.TracedSenders = make([]string, len(senderHexes))
+		for i, senderHex := range senderHexes {
+			sender := common.HexToAddress(senderHex)
+			cfg.TracedSenders[i] = string(sender[:])
+		}
 	}
 }
 
@@ -1306,69 +1328,69 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
-	case params.MainnetChainName:
+	case networkname.MainnetChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1
 		}
 		cfg.Genesis = core.DefaultGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 3
 		}
 		cfg.Genesis = core.DefaultRopstenGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.RopstenGenesisHash)
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 4
 		}
 		cfg.Genesis = core.DefaultRinkebyGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.RinkebyGenesisHash)
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 5
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case params.BSCChainName:
+	case networkname.BSCChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 56
 		}
 		cfg.Genesis = core.DefaultBSCGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
-	case params.ChapelChainName:
+	case networkname.ChapelChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 97
 		}
 		cfg.Genesis = core.DefaultChapelGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.ChapelGenesisHash)
-	case params.RialtoChainName:
+	case networkname.RialtoChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 97
 		}
 		cfg.Genesis = core.DefaultRialtoGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.RialtoGenesisHash)
-	case params.ErigonMineName:
+	case networkname.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
 		}
 		cfg.Genesis = core.DefaultErigonGenesisBlock()
-	case params.SokolChainName:
+	case networkname.SokolChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
-	case params.KovanChainName:
+	case networkname.KovanChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 42
 		}
 		cfg.Genesis = core.DefaultKovanGenesisBlock()
-	case params.FermionChainName:
+	case networkname.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1212120
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
-	case params.DevChainName:
+	case networkname.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
 		}
@@ -1435,27 +1457,27 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 	var genesis *core.Genesis
 	chain := ctx.GlobalString(ChainFlag.Name)
 	switch chain {
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		genesis = core.DefaultRopstenGenesisBlock()
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		genesis = core.DefaultRinkebyGenesisBlock()
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.BSCChainName:
+	case networkname.BSCChainName:
 		genesis = core.DefaultBSCGenesisBlock()
-	case params.ChapelChainName:
+	case networkname.ChapelChainName:
 		genesis = core.DefaultChapelGenesisBlock()
-	case params.RialtoChainName:
+	case networkname.RialtoChainName:
 		genesis = core.DefaultRialtoGenesisBlock()
-	case params.ErigonMineName:
+	case networkname.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
-	case params.SokolChainName:
+	case networkname.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
-	case params.KovanChainName:
+	case networkname.KovanChainName:
 		genesis = core.DefaultKovanGenesisBlock()
-	case params.FermionChainName:
+	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
-	case params.DevChainName:
+	case networkname.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}
 	return genesis

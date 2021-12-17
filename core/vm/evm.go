@@ -233,9 +233,9 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		_ = evm.config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig(), code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLT, input, gas, value.ToBig(), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 
@@ -319,9 +319,9 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		_ = evm.config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig(), code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, CALLCODET, input, gas, value.ToBig(), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 	var (
@@ -376,9 +376,9 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		_ = evm.config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1), code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, DELEGATECALLT, input, gas, big.NewInt(-1), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 	snapshot := evm.intraBlockState.Snapshot()
@@ -428,9 +428,9 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		_ = evm.config.Tracer.CaptureStart(evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2), code)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false, STATICCALLT, input, gas, big.NewInt(-2), code)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 	// We take a snapshot here. This is a bit counter-intuitive, and could probably be skipped.
@@ -503,12 +503,15 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
 	if evm.config.Debug || evm.config.EnableTEMV {
-		_ = evm.config.Tracer.CaptureStart(evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), nil)
+		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value.ToBig(), nil)
 		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err) //nolint:errcheck
+			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
 		}(gas, time.Now())
 	}
 	nonce := evm.intraBlockState.GetNonce(caller.Address())
+	if nonce+1 < nonce {
+		return nil, common.Address{}, gas, ErrNonceUintOverflow
+	}
 	evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back

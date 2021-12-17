@@ -19,7 +19,7 @@ package core
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/consensus"
-	"math"
+	"math/bits"
 
 	"github.com/holiman/uint256"
 
@@ -129,6 +129,10 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 	} else {
 		gas = params.TxGas
 	}
+
+	// Auxiliary variables for overflow protection
+	var product, overflow uint64
+
 	// Bump the required gas by the amount of transactional data
 	if len(data) > 0 {
 		// Zero and non-zero bytes are priced differently
@@ -143,20 +147,44 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 		if isEIP2028 {
 			nonZeroGas = params.TxDataNonZeroGasEIP2028
 		}
-		if (math.MaxUint64-gas)/nonZeroGas < nz {
+
+		overflow, product = bits.Mul64(nz, nonZeroGas)
+		if overflow != 0 {
 			return 0, ErrGasUintOverflow
 		}
-		gas += nz * nonZeroGas
+		gas, overflow = bits.Add64(gas, product, 0)
+		if overflow != 0 {
+			return 0, ErrGasUintOverflow
+		}
 
 		z := uint64(len(data)) - nz
-		if (math.MaxUint64-gas)/params.TxDataZeroGas < z {
+		overflow, product = bits.Mul64(z, params.TxDataZeroGas)
+		if overflow != 0 {
 			return 0, ErrGasUintOverflow
 		}
-		gas += z * params.TxDataZeroGas
+		gas, overflow = bits.Add64(gas, product, 0)
+		if overflow != 0 {
+			return 0, ErrGasUintOverflow
+		}
 	}
 	if accessList != nil {
-		gas += uint64(len(accessList)) * params.TxAccessListAddressGas
-		gas += uint64(accessList.StorageKeys()) * params.TxAccessListStorageKeyGas
+		overflow, product = bits.Mul64(uint64(len(accessList)), params.TxAccessListAddressGas)
+		if overflow != 0 {
+			return 0, ErrGasUintOverflow
+		}
+		gas, overflow = bits.Add64(gas, product, 0)
+		if overflow != 0 {
+			return 0, ErrGasUintOverflow
+		}
+
+		overflow, product = bits.Mul64(uint64(accessList.StorageKeys()), params.TxAccessListStorageKeyGas)
+		if overflow != 0 {
+			return 0, ErrGasUintOverflow
+		}
+		gas, overflow = bits.Add64(gas, product, 0)
+		if overflow != 0 {
+			return 0, ErrGasUintOverflow
+		}
 	}
 	return gas, nil
 }
@@ -249,6 +277,9 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		} else if stNonce > msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooLow,
 				st.msg.From().Hex(), msgNonce, stNonce)
+		} else if stNonce+1 < stNonce {
+			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
+				st.msg.From().Hex(), stNonce)
 		}
 	}
 

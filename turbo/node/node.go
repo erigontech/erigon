@@ -3,13 +3,15 @@ package node
 
 import (
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli"
 )
@@ -52,21 +54,21 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
-	case params.RopstenChainName:
+	case networkname.RopstenChainName:
 		log.Info("Starting Erigon on Ropsten testnet...")
-	case params.RinkebyChainName:
+	case networkname.RinkebyChainName:
 		log.Info("Starting Erigon on Rinkeby testnet...")
-	case params.GoerliChainName:
+	case networkname.GoerliChainName:
 		log.Info("Starting Erigon on Görli testnet...")
-	case params.BSCChainName:
+	case networkname.BSCChainName:
 		log.Info("Starting Erigon on BSC mainnet...")
-	case params.ChapelChainName:
+	case networkname.ChapelChainName:
 		log.Info("Starting Erigon on Chapel testnet...")
-	case params.RialtoChainName:
+	case networkname.RialtoChainName:
 		log.Info("Starting Erigon on Chapel testnet...")
-	case params.DevChainName:
+	case networkname.DevChainName:
 		log.Info("Starting Erigon in ephemerasl dev mode...")
-	case "", params.MainnetChainName:
+	case "", networkname.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
 			log.Info("Starting Erigon on Ethereum mainnet...")
 		}

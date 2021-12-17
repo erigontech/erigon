@@ -1,4 +1,4 @@
-package download
+package sentry
 
 import (
 	"bytes"
@@ -80,7 +80,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Warn("[RecvUploadMessage]", "err", err)
+			log.Debug("[RecvUploadMessage]", "err", err)
 			continue
 		}
 	}
@@ -120,11 +120,8 @@ func RecvUploadMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsDecodeError(err) {
-				log.Debug("[RecvUploadMessage]: Handling incoming message", "error", err)
-			} else {
-				log.Warn("[RecvUploadMessage]: Handling incoming message", "error", err)
-			}
+			log.Debug("[RecvUploadMessage]: Handling incoming message", "error", err)
+
 		}
 		if wg != nil {
 			wg.Done()
@@ -211,11 +208,7 @@ func RecvUploadHeadersMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsDecodeError(err) {
-				log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
-			} else {
-				log.Warn("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
-			}
+			log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
 		}
 		if wg != nil {
 			wg.Done()
@@ -353,6 +346,7 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 		1024*1024, /* linkLimit */
 		engine,
 	)
+
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
@@ -449,7 +443,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H256, sentry direct.SentryClient) error {
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
-		return fmt.Errorf("decode 2 BlockHeadersPacket65: %w", err)
+		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Extract headers from the block
 	var highestBlock uint64
@@ -457,7 +451,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 	for _, header := range pkt {
 		headerRaw, err := rlpStream.Raw()
 		if err != nil {
-			return fmt.Errorf("decode 3 BlockHeadersPacket65: %w", err)
+			return fmt.Errorf("decode 3 BlockHeadersPacket66: %w", err)
 		}
 		number := header.Number.Uint64()
 		if number > highestBlock {
@@ -470,28 +464,43 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			Number:    number,
 		})
 	}
-
-	if segments, penalty, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
-		if penalty == headerdownload.NoPenalty {
-			var canRequestMore bool
-			for _, segment := range segments {
-				requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
-				canRequestMore = canRequestMore || requestMore
-				if len(penalties) > 0 {
-					cs.Penalize(ctx, penalties)
+	if segments, penaltyKind, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
+		if penaltyKind == headerdownload.NoPenalty {
+			if cs.Hd.POSSync() {
+				tx, err := cs.db.BeginRo(ctx)
+				defer tx.Rollback()
+				if err != nil {
+					return err
 				}
-			}
-
-			if canRequestMore {
-				currentTime := uint64(time.Now().Unix())
-				req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
-				if req != nil {
-					if _, ok := cs.SendHeaderRequest(ctx, req); ok {
-						cs.Hd.SentRequest(req, currentTime, 5 /* timeout */)
-						log.Trace("Sent request", "height", req.Number)
+				for _, segment := range segments {
+					if err := cs.Hd.ProcessSegmentPOS(segment, tx); err != nil {
+						return err
 					}
 				}
-				cs.Penalize(ctx, penalties)
+			} else {
+				var canRequestMore bool
+				for _, segment := range segments {
+					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
+					canRequestMore = canRequestMore || requestMore
+					if len(penalties) > 0 {
+						cs.Penalize(ctx, penalties)
+					}
+				}
+
+				if canRequestMore {
+					currentTime := uint64(time.Now().Unix())
+					req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
+					if req != nil {
+						if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+							// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+							cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+							log.Trace("Sent request", "height", req.Number)
+						}
+					}
+					if len(penalties) > 0 {
+						cs.Penalize(ctx, penalties)
+					}
+				}
 			}
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
@@ -614,7 +623,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	_, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{})
 	if err != nil {
 		if !isPeerNotFoundErr(err) {
-			return fmt.Errorf("send header response 65: %w", err)
+			return fmt.Errorf("send header response 66: %w", err)
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}
@@ -737,9 +746,7 @@ func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
 	}
 }
 
-// Methods of Core called by sentry
-
-func GrpcSentryClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
+func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {
 	// creating grpc client connection
 	var dialOpts []grpc.DialOption
 

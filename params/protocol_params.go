@@ -24,8 +24,9 @@ var (
 )
 
 const (
-	MinGasLimit     uint64 = 5000    // Minimum the gas limit may ever be.
-	GenesisGasLimit uint64 = 4712388 // Gas limit of the Genesis block.
+	MinGasLimit          uint64 = 5000               // Minimum the gas limit may ever be.
+	MaxGasLimit          uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
+	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32     // Maximum size extra data may be after Genesis.
 	ForkIDSize            uint64 = 4      // The length of fork id

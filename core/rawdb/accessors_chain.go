@@ -1048,6 +1048,32 @@ func ReadBlockByHash(db kv.Tx, hash common.Hash) (*types.Block, error) {
 	return ReadBlock(db, hash, *number), nil
 }
 
+func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
+	data, err := db.GetOne(kv.Issuance, dbutils.EncodeBlockNumber(number))
+	if err != nil {
+		return nil, err
+	}
+
+	return new(big.Int).SetBytes(data), nil
+}
+
+func WriteTotalIssued(db kv.Putter, number uint64, totalIssued *big.Int) error {
+	return db.Put(kv.Issuance, dbutils.EncodeBlockNumber(number), totalIssued.Bytes())
+}
+
+func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
+	data, err := db.GetOne(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...))
+	if err != nil {
+		return nil, err
+	}
+
+	return new(big.Int).SetBytes(data), nil
+}
+
+func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
+	return db.Put(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...), totalBurnt.Bytes())
+}
+
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {

@@ -20,11 +20,14 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"os"
 	"time"
 
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
+
 	metrics2 "github.com/VictoriaMetrics/metrics"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -35,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (

@@ -14,15 +14,13 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-
-	"golang.org/x/crypto/sha3"
 )
 
 // Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
 var (
-	SerenityDifficulty = common.Big0                // Serenity block's difficulty is always 0.
-	SerenityNonce      = types.BlockNonce{}         // Serenity chain's nonces are 0.
-	serenityCap        = uint64(0x7fffffffffffffff) // Serenity's difficulty cap.
+	SerenityDifficulty = common.Big0        // Serenity block's difficulty is always 0.
+	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
+	RewardSerenity     = big.NewInt(300000000000000000)
 )
 
 var (
@@ -32,31 +30,50 @@ var (
 	// errInvalidNonce is returned if the nonce is non-zero.
 	errInvalidNonce = errors.New("invalid nonce")
 
-	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
-	errInvalidMixDigest = errors.New("non-zero mix digest")
 	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
+
+	errOlderBlockTime = errors.New("timestamp older than parent")
 )
 
 // Serenity Consensus Engine for the Execution Layer.
-// Note: the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
-type Serenity struct{}
+// Serenity is a consensus engine that combines the eth1 consensus and proof-of-stake
+// algorithm. The transition rule is described in the eth1/2 merge spec:
+// https://eips.ethereum.org/EIPS/eip-3675
+//
+// Note: After the Merge the work is mostly done on the Consensus Layer, so nothing much is to be added on this side.
+type Serenity struct {
+	eth1Engine consensus.Engine // Original consensus engine used in eth1, e.g. ethash or clique
+}
 
-// New creates a new instance of the Serenity Engine
-func New() *Serenity {
-	return &Serenity{}
+// New creates a new instance of the Serenity Engine with the given embedded eth1 engine.
+func New(eth1Engine consensus.Engine) *Serenity {
+	if _, ok := eth1Engine.(*Serenity); ok {
+		panic("nested consensus engine")
+	}
+	return &Serenity{eth1Engine: eth1Engine}
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 func (s *Serenity) Author(header *types.Header) (common.Address, error) {
+	if !IsPoSHeader(header) {
+		return s.eth1Engine.Author(header)
+	}
 	return header.Coinbase, nil
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum serenity engine.
 func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-	// Retrieve parent from the chain
+	reached, err := IsTTDReached(chain, header.ParentHash, header.Number.Uint64()-1)
+	if err != nil {
+		return err
+	}
+	if !reached {
+		return s.eth1Engine.VerifyHeader(chain, header, seal)
+	}
+	// Short circuit if the parent is not known
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
@@ -65,20 +82,12 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 	return s.verifyHeader(chain, header, parent)
 }
 
-// VerifyHeader checks whether a bunch of headers conforms to the consensus rules of the
-// stock Ethereum serenity engine.
-func (s *Serenity) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	for _, header := range headers {
-		if err := s.VerifyHeader(chain, header, false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
+	if !IsPoSHeader(header) {
+		return s.eth1Engine.VerifyUncles(chain, header, uncles)
+	}
 	if len(uncles) > 0 {
 		return errors.New("uncles not allowed")
 	}
@@ -87,8 +96,24 @@ func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Heade
 
 // Prepare makes sure difficulty and nonce are correct
 func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+	reached, err := IsTTDReached(chain, header.ParentHash, header.Number.Uint64()-1)
+	if err != nil {
+		return err
+	}
+	if !reached {
+		return s.eth1Engine.Prepare(chain, header, state)
+	}
 	header.Difficulty = SerenityDifficulty
-	header.Nonce = types.BlockNonce{}
+	header.Nonce = SerenityNonce
+	return nil
+}
+
+func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs *types.Transactions, uncles []*types.Header, r *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
+	syscall consensus.SystemCall) error {
+	if !IsPoSHeader(header) {
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
+	}
 	return nil
 }
 
@@ -96,45 +121,37 @@ func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types
 	state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header,
 	receipts *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
+	if !IsPoSHeader(header) {
+		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
+	}
 	return types.NewBlock(header, *txs, uncles, *receipts), nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
-
-	enc := []interface{}{
-		header.ParentHash,
-		header.UncleHash,
-		header.Coinbase,
-		header.Root,
-		header.TxHash,
-		header.ReceiptHash,
-		header.Bloom,
-		header.Difficulty,
-		header.Number,
-		header.GasLimit,
-		header.GasUsed,
-		header.Time,
-		header.Extra,
-	}
-	if header.Eip1559 {
-		enc = append(enc, header.BaseFee)
-	}
-	rlp.Encode(hasher, enc)
-	hasher.Sum(hash[:0])
-	return hash
+	return s.eth1Engine.SealHash(header)
 }
 
 func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
+	reached, err := IsTTDReached(chain, parentHash, parentNumber)
+	if err != nil {
+		return nil
+	}
+	if !reached {
+		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal)
+	}
 	return SerenityDifficulty
 }
 
-// verifyHeader checks whether a bunch of headers conforms to the consensus rules of the
-// stock Ethereum serenity engine.
+// verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
+// stock Ethereum consensus engine with EIP-3675 modifications.
 func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header) error {
 
-	if len(header.Extra) > 32 {
-		return fmt.Errorf("extra-data longer than 32 bytes (%d)", len(header.Extra))
+	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
+		return fmt.Errorf("extra-data longer than %d bytes (%d)", params.MaximumExtraDataSize, len(header.Extra))
+	}
+
+	if header.Time <= parent.Time {
+		return errOlderBlockTime
 	}
 
 	if header.Difficulty.Cmp(SerenityDifficulty) != 0 {
@@ -146,59 +163,30 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 
 	// Verify that the gas limit is within cap
-	if header.GasLimit > serenityCap {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, serenityCap)
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
 		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
 	}
-	// Verify the block's gas usage and (if applicable) verify the base fee.
-	if !chain.Config().IsLondon(header.Number.Uint64()) {
-		// Verify BaseFee not present before EIP-1559 fork.
-		if header.BaseFee != nil {
-			return fmt.Errorf("invalid baseFee before fork: have %d, expected 'nil'", header.BaseFee)
-		}
-		// Verify that the gas limit remains within allowed bounds
-		diff := int64(parent.GasLimit) - int64(header.GasLimit)
-		if diff < 0 {
-			diff *= -1
-		}
-		limit := parent.GasLimit / params.GasLimitBoundDivisor
-		if uint64(diff) >= limit || header.GasLimit < params.MinGasLimit {
-			return fmt.Errorf("invalid gas limit: have %d, want %d += %d", header.GasLimit, parent.GasLimit, limit)
-		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
-		// Verify the header's EIP-1559 attributes.
-		return err
-	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(big.NewInt(1)) != 0 {
+	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
 		return consensus.ErrInvalidNumber
-	}
-
-	if header.MixDigest != (common.Hash{}) {
-		return errInvalidMixDigest
 	}
 
 	if header.UncleHash != types.EmptyUncleHash {
 		return errInvalidUncleHash
 	}
-	return nil
-}
 
-// Methods now not needed for Serenity |
-//                                     |
-//                                     v
-
-func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs *types.Transactions, uncles []*types.Header, r *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
-	syscall consensus.SystemCall) error {
-	return nil
+	return misc.VerifyEip1559Header(chain.Config(), parent, header)
 }
 
 func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+	if !IsPoSHeader(block.Header()) {
+		return s.eth1Engine.Seal(chain, block, results, stop)
+	}
 	return nil
 }
 
@@ -210,9 +198,33 @@ func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainH
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {
-	return []rpc.API{}
+	return s.eth1Engine.APIs(chain)
 }
 
 func (s *Serenity) Close() error {
-	return nil
+	return s.eth1Engine.Close()
+}
+
+// IsPoSHeader reports the header belongs to the PoS-stage with some special fields.
+// This function is not suitable for a part of APIs like Prepare or CalcDifficulty
+// because the header difficulty is not set yet.
+func IsPoSHeader(header *types.Header) bool {
+	if header.Difficulty == nil {
+		panic("IsPoSHeader called with invalid difficulty")
+	}
+	return header.Difficulty.Cmp(SerenityDifficulty) == 0
+}
+
+// IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
+// It depends on the parentHash already being stored in the database.
+// If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.
+func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, number uint64) (bool, error) {
+	if chain.Config().TerminalTotalDifficulty == nil {
+		return false, nil
+	}
+	td := chain.GetTd(parentHash, number)
+	if td == nil {
+		return false, consensus.ErrUnknownAncestorTD
+	}
+	return td.Cmp(chain.Config().TerminalTotalDifficulty) >= 0, nil
 }

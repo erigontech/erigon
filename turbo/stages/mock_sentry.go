@@ -13,6 +13,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -20,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -60,7 +61,7 @@ type MockSentry struct {
 	MiningSync    *stagedsync.Sync
 	PendingBlocks chan *types.Block
 	MinedBlocks   chan *types.Block
-	downloader    *download.ControlServerImpl
+	downloader    *sentry.ControlServerImpl
 	Key           *ecdsa.PrivateKey
 	Genesis       *types.Block
 	SentryClient  direct.SentryClient
@@ -260,7 +261,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
+	mock.downloader, err = sentry.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -271,10 +272,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockReader := snapshotsync.NewBlockReader()
 	var allSnapshots *snapshotsync.AllSnapshots
+	var snapshotsDownloader proto_downloader.DownloaderClient
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
 			mock.downloader.Hd,
+			make(chan privateapi.ExecutionStatus),
 			*mock.ChainConfig,
 			sendHeaderRequest,
 			propagateNewBlockHashes,
@@ -284,7 +287,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			nil,
 			nil,
 			allSnapshots,
+			snapshotsDownloader,
 			blockReader,
+			mock.tmpdir,
 		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
@@ -296,7 +301,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BatchSize,
 			allSnapshots,
 			blockReader,
-		), stagedsync.StageDifficultyCfg(mock.DB, mock.tmpdir, nil, blockReader),
+		), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig),
+			stagedsync.StageDifficultyCfg(mock.DB, mock.tmpdir, nil, blockReader),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, allSnapshots),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
@@ -342,13 +348,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	)
 
 	mock.StreamWg.Add(1)
-	go download.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	go sentry.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	go sentry.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go download.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	go sentry.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 
 	return mock

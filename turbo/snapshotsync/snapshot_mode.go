@@ -1,5 +1,6 @@
 package snapshotsync
 
+/*
 import (
 	"fmt"
 
@@ -83,3 +84,4 @@ func SnapshotModeFromString(flags string) (SnapshotMode, error) {
 	}
 	return mode, nil
 }
+*/

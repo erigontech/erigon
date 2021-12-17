@@ -22,14 +22,11 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -115,80 +112,6 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 	}
 	// Sanity checks passed, do a proper verification
 	return ethash.verifyHeader(chain, header, parent, false, seal)
-}
-
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
-// concurrently. The method returns a quit channel to abort the operations and
-// a results channel to retrieve the async verifications.
-func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	if len(headers) == 0 {
-		return nil
-	}
-
-	// Spawn as many workers as allowed threads
-	workers := runtime.GOMAXPROCS(0)
-	if len(headers) < workers {
-		workers = len(headers)
-	}
-
-	// Create a task channel and spawn the verifiers
-	var (
-		errors = make([]error, len(headers))
-	)
-
-	wg := sync.WaitGroup{}
-
-	input := new(int64)
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer debug.LogPanic()
-			defer wg.Done()
-			var index int64
-			for {
-				index = atomic.AddInt64(input, 1) - 1
-				if int(index) > len(headers)-1 {
-					return
-				}
-				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
-				if errors[index] != nil {
-					return
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	for _, err := range errors {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int) error {
-	var parent *types.Header
-	if index == 0 {
-		parent = chain.GetHeader(headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	} else if headers[index-1].Hash() == headers[index].ParentHash {
-		parent = headers[index-1]
-	}
-	if parent == nil {
-		if index-1 >= 0 && index-1 <= len(headers)-1 {
-			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers), "index-1", headers[index-1].Number.Uint64(), "index", headers[index].Number.Uint64())
-		} else {
-			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers))
-		}
-
-		return consensus.ErrUnknownAncestor
-	}
-	if chain.GetHeader(headers[index].Hash(), headers[index].Number.Uint64()) != nil {
-		return nil // known block
-	}
-	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index])
 }
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
@@ -285,9 +208,8 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
 	}
 	// Verify that the gas limit is <= 2^63-1
-	cap := uint64(0x7fffffffffffffff)
-	if header.GasLimit > cap {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, cap)
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
