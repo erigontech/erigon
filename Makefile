@@ -95,20 +95,10 @@ evm:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
-seeder:
-	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+downloader:
+	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
-
-sndownloader:
-	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
-
-tracker:
-	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
+	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
 
 devnettest:
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
@@ -117,8 +107,13 @@ devnettest:
 
 db-tools:
 	@echo "Building db-tools"
-	rm -rf libmdbx # hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+
+	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	rm -rf libmdbx
+	rm -rf cmd/downloader/trackers/trackerslist
+	rm -rf turbo/snapshotsync/snapshothashes/erigon-snapshots
 	git submodule update --init --recursive --force
+
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)

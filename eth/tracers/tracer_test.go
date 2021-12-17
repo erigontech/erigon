@@ -48,7 +48,8 @@ type dummyStatedb struct {
 	state.IntraBlockState
 }
 
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
+func (*dummyStatedb) GetRefund() uint64                           { return 1337 }
+func (*dummyStatedb) GetBalance(addr common.Address) *uint256.Int { return uint256.NewInt(0) }
 
 type vmContext struct {
 	blockCtx vm.BlockContext
@@ -71,13 +72,9 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	if err := tracer.CaptureStart(0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.Code); err != nil {
-		return nil, err
-	}
+	tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.Code)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	if err1 := tracer.CaptureEnd(0, ret, startGas, contract.Gas, 1, err); err1 != nil {
-		return nil, err1
-	}
+	tracer.CaptureEnd(0, ret, startGas, contract.Gas, 1, err)
 	if err != nil {
 		return nil, err
 	}
@@ -85,25 +82,26 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 }
 
 func TestTracer(t *testing.T) {
-	execTracer := func(code string) []byte {
+	execTracer := func(code string) ([]byte, string) {
 		t.Helper()
 		ctx := &vmContext{blockCtx: vm.BlockContext{
 			BlockNumber:     1,
 			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
-		tracer, err := New(code, ctx.txCtx)
+		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)
 		}
 		ret, err := runTrace(tracer, ctx)
 		if err != nil {
-			t.Fatal(err)
+			return nil, err.Error()
 		}
-		return ret
+		return ret, ""
 	}
 	for i, tt := range []struct {
 		code string
 		want string
+		fail string
 	}{
 		{ // tests that we don't panic on bad arguments to memory access
 			code: "{depths: [], step: function(log) { this.depths.push(log.memory.slice(-1,-2)); }, fault: function() {}, result: function() { return this.depths; }}",
@@ -126,10 +124,13 @@ func TestTracer(t *testing.T) {
 		}, { // tests intrinsic gas
 			code: "{depths: [], step: function() {}, fault: function() {}, result: function(ctx) { return ctx.gasPrice+'.'+ctx.gasUsed+'.'+ctx.intrinsicGas; }}",
 			want: `"100000.6.21000"`,
+		}, { // tests too deep object / serialization crash
+			code: "{step: function() {}, fault: function() {}, result: function() { var o={}; var x=o; for (var i=0; i<1000; i++){	o.foo={}; o=o.foo; } return x; }}",
+			fail: "RangeError: json encode recursion limit    in server-side tracer function 'result'",
 		},
 	} {
-		if have := execTracer(tt.code); tt.want != string(have) {
-			t.Errorf("testcase %d: expected return value to be %s got %s\n\tcode: %v", i, tt.want, string(have), tt.code)
+		if have, err := execTracer(tt.code); tt.want != string(have) || tt.fail != err {
+			t.Errorf("testcase %d: expected return value to be '%s' got '%s', error to be '%s' got '%s'\n\tcode: %v", i, tt.want, string(have), tt.fail, err, tt.code)
 		}
 	}
 }
@@ -139,7 +140,7 @@ func TestHalt(t *testing.T) {
 
 	timeout := errors.New("stahp")
 	vmctx := testCtx()
-	tracer, err := New("{step: function() { while(1); }, result: function() { return null; }}", vmctx.txCtx)
+	tracer, err := New("{step: function() { while(1); }, result: function() { return null; }}", new(Context))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +156,7 @@ func TestHalt(t *testing.T) {
 }
 
 func TestHaltBetweenSteps(t *testing.T) {
-	vmctx := testCtx()
-	tracer, err := New("{step: function() {}, fault: function() {}, result: function() { return null; }}", vmctx.txCtx)
+	tracer, err := New("{step: function() {}, fault: function() {}, result: function() { return null; }}", new(Context))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,12 +166,51 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false, false)
 
-	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	tracer.CaptureState(env, 0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.CaptureState(env, 0, 0, 0, 0, nil, nil, nil, contract, 0, nil) //nolint:errcheck
+	tracer.CaptureState(env, 0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
 
 	if _, err := tracer.GetResult(); err.Error() != timeout.Error() {
 		t.Errorf("Expected timeout error, got %v", err)
+	}
+}
+
+// TestNoStepExec tests a regular value transfer (no exec), and accessing the statedb
+// in 'result'
+func TestNoStepExec(t *testing.T) {
+	runEmptyTrace := func(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
+		env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+		startGas := uint64(10000)
+		contract := vm.NewContract(account{}, account{}, uint256.NewInt(1), startGas, true, false)
+		tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CALLT, nil, 0, big.NewInt(0), nil)
+		tracer.CaptureEnd(0, nil, startGas-contract.Gas, 1, 0, nil)
+		return tracer.GetResult()
+	}
+	execTracer := func(code string) []byte {
+		t.Helper()
+		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		tracer, err := New(code, new(Context))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ret, err := runEmptyTrace(tracer, ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ret
+	}
+	for i, tt := range []struct {
+		code string
+		want string
+	}{
+		{ // tests that we don't panic on accessing the db methods
+			code: "{depths: [], step: function() {}, fault: function() {},  result: function(ctx, db){ return db.getBalance(ctx.to)} }",
+			want: `"0"`,
+		},
+	} {
+		if have := execTracer(tt.code); tt.want != string(have) {
+			t.Errorf("testcase %d: expected return value to be %s got %s\n\tcode: %v", i, tt.want, string(have), tt.code)
+		}
 	}
 }
