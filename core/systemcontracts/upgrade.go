@@ -35,7 +35,6 @@ const (
 )
 
 var (
-	GenesisHash common.Hash
 	//upgrade config
 	ramanujanUpgrade = make(map[string]*Upgrade)
 
@@ -317,13 +316,13 @@ func UpgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 		return
 	}
 	var network string
-	switch GenesisHash {
+	switch config.ChainName {
 	/* Add mainnet genesis hash */
-	case params.BSCGenesisHash:
+	case params.BSCChainName:
 		network = mainNet
-	case params.ChapelGenesisHash:
+	case params.ChapelChainName:
 		network = chapelNet
-	case params.RialtoGenesisHash:
+	case params.RialtoChainName:
 		network = rialtoNet
 	default:
 		network = defaultNet
