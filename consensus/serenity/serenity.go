@@ -86,17 +86,17 @@ func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Heade
 }
 
 // Prepare makes sure difficulty and nonce are correct
-func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	header.Difficulty = SerenityDifficulty
 	header.Nonce = types.BlockNonce{}
 	return nil
 }
 
 func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header,
-	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header,
-	receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
+	state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header,
+	receipts *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
-	return types.NewBlock(header, txs, uncles, receipts), nil
+	return types.NewBlock(header, *txs, uncles, *receipts), nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
@@ -193,7 +193,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 //                                     v
 
 func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
+	txs *types.Transactions, uncles []*types.Header, r *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall) error {
 	return nil
 }

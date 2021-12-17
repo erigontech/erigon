@@ -543,22 +543,25 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		log.Error("Cannot start mining without etherbase", "err", err)
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
-	if clique, ok := s.engine.(*clique.Clique); ok {
+	if c, ok := s.engine.(*clique.Clique); ok {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+		c.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
 	}
-	if _, ok := s.engine.(*parlia.Parlia); ok {
+	if p, ok := s.engine.(*parlia.Parlia); ok {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
-		panic("validator mode for parlia consensus is not yet supported")
+
+		p.Authorize(eb, func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error) {
+			return crypto.Sign(payload, cfg.SigKey)
+		})
 	}
 
 	if s.chainConfig.ChainID.Uint64() > 10 {

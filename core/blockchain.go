@@ -162,10 +162,15 @@ func ExecuteBlockEphemerally(
 
 	var newBlock *types.Block
 	if !vmConfig.ReadOnly {
-		var err error
-		if newBlock, err = FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, usedGas); err != nil {
+		txs := block.Transactions()
+		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), &txs, block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, usedGas, false); err != nil {
 			return nil, err
 		}
+		// We need repack this block because transactions and receipts might be changed by consensus, and
+		// it won't pass receipts hash or bloom verification
+		newBlock = types.NewBlock(block.Header(), txs, block.Uncles(), receipts)
+	} else {
+		newBlock = block
 	}
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
@@ -247,20 +252,40 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, gasUsed *uint64) (*types.Block, error) {
+func FinalizeBlockExecution(
+	engine consensus.Engine,
+	stateReader state.StateReader,
+	header *types.Header,
+	txs *types.Transactions,
+	uncles []*types.Header,
+	stateWriter state.WriterWithChangeSets,
+	cc *params.ChainConfig,
+	ibs *state.IntraBlockState,
+	receipts *types.Receipts,
+	e consensus.EpochReader,
+	headerReader consensus.ChainHeaderReader,
+	gasUsed *uint64,
+	mining bool,
+) error {
 
-	// We're doing this hack for BSC to avoid changing consensus interfaces. BSC modifies txs and receipts by appending
+	// We're doing this hack for BSC to avoid changing consensus interfaces a lot. BSC modifies txs and receipts by appending
 	// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
 	// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
 	// used by system transactions we just override. Of course, we write used by block gas back. It also always true
 	// that used gas by block is always equal to original's block header gas, and it's checked by receipts root verification
 	// otherwise it causes block verification error.
 	header.GasUsed = *gasUsed
-	block, err := engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, *receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
-	}, nil)
+	}
+	var err error
+	if mining {
+		_, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, syscall)
+	} else {
+		err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
+	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 	*gasUsed = header.GasUsed
 
@@ -272,27 +297,27 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 			var err error
 			originalSystemAcc, err = stateReader.ReadAccountData(state.SystemAddress)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
-		return nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		return fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
 	if originalSystemAcc != nil { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
 		acc := accounts.NewAccount()
 		acc.Nonce = 0
 		if err := stateWriter.UpdateAccountData(state.SystemAddress, originalSystemAcc, &acc); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
-		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+		return fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
-	return block, nil
+	return nil
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {

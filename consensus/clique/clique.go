@@ -297,7 +297,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -369,7 +369,7 @@ func (c *Clique) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header, r *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 	return nil
@@ -377,13 +377,13 @@ func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, stat
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts,
+func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header, receipts *types.Receipts,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts), nil
+	return types.NewBlock(header, *txs, nil, *receipts), nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
