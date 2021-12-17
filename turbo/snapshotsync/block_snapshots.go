@@ -212,8 +212,9 @@ func (s *AllSnapshots) ReopenSegments() error {
 			continue
 		}
 		if from != prevTo { // no gaps
-			log.Debug("[open snapshots] snapshot missed before", "file", f)
-			break
+			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, from)
+			//log.Debug("[open snapshots] snapshot missed before", "file", f)
+			//break
 		}
 		prevTo = to
 
