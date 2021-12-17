@@ -383,7 +383,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 		// connect to Downloader
 		backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
-
 		if err != nil {
 			return nil, err
 		}
