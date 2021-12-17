@@ -28,10 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var (
-	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
-)
-
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
 type ChainHeaderReader interface {
@@ -105,7 +101,7 @@ type Engine interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error)
+	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall) error
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
 	// rewards) and assembles the final block.
@@ -113,7 +109,7 @@ type Engine interface {
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
 	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction,
-		uncles []*types.Header, receipts types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, []*types.Receipt, error)
+		uncles []*types.Header, receipts types.Receipts, e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.
@@ -144,14 +140,4 @@ type PoW interface {
 
 	// Hashrate returns the current mining hashrate of a PoW consensus engine.
 	Hashrate() float64
-}
-
-// PoSA is a consensus engine based on proof-of-stake-authority used by Binance Smart Chain.
-type PoSA interface {
-	Engine
-
-	IsSystemTransaction(tx *types.Transaction, header *types.Header) (bool, error)
-	IsSystemContract(to *common.Address) bool
-	EnoughDistance(chain ChainReader, header *types.Header) bool
-	IsLocalBlock(header *types.Header) bool
 }
