@@ -222,9 +222,12 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 }
 
 func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
+	if len(reply.RplBlock) == 0 {
+		return
+	}
 	b := &types.Block{}
 	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
-		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
+		log.Warn("HandlePendingBlock rpc filters, unprocessable payload", "err", err)
 	}
 
 	ff.mu.Lock()
@@ -263,9 +266,12 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 }
 
 func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
+	if len(reply.RplLogs) == 0 {
+		return
+	}
 	l := []*types.Log{}
 	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
-		log.Warn("OnNewTx rpc filters, unprocessable payload", "err", err)
+		log.Warn("HandlePendingLogs rpc filters, unprocessable payload", "err", err)
 	}
 
 	ff.mu.RLock()
@@ -338,6 +344,9 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	switch event.Type {
 	case remote.Event_HEADER:
 		payload := event.Data
+		if len(payload) == 0 {
+			return
+		}
 		var header types.Header
 
 		err := rlp.Decode(bytes.NewReader(payload), &header)
@@ -385,6 +394,9 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 
 	txs := make([]types.Transaction, len(reply.RplTxs))
 	for i, rlpTx := range reply.RplTxs {
+		if len(rlpTx) == 0 {
+			continue
+		}
 		var decodeErr error
 		s := rlp.NewStream(bytes.NewReader(rlpTx), uint64(len(rlpTx)))
 		txs[i], decodeErr = types.DecodeTransaction(s)
