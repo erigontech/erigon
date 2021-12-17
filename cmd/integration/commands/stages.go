@@ -13,6 +13,10 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -36,9 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
 )
 
 var cmdStageHeaders = &cobra.Command{
@@ -1006,13 +1007,13 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.GoerliChainName:
 		chainConfig = params.GoerliChainConfig
 		genesis = core.DefaultGoerliGenesisBlock()
-	case params.BSCChainName:
+	case networkname.BSCChainName:
 		chainConfig = params.BSCChainConfig
 		genesis = core.DefaultBSCGenesisBlock()
-	case params.ChapelChainName:
+	case networkname.ChapelChainName:
 		chainConfig = params.ChapelChainConfig
 		genesis = core.DefaultChapelGenesisBlock()
-	case params.RialtoChainName:
+	case networkname.RialtoChainName:
 		chainConfig = params.RialtoChainConfig
 		genesis = core.DefaultChapelGenesisBlock()
 	case networkname.RinkebyChainName:
