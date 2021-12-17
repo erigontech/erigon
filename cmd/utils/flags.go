@@ -32,11 +32,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
+
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/params/networkname"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -53,7 +56,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -606,12 +608,14 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	var urls []string
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case params.MainnetChainName:
+			urls = params.MainnetBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
@@ -645,13 +649,14 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 // setBootstrapNodesV5 creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	var urls []string
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
-
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case params.MainnetChainName:
+			urls = params.MainnetBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
@@ -866,9 +871,15 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		setSigKey(ctx, cfg)
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == networkname.FermionChainName {
+	chainsWithValidatorMode := map[string]bool{
+		params.FermionChainName: true,
+		params.BSCChainName:     true,
+		params.RialtoChainName:  true,
+		params.ChapelChainName:  true,
+	}
+	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
-			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, networkname.FermionChainName, MiningEnabledFlag.Name))
+			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
 		}
 		setSigKey(ctx, cfg)
 		if cfg.Miner.SigKey != nil {
@@ -913,13 +924,13 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		cfg.NetRestrict = list
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
-		// --dev mode can't use p2p networking.
-		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
-		cfg.ListenAddr = ":0"
-		cfg.NoDiscovery = true
-		cfg.DiscoveryV5 = false
-	}
+	//if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
+	// --dev mode can't use p2p networking.
+	// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+	//cfg.ListenAddr = ":0"
+	//cfg.NoDiscovery = true
+	//cfg.DiscoveryV5 = false
+	//}
 }
 
 // SetNodeConfig applies node-related command line flags to the config.
@@ -1391,8 +1402,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		log.Info("Using developer account", "address", developer)
 
 		// Create a new developer genesis block or reuse existing one
-		cfg.Genesis = core.DeveloperGenesisBlock(uint64(ctx.GlobalInt(DeveloperPeriodFlag.Name)), developer)
-		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Clique.Period)
+		cfg.Genesis = core.DefaultChapelGenesisBlock()
+		extraData := make([]byte, 32+20+65)
+		copy(extraData[32:], developer[:])
+		cfg.Genesis.ExtraData = extraData
+		log.Info("Using custom developer period", "seconds", cfg.Genesis.Config.Parlia.Period)
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}

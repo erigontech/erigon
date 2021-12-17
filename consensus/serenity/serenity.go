@@ -95,13 +95,13 @@ func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Heade
 }
 
 // Prepare makes sure difficulty and nonce are correct
-func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	reached, err := IsTTDReached(chain, header.ParentHash, header.Number.Uint64()-1)
 	if err != nil {
 		return err
 	}
 	if !reached {
-		return s.eth1Engine.Prepare(chain, header)
+		return s.eth1Engine.Prepare(chain, header, state)
 	}
 	header.Difficulty = SerenityDifficulty
 	header.Nonce = SerenityNonce
@@ -109,7 +109,7 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 }
 
 func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
+	txs *types.Transactions, uncles []*types.Header, r *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall) error {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
@@ -118,13 +118,13 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 }
 
 func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header,
-	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header,
-	receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
+	state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header,
+	receipts *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
 	syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
 	}
-	return types.NewBlock(header, txs, uncles, receipts), nil
+	return types.NewBlock(header, *txs, uncles, *receipts), nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {

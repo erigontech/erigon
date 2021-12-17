@@ -516,7 +516,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 
 // Prepare implements consensus.Engine, initializing the difficulty field of a
 // header to conform to the ethash protocol. The changes are done inline.
-func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
@@ -530,7 +530,7 @@ func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.Cha
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
-func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header, r *types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
 	return nil
@@ -538,13 +538,13 @@ func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header,
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
-func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts,
+func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs *types.Transactions, uncles []*types.Header, r *types.Receipts,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 
 	// Finalize block
-	ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
+	_ = ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, txs, uncles, r), nil
+	return types.NewBlock(header, *txs, uncles, *r), nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
