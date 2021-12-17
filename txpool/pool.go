@@ -520,7 +520,7 @@ func (p *TxPool) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 	rlpTx, _, _, err := p.getRlpLocked(tx, hash)
-	return rlpTx, err
+	return common.Copy(rlpTx), err
 }
 func (p *TxPool) AppendLocalHashes(buf []byte) []byte {
 	p.lock.RLock()
@@ -1048,6 +1048,9 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*TxSlot, pending *Pending
 			if mt.Tx.nonce > nonce {
 				return false
 			}
+			if mt.Tx.traced {
+				log.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IdHash, mt.Tx.senderID, mt.currentSubPool))
+			}
 			toDel = append(toDel, mt)
 			// del from sub-pool
 			switch mt.currentSubPool {
@@ -1105,7 +1108,24 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 	minTip := uint64(math.MaxUint64)
 	byNonce.ascend(senderID, func(mt *metaTx) bool {
 		if mt.Tx.traced {
-			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%b", mt.Tx.IdHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
+			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IdHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
+		}
+		if senderNonce > mt.Tx.nonce {
+			if mt.Tx.traced {
+				log.Info(fmt.Sprintf("TX TRACING: removing due to low nonce for idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IdHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
+			}
+			// del from sub-pool
+			switch mt.currentSubPool {
+			case PendingSubPool:
+				pending.UnsafeRemove(mt)
+			case BaseFeeSubPool:
+				baseFee.UnsafeRemove(mt)
+			case QueuedSubPool:
+				queued.UnsafeRemove(mt)
+			default:
+				//already removed
+			}
+			return true
 		}
 		minFeeCap = min(minFeeCap, mt.Tx.feeCap)
 		mt.minFeeCap = minFeeCap
