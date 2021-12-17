@@ -35,6 +35,7 @@ import (
 var (
 	datadir           string
 	seeding           bool
+	asJson            bool
 	downloaderApiAddr string
 )
 
@@ -48,6 +49,7 @@ func init() {
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 
 	withDatadir(printInfoHashes)
+	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", true, "Print in json format (default: toml)")
 	rootCmd.AddCommand(printInfoHashes)
 }
 
@@ -156,7 +158,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 }
 
 var printInfoHashes = &cobra.Command{
-	Use:     "print_info_hashes",
+	Use:     "print_torrent_files",
 	Example: "go run ./cmd/downloader print_info_hashes --datadir <your_datadir> ",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		snapshotsDir := path.Join(datadir, "snapshots")
