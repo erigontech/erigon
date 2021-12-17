@@ -207,10 +207,6 @@ func (s *AllSnapshots) ReopenSegments() error {
 		if to == prevTo {
 			continue
 		}
-		if from > s.cfg.ExpectBlocks {
-			log.Debug("[open snapshots] skip snapshot because node expect less blocks in snapshots", "file", f)
-			continue
-		}
 		if from != prevTo { // no gaps
 			log.Debug("[open snapshots] snapshot missed before", "file", f)
 			break
