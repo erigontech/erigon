@@ -1019,9 +1019,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
-	case networkname.BSCMainnetChainName:
-		chainConfig = params.BSCMainnetChainConfig
-		genesis = core.DefaultBSCMainnetGenesisBlock()
 	}
 	return genesis, chainConfig
 }
