@@ -26,12 +26,17 @@ import (
 )
 
 var activators = map[int]func(*JumpTable){
-	//3529: enable3529,
-	//3198: enable3198,
+	3529: enable3529,
+	3198: enable3198,
 	2929: enable2929,
 	2200: enable2200,
 	1884: enable1884,
 	1344: enable1344,
+}
+
+func ApplyBinanceSmartChainEIPs() {
+	delete(activators, 3529)
+	delete(activators, 3198)
 }
 
 // EnableEIP enables the given EIP on the config.

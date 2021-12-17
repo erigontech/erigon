@@ -21,8 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/consensus/parlia"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"math/big"
 	"os"
 	"path"
@@ -46,6 +44,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
+	"github.com/ledgerwatch/erigon/consensus/parlia"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/download"
 	"github.com/ledgerwatch/erigon/common"
@@ -71,9 +75,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -170,7 +171,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
-	systemcontracts.GenesisHash = genesis.Hash()
+	// Apply special hacks for BSC params
+	if chainConfig.Parlia != nil {
+		params.ApplyBinanceSmartChainParams()
+		vm.ApplyBinanceSmartChainEIPs()
+	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
