@@ -70,3 +70,9 @@ docker-compose.dev.yml
 
 libmdbx/build/*
 tests/testdata/*
+
+config.toml
+genesis.json
+datadir/
+erigon
+integration

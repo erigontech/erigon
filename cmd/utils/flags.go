@@ -618,6 +618,12 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
+		case params.BSCChainName:
+			urls = params.BscBootnodes
+		case params.ChapelChainName:
+			urls = params.ChapelBootnodes
+		case params.RialtoChainName:
+			urls = params.RialtoBootnodes
 		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
@@ -652,6 +658,12 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.RinkebyBootnodes
 		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
+		case params.BSCChainName:
+			urls = params.BscBootnodes
+		case params.ChapelChainName:
+			urls = params.ChapelBootnodes
+		case params.RialtoChainName:
+			urls = params.RialtoBootnodes
 		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
@@ -671,7 +683,21 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 }
 
 func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
-	cfg.StaticNodes, _ = appendCfgUrlListNodes(cfg.StaticNodes, ctx, StaticPeersFlag.Name, log.Error)
+	var urls []string
+	if ctx.GlobalIsSet(StaticPeersFlag.Name) {
+		urls = SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
+	} else {
+		chain := ctx.GlobalString(ChainFlag.Name)
+		switch chain {
+		case params.BSCChainName:
+			urls = params.BscStaticPeers
+		case params.ChapelChainName:
+			urls = params.ChapelStaticPeers
+		case params.RialtoChainName:
+			urls = params.RialtoStaticPeers
+		}
+	}
+	cfg.StaticNodes, _ = GetUrlListNodes(urls, StaticPeersFlag.Name, log.Error)
 }
 
 func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
@@ -1141,6 +1167,10 @@ func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
 	cfg.DBPath = path.Join(datadir, "aura")
 }
 
+func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
+	cfg.DBPath = path.Join(datadir, "parlia")
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
 		cfg.Enabled = true
@@ -1249,6 +1279,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setEthash(ctx, nodeConfig.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.DataDir)
 	setAuRa(ctx, &cfg.Aura, nodeConfig.DataDir)
+	setParlia(ctx, &cfg.Parlia, nodeConfig.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 
@@ -1310,6 +1341,24 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
+	case params.BSCChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 56
+		}
+		cfg.Genesis = core.DefaultBSCGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
+	case params.ChapelChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 97
+		}
+		cfg.Genesis = core.DefaultChapelGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.ChapelGenesisHash)
+	case params.RialtoChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 97
+		}
+		cfg.Genesis = core.DefaultRialtoGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.RialtoGenesisHash)
 	case networkname.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
@@ -1400,6 +1449,12 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case networkname.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
+	case params.BSCChainName:
+		genesis = core.DefaultBSCGenesisBlock()
+	case params.ChapelChainName:
+		genesis = core.DefaultChapelGenesisBlock()
+	case params.RialtoChainName:
+		genesis = core.DefaultRialtoGenesisBlock()
 	case networkname.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
 	case networkname.SokolChainName:

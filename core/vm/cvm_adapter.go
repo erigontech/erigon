@@ -33,6 +33,10 @@ func (cvm *CVMAdapter) Config() Config {
 	return cvm.Cvm.Config()
 }
 
+func (cvm *CVMAdapter) ChainConfig() *params.ChainConfig {
+	return nil
+}
+
 func (cvm *CVMAdapter) ChainRules() params.Rules {
 	return params.Rules{}
 }

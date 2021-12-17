@@ -7,13 +7,13 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
-//go:embed erigon-snapshots/mainnet.json
+////go:embed erigon-snapshots/mainnet.json
 var mainnet []byte
-var Mainnet = fromJson(mainnet)
+var Mainnet Preverified // = fromJson(mainnet)
 
-//go:embed erigon-snapshots/goerli.json
+////go:embed erigon-snapshots/goerli.json
 var goerli []byte
-var Goerli = fromJson(goerli)
+var Goerli Preverified // = fromJson(goerli)
 
 type Preverified map[string]string
 

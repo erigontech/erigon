@@ -110,21 +110,21 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 
 func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
 	txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
-	syscall consensus.SystemCall) (systemTxs []types.Transaction, usedGas uint64, err error) {
+	syscall consensus.SystemCall) error {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
 	}
-	return nil, 0, nil
+	return nil
 }
 
 func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header,
 	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header,
 	receipts types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader,
-	syscall consensus.SystemCall, call consensus.Call) (*types.Block, []*types.Receipt, error) {
+	syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
 	}
-	return types.NewBlock(header, txs, uncles, receipts), receipts, nil
+	return types.NewBlock(header, txs, uncles, receipts), nil
 }
 
 func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
