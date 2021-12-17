@@ -1004,6 +1004,9 @@ func (p *Parlia) applyTransaction(
 	}
 	ibs.Prepare(expectedTx.Hash(), common.Hash{}, len(*txs))
 	gasUsed, _, err := systemCall(from, to, data, *p.chainConfig, ibs, header, p, value)
+	if err != nil {
+		return err
+	}
 	*txs = append(*txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
