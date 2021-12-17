@@ -2,14 +2,12 @@ name: Continuous integration
 on:
   push:
     branches:
-      - bsc
-      - develop
-      - main
+      - devel
+      - stable
   pull_request:
     branches:
-      - bsc
-      - develop
-      - main
+      - devel
+      - stable
 jobs:
   tests:
     strategy:
