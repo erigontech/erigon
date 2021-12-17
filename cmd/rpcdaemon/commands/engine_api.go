@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -46,7 +47,7 @@ type EngineAPI interface {
 	ForkchoiceUpdatedV1(context.Context, struct{}, *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
-	GetPayloadBodiesV1(ctx context.Context, blockHashes []common.Hash) (map[common.Hash]types.Body, error)
+	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]types.Body, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -157,7 +158,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64)
 }
 
 // GetPayloadBodiesV1 gets a list of blockHashes and returns a map of blockhash => block body
-func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []common.Hash) (map[common.Hash]types.Body, error) {
+func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]types.Body, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -166,18 +167,16 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []commo
 
 	blockHashToBody := make(map[common.Hash]types.Body)
 
-	for _, hash := range blockHashes {
-		if block, err := e.blockByHashWithSenders(tx, hash); err != nil {
+	for _, blockHash := range blockHashes {
+		hash := *blockHash.BlockHash
+		fmt.Println(hash)
+
+		block, err := e.blockByHashWithSenders(tx, hash)
+		if err != nil {
 			return nil, err
-		} else {
-			body := types.Body{
-				Transactions: block.Transactions(),
-				Uncles:       block.Uncles(),
-			}
-
-			blockHashToBody[hash] = body
-
 		}
+
+		blockHashToBody[hash] = *block.Body()
 	}
 	return blockHashToBody, nil
 }
