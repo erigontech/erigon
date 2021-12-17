@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -49,7 +50,7 @@ func init() {
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 
 	withDatadir(printInfoHashes)
-	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", true, "Print in json format (default: toml)")
+	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
 	rootCmd.AddCommand(printInfoHashes)
 }
 
@@ -164,7 +165,7 @@ var printInfoHashes = &cobra.Command{
 		snapshotsDir := path.Join(datadir, "snapshots")
 
 		res := map[string]string{}
-		if err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+		err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
 			mi, err := metainfo.LoadFromFile(torrentFilePath)
 			if err != nil {
 				return err
@@ -175,14 +176,23 @@ var printInfoHashes = &cobra.Command{
 			}
 			res[info.Name] = mi.HashInfoBytes().String()
 			return nil
-		}); err != nil {
-			return err
-		}
-		b, err := json.Marshal(res)
+		})
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s\n", b)
+		var serialized []byte
+		if asJson {
+			serialized, err = json.Marshal(res)
+			if err != nil {
+				return err
+			}
+		} else {
+			serialized, err = toml.Marshal(res)
+			if err != nil {
+				return err
+			}
+		}
+		fmt.Printf("%s\n", serialized)
 		return nil
 	},
 }

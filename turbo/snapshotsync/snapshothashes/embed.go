@@ -2,26 +2,26 @@ package snapshothashes
 
 import (
 	_ "embed"
-	"encoding/json"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/pelletier/go-toml/v2"
 )
 
-//go:embed erigon-snapshots/mainnet.json
+//go:embed erigon-snapshots/mainnet.toml
 var mainnet []byte
-var Mainnet = fromJson(mainnet)
+var Mainnet = fromToml(mainnet)
 
-//go:embed erigon-snapshots/goerli.json
+//go:embed erigon-snapshots/goerli.toml
 var goerli []byte
-var Goerli = fromJson(goerli)
+var Goerli = fromToml(goerli)
 
 type Preverified map[string]string
 
-func fromJson(in []byte) (out Preverified) {
-	if err := json.Unmarshal(in, &out); err != nil {
+func fromToml(in []byte) (out Preverified) {
+	if err := toml.Unmarshal(in, &out); err != nil {
 		panic(err)
 	}
 	return out
