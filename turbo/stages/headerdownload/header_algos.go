@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -27,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -485,7 +486,7 @@ func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
-		log.Warn("Preverified hashes not found for", "chain", chain)
+		log.Trace("Preverified hashes not found for", "chain", chain)
 		return nil, 0
 	}
 	return DecodeHashes(encodings), height
