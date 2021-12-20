@@ -368,65 +368,84 @@ func (tx DynamicFeeTransaction) EncodeRLP(w io.Writer) error {
 }
 
 func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
+	decoder := TransactionRLPDecoder{s}
+
+	err := decoder.Start()
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+
+	chainID, err := decoder.ChainID()
+	if err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
-	if tx.Nonce, err = s.Uint(); err != nil {
+	tx.ChainID = chainID
+
+	nonce, err := decoder.Nonce()
+	if err != nil {
 		return err
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Nonce = nonce
+
+	tip, err := decoder.Tip()
+	if err != nil {
 		return err
 	}
-	tx.Tip = new(uint256.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.Tip = tip
+
+	feeCap, err := decoder.FeeCap()
+	if err != nil {
 		return err
 	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
+	tx.FeeCap = feeCap
+
+	gas, err := decoder.Gas()
+	if err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	tx.Gas = gas
+
+	to, err := decoder.To()
+	if err != nil {
 		return err
 	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &common.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.To = to
+
+	value, err := decoder.Value()
+	if err != nil {
 		return err
 	}
-	tx.Value = new(uint256.Int).SetBytes(b)
-	if tx.Data, err = s.Bytes(); err != nil {
+	tx.Value = value
+
+	err = decoder.Data(&tx.Data)
+	if err != nil {
 		return err
 	}
-	// decode AccessList
+
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	if err = decoder.AccessList(&tx.AccessList); err != nil {
 		return err
 	}
-	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
+
+	signV, err := decoder.V()
+	if err != nil {
 		return err
 	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.V = *signV
+
+	signR, err := decoder.R()
+	if err != nil {
 		return err
 	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
+	tx.R = *signR
+
+	signS, err := decoder.S()
+	if err != nil {
 		return err
 	}
-	tx.S.SetBytes(b)
-	return s.ListEnd()
+	tx.S = *signS
+
+	return decoder.End()
 }
 
 // AsMessage returns the transaction as a core.Message.

@@ -39,10 +39,12 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 	if len(b) > 32 {
 		return fmt.Errorf("wrong size for ChainID: %d", len(b))
 	}
-	//tx.ChainID = new(uint256.Int).SetBytes(b)
+	tx.ChainID = new(uint256.Int).SetBytes(b)
+
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
+
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -50,6 +52,7 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
 	tx.Tip = new(uint256.Int).SetBytes(b)
+
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
@@ -57,6 +60,7 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
+
 	if tx.Gas, err = s.Uint(); err != nil {
 		return err
 	}
@@ -70,6 +74,7 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
+
 	if b, err = s.Bytes(); err != nil {
 		return err
 	}
