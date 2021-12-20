@@ -2,11 +2,12 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -33,7 +34,7 @@ import (
 //}
 
 // Issuance implements erigon_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
-func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
+func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return Issuance{}, err
@@ -48,12 +49,21 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 		// Clique for example has no issuance
 		return Issuance{}, nil
 	}
-
-	block, err := api.getBlockByRPCNumber(tx, blockNr)
+	hash, err := rawdb.ReadCanonicalHash(tx, uint64(blockNr))
 	if err != nil {
 		return Issuance{}, err
 	}
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
+	header := rawdb.ReadHeader(tx, hash, uint64(blockNr))
+	if header == nil {
+		return Issuance{}, fmt.Errorf("could not find block header")
+	}
+
+	body, _, _ := rawdb.ReadBody(tx, hash, uint64(blockNr))
+	if body == nil {
+		return Issuance{}, fmt.Errorf("could not find block body")
+	}
+
+	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, header, body.Uncles)
 	issuance := minerReward
 	for _, r := range uncleRewards {
 		p := r // avoids warning?
@@ -61,24 +71,38 @@ func (api *ErigonImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (I
 	}
 
 	var ret Issuance
-	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
+	ret.BlockReward = minerReward.ToBig()
+	ret.Issuance = issuance.ToBig()
 	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
-	return ret, nil
-}
-
-func (api *ErigonImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*types.Block, error) {
-	blockNum, err := getBlockNumber(blockNr, tx)
-	if err != nil {
-		return nil, err
+	ret.UncleReward = issuance.ToBig()
+	// Compute how much was burnt
+	if header.BaseFee != nil {
+		ret.Burnt = header.BaseFee
+		ret.Burnt.Mul(ret.Burnt, big.NewInt(int64(header.GasUsed)))
+	} else {
+		ret.Burnt = common.Big0
 	}
-	return api.blockByNumberWithSenders(tx, blockNum)
+	// Compute totalIssued, totalBurnt and the supply of eth
+	ret.TotalIssued, err = rawdb.ReadTotalIssued(tx, uint64(blockNr))
+	if err != nil {
+		return Issuance{}, err
+	}
+	ret.TotalBurnt, err = rawdb.ReadTotalBurnt(tx, uint64(blockNr))
+	if err != nil {
+		return Issuance{}, err
+	}
+	if uint64(blockNr) == 0 {
+		ret.Issuance.Set(ret.TotalIssued)
+	}
+	return ret, nil
 }
 
 // Issuance structure to return information about issuance
 type Issuance struct {
-	BlockReward string `json:"blockReward,omitempty"`
-	UncleReward string `json:"uncleReward,omitempty"`
-	Issuance    string `json:"issuance,omitempty"`
+	BlockReward *big.Int `json:"blockReward"` // Block reward for given block
+	UncleReward *big.Int `json:"uncleReward"` // Uncle reward for gived block
+	Issuance    *big.Int `json:"issuance"`    // Total amount of wei created in the block
+	Burnt       *big.Int `json:"burnt"`       // Total amount of wei burned in the block
+	TotalIssued *big.Int `json:"totalIssued"` // Total amount of wei created in total so far
+	TotalBurnt  *big.Int `json:"totalBurnt"`  // Total amount of wei burnt so far
 }

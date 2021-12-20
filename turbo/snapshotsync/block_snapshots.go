@@ -30,8 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -42,6 +42,8 @@ const (
 	Bodies       SnapshotType = "bodies"
 	Transactions SnapshotType = "transactions"
 )
+
+var AllSnapshotTypes = []SnapshotType{Headers, Bodies, Transactions}
 
 var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
@@ -90,7 +92,7 @@ type AllSnapshots struct {
 	segmentsAvailable    uint64
 	idxAvailable         uint64
 	blocks               []*BlocksSnapshot
-	cfg                  *params.SnapshotsConfig
+	cfg                  *snapshothashes.Config
 }
 
 // NewAllSnapshots - opens all snapshots. But to simplify everything:
@@ -98,20 +100,20 @@ type AllSnapshots struct {
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func NewAllSnapshots(dir string, cfg *params.SnapshotsConfig) *AllSnapshots {
+func NewAllSnapshots(dir string, cfg *snapshothashes.Config) *AllSnapshots {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		panic(err)
 	}
 	return &AllSnapshots{dir: dir, cfg: cfg}
 }
 
-func (s *AllSnapshots) ChainSnapshotConfig() *params.SnapshotsConfig { return s.cfg }
-func (s *AllSnapshots) AllSegmentsAvailable() bool                   { return s.allSegmentsAvailable }
-func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)               { s.allSegmentsAvailable = v }
-func (s *AllSnapshots) BlocksAvailable() uint64                      { return s.segmentsAvailable }
-func (s *AllSnapshots) AllIdxAvailable() bool                        { return s.allIdxAvailable }
-func (s *AllSnapshots) SetAllIdxAvailable(v bool)                    { s.allIdxAvailable = v }
-func (s *AllSnapshots) IndicesAvailable() uint64                     { return s.idxAvailable }
+func (s *AllSnapshots) ChainSnapshotConfig() *snapshothashes.Config { return s.cfg }
+func (s *AllSnapshots) AllSegmentsAvailable() bool                  { return s.allSegmentsAvailable }
+func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)              { s.allSegmentsAvailable = v }
+func (s *AllSnapshots) BlocksAvailable() uint64                     { return s.segmentsAvailable }
+func (s *AllSnapshots) AllIdxAvailable() bool                       { return s.allIdxAvailable }
+func (s *AllSnapshots) SetAllIdxAvailable(v bool)                   { s.allIdxAvailable = v }
+func (s *AllSnapshots) IndicesAvailable() uint64                    { return s.idxAvailable }
 
 func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
 	if headers, err = latestSegment(s.dir, Headers); err != nil {
@@ -137,37 +139,51 @@ func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error
 	}
 	return
 }
+
 func (s *AllSnapshots) ReopenIndices() error {
+	return s.ReopenSomeIndices(AllSnapshotTypes...)
+}
+
+func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) error {
 	for _, bs := range s.blocks {
-		if bs.Headers.Idx != nil {
-			bs.Headers.Idx.Close()
-			bs.Headers.Idx = nil
-		}
-		idx, err := recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Headers.From, bs.Headers.To, Headers)))
-		if err != nil {
-			return err
-		}
-		bs.Headers.Idx = idx
+		for _, snapshotType := range types {
+			switch snapshotType {
+			case Headers:
+				if bs.Headers.Idx != nil {
+					bs.Headers.Idx.Close()
+					bs.Headers.Idx = nil
+				}
+				idx, err := recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Headers.From, bs.Headers.To, Headers)))
+				if err != nil {
+					return err
+				}
+				bs.Headers.Idx = idx
+			case Bodies:
+				if bs.Bodies.Idx != nil {
+					bs.Bodies.Idx.Close()
+					bs.Bodies.Idx = nil
+				}
+				idx, err := recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Bodies.From, bs.Bodies.To, Bodies)))
+				if err != nil {
+					return err
+				}
+				bs.Bodies.Idx = idx
 
-		if bs.Bodies.Idx != nil {
-			bs.Bodies.Idx.Close()
-			bs.Bodies.Idx = nil
+			case Transactions:
+				if bs.Transactions.Idx != nil {
+					bs.Transactions.Idx.Close()
+					bs.Transactions.Idx = nil
+				}
+				idx, err := recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Transactions.From, bs.Transactions.To, Transactions)))
+				if err != nil {
+					return err
+				}
+				bs.Transactions.Idx = idx
+			default:
+				panic(fmt.Sprintf("unknown snapshot type: %s", snapshotType))
+			}
 		}
-		idx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Bodies.From, bs.Bodies.To, Bodies)))
-		if err != nil {
-			return err
-		}
-		bs.Bodies.Idx = idx
 
-		if bs.Transactions.Idx != nil {
-			bs.Transactions.Idx.Close()
-			bs.Transactions.Idx = nil
-		}
-		idx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.Transactions.From, bs.Transactions.To, Transactions)))
-		if err != nil {
-			return err
-		}
-		bs.Transactions.Idx = idx
 		s.idxAvailable = bs.Transactions.To - 1
 	}
 	return nil
@@ -274,7 +290,6 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) error {
-	fmt.Printf("build!\n")
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.Headers.From, sn.Headers.To, Headers))
 		if err := HeadersHashIdx(f, sn.Headers.From); err != nil {
@@ -288,31 +303,33 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int) er
 	}
 
 	// hack to read first block body - to get baseTxId from there
-	_ = s.ReopenIndices()
+	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
+		return err
+	}
+
 	for _, sn := range s.blocks {
 		gg := sn.Bodies.Segment.MakeGetter()
 		buf, _ := gg.Next(nil)
-		b := &types.BodyForStorage{}
-		if err := rlp.DecodeBytes(buf, b); err != nil {
+		firstBody := &types.BodyForStorage{}
+		if err := rlp.DecodeBytes(buf, firstBody); err != nil {
 			return err
 		}
 
 		var expectedTxsAmount uint64
 		{
-			off := sn.Bodies.Idx.Lookup2(sn.To - 1)
+			off := sn.Bodies.Idx.Lookup2(sn.To - 1 - sn.From)
 			gg.Reset(off)
 
-			buf, _ = gg.Next(nil)
-			bodyForStorage := new(types.BodyForStorage)
-			err := rlp.DecodeBytes(buf, bodyForStorage)
+			buf, _ = gg.Next(buf[:0])
+			lastBody := new(types.BodyForStorage)
+			err := rlp.DecodeBytes(buf, lastBody)
 			if err != nil {
-				panic(err)
+				return err
 			}
-			expectedTxsAmount = bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount) - b.BaseTxId
+			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.Transactions.From, sn.Transactions.To, Transactions))
-		fmt.Printf("create: %s\n", f)
-		if err := TransactionsHashIdx(chainID, b.BaseTxId, f, expectedTxsAmount); err != nil {
+		if err := TransactionsHashIdx(chainID, firstBody.BaseTxId, f, expectedTxsAmount); err != nil {
 			return err
 		}
 	}

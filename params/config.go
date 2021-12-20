@@ -23,18 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
-)
-
-const (
-	MainnetChainName = "mainnet"
-	RopstenChainName = "ropsten"
-	RinkebyChainName = "rinkeby"
-	GoerliChainName  = "goerli"
-	DevChainName     = "dev"
-	ErigonMineName   = "erigonmine"
-	SokolChainName   = "sokol"
-	KovanChainName   = "kovan"
-	FermionChainName = "fermion"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type ConsensusType string
@@ -43,6 +32,7 @@ const (
 	AuRaConsensus   ConsensusType = "aura"
 	EtHashConsensus ConsensusType = "ethash"
 	CliqueConsensus ConsensusType = "clique"
+	ParliaConsensus ConsensusType = "parlia"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -54,6 +44,9 @@ var (
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
+	BSCGenesisHash     = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
+	ChapelGenesisHash  = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
+	RialtoGenesisHash  = common.HexToHash("0x005dc005bddd1967de6187c1c23be801eb7abdd80cebcc24f341b727b70311d6")
 	FermionGenesisHash = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 )
 
@@ -70,7 +63,7 @@ var (
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
-		ChainName:           MainnetChainName,
+		ChainName:           networkname.MainnetChainName,
 		ChainID:             big.NewInt(1),
 		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(1_150_000),
@@ -85,7 +78,9 @@ var (
 		PetersburgBlock:     big.NewInt(7_280_000),
 		IstanbulBlock:       big.NewInt(9_069_000),
 		MuirGlacierBlock:    big.NewInt(9_200_000),
-		RamanujanBlock:      nil,
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(0),
 		BerlinBlock:         big.NewInt(12_244_000),
 		LondonBlock:         big.NewInt(12_965_000),
 		ArrowGlacierBlock:   big.NewInt(13_773_000),
@@ -94,7 +89,7 @@ var (
 
 	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
 	RopstenChainConfig = &ChainConfig{
-		ChainName:           RopstenChainName,
+		ChainName:           networkname.RopstenChainName,
 		ChainID:             big.NewInt(3),
 		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -109,7 +104,9 @@ var (
 		PetersburgBlock:     big.NewInt(4_939_394),
 		IstanbulBlock:       big.NewInt(6_485_846),
 		MuirGlacierBlock:    big.NewInt(7_117_117),
-		RamanujanBlock:      nil,
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(0),
 		BerlinBlock:         big.NewInt(9_812_189),
 		LondonBlock:         big.NewInt(10_499_401),
 		Ethash:              new(EthashConfig),
@@ -117,7 +114,7 @@ var (
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
 	RinkebyChainConfig = &ChainConfig{
-		ChainName:           RinkebyChainName,
+		ChainName:           networkname.RinkebyChainName,
 		ChainID:             big.NewInt(4),
 		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(1),
@@ -130,7 +127,9 @@ var (
 		ByzantiumBlock:      big.NewInt(1_035_301),
 		ConstantinopleBlock: big.NewInt(3_660_663),
 		PetersburgBlock:     big.NewInt(4_321_234),
-		RamanujanBlock:      nil,
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(0),
 		IstanbulBlock:       big.NewInt(5_435_345),
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(8_290_928),
@@ -143,7 +142,7 @@ var (
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
 	GoerliChainConfig = &ChainConfig{
-		ChainName:           GoerliChainName,
+		ChainName:           networkname.GoerliChainName,
 		ChainID:             big.NewInt(5),
 		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -155,6 +154,9 @@ var (
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(0),
 		IstanbulBlock:       big.NewInt(1_561_651),
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(4_460_644),
@@ -167,7 +169,7 @@ var (
 
 	// MainnetChainConfig is the chain parameters to run a PoW dev net to test Erigon mining
 	ErigonChainConfig = &ChainConfig{
-		ChainName:           ErigonMineName,
+		ChainName:           networkname.ErigonMineName,
 		ChainID:             new(big.Int).SetBytes([]byte("erigon-mine")),
 		Consensus:           EtHashConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -188,7 +190,7 @@ var (
 	}
 
 	SokolChainConfig = &ChainConfig{
-		ChainName:      SokolChainName,
+		ChainName:      networkname.SokolChainName,
 		ChainID:        big.NewInt(77),
 		Consensus:      AuRaConsensus,
 		HomesteadBlock: big.NewInt(0),
@@ -252,7 +254,7 @@ var (
 	}
 
 	KovanChainConfig = &ChainConfig{
-		ChainName:           KovanChainName,
+		ChainName:           networkname.KovanChainName,
 		ChainID:             big.NewInt(42),
 		Consensus:           AuRaConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -273,7 +275,7 @@ var (
 	}
 
 	FermionChainConfig = &ChainConfig{
-		ChainName:           FermionChainName,
+		ChainName:           networkname.FermionChainName,
 		ChainID:             big.NewInt(1212120),
 		Consensus:           CliqueConsensus,
 		HomesteadBlock:      big.NewInt(0),
@@ -293,6 +295,70 @@ var (
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
+		},
+	}
+
+	BSCMainnetChainConfig = &ChainConfig{
+		ChainName:           networkname.BSCMainnetChainName,
+		ChainID:             big.NewInt(56),
+		Consensus:           ParliaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(5184000),
+		Parlia: &ParliaConfig{
+			Period: 3,
+			Epoch:  200,
+		},
+	}
+
+	ChapelChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(97),
+		Consensus:           ParliaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		RamanujanBlock:      big.NewInt(1010000),
+		NielsBlock:          big.NewInt(1014369),
+		MirrorSyncBlock:     big.NewInt(5582500),
+		Parlia: &ParliaConfig{
+			Period: 3,
+			Epoch:  200,
+		},
+	}
+
+	RialtoChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(1417),
+		Consensus:           ParliaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		RamanujanBlock:      big.NewInt(400),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(400),
+		Parlia: &ParliaConfig{
+			Period: 3,
+			Epoch:  200,
 		},
 	}
 
@@ -401,7 +467,7 @@ type ChainConfig struct {
 	ChainName string
 	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash or clique
+	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash, clique, or parlia
 
 	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
 
@@ -424,7 +490,9 @@ type ChainConfig struct {
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
-	RamanujanBlock *big.Int `json:"ramanujanBlock,omitempty"` // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	NielsBlock      *big.Int `json:"nielsBlock,omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
+	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
 	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
@@ -487,7 +555,19 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
+
+	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
+	if c.Consensus == ParliaConsensus {
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Engine: %v}",
+			c.ChainID,
+			c.RamanujanBlock,
+			c.NielsBlock,
+			c.MirrorSyncBlock,
+			engine,
+		)
+	}
+
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v , Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -560,6 +640,11 @@ func (c *ChainConfig) IsEIP158(num uint64) bool {
 	return isForked(c.EIP158Block, num)
 }
 
+// IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
+func (c *ChainConfig) IsEIP158BigInt(num *big.Int) bool {
+	return configNumEqual(c.EIP158Block, num)
+}
+
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
 func (c *ChainConfig) IsByzantium(num uint64) bool {
 	return isForked(c.ByzantiumBlock, num)
@@ -576,8 +661,38 @@ func (c *ChainConfig) IsConstantinople(num uint64) bool {
 }
 
 // IsRamanujan returns whether num is either equal to the IsRamanujan fork block or greater.
+func (c *ChainConfig) IsRamanujan(num uint64) bool {
+	return isForked(c.RamanujanBlock, num)
+}
+
+// IsRamanujan returns whether num is either equal to the IsRamanujan fork block or greater.
 func (c *ChainConfig) IsRamanujanBigInt(num *big.Int) bool {
 	return configNumEqual(c.RamanujanBlock, num)
+}
+
+// IsOnRamanujan returns whether num is equal to the Ramanujan fork block
+func (c *ChainConfig) IsOnRamanujan(num *big.Int) bool {
+	return configNumEqual(c.RamanujanBlock, num)
+}
+
+// IsNiels returns whether num is either equal to the Niels fork block or greater.
+func (c *ChainConfig) IsNiels(num uint64) bool {
+	return isForked(c.NielsBlock, num)
+}
+
+// IsOnNiels returns whether num is equal to the IsNiels fork block
+func (c *ChainConfig) IsOnNiels(num *big.Int) bool {
+	return configNumEqual(c.NielsBlock, num)
+}
+
+// IsMirrorSync returns whether num is either equal to the MirrorSync fork block or greater.
+func (c *ChainConfig) IsMirrorSync(num uint64) bool {
+	return isForked(c.MirrorSyncBlock, num)
+}
+
+// IsOnMirrorSync returns whether num is equal to the MirrorSync fork block
+func (c *ChainConfig) IsOnMirrorSync(num *big.Int) bool {
+	return configNumEqual(c.MirrorSyncBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
@@ -718,6 +833,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.MuirGlacierBlock, newcfg.MuirGlacierBlock, head) {
 		return newCompatError("Muir Glacier fork block", c.MuirGlacierBlock, newcfg.MuirGlacierBlock)
+	}
+	if isForkIncompatible(c.RamanujanBlock, newcfg.RamanujanBlock, head) {
+		return newCompatError("ramanujan fork block", c.RamanujanBlock, newcfg.RamanujanBlock)
+	}
+	if isForkIncompatible(c.MirrorSyncBlock, newcfg.MirrorSyncBlock, head) {
+		return newCompatError("mirrorSync fork block", c.MirrorSyncBlock, newcfg.MirrorSyncBlock)
 	}
 	if isForkIncompatible(c.BerlinBlock, newcfg.BerlinBlock, head) {
 		return newCompatError("Berlin fork block", c.BerlinBlock, newcfg.BerlinBlock)

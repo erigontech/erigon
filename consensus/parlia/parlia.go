@@ -19,7 +19,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon"
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts/parlia"
+	systemcontracts "github.com/ledgerwatch/erigon/core/systemcontracts/parlia"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -291,29 +291,6 @@ func (p *Parlia) VerifyHeader(chain consensus.ChainHeaderReader, header *types.H
 	return p.verifyHeader(chain, header, nil)
 }
 
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
-// method returns a quit channel to abort the operations and a results channel to
-// retrieve the async verifications (the order is that of the input slice).
-func (p *Parlia) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	// Covalent change: This gets called in blockchain.go in BSC but in Erigon, this is not needed, so commenting out
-	// abort := make(chan struct{})
-	// results := make(chan error, len(headers))
-
-	// go func() {
-	// 	for i, header := range headers {
-	// 		err := p.verifyHeader(chain, header, headers[:i])
-
-	// 		select {
-	// 		case <-abort:
-	// 			return
-	// 		case results <- err:
-	// 		}
-	// 	}
-	// }()
-	// return abort, results
-	return nil
-}
-
 // verifyHeader checks whether a header conforms to the consensus rules.The
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
@@ -403,9 +380,8 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 	}
 
 	// Verify that the gas limit is <= 2^63-1
-	capacity := uint64(0x7fffffffffffffff)
-	if header.GasLimit > capacity {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, capacity)
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {

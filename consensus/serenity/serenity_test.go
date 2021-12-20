@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -31,16 +32,22 @@ func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
 	return nil
 }
 
+func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
+	return nil
+}
+
 // The thing only that changes beetwen normal ethash checks other than POW, is difficulty
 // and nonce so we are gonna test those
 func TestVerifyHeaderDifficulty(t *testing.T) {
 	header := &types.Header{
 		Difficulty: big.NewInt(1),
+		Time:       1,
 	}
 
 	parent := &types.Header{}
 
-	serenity := New()
+	var eth1Engine consensus.Engine
+	serenity := New(eth1Engine)
 
 	err := serenity.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidDifficulty {
@@ -56,11 +63,13 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	header := &types.Header{
 		Nonce:      types.BlockNonce{1, 0, 0, 0, 0, 0, 0, 0},
 		Difficulty: big.NewInt(0),
+		Time:       1,
 	}
 
 	parent := &types.Header{}
 
-	serenity := New()
+	var eth1Engine consensus.Engine
+	serenity := New(eth1Engine)
 
 	err := serenity.verifyHeader(readerMock{}, header, parent)
 	if err != errInvalidNonce {

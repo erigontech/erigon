@@ -10,9 +10,10 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -23,9 +24,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -224,17 +225,18 @@ func NewStagedSync(
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
 	terminalTotalDifficulty *big.Int,
-	controlServer *download.ControlServerImpl,
+	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan types.Header,
 	statusCh chan privateapi.ExecutionStatus,
 	waitingForPOSHeaders *bool,
+	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.AllSnapshots
 	if cfg.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, params.KnownSnapshots(controlServer.ChainConfig.ChainName))
+		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, snapshothashes.KnownConfig(controlServer.ChainConfig.ChainName))
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
@@ -254,7 +256,9 @@ func NewStagedSync(
 			reverseDownloadCh,
 			waitingForPOSHeaders,
 			allSnapshots,
+			snapshotDownloader,
 			blockReader,
+			tmpdir,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
@@ -266,7 +270,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			allSnapshots,
 			blockReader,
-		), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,
