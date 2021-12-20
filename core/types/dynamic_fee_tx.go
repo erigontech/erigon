@@ -417,10 +417,11 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	tx.Value = value
 
-	err = decoder.Data(&tx.Data)
+	data, err := decoder.Data()
 	if err != nil {
 		return err
 	}
+	tx.Data = data
 
 	tx.AccessList = AccessList{}
 	if err = decoder.AccessList(&tx.AccessList); err != nil {

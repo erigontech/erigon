@@ -54,6 +54,10 @@ func (d TransactionRLPDecoder) To() (*common.Address, error) {
 		return nil, fmt.Errorf("wrong size for To: %d", len(b))
 	}
 
+	if len(b) == 0 {
+		return nil, nil
+	}
+
 	to := &common.Address{}
 	copy((*to)[:], b)
 
@@ -64,12 +68,18 @@ func (d TransactionRLPDecoder) Value() (*uint256.Int, error) {
 	return d.uint256Bytes()
 }
 
-func (d TransactionRLPDecoder) Data(data *[]byte) error {
-	var err error
-	if *data, err = d.bytes(); err != nil {
-		return err
+func (d TransactionRLPDecoder) Data() ([]byte, error) {
+	data, err := d.bytes()
+
+	if err != nil {
+		return nil, err
 	}
-	return nil
+
+	if len(data) == 0 {
+		return nil, nil
+	}
+
+	return data, nil
 }
 
 func (d TransactionRLPDecoder) AccessList(al *AccessList) error {
