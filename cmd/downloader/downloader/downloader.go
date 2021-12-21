@@ -77,8 +77,8 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	torrentConfig.TorrentPeersLowWater = 50       // default: 50
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(32*1024*1024), 0) // default: unlimited
-	//torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Inf/1024/1024/1024, 0) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(32*1024*1024, DefaultPieceSize)   // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(32*1024*1024, DefaultPieceSize) // default: unlimited
 
 	return torrentConfig
 }
