@@ -12,10 +12,12 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/c2h5oh/datasize"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/time/rate"
 )
 
 type Client struct {
@@ -53,6 +55,7 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.ListenPort = 0
+
 	// debug
 	torrentConfig.Debug = false
 	torrentConfig.Logger = NewAdapterLogger()
@@ -70,6 +73,13 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
 
 	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
+
+	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
+	torrentConfig.TorrentPeersHighWater = 100     // default: 500
+	torrentConfig.TorrentPeersLowWater = 50       // default: 50
+
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(32*datasize.MB), 0) // default: unlimited
+
 	return torrentConfig
 }
 
