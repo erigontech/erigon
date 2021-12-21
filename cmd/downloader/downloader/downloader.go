@@ -10,7 +10,6 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -69,7 +68,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
 
-	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
+	//torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
 	return torrentConfig
 }
 
