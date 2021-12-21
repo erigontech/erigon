@@ -122,8 +122,9 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			stats = calcStats(stats, interval, torrentClient)
 			if allComplete {
 				log.Info(fmt.Sprintf(
-					"[torrent] Seeding: %d%%, %v/s, peers: %d, torrents: %d",
+					"[torrent] Seeding: %d%%, disk_read=%v/s disk_write=%v/s, peers: %d, torrents: %d",
 					stats.progress,
+					humanize.Bytes(uint64(stats.readBytesPerSec)),
 					humanize.Bytes(uint64(stats.writeBytesPerSec)),
 					stats.peersCount,
 					stats.torrentsCount,
@@ -132,9 +133,10 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info(fmt.Sprintf(
-				"[torrent] Downloading: %d%%, %v/s, peers: %d, torrents: %d",
+				"[torrent] Downloading: %d%%, disk_read=%v/s disk_write=%v/s, peers: %d, torrents: %d",
 				stats.progress,
 				humanize.Bytes(uint64(stats.readBytesPerSec)),
+				humanize.Bytes(uint64(stats.writeBytesPerSec)),
 				stats.peersCount,
 				stats.torrentsCount,
 			))
