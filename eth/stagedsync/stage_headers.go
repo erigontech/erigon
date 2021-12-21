@@ -182,8 +182,12 @@ func HeadersPOS(
 			Status:   privateapi.Valid,
 			HeadHash: headerHash,
 		}
-		// TODO(yperbasis): useExternalTx boilerplate
-		return tx.Commit()
+		if !useExternalTx {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 
 	// If we don't have the right parent, download the missing ancestors
@@ -282,8 +286,12 @@ func HeadersPOS(
 		return err
 	}
 
-	// TODO(yperbasis): useExternalTx boilerplate
-	return tx.Commit()
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // HeadersForward progresses Headers stage in the forward direction
