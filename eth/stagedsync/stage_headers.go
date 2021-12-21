@@ -171,7 +171,14 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		// TODO(yperbasis): engine.VerifyHeader(headerReader, header, true /* seal */)
+		if err := cfg.hd.VerifyHeader(&header); err != nil {
+			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
+			cfg.statusCh <- privateapi.ExecutionStatus{
+				Status:   privateapi.Invalid,
+				HeadHash: header.ParentHash,
+			}
+			return nil
+		}
 		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
 			cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
 			return err
@@ -281,7 +288,10 @@ func HeadersPOS(
 		return err
 	}
 
-	// TODO(yperbasis): engine.VerifyHeader(headerReader, header, true /* seal */)
+	if err := cfg.hd.VerifyHeader(&header); err != nil {
+		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
+		return nil
+	}
 	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
 		return err
 	}
