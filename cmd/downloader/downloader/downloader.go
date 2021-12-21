@@ -118,25 +118,28 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				log.Info(fmt.Sprintf("[torrent] Waiting for torrents metadata: %d/%d", gotInfo, len(torrents)))
 				continue
 			}
-			if allComplete {
-				peers := map[torrent.PeerID]struct{}{}
-				for _, t := range torrentClient.Torrents() {
-					for _, peer := range t.PeerConns() {
-						peers[peer.PeerID] = struct{}{}
-					}
-				}
 
-				log.Info("[torrent] Seeding", "peers", len(peers), "torrents", len(torrents))
+			stats = calcStats(stats, interval, torrentClient)
+			if allComplete {
+				line := fmt.Sprintf(
+					"[torrent] Seeding: %d%%, %v/s, peers: %d, torrents: %d",
+					stats.progress,
+					humanize.Bytes(uint64(stats.readBytesPerSec)),
+					stats.peersCount,
+					stats.torrentsCount,
+				)
+				log.Info(line)
 				continue
 			}
 
 			stats = calcStats(stats, interval, torrentClient)
 
 			line := fmt.Sprintf(
-				"[torrent] Downloading: %d%%, %v/s, peers: %d",
+				"[torrent] Downloading: %d%%, %v/s, peers: %d, torrents: %d",
 				stats.progress,
 				humanize.Bytes(uint64(stats.readBytesPerSec)),
 				stats.peersCount,
+				stats.torrentsCount,
 			)
 			log.Info(line)
 		}
@@ -159,7 +162,8 @@ type aggStats struct {
 	writeBytesPerSec int64
 	peersCount       int64
 
-	progress int
+	progress      int
+	torrentsCount int
 
 	bytesRead    int64
 	bytesWritten int64
@@ -169,7 +173,8 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 	var aggBytesCompleted, aggLen int64
 	//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
 	peers := map[torrent.PeerID]*torrent.PeerConn{}
-	for _, t := range client.Torrents() {
+	torrents := client.Torrents()
+	for _, t := range torrents {
 		stats := t.Stats()
 
 		/*
@@ -204,6 +209,7 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 	}
 	result.progress = int(100 * (float64(aggBytesCompleted) / float64(aggLen)))
 	result.peersCount = int64(len(peers))
+	result.torrentsCount = len(torrents)
 	return result
 }
 
