@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -44,8 +43,6 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentCl
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
-	fmt.Printf("alex: %d\n", config.ExpectBlocks)
-
 	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient, config.Preverified); err != nil {
 		return err
 	}
