@@ -296,6 +296,7 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 	return nil
 }
 
+//nolint
 func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 	//TODO: tr.VerifyData() - find when to call it
 	ctx, cancel := context.WithCancel(ctx)
