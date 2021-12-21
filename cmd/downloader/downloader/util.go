@@ -117,7 +117,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[torrent] Create .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			log.Info("[torrent] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
 		}
 	}
 	return nil
