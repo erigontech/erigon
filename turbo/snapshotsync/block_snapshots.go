@@ -184,7 +184,11 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) error {
 			}
 		}
 
-		s.idxAvailable = bs.Transactions.To - 1
+		if bs.Transactions.To > 0 {
+			s.idxAvailable = bs.Transactions.To - 1
+		} else {
+			s.idxAvailable = 0
+		}
 	}
 	return nil
 }
@@ -207,9 +211,14 @@ func (s *AllSnapshots) ReopenSegments() error {
 		if to == prevTo {
 			continue
 		}
+		if from > s.cfg.ExpectBlocks {
+			log.Debug("[open snapshots] skip snapshot because node expect less blocks in snapshots", "file", f)
+			continue
+		}
 		if from != prevTo { // no gaps
-			log.Debug("[open snapshots] snapshot missed before", "file", f)
-			break
+			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, from)
+			//log.Debug("[open snapshots] snapshot missed before", "file", f)
+			//break
 		}
 		prevTo = to
 
@@ -249,7 +258,11 @@ func (s *AllSnapshots) ReopenSegments() error {
 		}
 
 		s.blocks = append(s.blocks, blocksSnapshot)
-		s.segmentsAvailable = blocksSnapshot.To - 1
+		if blocksSnapshot.To > 0 {
+			s.segmentsAvailable = blocksSnapshot.To - 1
+		} else {
+			s.segmentsAvailable = 0
+		}
 	}
 	return nil
 }
