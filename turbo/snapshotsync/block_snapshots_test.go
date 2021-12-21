@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,7 @@ import (
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	cfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
+	cfg.ExpectBlocks = math.MaxUint64
 	createFile := func(from, to uint64, name SnapshotType) {
 		c, err := compress.NewCompressor("test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100)
 		require.NoError(err)
@@ -36,6 +38,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		require.NoError(err)
 	}
 	s := NewAllSnapshots(dir, cfg)
+	defer s.Close()
 	err := s.ReopenSegments()
 	require.NoError(err)
 	require.Equal(0, len(s.blocks))
@@ -43,6 +46,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 	createFile(500_000, 1_000_000, Bodies)
 	s = NewAllSnapshots(dir, cfg)
+	defer s.Close()
 	require.Equal(0, len(s.blocks)) //because, no headers and transactions snapshot files are created
 	s.Close()
 
@@ -50,7 +54,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 1_000_000, Transactions)
 	s = NewAllSnapshots(dir, cfg)
 	err = s.ReopenSegments()
-	require.NoError(err)
+	require.Error(err)
 	require.Equal(0, len(s.blocks)) //because, no gaps are allowed (expect snapshots from block 0)
 	s.Close()
 
@@ -73,6 +77,23 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 	_, ok = s.Blocks(1_000_000)
 	require.False(ok)
+
+	// user must be able to limit amount of blocks which read from snapshot
+	cfg.ExpectBlocks = 500_000 - 1
+	s = NewAllSnapshots(dir, cfg)
+	err = s.ReopenSegments()
+	require.NoError(err)
+	defer s.Close()
+	require.Equal(1, len(s.blocks))
+
+	createFile(500_000, 900_000, Headers)
+	createFile(500_000, 900_000, Bodies)
+	createFile(500_000, 900_000, Transactions)
+	cfg.ExpectBlocks = math.MaxUint64
+	s = NewAllSnapshots(dir, cfg)
+	defer s.Close()
+	err = s.ReopenSegments()
+	require.Error(err)
 }
 
 func TestParseCompressedFileName(t *testing.T) {
