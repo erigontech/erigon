@@ -12,12 +12,10 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
-	"github.com/c2h5oh/datasize"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
 )
 
 type Client struct {
@@ -78,9 +76,9 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	torrentConfig.TorrentPeersLowWater = 50       // default: 50
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(64*datasize.MB), 0) // default: unlimited
+	//torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(64*datasize.MB), 0) // default: unlimited
 	//torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(256*datasize.MB), 0) // default: unlimited
-	
+
 	return torrentConfig
 }
 
