@@ -208,6 +208,7 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 		}
 	}
 
+	fmt.Printf("alex: %d,%d, %d,%d\n", result.bytesRead/1024, result.bytesWritten/1024, prevStats.bytesRead, prevStats.bytesWritten)
 	result.readBytesPerSec += (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
 	result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
 
