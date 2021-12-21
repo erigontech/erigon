@@ -222,6 +222,8 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
 func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client, preverifiedHashes snapshothashes.Preverified) error {
+	fmt.Printf("trackers: %d\n", len(Trackers))
+
 	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
