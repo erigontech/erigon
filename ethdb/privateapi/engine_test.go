@@ -105,18 +105,14 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	<-reverseDownloadCh
-	statusCh <- ExecutionStatus{
-		HeadHash: startingHeadHash,
-		Status:   Syncing,
-	}
+	statusCh <- ExecutionStatus{Status: Syncing}
 	waitingForHeaders = false
 	<-done
 	require.NoError(err)
 	require.Equal(reply.Status, string(Syncing))
-	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	require.Equal(replyHash[:], startingHeadHash[:])
+	require.Nil(reply.LatestValidHash)
 
-	// If we get another request we dont need to process it with processDownloadCh and ignore it and return Syncing status
+	// If we get another request we don't need to process it with processDownloadCh and ignore it and return Syncing status
 	go func() {
 		reply, err = backend.EngineExecutePayloadV1(ctx, mockPayload2)
 		done <- true
@@ -126,8 +122,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	// Same result as before
 	require.NoError(err)
 	require.Equal(reply.Status, string(Syncing))
-	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	require.Equal(replyHash[:], startingHeadHash[:])
+	require.Nil(reply.LatestValidHash)
 
 	// However if we simulate that we finish reverse downloading the chain by updating the head, we just execute 1:1
 	tx, _ := db.BeginRw(ctx)
@@ -144,8 +139,7 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	require.NoError(err)
 	require.Equal(reply.Status, string(Syncing))
-	replyHash = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	require.Equal(replyHash[:], startingHeadHash[:])
+	require.Nil(reply.LatestValidHash)
 }
 
 func TestMockValidExecution(t *testing.T) {
@@ -173,8 +167,8 @@ func TestMockValidExecution(t *testing.T) {
 	<-reverseDownloadCh
 
 	statusCh <- ExecutionStatus{
-		HeadHash: payload3Hash,
-		Status:   Valid,
+		Status:          Valid,
+		LatestValidHash: payload3Hash,
 	}
 	<-done
 
@@ -209,8 +203,8 @@ func TestMockInvalidExecution(t *testing.T) {
 	<-reverseDownloadCh
 	// Simulate invalid status
 	statusCh <- ExecutionStatus{
-		HeadHash: startingHeadHash,
-		Status:   Invalid,
+		Status:          Invalid,
+		LatestValidHash: startingHeadHash,
 	}
 	<-done
 

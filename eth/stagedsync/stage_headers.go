@@ -154,10 +154,7 @@ func HeadersPOS(
 	// TODO(yperbasis): handle re-orgs properly
 	if s.BlockNumber >= headerNumber && headerHash != existingHash {
 		u.UnwindTo(headerNumber-1, common.Hash{})
-		cfg.statusCh <- privateapi.ExecutionStatus{
-			HeadHash: header.ParentHash,
-			Status:   privateapi.Syncing,
-		}
+		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 		return nil
 	}
 
@@ -174,8 +171,8 @@ func HeadersPOS(
 		if err := cfg.hd.VerifyHeader(&header); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.statusCh <- privateapi.ExecutionStatus{
-				Status:   privateapi.Invalid,
-				HeadHash: header.ParentHash,
+				Status:          privateapi.Invalid,
+				LatestValidHash: header.ParentHash,
 			}
 			return nil
 		}
@@ -186,8 +183,8 @@ func HeadersPOS(
 		// For the sake of simplicity we can just assume it will be valid for now.
 		// TODO(yperbasis): move to execution stage
 		cfg.statusCh <- privateapi.ExecutionStatus{
-			Status:   privateapi.Valid,
-			HeadHash: headerHash,
+			Status:          privateapi.Valid,
+			LatestValidHash: headerHash,
 		}
 		if !useExternalTx {
 			if err := tx.Commit(); err != nil {
@@ -198,10 +195,7 @@ func HeadersPOS(
 	}
 
 	// If we don't have the right parent, download the missing ancestors
-	cfg.statusCh <- privateapi.ExecutionStatus{
-		Status:   privateapi.Syncing,
-		HeadHash: rawdb.ReadHeadBlockHash(tx),
-	}
+	cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 
 	cfg.hd.SetPOSSync(true)
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
