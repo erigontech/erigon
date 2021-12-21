@@ -63,7 +63,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	// enable dht
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
-	//torrentConfig.DisableWebtorrent = true
+	torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
 	// Increase default timeouts, because we often run on commodity networks
