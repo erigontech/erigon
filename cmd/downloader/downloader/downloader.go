@@ -142,7 +142,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info(fmt.Sprintf(
-				"[torrent] Downloading: %d%%, disk_read=%v/s disk_write=%v/s, peers: %d, torrents: %d",
+				"[torrent] Downloading: %.2f%%, disk_read=%v/s disk_write=%v/s, peers: %d, torrents: %d",
 				stats.progress,
 				humanize.Bytes(uint64(stats.readBytesPerSec)),
 				humanize.Bytes(uint64(stats.writeBytesPerSec)),
@@ -169,7 +169,7 @@ type aggStats struct {
 	writeBytesPerSec int64
 	peersCount       int64
 
-	progress      int
+	progress      float32
 	torrentsCount int
 
 	bytesRead    int64
@@ -208,15 +208,12 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 
 		aggBytesCompleted += t.BytesCompleted()
 		aggLen += t.Length()
-		if t.BytesCompleted() > 0 {
-			fmt.Printf("completed: %s: %d\n", t.Name(), t.BytesCompleted())
-		}
-
 		for _, peer := range t.PeerConns() {
 			peers[peer.PeerID] = peer
 		}
 	}
-	result.progress = int(100 * (float64(aggBytesCompleted) / float64(aggLen)))
+
+	result.progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
 	result.peersCount = int64(len(peers))
 	result.torrentsCount = len(torrents)
 	return result
