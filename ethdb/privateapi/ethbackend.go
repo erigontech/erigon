@@ -71,6 +71,7 @@ type EthBackend interface {
 type ExecutionStatus struct {
 	HeadHash common.Hash
 	Status   PayloadStatus
+	Error    error
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
@@ -244,6 +245,10 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	s.reverseDownloadCh <- header
 
 	executedStatus := <-s.statusCh
+
+	if executedStatus.Error != nil {
+		return nil, executedStatus.Error
+	}
 
 	s.latestHead = executedStatus.HeadHash
 	return &remote.EngineExecutePayloadReply{

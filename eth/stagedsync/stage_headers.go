@@ -147,11 +147,11 @@ func HeadersPOS(
 
 	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
-		// TODO: err to statusCh
+		cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
 		return err
 	}
 
-	// TODO: handle re-orgs properly
+	// TODO(yperbasis): handle re-orgs properly
 	if s.BlockNumber >= headerNumber && headerHash != existingHash {
 		u.UnwindTo(headerNumber-1, common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{
@@ -167,27 +167,33 @@ func HeadersPOS(
 	// If we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
-		// TODO: err to statusCh
+		cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		// TODO: engine.VerifyHeader(headerReader, header, true /* seal */)
+		// TODO(yperbasis): engine.VerifyHeader(headerReader, header, true /* seal */)
 		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
-			// TODO: err to statusCh
+			cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
 			return err
 		}
-		// For the sake of simplicity we can just assume it will be valid for now. (TODO: move to execution stage)
+		// For the sake of simplicity we can just assume it will be valid for now.
+		// TODO(yperbasis): move to execution stage
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			Status:   privateapi.Valid,
 			HeadHash: headerHash,
 		}
-		// TODO: useExternalTx boilerplate
+		// TODO(yperbasis): useExternalTx boilerplate
 		return tx.Commit()
+	}
+
+	// If we don't have the right parent, download the missing ancestors
+	cfg.statusCh <- privateapi.ExecutionStatus{
+		Status:   privateapi.Syncing,
+		HeadHash: rawdb.ReadHeadBlockHash(tx),
 	}
 
 	cfg.hd.SetPOSSync(true)
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
-		// TODO: err to statusCh
 		return err
 	}
 	cfg.hd.SetProcessed(headerNumber)
@@ -197,10 +203,6 @@ func HeadersPOS(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	cfg.statusCh <- privateapi.ExecutionStatus{
-		Status:   privateapi.Syncing,
-		HeadHash: rawdb.ReadHeadBlockHash(tx),
-	}
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -258,7 +260,7 @@ func HeadersPOS(
 		return nil
 	}
 
-	// TODO: engine.VerifyHeader + FeedHeaderPoS instead of IdentityLoadFunc
+	// TODO(yperbasis): engine.VerifyHeader + FeedHeaderPoS instead of IdentityLoadFunc
 	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
@@ -266,7 +268,7 @@ func HeadersPOS(
 	}); err != nil {
 		return err
 	}
-	// TODO: remove canonicalHeadersCollector (use fixCanonicalChain instead)
+	// TODO(yperbasis): remove canonicalHeadersCollector (use fixCanonicalChain instead)
 	if err = canonicalHeadersCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
@@ -275,12 +277,12 @@ func HeadersPOS(
 		return err
 	}
 
-	// TODO: engine.VerifyHeader(headerReader, header, true /* seal */)
+	// TODO(yperbasis): engine.VerifyHeader(headerReader, header, true /* seal */)
 	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
 		return err
 	}
 
-	// TODO: useExternalTx boilerplate
+	// TODO(yperbasis): useExternalTx boilerplate
 	return tx.Commit()
 }
 

@@ -815,7 +815,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
-		// TODO: return correct isTrans
+		// TODO(yperbasis): return correct isTrans
 		return false, nil
 	}
 	// Load parent header
@@ -917,7 +917,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 
 func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
 	blockHeight := header.Number.Uint64()
-	// TODO: do we need to check if the header is already inserted (oldH)?
+	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
 
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
