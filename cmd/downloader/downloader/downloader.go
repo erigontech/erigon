@@ -61,8 +61,8 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 
 	// enable dht
-	torrentConfig.NoDHT = true
-	torrentConfig.DisableTrackers = false
+	torrentConfig.NoDHT = false
+	torrentConfig.DisableTrackers = true
 	//torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
