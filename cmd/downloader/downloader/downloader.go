@@ -73,9 +73,9 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 
 	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
 
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
-	torrentConfig.TorrentPeersHighWater = 100     // default: 500
-	torrentConfig.TorrentPeersLowWater = 50       // default: 50
+	//torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
+	//torrentConfig.TorrentPeersHighWater = 100     // default: 500
+	//torrentConfig.TorrentPeersLowWater = 50       // default: 50
 
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(128*1024*1024, 2*DefaultPieceSize)   // default: unlimited
 	torrentConfig.DownloadRateLimiter = rate.NewLimiter(256*1024*1024, 2*DefaultPieceSize) // default: unlimited
@@ -142,7 +142,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info(fmt.Sprintf(
-				"[torrent] Downloading: %.2f%%, disk_read=%v/s disk_write=%v/s, peers: %d, torrents: %d",
+				"[torrent] Downloading: %.2f%%, disk read=%v/s write=%v/s, peers: %d, torrents: %d",
 				stats.progress,
 				humanize.Bytes(uint64(stats.readBytesPerSec)),
 				humanize.Bytes(uint64(stats.writeBytesPerSec)),
