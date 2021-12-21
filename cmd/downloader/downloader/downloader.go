@@ -195,6 +195,7 @@ func (cli *Client) StopSeeding(hash metainfo.Hash) error {
 // Don't need call torrent.VerifyData manually
 func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client, preverifiedHashes snapshothashes.Preverified) error {
 	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+		fmt.Printf("alex: %s\n", torrentFilePath)
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err

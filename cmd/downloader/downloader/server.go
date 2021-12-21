@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -48,7 +47,6 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentCl
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {
-		fmt.Printf("%s\n", t.Name())
 		t.AllowDataDownload()
 		t.AllowDataUpload()
 	}
