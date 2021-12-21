@@ -34,6 +34,7 @@ type Decompressor struct {
 	dict           Dictionary
 	posDict        Dictionary
 	wordsStart     uint64 // Offset of whether the words actually start
+	count          uint64
 }
 
 func NewDecompressor(compressedFile string) (*Decompressor, error) {
@@ -57,11 +58,12 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 		return nil, err
 	}
 	d.data = d.mmapHandle1[:size]
-	dictSize := binary.BigEndian.Uint64(d.data[:8])
-	d.dict.rootOffset = binary.BigEndian.Uint64(d.data[8:16])
-	d.dict.cutoff = binary.BigEndian.Uint64(d.data[16:24])
-	d.dict.data = d.data[24 : 24+dictSize]
-	pos := 24 + dictSize
+	d.count = binary.BigEndian.Uint64(d.data[:8])
+	dictSize := binary.BigEndian.Uint64(d.data[8:16])
+	d.dict.rootOffset = binary.BigEndian.Uint64(d.data[16:24])
+	d.dict.cutoff = binary.BigEndian.Uint64(d.data[24:32])
+	d.dict.data = d.data[32 : 32+dictSize]
+	pos := 32 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
 	d.posDict.rootOffset = binary.BigEndian.Uint64(d.data[pos+8 : pos+16])
 	d.posDict.cutoff = binary.BigEndian.Uint64(d.data[pos+16 : pos+24])

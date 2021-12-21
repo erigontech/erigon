@@ -70,6 +70,8 @@ type Compressor struct {
 	patterns    []int                       // Buffer of pattern ids (used in the dynamic programming algorithm to remember patterns corresponding to dynamic cells)
 	uncovered   []int                       // Buffer of intervals that are not covered by patterns
 	posMap      map[uint64]uint64           // Counter of use for each position within compressed word (for building huffman code for positions)
+
+	wordsCount uint64
 }
 
 type Phase int
@@ -523,6 +525,7 @@ func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore 
 
 // AddWord needs to be called repeatedly to provide all the words to compress
 func (c *Compressor) AddWord(word []byte) error {
+	c.wordsCount++
 	if len(c.superstring)+2*len(word)+2 > superstringLimit {
 		// Adding this word would make superstring go over the limit
 		if err := c.processSuperstring(); err != nil {
@@ -805,6 +808,8 @@ func (c *Compressor) optimiseCodes() error {
 	if codeHeap.Len() > 0 {
 		root = heap.Pop(&codeHeap).(*PatternHuff) // Root node of huffman tree
 	}
+
+	// Start writing to result file
 	cf, err := os.Create(c.outputFile)
 	if err != nil {
 		return err
@@ -813,12 +818,17 @@ func (c *Compressor) optimiseCodes() error {
 	defer cf.Sync()
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
 	defer cw.Flush()
-	// First, output dictionary size
+	// 1-st, output amount of words in file
+	binary.BigEndian.PutUint64(c.numBuf[:], c.wordsCount)
+	if _, err = cw.Write(c.numBuf[:8]); err != nil {
+		return err
+	}
+	// 2-nd, output dictionary size
 	binary.BigEndian.PutUint64(c.numBuf[:], offset) // Dictionary size
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
-	// Secondly, output directory root
+	// 3-rd, output directory root
 	if root == nil {
 		binary.BigEndian.PutUint64(c.numBuf[:], 0)
 	} else {
@@ -827,7 +837,7 @@ func (c *Compressor) optimiseCodes() error {
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
-	// Thirdly, output pattern cutoff offset
+	// 4-th, output pattern cutoff offset
 	binary.BigEndian.PutUint64(c.numBuf[:], patternCutoff)
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
