@@ -715,7 +715,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	// Handle request after closing collectors
-	if hd.canonicalHashesCollector == nil || hd.headersCollector == nil {
+	if hd.headersCollector == nil {
 		return nil
 	}
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
@@ -734,9 +734,6 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 			return nil
 		}
 		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
-			return err
-		}
-		if err := hd.canonicalHashesCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
 			return err
 		}
 		hd.expectedHash = segmentFragment.Header.ParentHash
@@ -947,6 +944,10 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 		return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
 	}
 
+	hi.highest = blockHeight
+	hi.highestHash = hash
+	hi.highestTimestamp = header.Time
+
 	return nil
 }
 
@@ -1080,12 +1081,6 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headersCollector = collector
-}
-
-func (hd *HeaderDownload) SetCanonicalHashesCollector(collector *etl.Collector) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.canonicalHashesCollector = collector
 }
 
 func (hd *HeaderDownload) SetPOSSync(posSync bool) {

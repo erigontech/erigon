@@ -159,6 +159,9 @@ func HeadersPOS(
 	}
 
 	logPrefix := s.LogPrefix()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, nil, s.BlockNumber)
 
 	// If we have the parent then we can move on with the stagedsync
@@ -176,16 +179,21 @@ func HeadersPOS(
 			}
 			return nil
 		}
-		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
-			cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
-			return err
-		}
+
 		// For the sake of simplicity we can just assume it will be valid for now.
 		// TODO(yperbasis): move to execution stage
 		cfg.statusCh <- privateapi.ExecutionStatus{
 			Status:          privateapi.Valid,
 			LatestValidHash: headerHash,
 		}
+
+		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+			return err
+		}
+		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+			return fmt.Errorf("fix canonical chain: %w", err)
+		}
+
 		if !useExternalTx {
 			if err := tx.Commit(); err != nil {
 				return err
@@ -205,9 +213,6 @@ func HeadersPOS(
 	cfg.hd.SetExpectedHash(header.ParentHash)
 	cfg.hd.SetFetching(true)
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
@@ -216,15 +221,11 @@ func HeadersPOS(
 	prevProgress := headerNumber
 
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	canonicalHeadersCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	cfg.hd.SetHeadersCollector(headerCollector)
-	cfg.hd.SetCanonicalHashesCollector(canonicalHeadersCollector)
 	// Cleanup after we finish backward sync
 	defer func() {
 		headerCollector.Close()
-		canonicalHeadersCollector.Close()
 		cfg.hd.SetHeadersCollector(nil)
-		cfg.hd.SetCanonicalHashesCollector(nil)
 		cfg.hd.Unsync()
 		cfg.hd.SetFetching(false)
 	}()
@@ -273,14 +274,6 @@ func HeadersPOS(
 	}); err != nil {
 		return err
 	}
-	// TODO(yperbasis): remove canonicalHeadersCollector (use fixCanonicalChain instead)
-	if err = canonicalHeadersCollector.Load(tx, kv.HeaderCanonical, etl.IdentityLoadFunc, etl.TransformArgs{
-		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-			return []interface{}{"block", binary.BigEndian.Uint64(k)}
-		},
-	}); err != nil {
-		return err
-	}
 
 	if err := cfg.hd.VerifyHeader(&header); err != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
@@ -288,6 +281,9 @@ func HeadersPOS(
 	}
 	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
 		return err
+	}
+	if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+		return fmt.Errorf("fix canonical chain: %w", err)
 	}
 
 	if !useExternalTx {
