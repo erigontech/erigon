@@ -142,7 +142,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	}
 
 	snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-	err = downloader.Start(ctx, snapshotsDir, t.Cli, snapshotsCfg)
+	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli, snapshotsCfg)
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
