@@ -237,7 +237,7 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 		return err
 	}
 
-	waitForChecksumVerify(ctx, torrentClient)
+	//waitForChecksumVerify(ctx, torrentClient)
 	return nil
 }
 
