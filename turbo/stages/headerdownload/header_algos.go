@@ -915,9 +915,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 	return td.Cmp(terminalTotalDifficulty) >= 0, nil
 }
 
-func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, engine consensus.Engine, headerReader consensus.ChainHeaderReader, header *types.Header, hash common.Hash) error {
-	// TODO: engine.VerifyHeader(headerReader, header, true /* seal */)
-
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
 	blockHeight := header.Number.Uint64()
 	// TODO: do we need to check if the header is already inserted (oldH)?
 

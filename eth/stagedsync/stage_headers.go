@@ -161,20 +161,18 @@ func HeadersPOS(
 		return nil
 	}
 
-	// Write current payload
-	rawdb.WriteHeader(tx, &header)
-	if err := rawdb.WriteCanonicalHash(tx, headerHash, headerNumber); err != nil {
-		// TODO: err to statusCh
-		return err
-	}
-	// if we have the parent then we can move on with the stagedsync
+	logPrefix := s.LogPrefix()
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, nil, s.BlockNumber)
+
+	// If we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
 		// TODO: err to statusCh
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		if err := s.Update(tx, headerNumber); err != nil {
+		// TODO: engine.VerifyHeader(headerReader, header, true /* seal */)
+		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
 			// TODO: err to statusCh
 			return err
 		}
@@ -186,6 +184,7 @@ func HeadersPOS(
 		// TODO: useExternalTx boilerplate
 		return tx.Commit()
 	}
+
 	cfg.hd.SetPOSSync(true)
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		// TODO: err to statusCh
@@ -194,16 +193,9 @@ func HeadersPOS(
 	cfg.hd.SetProcessed(headerNumber)
 	cfg.hd.SetExpectedHash(header.ParentHash)
 	cfg.hd.SetFetching(true)
-	logPrefix := s.LogPrefix()
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-
-	// Allow other stages to run 1 cycle if no network available
-	if initialCycle && cfg.noP2PDiscovery {
-		// TODO: update statusCh
-		return nil
-	}
 
 	cfg.statusCh <- privateapi.ExecutionStatus{
 		Status:   privateapi.Syncing,
@@ -266,7 +258,7 @@ func HeadersPOS(
 		return nil
 	}
 
-	// TODO: FeedHeaderPoS instead of IdentityLoadFunc
+	// TODO: engine.VerifyHeader + FeedHeaderPoS instead of IdentityLoadFunc
 	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
@@ -282,13 +274,12 @@ func HeadersPOS(
 	}); err != nil {
 		return err
 	}
-	if s.BlockNumber >= cfg.hd.Progress() {
-		u.UnwindTo(cfg.hd.Progress(), common.Hash{})
-	} else {
-		if err := s.Update(tx, headerNumber); err != nil {
-			return err
-		}
+
+	// TODO: engine.VerifyHeader(headerReader, header, true /* seal */)
+	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+		return err
 	}
+
 	// TODO: useExternalTx boilerplate
 	return tx.Commit()
 }
