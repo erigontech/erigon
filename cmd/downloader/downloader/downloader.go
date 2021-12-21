@@ -241,7 +241,7 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 		}
 		expect := metainfo.NewHashFromHex(hashString)
 		if mi.HashInfoBytes() != expect {
-			return fmt.Errorf("file %s has unexpected hash %x, expected %x", torrentFileName, mi.HashInfoBytes(), expect)
+			return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", torrentFileName, mi.HashInfoBytes(), expect)
 		}
 
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
