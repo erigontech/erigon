@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
 )
 
 type Client struct {
@@ -73,12 +72,12 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 
 	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
 
-	//torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
+	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
 	//torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	//torrentConfig.TorrentPeersLowWater = 50       // default: 50
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(128*1024*1024, 2*DefaultPieceSize)   // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(256*1024*1024, 2*DefaultPieceSize) // default: unlimited
+	//torrentConfig.UploadRateLimiter = rate.NewLimiter(128*1024*1024, 2*DefaultPieceSize)   // default: unlimited
+	//torrentConfig.DownloadRateLimiter = rate.NewLimiter(256*1024*1024, 2*DefaultPieceSize) // default: unlimited
 
 	return torrentConfig
 }
