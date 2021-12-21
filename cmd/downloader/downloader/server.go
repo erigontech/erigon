@@ -39,7 +39,7 @@ func Stop(torrentClient *torrent.Client) {
 	}
 }
 
-func Start(ctx context.Context, snapshotDir string, torrentClient *torrent.Client, config *snapshothashes.Config) error {
+func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentClient *torrent.Client, config *snapshothashes.Config) error {
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
