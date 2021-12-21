@@ -72,7 +72,7 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 
 	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
 
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
+	//torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
 	//torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	//torrentConfig.TorrentPeersLowWater = 50       // default: 50
 
