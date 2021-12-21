@@ -208,6 +208,9 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 
 		aggBytesCompleted += t.BytesCompleted()
 		aggLen += t.Length()
+		if t.BytesCompleted() > 0 {
+			fmt.Printf("completed: %s: %d\n", t.Name(), t.BytesCompleted())
+		}
 
 		for _, peer := range t.PeerConns() {
 			peers[peer.PeerID] = peer
