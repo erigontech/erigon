@@ -77,8 +77,8 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	torrentConfig.TorrentPeersLowWater = 50       // default: 50
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(64*1024*1024, 2*DefaultPieceSize)    // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(128*1024*1024, 2*DefaultPieceSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(128*1024*1024, 2*DefaultPieceSize)   // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(256*1024*1024, 2*DefaultPieceSize) // default: unlimited
 
 	return torrentConfig
 }
@@ -199,13 +199,8 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 			aggPartialPieces += partialPieces
 			aggNumPieces = t.NumPieces()
 		*/
-
-		result.bytesRead = stats.BytesRead.Int64()
-		result.readBytesPerSec = (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
-
-		result.bytesWritten = stats.BytesWritten.Int64()
-		result.writeBytesPerSec = (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
-
+		result.bytesRead += stats.BytesRead.Int64()
+		result.bytesWritten += stats.BytesWritten.Int64()
 		aggBytesCompleted += t.BytesCompleted()
 		aggLen += t.Length()
 		for _, peer := range t.PeerConns() {
@@ -213,7 +208,11 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 		}
 	}
 
+	result.readBytesPerSec += (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
+	result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
+
 	result.progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
+
 	result.peersCount = int64(len(peers))
 	result.torrentsCount = len(torrents)
 	return result
