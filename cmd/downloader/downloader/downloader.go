@@ -55,12 +55,12 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	// debug
 	torrentConfig.Debug = false
 	torrentConfig.Logger = NewAdapterLogger()
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Debug)
+	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 
 	// enable dht
 	torrentConfig.NoDHT = true
 	torrentConfig.DisableTrackers = false
-	//torrentConfig.DisableWebtorrent = true
+	torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
 	// Increase default timeouts, because we often run on commodity networks
