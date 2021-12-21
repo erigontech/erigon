@@ -198,8 +198,8 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 			aggPartialPieces += partialPieces
 			aggNumPieces = t.NumPieces()
 		*/
-		result.bytesRead += stats.BytesRead.Int64()
-		result.bytesWritten += stats.BytesWritten.Int64()
+		result.bytesRead += stats.BytesRead.Int64() + stats.BytesReadData.Int64()
+		result.bytesWritten += stats.BytesWritten.Int64() + stats.BytesWrittenData.Int64()
 		aggBytesCompleted += t.BytesCompleted()
 		aggLen += t.Length()
 		for _, peer := range t.PeerConns() {
