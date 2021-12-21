@@ -2171,19 +2171,19 @@ func reducedict(name string, segmentFileName string) error {
 		wg.Add(1)
 		go reduceDictWorker(ch, &wg, &pt, collector, inputSize, outputSize, posMap)
 	}
-	i := 0
+	var wordsCount uint64
 	if err := snapshotsync.ReadSimpleFile(name+".dat", func(v []byte) error {
 		input := make([]byte, 8+int(len(v)))
-		binary.BigEndian.PutUint64(input, uint64(i))
+		binary.BigEndian.PutUint64(input, wordsCount)
 		copy(input[8:], v)
 		ch <- input
-		i++
+		wordsCount++
 		select {
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Replacement preprocessing", "processed", fmt.Sprintf("%dK", i/1_000), "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Replacement preprocessing", "processed", fmt.Sprintf("%dK", wordsCount/1_000), "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
 		return nil
 	}); err != nil {
@@ -2191,6 +2191,7 @@ func reducedict(name string, segmentFileName string) error {
 	}
 	close(ch)
 	wg.Wait()
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Done", "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
@@ -2223,7 +2224,7 @@ func reducedict(name string, segmentFileName string) error {
 		offset += uint64(n + len(p.w))
 	}
 	patternCutoff := offset // All offsets below this will be considered patterns
-	i = 0
+	i := 0
 	log.Info("Effective dictionary", "size", patternList.Len())
 	// Build Huffman tree for codes
 	var codeHeap PatternHeap
@@ -2284,17 +2285,22 @@ func reducedict(name string, segmentFileName string) error {
 		return err
 	}
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
-	// First, output dictionary
+	// 1-st, output dictionary
+	binary.BigEndian.PutUint64(numBuf, wordsCount) // Dictionary size
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	// 2-nd, output dictionary
 	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Secondly, output directory root
+	// 3-rd, output directory root
 	binary.BigEndian.PutUint64(numBuf, root.offset)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Thirdly, output pattern cutoff offset
+	// 4-th, output pattern cutoff offset
 	binary.BigEndian.PutUint64(numBuf, patternCutoff)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err

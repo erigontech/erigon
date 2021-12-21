@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -184,6 +184,19 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, block
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneTxLookup(p, tx, txLookup, ctx)
+			},
+		},
+		{
+			ID:          stages.Issuance,
+			Description: "Issuance computation",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				return SpawnStageIssuance(issuance, s, tx, ctx)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindIssuanceStage(u, tx, ctx)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return PruneIssuanceStage(p, tx, ctx)
 			},
 		},
 		{
