@@ -230,7 +230,7 @@ func NewStagedSync(
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan types.Header,
 	statusCh chan privateapi.ExecutionStatus,
-	waitingForPOSHeaders *bool,
+	waitingForPOSHeaders *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
