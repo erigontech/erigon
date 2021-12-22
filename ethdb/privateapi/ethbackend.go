@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -53,7 +54,7 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForPOSHeaders *bool
+	waitingForPOSHeaders *uint32 // atomic boolean flag
 	mu                   sync.Mutex
 }
 
@@ -74,7 +75,7 @@ type ExecutionStatus struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *bool,
+	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *uint32,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForPOSHeaders: waitingForPOSHeaders,
@@ -197,7 +198,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 
 	// If another payload is already commissioned then we just reply with syncing
-	if !(*s.waitingForPOSHeaders) {
+	if atomic.LoadUint32(s.waitingForPOSHeaders) == 0 {
 		// We are still syncing a commissioned payload
 		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
 	}

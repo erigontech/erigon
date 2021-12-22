@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -43,7 +44,7 @@ type HeadersCfg struct {
 	noP2PDiscovery    bool
 	tmpdir            string
 	reverseDownloadCh chan types.Header
-	waitingPosHeaders *bool
+	waitingPosHeaders *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -61,7 +62,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan types.Header,
-	waitingPosHeaders *bool,
+	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
@@ -136,11 +137,11 @@ func HeadersPOS(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	*cfg.waitingPosHeaders = true
+	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	header := <-cfg.reverseDownloadCh
-	*cfg.waitingPosHeaders = false
+	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
