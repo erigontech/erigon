@@ -545,6 +545,18 @@ func (c *ChainConfig) String() string {
 	default:
 		engine = "unknown"
 	}
+
+	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
+	if c.Consensus == ParliaConsensus {
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Engine: %v}",
+			c.ChainID,
+			c.RamanujanBlock,
+			c.NielsBlock,
+			c.MirrorSyncBlock,
+			engine,
+		)
+	}
+
 	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
