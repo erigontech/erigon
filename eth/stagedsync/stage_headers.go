@@ -266,8 +266,19 @@ func HeadersPOS(
 		return nil
 	}
 
-	// TODO(yperbasis): engine.VerifyHeader + FeedHeaderPoS instead of IdentityLoadFunc
-	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
+	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		var h types.Header
+		if err := rlp.DecodeBytes(value, &h); err != nil {
+			return err
+		}
+		if err := cfg.hd.VerifyHeader(&h); err != nil {
+			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
+			return err
+		}
+		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+	}
+
+	if err := headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
