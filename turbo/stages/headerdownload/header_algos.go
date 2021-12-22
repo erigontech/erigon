@@ -616,7 +616,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
-type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error)
+type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
@@ -666,14 +666,16 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			continue
 		}
 
-		isTrans, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight, terminalTotalDifficulty)
+		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
 			return false, err
 		}
-		// Check if transition to proof-of-stake happened and stop forward syncing
-		if isTrans {
-			hd.highestInDb = link.blockHeight
-			return true, nil
+		if td != nil {
+			// Check if transition to proof-of-stake happened and stop forward syncing
+			if terminalTotalDifficulty != nil && (link.header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 || td.Cmp(terminalTotalDifficulty) >= 0) {
+				hd.highestInDb = link.blockHeight
+				return true, nil
+			}
 		}
 
 		if link.blockHeight > hd.highestInDb {
@@ -803,36 +805,36 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 }
 
 func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) FeedHeaderFunc {
-	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (bool, error) {
-		return hi.FeedHeader(db, headerReader, header, headerRaw, hash, blockHeight, terminalTotalDifficulty)
+	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (*big.Int, error) {
+		return hi.FeedHeader(db, headerReader, header, headerRaw, hash, blockHeight)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) (isTrans bool, err error) {
+func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
-		return false, nil
+		return nil, nil
 	}
 	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
 		// Already inserted, skip
-		return false, nil
+		return nil, nil
 	}
 	// Load parent header
 	parent, err := headerReader.Header(context.Background(), db, header.ParentHash, blockHeight-1)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if parent == nil {
 		// Fail on headers without parent
-		return false, fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
+		return nil, fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
-		return false, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+		return nil, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
-	td := new(big.Int).Add(parentTd, header.Difficulty)
+	td = new(big.Int).Add(parentTd, header.Difficulty)
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
 		hi.newCanonical = true
@@ -845,7 +847,7 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 			ch = fromCache.(common.Hash)
 		} else {
 			if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
-				return false, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
+				return nil, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 			}
 		}
 		if ch == header.ParentHash {
@@ -871,16 +873,16 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 				ancestorHeight--
 			}
 			if err != nil {
-				return false, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+				return nil, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
 			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 			forkingPoint = ancestorHeight
 		}
 		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
-			return false, fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
+			return nil, fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 		}
 		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-			return false, fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+			return nil, fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
 		}
 		hi.highest = blockHeight
 		hi.highestHash = hash
@@ -895,23 +897,15 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 		hi.localTd.Set(td)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
-		return false, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 
 	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
-		return false, fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+		return nil, fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 
 	hi.prevHash = hash
-
-	if terminalTotalDifficulty == nil {
-		return false, nil
-	}
-
-	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
-		return true, nil
-	}
-	return td.Cmp(terminalTotalDifficulty) >= 0, nil
+	return td, nil
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {
