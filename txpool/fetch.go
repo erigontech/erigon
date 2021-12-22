@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -201,7 +202,12 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				continue
 			}
-			log.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+
+			if rlp.IsRLPError(err) {
+				log.Debug("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+			} else {
+				log.Warn("[txpool.fetch] Handling incoming message", "msg", req.Id.String(), "err", err)
+			}
 		}
 		if f.wg != nil {
 			f.wg.Done()

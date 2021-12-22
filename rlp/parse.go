@@ -17,19 +17,28 @@
 package rlp
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
 )
 
+var (
+	ErrBase   = fmt.Errorf("rlp")
+	ErrParse  = fmt.Errorf("%w parse", ErrBase)
+	ErrDecode = fmt.Errorf("%w decode", ErrBase)
+)
+
+func IsRLPError(err error) bool { return errors.Is(err, ErrBase) }
+
 // BeInt parses Big Endian representation of an integer from given payload at given position
 func BeInt(payload []byte, pos, length int) (int, error) {
 	var r int
 	if pos+length >= len(payload) {
-		return 0, fmt.Errorf("unexpected end of payload")
+		return 0, fmt.Errorf("%w: unexpected end of payload", ErrParse)
 	}
 	if length > 0 && payload[pos] == 0 {
-		return 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[pos:pos+length])
+		return 0, fmt.Errorf("%w: integer encoding for RLP must not have leading zeros: %x", ErrParse, payload[pos:pos+length])
 	}
 	for _, b := range payload[pos : pos+length] {
 		r = (r << 8) | int(b)
@@ -41,10 +50,10 @@ func BeInt(payload []byte, pos, length int) (int, error) {
 // as well as the indication of whether it is a list of string
 func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err error) {
 	if pos < 0 {
-		return 0, 0, false, fmt.Errorf("negative position not allowed")
+		return 0, 0, false, fmt.Errorf("%w: negative position not allowed", ErrParse)
 	}
 	if pos >= len(payload) {
-		return 0, 0, false, fmt.Errorf("unexpected end of payload")
+		return 0, 0, false, fmt.Errorf("%w: unexpected end of payload", ErrParse)
 	}
 	switch first := payload[pos]; {
 	case first < 128:
@@ -60,7 +69,7 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		dataLen = int(first) - 128
 		isList = false
 		if dataLen == 1 && dataPos < len(payload) && payload[dataPos] < 128 {
-			err = fmt.Errorf("rlp: non-canonical size information")
+			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
 		}
 	case first < 192:
 		// If a string is more than 55 bytes long, the
@@ -74,7 +83,7 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		dataLen, err = BeInt(payload, pos+1, beLen)
 		isList = false
 		if dataLen < 56 {
-			err = fmt.Errorf("rlp: non-canonical size information")
+			err = fmt.Errorf("%w: non-canonical size information", ErrParse)
 		}
 	case first < 248:
 		// isList of len < 56
@@ -98,14 +107,14 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 		dataLen, err = BeInt(payload, pos+1, beLen)
 		isList = true
 		if dataLen < 56 {
-			err = fmt.Errorf("rlp: non-canonical size information")
+			err = fmt.Errorf("%w: : non-canonical size information", ErrParse)
 		}
 	}
 	if err == nil {
 		if dataPos+dataLen > len(payload) {
-			err = fmt.Errorf("unexpected end of payload")
+			err = fmt.Errorf("%w: unexpected end of payload", ErrParse)
 		} else if dataPos+dataLen < 0 {
-			err = fmt.Errorf("found too big len")
+			err = fmt.Errorf("%w: found too big len", ErrParse)
 		}
 	}
 	return
@@ -117,7 +126,7 @@ func List(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 		return 0, 0, err
 	}
 	if !isList {
-		return 0, 0, fmt.Errorf("must be a list")
+		return 0, 0, fmt.Errorf("%w: must be a list", ErrParse)
 	}
 	return
 }
@@ -128,7 +137,7 @@ func String(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 		return 0, 0, err
 	}
 	if isList {
-		return 0, 0, fmt.Errorf("must be a string, instead of a list")
+		return 0, 0, fmt.Errorf("%w: must be a string, instead of a list", ErrParse)
 	}
 	return
 }
@@ -138,7 +147,7 @@ func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) 
 		return 0, err
 	}
 	if dataLen != expectedLen {
-		return 0, fmt.Errorf("expected string of len %d, got %d", expectedLen, dataLen)
+		return 0, fmt.Errorf("%w: expected string of len %d, got %d", ErrParse, expectedLen, dataLen)
 	}
 	return
 }
@@ -150,13 +159,13 @@ func U64(payload []byte, pos int) (int, uint64, error) {
 		return 0, 0, err
 	}
 	if isList {
-		return 0, 0, fmt.Errorf("uint64 must be a string, not isList")
+		return 0, 0, fmt.Errorf("%w: uint64 must be a string, not isList", ErrParse)
 	}
 	if dataLen > 8 {
-		return 0, 0, fmt.Errorf("uint64 must not be more than 8 bytes long, got %d", dataLen)
+		return 0, 0, fmt.Errorf("%w: uint64 must not be more than 8 bytes long, got %d", ErrParse, dataLen)
 	}
 	if dataLen > 0 && payload[dataPos] == 0 {
-		return 0, 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[dataPos:dataPos+dataLen])
+		return 0, 0, fmt.Errorf("%w: integer encoding for RLP must not have leading zeros: %x", ErrParse, payload[dataPos:dataPos+dataLen])
 	}
 	var r uint64
 	for _, b := range payload[dataPos : dataPos+dataLen] {
@@ -172,13 +181,13 @@ func U32(payload []byte, pos int) (int, uint32, error) {
 		return 0, 0, err
 	}
 	if isList {
-		return 0, 0, fmt.Errorf("uint32 must be a string, not isList")
+		return 0, 0, fmt.Errorf("%w: uint32 must be a string, not isList", ErrParse)
 	}
 	if dataLen > 4 {
-		return 0, 0, fmt.Errorf("uint32 must not be more than 4 bytes long, got %d", dataLen)
+		return 0, 0, fmt.Errorf("%w: uint32 must not be more than 4 bytes long, got %d", ErrParse, dataLen)
 	}
 	if dataLen > 0 && payload[dataPos] == 0 {
-		return 0, 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[dataPos:dataPos+dataLen])
+		return 0, 0, fmt.Errorf("%w: integer encoding for RLP must not have leading zeros: %x", ErrParse, payload[dataPos:dataPos+dataLen])
 	}
 	var r uint32
 	for _, b := range payload[dataPos : dataPos+dataLen] {
@@ -194,10 +203,10 @@ func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
 		return 0, err
 	}
 	if dataLen > 32 {
-		return 0, fmt.Errorf("uint256 must not be more than 32 bytes long, got %d", dataLen)
+		return 0, fmt.Errorf("%w: uint256 must not be more than 32 bytes long, got %d", ErrParse, dataLen)
 	}
 	if dataLen > 0 && payload[dataPos] == 0 {
-		return 0, fmt.Errorf("integer encoding for RLP must not have leading zeros: %x", payload[dataPos:dataPos+dataLen])
+		return 0, fmt.Errorf("%w: integer encoding for RLP must not have leading zeros: %x", ErrParse, payload[dataPos:dataPos+dataLen])
 	}
 	x.SetBytes(payload[dataPos : dataPos+dataLen])
 	return dataPos + dataLen, nil
