@@ -53,7 +53,6 @@ type EthBackendServer struct {
 	statusCh <-chan ExecutionStatus
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
-	latestHead common.Hash // The last head processed through ethbackend
 	// Determines whether stageloop is processing a block or not
 	waitingForPOSHeaders *uint32 // atomic boolean flag
 	mu                   sync.Mutex
@@ -70,8 +69,9 @@ type EthBackend interface {
 // Hash: Block hash
 // Status: block's status
 type ExecutionStatus struct {
-	HeadHash common.Hash
-	Status   PayloadStatus
+	Status          PayloadStatus
+	LatestValidHash common.Hash
+	Error           error
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
@@ -200,10 +200,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	// If another payload is already commissioned then we just reply with syncing
 	if atomic.LoadUint32(s.waitingForPOSHeaders) == 0 {
 		// We are still syncing a commissioned payload
-		return &remote.EngineExecutePayloadReply{
-			Status:          string(Syncing),
-			LatestValidHash: gointerfaces.ConvertHashToH256(s.latestHead),
-		}, nil
+		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
 	}
 	// Let's check if we have parent hash, if we have it we can process the payload right now.
 	// If not, we need to commission it and reverse-download the chain.
@@ -246,11 +243,15 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 	executedStatus := <-s.statusCh
 
-	s.latestHead = executedStatus.HeadHash
-	return &remote.EngineExecutePayloadReply{
-		Status:          string(executedStatus.Status),
-		LatestValidHash: gointerfaces.ConvertHashToH256(executedStatus.HeadHash),
-	}, nil
+	if executedStatus.Error != nil {
+		return nil, executedStatus.Error
+	}
+
+	reply := remote.EngineExecutePayloadReply{Status: string(executedStatus.Status)}
+	if executedStatus.LatestValidHash != (common.Hash{}) {
+		reply.LatestValidHash = gointerfaces.ConvertHashToH256(executedStatus.LatestValidHash)
+	}
+	return &reply, nil
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)

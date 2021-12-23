@@ -116,10 +116,15 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		return nil, err
 	}
 
-	var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
+	if res.LatestValidHash != nil {
+		var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
+		return map[string]interface{}{
+			"status":          res.Status,
+			"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+		}, nil
+	}
 	return map[string]interface{}{
-		"status":          res.Status,
-		"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+		"status": res.Status,
 	}, nil
 }
 
