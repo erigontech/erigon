@@ -89,7 +89,7 @@ func (st *InsertStats) Report(logPrefix string, chain []*types.Block, index int,
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
-func ExecuteBlockEphemerally(
+func ExecuteBlockEphemerallyForBSC(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,
 	getHeader func(hash common.Hash, number uint64) *types.Header,
@@ -165,9 +165,22 @@ func ExecuteBlockEphemerally(
 	var newBlock *types.Block
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), &txs, block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, usedGas, false); err != nil {
+
+		// We're doing this hack for BSC to avoid changing consensus interfaces a lot. BSC modifies txs and receipts by appending
+		// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
+		// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
+		// used by system transactions we just override. Of course, we write used by block gas back. It also always true
+		// that used gas by block is always equal to original's block header gas, and it's checked by receipts root verification
+		// otherwise it causes block verification error.
+		header.GasUsed = *usedGas
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			return SysCallContract(contract, data, *chainConfig, ibs, header, engine)
+		}
+		if err := engine.Finalize(chainConfig, header, ibs, &txs, block.Uncles(), &receipts, epochReader, chainReader, syscall); err != nil {
 			return nil, err
 		}
+		*usedGas = header.GasUsed
+
 		// We need repack this block because transactions and receipts might be changed by consensus, and
 		// it won't pass receipts hash or bloom verification
 		newBlock = types.NewBlock(block.Header(), txs, block.Uncles(), receipts)
@@ -186,6 +199,104 @@ func ExecuteBlockEphemerally(
 	if !vmConfig.NoReceipts {
 		if newBlock.Bloom() != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", newBlock.Bloom(), header.Bloom)
+		}
+	}
+
+	if err := ibs.CommitBlock(chainConfig.Rules(header.Number.Uint64()), stateWriter); err != nil {
+		return nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+	} else if err := stateWriter.WriteChangeSets(); err != nil {
+		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+	}
+
+	return receipts, nil
+}
+
+// ExecuteBlockEphemerally runs a block from provided stateReader and
+// writes the result to the provided stateWriter
+func ExecuteBlockEphemerally(
+	chainConfig *params.ChainConfig,
+	vmConfig *vm.Config,
+	getHeader func(hash common.Hash, number uint64) *types.Header,
+	engine consensus.Engine,
+	block *types.Block,
+	stateReader state.StateReader,
+	stateWriter state.WriterWithChangeSets,
+	epochReader consensus.EpochReader,
+	chainReader consensus.ChainHeaderReader,
+	contractHasTEVM func(codeHash common.Hash) (bool, error),
+) (types.Receipts, error) {
+	defer blockExecutionTimer.UpdateDuration(time.Now())
+	block.Uncles()
+	ibs := state.New(stateReader)
+	header := block.Header()
+	var receipts types.Receipts
+	usedGas := new(uint64)
+	gp := new(GasPool)
+	gp.AddGas(block.GasLimit())
+
+	if !vmConfig.ReadOnly {
+		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+			return nil, err
+		}
+	}
+
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	noop := state.NewNoopWriter()
+	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		writeTrace := false
+		if vmConfig.Debug && vmConfig.Tracer == nil {
+			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+			writeTrace = true
+		}
+
+		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
+		if writeTrace {
+			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
+			if err1 != nil {
+				panic(err1)
+			}
+			encoder := json.NewEncoder(w)
+			logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+			if err2 := encoder.Encode(logs); err2 != nil {
+				panic(err2)
+			}
+			if err2 := w.Close(); err2 != nil {
+				panic(err2)
+			}
+			vmConfig.Tracer = nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+		}
+		if !vmConfig.NoReceipts {
+			receipts = append(receipts, receipt)
+		}
+	}
+
+	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
+		receiptSha := types.DeriveSha(receipts)
+		if receiptSha != block.ReceiptHash() {
+			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+		}
+	}
+
+	if *usedGas != header.GasUsed {
+		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+	}
+	if !vmConfig.NoReceipts {
+		bloom := types.CreateBloom(receipts)
+		if bloom != header.Bloom {
+			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+		}
+	}
+	if !vmConfig.ReadOnly {
+		txs := block.Transactions()
+		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), &txs, block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader); err != nil {
+			return nil, err
 		}
 	}
 
@@ -254,42 +365,19 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(
-	engine consensus.Engine,
-	stateReader state.StateReader,
-	header *types.Header,
-	txs *types.Transactions,
-	uncles []*types.Header,
-	stateWriter state.WriterWithChangeSets,
-	cc *params.ChainConfig,
-	ibs *state.IntraBlockState,
-	receipts *types.Receipts,
-	e consensus.EpochReader,
-	headerReader consensus.ChainHeaderReader,
-	gasUsed *uint64,
-	mining bool,
-) error {
+func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs *types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader) error {
+	//ibs.Print(cc.Rules(header.Number.Uint64()))
+	//fmt.Printf("====tx processing end====\n")
 
-	// We're doing this hack for BSC to avoid changing consensus interfaces a lot. BSC modifies txs and receipts by appending
-	// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
-	// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
-	// used by system transactions we just override. Of course, we write used by block gas back. It also always true
-	// that used gas by block is always equal to original's block header gas, and it's checked by receipts root verification
-	// otherwise it causes block verification error.
-	header.GasUsed = *gasUsed
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
-	}
-	var err error
-	if mining {
-		_, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, syscall)
-	} else {
-		err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
-	}
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	*gasUsed = header.GasUsed
+
+	//fmt.Printf("====finalize start %d====\n", header.Number.Uint64())
+	//ibs.Print(cc.Rules(header.Number.Uint64()))
+	//fmt.Printf("====finalize end====\n")
 
 	var originalSystemAcc *accounts.Account
 

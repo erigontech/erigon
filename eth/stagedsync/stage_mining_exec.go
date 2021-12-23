@@ -124,7 +124,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		current.Receipts = types.Receipts{}
 	}
 
-	err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, &current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, &current.Receipts, epochReader{tx: tx}, chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, new(uint64), true)
+	err := core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, &current.Txs, current.Uncles, stateWriter, &cfg.chainConfig, ibs, &current.Receipts, epochReader{tx: tx}, chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	if err != nil {
 		return err
 	}
