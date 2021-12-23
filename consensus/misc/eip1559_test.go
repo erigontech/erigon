@@ -58,7 +58,6 @@ func config() *params.ChainConfig {
 
 // TestBlockGasLimits tests the gasLimit checks for blocks both across
 // the EIP-1559 boundary and post-1559 blocks
-// TODO: "this test won't work for BSC because it has another GasLimitBoundDivisor"
 func TestBlockGasLimits(t *testing.T) {
 	initial := new(big.Int).SetUint64(params.InitialBaseFee)
 

@@ -318,7 +318,6 @@ func UpgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 	}
 	var network string
 	switch config.ChainName {
-	/* Add mainnet genesis hash */
 	case networkname.BSCChainName:
 		network = mainNet
 	case networkname.ChapelChainName:
@@ -326,7 +325,7 @@ func UpgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.I
 	case networkname.RialtoChainName:
 		network = rialtoNet
 	default:
-		network = defaultNet
+		return
 	}
 
 	logger := log.New("system-contract-upgrade", network)
