@@ -179,7 +179,9 @@ var (
 	}
 
 	ChapelChainConfig = &ChainConfig{
+		ChainName:           networkname.ChapelChainName,
 		ChainID:             big.NewInt(97),
+		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),
@@ -200,7 +202,9 @@ var (
 	}
 
 	RialtoChainConfig = &ChainConfig{
+		ChainName:           networkname.RialtoChainName,
 		ChainID:             big.NewInt(1417),
+		Consensus:           ParliaConsensus,
 		HomesteadBlock:      big.NewInt(0),
 		EIP150Block:         big.NewInt(0),
 		EIP155Block:         big.NewInt(0),

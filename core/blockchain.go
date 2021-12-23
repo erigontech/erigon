@@ -295,7 +295,7 @@ func ExecuteBlockEphemerally(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), &txs, block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader); err != nil {
+		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), &txs, block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, false); err != nil {
 			return nil, err
 		}
 	}
@@ -365,49 +365,47 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs *types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader) error {
-	//ibs.Print(cc.Rules(header.Number.Uint64()))
-	//fmt.Printf("====tx processing end====\n")
-
-	if err := engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, func(contract common.Address, data []byte) ([]byte, error) {
+func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs *types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool) (newBlock *types.Block, err error) {
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
-	}); err != nil {
-		return err
+	}
+	if isMining {
+		newBlock, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, nil)
+	} else {
+		err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
+	}
+	if err != nil {
+		return
 	}
 
-	//fmt.Printf("====finalize start %d====\n", header.Number.Uint64())
-	//ibs.Print(cc.Rules(header.Number.Uint64()))
-	//fmt.Printf("====finalize end====\n")
-
 	var originalSystemAcc *accounts.Account
-
 	if cc.ChainID.Uint64() == 77 { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
 		n := ibs.GetNonce(state.SystemAddress) //hack - because syscall must use ApplyMessage instead of ApplyTx (and don't create tx at all). But CallContract must create tx.
 		if n > 0 {
 			var err error
 			originalSystemAcc, err = stateReader.ReadAccountData(state.SystemAddress)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 
 	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
-		return fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
+		return nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
 	if originalSystemAcc != nil { // hack for Sokol - don't understand why eip158 is enabled, but OE still save SystemAddress with nonce=0
 		acc := accounts.NewAccount()
 		acc.Nonce = 0
 		if err := stateWriter.UpdateAccountData(state.SystemAddress, originalSystemAcc, &acc); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if err := stateWriter.WriteChangeSets(); err != nil {
-		return fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
+		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
 	}
-	return nil
+	return newBlock, nil
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
