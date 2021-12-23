@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -43,7 +44,7 @@ type HeadersCfg struct {
 	noP2PDiscovery    bool
 	tmpdir            string
 	reverseDownloadCh chan types.Header
-	waitingPosHeaders *bool
+	waitingPosHeaders *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -61,7 +62,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan types.Header,
-	waitingPosHeaders *bool,
+	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
@@ -136,11 +137,11 @@ func HeadersPOS(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	*cfg.waitingPosHeaders = true
+	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	header := <-cfg.reverseDownloadCh
-	*cfg.waitingPosHeaders = false
+	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
@@ -266,8 +267,19 @@ func HeadersPOS(
 		return nil
 	}
 
-	// TODO(yperbasis): engine.VerifyHeader + FeedHeaderPoS instead of IdentityLoadFunc
-	if err := headerCollector.Load(tx, kv.Headers, etl.IdentityLoadFunc, etl.TransformArgs{
+	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		var h types.Header
+		if err := rlp.DecodeBytes(value, &h); err != nil {
+			return err
+		}
+		if err := cfg.hd.VerifyHeader(&h); err != nil {
+			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
+			return err
+		}
+		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+	}
+
+	if err := headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},

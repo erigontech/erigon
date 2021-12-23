@@ -19,6 +19,7 @@ package eth
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -28,6 +29,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -132,7 +134,7 @@ type Ethereum struct {
 	// to proof-of-stake so we start reverse syncing from the header
 	reverseDownloadCh    chan types.Header
 	statusCh             chan privateapi.ExecutionStatus
-	waitingForPOSHeaders bool
+	waitingForPOSHeaders uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -347,7 +349,34 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, snapshothashes.KnownConfig(chainConfig.ChainName))
+		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
+		//TODO: incremental snapshot sync
+		if err := chainKv.Update(ctx, func(tx kv.RwTx) error {
+			const SyncedWithSnapshot = "synced_with_snapshot"
+			v, err := tx.GetOne(kv.DatabaseInfo, []byte(SyncedWithSnapshot))
+			if err != nil {
+				return err
+			}
+			if v != nil {
+				valueInDB := binary.BigEndian.Uint64(v)
+				if valueInDB != snConfig.ExpectBlocks {
+					log.Warn(fmt.Sprintf("'incremental snapshots feature' not implemented yet. New snapshots available up to block %d, but this node was synced to snapshot %d and will keep other blocks in db. (it's safe, re-sync may reduce db size)", valueInDB, snConfig.ExpectBlocks))
+					snConfig.ExpectBlocks = valueInDB
+				}
+				return nil
+			}
+
+			num := make([]byte, 8)
+			binary.BigEndian.PutUint64(num, snConfig.ExpectBlocks)
+			if err := tx.Put(kv.DatabaseInfo, []byte(SyncedWithSnapshot), num); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, snConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -375,7 +404,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	backend.waitingForPOSHeaders = false
+	atomic.StoreUint32(&backend.waitingForPOSHeaders, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)

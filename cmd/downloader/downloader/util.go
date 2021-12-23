@@ -20,11 +20,13 @@ import (
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
 // amount of network announcements, but can't go over 2Mb
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-const DefaultPieceSize = 2 * 1024 * 1024
+const DefaultPieceSize = 1 * 1024 * 1024
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
-	trackers.Best, trackers.Ws, // trackers.Udp, trackers.Https, trackers.Http,
+	trackers.Best,
+	trackers.Ws,
+	// trackers.Udp, trackers.Https, trackers.Http,
 }
 
 func allTorrentFiles(dir string) ([]string, error) {
@@ -117,7 +119,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[torrent] Create .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			log.Info("[torrent] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
 		}
 	}
 	return nil

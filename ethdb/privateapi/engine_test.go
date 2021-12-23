@@ -2,6 +2,7 @@ package privateapi
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -91,7 +92,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	makeTestDb(ctx, db)
 	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
-	waitingForHeaders := true
+	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
@@ -106,7 +107,7 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	<-reverseDownloadCh
 	statusCh <- ExecutionStatus{Status: Syncing}
-	waitingForHeaders = false
+	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
 	require.NoError(err)
 	require.Equal(reply.Status, string(Syncing))
@@ -151,7 +152,7 @@ func TestMockValidExecution(t *testing.T) {
 
 	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
-	waitingForHeaders := true
+	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
@@ -188,7 +189,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
 
-	waitingForHeaders := true
+	waitingForHeaders := uint32(1)
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
 	var err error
@@ -223,7 +224,7 @@ func TestNoTTD(t *testing.T) {
 
 	reverseDownloadCh := make(chan types.Header)
 	statusCh := make(chan ExecutionStatus)
-	waitingForHeaders := true
+	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, &waitingForHeaders)
 
