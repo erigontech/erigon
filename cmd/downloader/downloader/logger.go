@@ -20,6 +20,13 @@ func NewAdapterLogger() lg.Logger {
 	}
 }
 
+var String2LogLevel = map[string]lg.Level{
+	lg.Debug.LogString():   lg.Debug,
+	lg.Info.LogString():    lg.Info,
+	lg.Warning.LogString(): lg.Warning,
+	lg.Error.LogString():   lg.Error,
+}
+
 type adapterLogger struct{}
 
 func (b adapterLogger) Log(msg lg.Msg) {
