@@ -29,6 +29,7 @@ type MiningBlock struct {
 	Uncles   []*types.Header
 	Txs      []types.Transaction
 	Receipts types.Receipts
+	POS      bool
 
 	LocalTxs  types.TransactionsStream
 	RemoteTxs types.TransactionsStream

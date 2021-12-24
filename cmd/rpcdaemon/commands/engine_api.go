@@ -176,20 +176,16 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 
 	for _, blockHash := range blockHashes {
 		hash := *blockHash.BlockHash
-
 		block, err := e.blockByHashWithSenders(tx, hash)
 		if err != nil {
 			return nil, err
 		}
-
 		if block == nil {
 			continue
 		}
 
 		var bloom types.Bloom = block.Bloom()
-
 		buf := bytes.NewBuffer(nil)
-
 		var encodedTransactions []hexutil.Bytes
 
 		for _, tx := range block.Transactions() {
@@ -199,7 +195,6 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 			if err != nil {
 				return nil, fmt.Errorf("broken tx rlp: %w", err)
 			}
-
 			encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 		}
 
@@ -219,7 +214,6 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 			BlockHash:     block.Hash(),
 			Transactions:  encodedTransactions,
 		}
-
 	}
 	return blockHashToBody, nil
 }

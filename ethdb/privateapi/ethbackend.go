@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -40,12 +42,14 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
 
-	ctx             context.Context
-	eth             EthBackend
-	events          *Events
-	db              kv.RoDB
-	blockReader     interfaces.BlockReader
-	config          *params.ChainConfig
+	ctx         context.Context
+	eth         EthBackend
+	events      *Events
+	db          kv.RoDB
+	blockReader interfaces.BlockReader
+	config      *params.ChainConfig
+	// Block proposing for proof-of-stake
+	nextPayloadId   uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send reverse sync starting point to staged sync
 	reverseDownloadCh chan<- types.Header
@@ -54,8 +58,9 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForPOSHeaders *uint32 // atomic boolean flag
-	mu                   sync.Mutex
+	waitingForBeaconChain *uint32      // atomic boolean flag
+	assembledBlock        *types.Block // block assembled in mining stages for N+1
+	mu                    sync.Mutex
 }
 
 type EthBackend interface {
@@ -75,10 +80,12 @@ type ExecutionStatus struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForPOSHeaders *uint32,
+	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	assembledBlock *types.Block,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForPOSHeaders: waitingForPOSHeaders,
+		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
+		assembledBlock: assembledBlock, pendingPayloads: make(map[uint64]types2.ExecutionPayload),
 	}
 }
 
@@ -196,9 +203,11 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-
+	// Discard all previous prepared payloads if another block was proposed
+	s.nextPayloadId = 0
+	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// If another payload is already commissioned then we just reply with syncing
-	if atomic.LoadUint32(s.waitingForPOSHeaders) == 0 {
+	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		// We are still syncing a commissioned payload
 		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
 	}
@@ -268,6 +277,70 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return &payload, nil
 	}
 	return nil, fmt.Errorf("unknown payload")
+}
+
+// EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
+func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *remote.EnginePreparePayload) (*remote.EngineForkChoiceUpdatedReply, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+	if s.assembledBlock == nil {
+		return nil, fmt.Errorf("mining has not been enabled yet")
+	}
+	// Check if parent equate to the head
+	parent := gointerfaces.ConvertH256ToHash(req.ParentHash)
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if parent != rawdb.ReadHeadBlockHash(tx) || s.assembledBlock.Header().ParentHash != parent || *s.waitingForBeaconChain == 0 {
+		return &remote.EngineForkChoiceUpdatedReply{
+			Status: string(Syncing),
+		}, nil
+	}
+	var baseFeeReply *types2.H256
+	if s.assembledBlock.Header().BaseFee != nil {
+		var baseFee uint256.Int
+		baseFee.SetFromBig(s.assembledBlock.Header().BaseFee)
+		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
+	}
+	var encodedTransactions [][]byte
+	buf := bytes.NewBuffer(nil)
+
+	for _, tx := range s.assembledBlock.Transactions() {
+		buf.Reset()
+
+		err := rlp.Encode(buf, tx)
+		if err != nil {
+			return nil, fmt.Errorf("broken tx rlp: %w", err)
+		}
+		encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
+	}
+	// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
+	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
+		ParentHash:    req.ParentHash,
+		Coinbase:      req.FeeRecipient,
+		Timestamp:     req.Timestamp,
+		Random:        req.Random,
+		StateRoot:     gointerfaces.ConvertHashToH256(s.assembledBlock.Root()),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(s.assembledBlock.ReceiptHash()),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(s.assembledBlock.Bloom().Bytes()),
+		GasLimit:      s.assembledBlock.GasLimit(),
+		GasUsed:       s.assembledBlock.GasUsed(),
+		BlockNumber:   s.assembledBlock.NumberU64(),
+		ExtraData:     gointerfaces.ConvertHashToH256(common.BytesToHash(s.assembledBlock.Extra())),
+		BaseFeePerGas: baseFeeReply,
+		BlockHash:     gointerfaces.ConvertHashToH256(s.assembledBlock.Hash()),
+		Transactions:  encodedTransactions,
+	}
+	// successfully assembled the payload and assinged the correct id
+	defer func() { s.nextPayloadId++ }()
+	return &remote.EngineForkChoiceUpdatedReply{
+		Status:    "SUCCESS",
+		PayloadId: s.nextPayloadId,
+	}, nil
 }
 
 func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {

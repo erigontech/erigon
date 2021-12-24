@@ -132,9 +132,10 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh    chan types.Header
-	statusCh             chan privateapi.ExecutionStatus
-	waitingForPOSHeaders uint32 // atomic boolean flag
+	reverseDownloadCh     chan types.Header
+	statusCh              chan privateapi.ExecutionStatus
+	waitingForBeaconChain uint32       // atomic boolean flag
+	assembledBlock        *types.Block // Mining stages telling engine API which block has been assembled
 }
 
 // New creates a new Ethereum object (including the
@@ -335,6 +336,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		txPoolRPC = backend.txPool2GrpcServer
 	}
 
+	backend.assembledBlock = new(types.Block)
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
 	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
@@ -397,16 +399,16 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
+			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit, backend.assembledBlock),
 		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 
 	var ethashApi *ethash.API
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	atomic.StoreUint32(&backend.waitingForPOSHeaders, 0)
+	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain, backend.assembledBlock)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -478,7 +480,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders,
+		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
 		backend.downloaderClient)
 	if err != nil {
 		return nil, err
