@@ -24,27 +24,33 @@ type Client struct {
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
+	// debug
+	if lg.Debug == verbosity {
+		torrentConfig.Debug = true
+	}
+	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
+
 	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
 
-	torrentClient, err := torrent.NewClient(torrentConfig)
+	return torrentConfig, progressStore, nil
+}
+
+func New(cfg *torrent.ClientConfig, progressStore storage.PieceCompletion) (*Client, error) {
+	torrentClient, err := torrent.NewClient(cfg)
 	if err != nil {
-		log.Error("Fail to start torrnet client", "err", err)
-		return nil, fmt.Errorf("fail to start: %w", err)
+		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
-
-	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", seeding, torrentClient.PeerID()))
-
 	return &Client{
 		Cli:                  torrentClient,
 		pieceCompletionStore: progressStore,
@@ -54,11 +60,6 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.ListenPort = 0
-
-	// debug
-	torrentConfig.Debug = false
-	torrentConfig.Logger = NewAdapterLogger()
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 
 	// enable dht
 	torrentConfig.NoDHT = true

@@ -344,16 +344,29 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 	return nil
 }
 
-func WriteRawTransactions(db kv.StatelessWriteTx, txs [][]byte, baseTxId uint64) error {
+func WriteRawTransactions(db kv.StatelessRwTx, txs [][]byte, baseTxId uint64) error {
+	txIdKey := make([]byte, 8)
+	/*
+		if baseTxId > 0 {
+			binary.BigEndian.PutUint64(txIdKey, baseTxId-1)
+			exists, err := db.Has(kv.EthTx, txIdKey)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return fmt.Errorf("no gaps allowed in tranactions table, inserting %d, but %d doesn't exists", baseTxId, baseTxId-1)
+			}
+		}
+	*/
+
 	txId := baseTxId
 	for _, tx := range txs {
-		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
 			return err
 		}
+		txId++
 	}
 	return nil
 }
@@ -365,14 +378,6 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 		return err
 	}
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
-}
-
-// HasBody verifies the existence of a block body corresponding to the hash.
-func HasBody(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); !has || err != nil {
-		return false
-	}
-	return true
 }
 
 func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, error) {
@@ -502,7 +507,7 @@ func WriteRawBodyIfNotExists(db kv.StatelessRwTx, hash common.Hash, number uint6
 	return WriteRawBody(db, hash, number, body)
 }
 
-func WriteRawBody(db kv.StatelessWriteTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBody(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
