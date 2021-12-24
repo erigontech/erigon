@@ -1106,6 +1106,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
+	// Apply special hacks for BSC params
+	if chainConfig.Parlia != nil {
+		params.ApplyBinanceSmartChainParams()
+		vm.ApplyBinanceSmartChainEIPs()
+	}
+
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 

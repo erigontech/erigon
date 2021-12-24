@@ -179,6 +179,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+
 	// Apply special hacks for BSC params
 	if chainConfig.Parlia != nil {
 		params.ApplyBinanceSmartChainParams()
