@@ -13,6 +13,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/c2h5oh/datasize"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -26,12 +27,15 @@ type Client struct {
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadLimit, uploadLimit datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
+
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(downloadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(uploadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
 
 	// debug
 	if lg.Debug == verbosity {
@@ -79,9 +83,6 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
 	torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	torrentConfig.TorrentPeersLowWater = 50       // default: 50
-
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(64*1024*1024, 2*DefaultPieceSize)    // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(128*1024*1024, 2*DefaultPieceSize) // default: unlimited
 
 	return torrentConfig
 }
