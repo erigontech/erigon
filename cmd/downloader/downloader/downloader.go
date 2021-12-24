@@ -259,12 +259,6 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 		return err
 	}
 
-	pieces := 0
-	for _, t := range torrentClient.Torrents() {
-		pieces += t.NumPieces()
-	}
-	fmt.Printf("trackers: %d, pieces %d\n", len(Trackers), pieces)
-
 	//waitForChecksumVerify(ctx, torrentClient)
 	return nil
 }
