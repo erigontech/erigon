@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
@@ -105,7 +107,9 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 	interval := time.Second * 5
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
+	var m runtime.MemStats
 	var stats aggStats
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -129,6 +133,10 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				continue
 			}
 
+			runtime.ReadMemStats(&m)
+			alloc := common.StorageSize(m.Alloc)
+			sys := common.StorageSize(m.Sys)
+
 			stats = calcStats(stats, interval, torrentClient)
 			if allComplete {
 				log.Info(fmt.Sprintf(
@@ -137,7 +145,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 					humanize.Bytes(uint64(stats.writeBytesPerSec)),
 					stats.peersCount,
 					stats.torrentsCount,
-				))
+				), "alloc", alloc, "sys", sys)
 				continue
 			}
 
@@ -148,7 +156,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				humanize.Bytes(uint64(stats.writeBytesPerSec)),
 				stats.peersCount,
 				stats.torrentsCount,
-			))
+			), "alloc", alloc, "sys", sys)
 		}
 	}
 }
@@ -250,12 +258,6 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 	}); err != nil {
 		return err
 	}
-
-	pieces := 0
-	for _, t := range torrentClient.Torrents() {
-		pieces += t.NumPieces()
-	}
-	fmt.Printf("trackers: %d, pieces %d\n", len(Trackers), pieces)
 
 	//waitForChecksumVerify(ctx, torrentClient)
 	return nil
