@@ -18,7 +18,9 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -591,7 +593,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash common.Hash, blockHeight uint64, terminalTotalDifficulty *big.Int) error, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, tx kv.RwTx) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
@@ -607,12 +609,18 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 			// Header should be preverified, but not yet, try again later
 			break
 		}
+
+		stateReader := state.NewPlainStateReader(tx)
+		ibs := state.New(stateReader)
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
 			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
-			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
+			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true, /* seal */
+				func(contract common.Address, data []byte) ([]byte, error) {
+					return core.SysCallContract(contract, data, *hd.headerReader.Config(), ibs, link.header, hd.engine)
+				}); err != nil {
 				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later

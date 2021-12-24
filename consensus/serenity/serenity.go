@@ -55,7 +55,7 @@ func (s *Serenity) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum serenity engine.
-func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool, sysCall consensus.SystemCall) error {
 	// Retrieve parent from the chain
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
@@ -69,7 +69,7 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 // stock Ethereum serenity engine.
 func (s *Serenity) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
 	for _, header := range headers {
-		if err := s.VerifyHeader(chain, header, false); err != nil {
+		if err := s.VerifyHeader(chain, header, false, nil); err != nil {
 			return err
 		}
 	}
