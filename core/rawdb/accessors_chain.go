@@ -344,29 +344,16 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 	return nil
 }
 
-func WriteRawTransactions(db kv.StatelessRwTx, txs [][]byte, baseTxId uint64) error {
-	txIdKey := make([]byte, 8)
-	/*
-		if baseTxId > 0 {
-			binary.BigEndian.PutUint64(txIdKey, baseTxId-1)
-			exists, err := db.Has(kv.EthTx, txIdKey)
-			if err != nil {
-				return err
-			}
-			if !exists {
-				return fmt.Errorf("no gaps allowed in tranactions table, inserting %d, but %d doesn't exists", baseTxId, baseTxId-1)
-			}
-		}
-	*/
-
+func WriteRawTransactions(db kv.StatelessWriteTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
 	for _, tx := range txs {
+		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
+		txId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
 			return err
 		}
-		txId++
 	}
 	return nil
 }
