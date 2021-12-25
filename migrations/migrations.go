@@ -31,12 +31,7 @@ import (
 // - write test - and check that it's safe to apply same migration twice
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
-		headerPrefixToSeparateBuckets,
-		removeCliqueBucket,
 		dbSchemaVersion,
-		fixSequences,
-		storageMode,
-		setPruneType,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -127,10 +122,37 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 	}
 
 	var applied map[string][]byte
+	var existingVersion []byte
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
 		applied, err = AppliedMigrations(tx, false)
-		return err
+		if err != nil {
+			return fmt.Errorf("reading applied migrations: %w", err)
+		}
+		existingVersion, err = tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
+		if err != nil {
+			return fmt.Errorf("reading DB schema version: %w", err)
+		}
+		if len(existingVersion) != 0 && len(existingVersion) != 12 {
+			return fmt.Errorf("incorrect length of DB schema version: %d", len(existingVersion))
+		}
+		if len(existingVersion) == 12 {
+			major := binary.BigEndian.Uint32(existingVersion)
+			minor := binary.BigEndian.Uint32(existingVersion[4:])
+			if major > kv.DBSchemaVersion.Major {
+				return fmt.Errorf("cannot downgrade major DB version from %d to %d", major, kv.DBSchemaVersion.Major)
+			} else if major == kv.DBSchemaVersion.Major {
+				if minor > kv.DBSchemaVersion.Minor {
+					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
+				}
+			} else {
+				// major < kv.DBSchemaVersion.Major
+				if kv.DBSchemaVersion.Major-major > 1 {
+					return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		return err
 	}

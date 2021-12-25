@@ -95,9 +95,11 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 			select {
 			case txs := <-txsCh:
 				for _, t := range txs {
-					err := notifier.Notify(rpcSub.ID, t.Hash())
-					if err != nil {
-						log.Warn("error while notifying subscription", "err", err)
+					if t != nil {
+						err := notifier.Notify(rpcSub.ID, t.Hash())
+						if err != nil {
+							log.Warn("error while notifying subscription", "err", err)
+						}
 					}
 				}
 			case <-rpcSub.Err():

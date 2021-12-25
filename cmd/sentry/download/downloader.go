@@ -79,7 +79,7 @@ func RecvUploadMessageLoop(ctx context.Context,
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Warn("[RecvUploadMessage]", "err", err)
+			log.Debug("[RecvUploadMessage]", "err", err)
 			continue
 		}
 	}
@@ -119,11 +119,8 @@ func RecvUploadMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsDecodeError(err) {
-				log.Debug("[RecvUploadMessage]: Handling incoming message", "error", err)
-			} else {
-				log.Warn("[RecvUploadMessage]: Handling incoming message", "error", err)
-			}
+			log.Debug("[RecvUploadMessage]: Handling incoming message", "error", err)
+
 		}
 		if wg != nil {
 			wg.Done()
@@ -210,11 +207,7 @@ func RecvUploadHeadersMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsDecodeError(err) {
-				log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
-			} else {
-				log.Warn("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
-			}
+			log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
 		}
 		if wg != nil {
 			wg.Done()
