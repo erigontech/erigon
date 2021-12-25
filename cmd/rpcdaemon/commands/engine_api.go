@@ -54,7 +54,7 @@ type PayloadAttributes struct {
 
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
-	ForkchoiceUpdatedV1(context.Context, *ForkChoiceState, *PayloadAttributes) (map[string]interface{}, error)
+	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
@@ -79,8 +79,16 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	}
 	// Request for assembling payload
 	reply, err := e.api.EngineForkchoiceUpdateV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
-		HeadBlockHash: &remote.EnginePreparePayload{},
-		SafeBlockHash: &remote.EngineForkChoiceUpdated{},
+		Prepare: &remote.EnginePreparePayload{
+			Timestamp:    uint64(payloadAttributes.Timestamp),
+			Random:       gointerfaces.ConvertHashToH256(payloadAttributes.Random),
+			FeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		},
+		Forkchoice: &remote.EngineForkChoiceUpdated{
+			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FizalizedBlockHash),
+			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -109,9 +117,6 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 			return nil, fmt.Errorf("invalid request")
 		}
 	}
-	// Maximum length of extra is 32 bytes so we can use the hash datatype
-	extra := common.BytesToHash(payload.ExtraData)
-
 	log.Info("Received Payload from beacon-chain")
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
@@ -130,7 +135,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		GasLimit:      (uint64)(payload.GasLimit),
 		GasUsed:       (uint64)(payload.GasUsed),
 		Timestamp:     (uint64)(payload.Timestamp),
-		ExtraData:     gointerfaces.ConvertHashToH256(extra),
+		ExtraData:     payload.ExtraData,
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
 		Transactions:  transactions,
@@ -143,7 +148,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
 		return map[string]interface{}{
 			"status":          res.Status,
-			"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+			"latestValidHash": latestValidHash,
 		}, nil
 	}
 	return map[string]interface{}{
@@ -157,7 +162,6 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64)
 		return nil, err
 	}
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	var extra common.Hash = gointerfaces.ConvertH256ToHash(payload.ExtraData)
 
 	var baseFee *big.Int
 	if payload.BaseFeePerGas != nil {
@@ -180,7 +184,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64)
 		GasLimit:      hexutil.Uint64(payload.GasLimit),
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
-		ExtraData:     extra[:],
+		ExtraData:     payload.ExtraData,
 		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,

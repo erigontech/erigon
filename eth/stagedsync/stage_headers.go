@@ -174,14 +174,14 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		if err := cfg.hd.VerifyHeader(&header); err != nil {
+		/*if err := cfg.hd.VerifyHeader(&header); err != nil { Disable for now
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.statusCh <- privateapi.ExecutionStatus{
 				Status:          privateapi.Invalid,
 				LatestValidHash: header.ParentHash,
 			}
 			return nil
-		}
+		}*/
 
 		// For the sake of simplicity we can just assume it will be valid for now.
 		// TODO(yperbasis): move to execution stage

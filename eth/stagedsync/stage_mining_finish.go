@@ -55,7 +55,6 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	}
 	// If we are on proof-of-stake, we send our block to the engine API
 	if isTrans {
-		fmt.Println("lol")
 		*cfg.assembledBlock = *block
 		return nil
 	}

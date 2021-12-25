@@ -222,7 +222,19 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 
 	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
-	var extra_data common.Hash = gointerfaces.ConvertH256ToHash(req.ExtraData)
+	var transactions types.Transactions
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+	for _, encodedTx := range req.Transactions {
+		var tx types.Transaction
+		var err error
+		reader.Reset(encodedTx)
+		stream.Reset(reader, 0)
+		if tx, err = types.DecodeTransaction(stream); err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, tx)
+	}
 	header := types.Header{
 		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
@@ -230,7 +242,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
 		Eip1559:     eip1559,
 		BaseFee:     baseFee,
-		Extra:       extra_data.Bytes(),
+		Extra:       req.ExtraData,
 		Number:      big.NewInt(int64(req.BlockNumber)),
 		GasUsed:     req.GasUsed,
 		GasLimit:    req.GasLimit,
@@ -240,8 +252,30 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
+		TxHash:      types.DeriveSha(transactions),
 	}
+	fmt.Printf("Parent: ")
+	fmt.Println(header.ParentHash)
+	fmt.Printf("Coinbase: ")
+	fmt.Println(header.Coinbase)
+	fmt.Printf("Root: ")
+	fmt.Println(header.Root)
+	fmt.Printf("ReceiptHash: ")
+	fmt.Println(header.ReceiptHash)
+	fmt.Printf("Bloom: ")
+	fmt.Println(header.Bloom)
+	fmt.Printf("MixDigest: ")
+	fmt.Println(header.MixDigest)
+	fmt.Printf("Block Number: ")
+	fmt.Println(header.Number.Uint64())
+	fmt.Printf("GasLimit: ")
+	fmt.Println(header.GasLimit)
+	fmt.Printf("GasUsed: ")
+	fmt.Println(header.GasUsed)
+	fmt.Printf("Time: ")
+	fmt.Println(header.Time)
+	fmt.Printf("Extra: ")
+	fmt.Println(header.Extra)
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
@@ -290,7 +324,7 @@ func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("mining has not been enabled yet")
 	}
 	// Check if parent equate to the head
-	parent := gointerfaces.ConvertH256ToHash(req.SafeBlockHash.HeadBlockHash)
+	parent := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -320,17 +354,17 @@ func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
 	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
-		ParentHash:    req.HeadBlockHash.ParentHash,
-		Coinbase:      req.HeadBlockHash.FeeRecipient,
-		Timestamp:     req.HeadBlockHash.Timestamp,
-		Random:        req.HeadBlockHash.Random,
+		ParentHash:    req.Forkchoice.HeadBlockHash,
+		Coinbase:      req.Prepare.FeeRecipient,
+		Timestamp:     req.Prepare.Timestamp,
+		Random:        req.Prepare.Random,
 		StateRoot:     gointerfaces.ConvertHashToH256(s.assembledBlock.Root()),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(s.assembledBlock.ReceiptHash()),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(s.assembledBlock.Bloom().Bytes()),
 		GasLimit:      s.assembledBlock.GasLimit(),
 		GasUsed:       s.assembledBlock.GasUsed(),
 		BlockNumber:   s.assembledBlock.NumberU64(),
-		ExtraData:     gointerfaces.ConvertHashToH256(common.BytesToHash(s.assembledBlock.Extra())),
+		ExtraData:     s.assembledBlock.Extra(),
 		BaseFeePerGas: baseFeeReply,
 		BlockHash:     gointerfaces.ConvertHashToH256(s.assembledBlock.Hash()),
 		Transactions:  encodedTransactions,
