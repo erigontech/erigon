@@ -280,7 +280,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
-func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *remote.EnginePreparePayload) (*remote.EngineForkChoiceUpdatedReply, error) {
+func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.config.TerminalTotalDifficulty == nil {
@@ -290,7 +290,7 @@ func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("mining has not been enabled yet")
 	}
 	// Check if parent equate to the head
-	parent := gointerfaces.ConvertH256ToHash(req.ParentHash)
+	parent := gointerfaces.ConvertH256ToHash(req.SafeBlockHash.HeadBlockHash)
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -320,10 +320,10 @@ func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
 	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
-		ParentHash:    req.ParentHash,
-		Coinbase:      req.FeeRecipient,
-		Timestamp:     req.Timestamp,
-		Random:        req.Random,
+		ParentHash:    req.HeadBlockHash.ParentHash,
+		Coinbase:      req.HeadBlockHash.FeeRecipient,
+		Timestamp:     req.HeadBlockHash.Timestamp,
+		Random:        req.HeadBlockHash.Random,
 		StateRoot:     gointerfaces.ConvertHashToH256(s.assembledBlock.Root()),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(s.assembledBlock.ReceiptHash()),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(s.assembledBlock.Bloom().Bytes()),

@@ -77,6 +77,7 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params
 //TODO:
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
+	fmt.Println("lol")
 	current := cfg.miner.MiningBlock
 	txPoolLocals := []common.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase

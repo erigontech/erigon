@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
@@ -38,6 +39,13 @@ type ExecutionPayload struct {
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
+type ForkChoiceState struct {
+	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
+	SafeBlockHash      common.Hash `json:"safeBlockHash"             gencodec:"required"`
+	FizalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
+}
+
+// PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
 	Random                common.Hash    `json:"random"                gencodec:"required"`
@@ -46,7 +54,7 @@ type PayloadAttributes struct {
 
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
-	ForkchoiceUpdatedV1(context.Context, struct{}, *PayloadAttributes) (map[string]interface{}, error)
+	ForkchoiceUpdatedV1(context.Context, *ForkChoiceState, *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
@@ -62,16 +70,31 @@ type EngineImpl struct {
 // ForkchoiceUpdatedV1 is executed only if we are running a beacon validator,
 // in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
 // if the payloadAttributes is different than null, we return
-func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
 	if payloadAttributes == nil {
 		return map[string]interface{}{
-			"status":    "SUCCESS",
-			"payloadId": nil,
+			"status": "SUCCESS",
 		}, nil
 	}
 	// Request for assembling payload
-	return nil, fmt.Errorf("invalid request")
+	reply, err := e.api.EngineForkchoiceUpdateV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
+		HeadBlockHash: &remote.EnginePreparePayload{},
+		SafeBlockHash: &remote.EngineForkChoiceUpdated{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Process reply
+	if reply.Status == "SYNCING" {
+		return map[string]interface{}{
+			"status": reply.Status,
+		}, nil
+	}
+	return map[string]interface{}{
+		"status":    reply.Status,
+		"payloadId": hexutil.Uint64(reply.PayloadId),
+	}, nil
 }
 
 // ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things

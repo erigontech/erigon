@@ -95,17 +95,11 @@ func SpawnStageHeaders(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
-
 	var blockNumber uint64
+	roTx, err := cfg.db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
 
 	if s == nil {
 		blockNumber = 0
@@ -113,16 +107,16 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
-	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+	isTrans, err := rawdb.Transitioned(roTx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 
 	if err != nil {
 		return err
 	}
 
 	if isTrans {
-		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test)
 	} else {
-		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test)
 	}
 }
 
@@ -135,12 +129,20 @@ func HeadersPOS(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
-	useExternalTx bool,
 ) error {
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	header := <-cfg.reverseDownloadCh
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 
 	headerNumber := header.Number.Uint64()
@@ -315,8 +317,16 @@ func HeadersPOW(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
-	useExternalTx bool,
 ) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg); err != nil {
 		return err
 	}
