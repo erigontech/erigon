@@ -50,9 +50,9 @@ linters-settings:
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
     enabled-tags:
       - performance
+      - diagnostic
     disabled-tags:
       - experimental
-      - opinionated
     settings:
       ruleguard:
         rules: "rules.go"
