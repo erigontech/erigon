@@ -16,7 +16,7 @@ testd
 build/_vendor/pkg
 /*.a
 docs/readthedocs/build
-
+genesis.json
 #*
 .#*
 *#

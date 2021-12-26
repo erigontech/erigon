@@ -909,7 +909,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 	return td, nil
 }
 
-func (hi *HeaderInserter) FeedHeaderPoS(db kv.RwTx, header *types.Header, hash common.Hash) error {
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
 	blockHeight := header.Number.Uint64()
 	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
