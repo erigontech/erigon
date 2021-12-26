@@ -336,7 +336,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		txPoolRPC = backend.txPool2GrpcServer
 	}
 
-	backend.assembledBlock = *types.NewBlock(&types.Header{}, nil, nil, nil)
+	backend.assembledBlock = types.Block{}
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
 	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
