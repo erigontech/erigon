@@ -70,3 +70,5 @@ docker-compose.dev.yml
 
 libmdbx/build/*
 tests/testdata/*
+
+go.work
