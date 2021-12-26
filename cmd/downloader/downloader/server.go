@@ -32,14 +32,7 @@ func NewServer(db kv.RwDB, client *Client, snapshotDir string) (*SNDownloaderSer
 	return sn, nil
 }
 
-func Stop(torrentClient *torrent.Client) {
-	for _, t := range torrentClient.Torrents() {
-		t.DisallowDataDownload()
-		t.DisallowDataUpload()
-	}
-}
-
-func Start(ctx context.Context, snapshotDir string, torrentClient *torrent.Client, config *snapshothashes.Config) error {
+func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentClient *torrent.Client, config *snapshothashes.Config) error {
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
@@ -49,6 +42,7 @@ func Start(ctx context.Context, snapshotDir string, torrentClient *torrent.Clien
 	for _, t := range torrentClient.Torrents() {
 		t.AllowDataDownload()
 		t.AllowDataUpload()
+		t.DownloadAll()
 	}
 
 	return nil

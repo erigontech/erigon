@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -133,7 +134,7 @@ type Ethereum struct {
 	// to proof-of-stake so we start reverse syncing from the header
 	reverseDownloadCh    chan types.Header
 	statusCh             chan privateapi.ExecutionStatus
-	waitingForPOSHeaders bool
+	waitingForPOSHeaders uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -403,7 +404,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	backend.waitingForPOSHeaders = false
+	atomic.StoreUint32(&backend.waitingForPOSHeaders, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)

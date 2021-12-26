@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -13,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -46,7 +49,7 @@ type EngineAPI interface {
 	ForkchoiceUpdatedV1(context.Context, struct{}, *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
-	GetBodiesV1(ctx context.Context, blockHashes []common.Hash) ([]*types.Body, error)
+	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -113,10 +116,15 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		return nil, err
 	}
 
-	var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
+	if res.LatestValidHash != nil {
+		var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
+		return map[string]interface{}{
+			"status":          res.Status,
+			"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+		}, nil
+	}
 	return map[string]interface{}{
-		"status":          res.Status,
-		"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+		"status": res.Status,
 	}, nil
 }
 
@@ -156,27 +164,64 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64)
 	}, nil
 }
 
-func (e *EngineImpl) GetBodiesV1(ctx context.Context, blockHashes []common.Hash) ([]*types.Body, error) {
+// GetPayloadBodiesV1 gets a list of blockHashes and returns a map of blockhash => block body
+func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error) {
 	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	var blockBodies []*types.Body
+	blockHashToBody := make(map[common.Hash]ExecutionPayload)
 
-	for _, hash := range blockHashes {
-		if block, err := e.blockByHashWithSenders(tx, hash); err != nil {
+	for _, blockHash := range blockHashes {
+		hash := *blockHash.BlockHash
+
+		block, err := e.blockByHashWithSenders(tx, hash)
+		if err != nil {
 			return nil, err
-		} else {
-			body := &types.Body{
-				Transactions: block.Transactions(),
-				Uncles:       block.Uncles(),
-			}
-			blockBodies = append(blockBodies, body)
 		}
+
+		if block == nil {
+			continue
+		}
+
+		var bloom types.Bloom = block.Bloom()
+
+		buf := bytes.NewBuffer(nil)
+
+		var encodedTransactions []hexutil.Bytes
+
+		for _, tx := range block.Transactions() {
+			buf.Reset()
+
+			err := rlp.Encode(buf, tx)
+			if err != nil {
+				return nil, fmt.Errorf("broken tx rlp: %w", err)
+			}
+
+			encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
+		}
+
+		blockHashToBody[hash] = ExecutionPayload{
+			ParentHash:    block.ParentHash(),
+			FeeRecipient:  block.Coinbase(),
+			StateRoot:     block.Header().Root,
+			ReceiptsRoot:  block.ReceiptHash(),
+			LogsBloom:     bloom.Bytes(),
+			Random:        block.Header().MixDigest,
+			BlockNumber:   hexutil.Uint64(block.NumberU64()),
+			GasLimit:      hexutil.Uint64(block.GasLimit()),
+			GasUsed:       hexutil.Uint64(block.GasUsed()),
+			Timestamp:     hexutil.Uint64(block.Header().Time),
+			ExtraData:     block.Extra(),
+			BaseFeePerGas: (*hexutil.Big)(block.BaseFee()),
+			BlockHash:     block.Hash(),
+			Transactions:  encodedTransactions,
+		}
+
 	}
-	return blockBodies, nil
+	return blockHashToBody, nil
 }
 
 // NewEngineAPI returns EngineImpl instance

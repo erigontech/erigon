@@ -230,7 +230,7 @@ func NewStagedSync(
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan types.Header,
 	statusCh chan privateapi.ExecutionStatus,
-	waitingForPOSHeaders *bool,
+	waitingForPOSHeaders *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
@@ -270,7 +270,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			allSnapshots,
 			blockReader,
-		), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig), stagedsync.StageDifficultyCfg(db, tmpdir, terminalTotalDifficulty, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,

@@ -5,7 +5,7 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test ./... -p 2
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags `git rev-list --tags="v*" --max-count=1`)
-GOBUILD = env GO111MODULE=on $(GO) build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
+GOBUILD = $(GO) build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
 GO_DBG_BUILD = $(GO) build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
@@ -39,6 +39,7 @@ geth: erigon
 erigon: go-version
 	@echo "Building Erigon"
 	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	git submodule update --init --recursive --force
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
@@ -96,6 +97,7 @@ evm:
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
 downloader:
+	git submodule update --init --recursive --force
 	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
@@ -138,9 +140,10 @@ lintci-deps:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.42.1
 
 clean:
-	env GO111MODULE=on go clean -cache
+	go clean -cache
 	rm -fr build/*
 	cd libmdbx/ && make clean
+	./build/bin/golangci-lint cache clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.

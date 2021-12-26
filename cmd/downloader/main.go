@@ -9,7 +9,9 @@ import (
 	"path"
 	"time"
 
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -34,10 +36,12 @@ import (
 )
 
 var (
-	datadir           string
-	seeding           bool
-	asJson            bool
-	downloaderApiAddr string
+	datadir                          string
+	seeding                          bool
+	asJson                           bool
+	downloaderApiAddr                string
+	torrentVerbosity                 string
+	downloadLimitStr, uploadLimitStr string
 )
 
 func init() {
@@ -48,6 +52,9 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
+	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Info.LogString(), "DEBUG | INFO | WARN | ERROR")
+	rootCmd.Flags().StringVar(&downloadLimitStr, "download.limit", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadLimitStr, "upload.limit", "1gb", "bytes per second, example: 32mb")
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
@@ -93,6 +100,59 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context, cmd *cobra.Command) error {
+	snapshotsDir := path.Join(datadir, "snapshots")
+	torrentLogLevel, ok := downloader.String2LogLevel[torrentVerbosity]
+	if !ok {
+		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
+	}
+
+	var downloadLimit, uploadLimit datasize.ByteSize
+	if err := downloadLimit.UnmarshalText([]byte(downloadLimitStr)); err != nil {
+		return err
+	}
+	if err := uploadLimit.UnmarshalText([]byte(uploadLimitStr)); err != nil {
+		return err
+	}
+
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
+	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
+		return err
+	}
+
+	db := mdbx.MustOpen(snapshotsDir + "/db")
+	var t *downloader.Client
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
+		if err != nil {
+			return fmt.Errorf("get peer id: %w", err)
+		}
+
+		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadLimit, uploadLimit)
+		if err != nil {
+			return err
+		}
+		t, err = downloader.New(cfg, pieceStore)
+		if err != nil {
+			return err
+		}
+		if len(peerID) == 0 {
+			err = t.SavePeerID(tx)
+			if err != nil {
+				return fmt.Errorf("save peer id: %w", err)
+			}
+		}
+		log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
+		return nil
+	}); err != nil {
+		return err
+	}
+	defer t.Close()
+
+	bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
+	if err != nil {
+		return fmt.Errorf("new server: %w", err)
+	}
+
 	var cc *params.ChainConfig
 	{
 		chaindataDir := path.Join(datadir, "chaindata")
@@ -107,42 +167,8 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		chaindata.Close()
 	}
 
-	snapshotsDir := path.Join(datadir, "snapshots")
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
-	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
-		return err
-	}
-
-	db := mdbx.MustOpen(snapshotsDir + "/db")
-	var t *downloader.Client
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-		if err != nil {
-			return fmt.Errorf("get peer id: %w", err)
-		}
-		t, err = downloader.New(snapshotsDir, seeding, string(peerID))
-		if err != nil {
-			return err
-		}
-		if len(peerID) == 0 {
-			err = t.SavePeerID(tx)
-			if err != nil {
-				return fmt.Errorf("save peer id: %w", err)
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	defer t.Close()
-
-	bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
-	if err != nil {
-		return fmt.Errorf("new server: %w", err)
-	}
-
 	snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-	err = downloader.Start(ctx, snapshotsDir, t.Cli, snapshotsCfg)
+	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli, snapshotsCfg)
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
 	}

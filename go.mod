@@ -6,9 +6,9 @@ require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
 	github.com/VictoriaMetrics/metrics v1.18.1
-	github.com/anacrolix/go-libutp v1.0.4
+	github.com/anacrolix/go-libutp v1.1.0
 	github.com/anacrolix/log v0.10.0
-	github.com/anacrolix/torrent v1.38.0
+	github.com/anacrolix/torrent v1.39.1
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/consensys/gnark-crypto v0.4.0
@@ -37,7 +37,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20211216213333-d79d43f9085d
+	github.com/ledgerwatch/erigon-lib v0.0.0-20211222044740-1c54b2b55047
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
