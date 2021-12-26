@@ -132,7 +132,7 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh     chan types.Header
+	reverseDownloadCh     chan privateapi.PayloadMessage
 	statusCh              chan privateapi.ExecutionStatus
 	waitingForBeaconChain uint32       // atomic boolean flag
 	assembledBlock        *types.Block // Mining stages telling engine API which block has been assembled
@@ -336,7 +336,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		txPoolRPC = backend.txPool2GrpcServer
 	}
 
-	backend.assembledBlock = new(types.Block)
+	backend.assembledBlock = types.NewBlock(&types.Header{}, nil, nil, nil)
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
 	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})
@@ -346,7 +346,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
-	backend.reverseDownloadCh = make(chan types.Header)
+	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.statusCh = make(chan privateapi.ExecutionStatus)
 
 	var blockReader interfaces.FullBlockReader
@@ -617,7 +617,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
-
 		for {
 			mineEvery.Reset(3 * time.Second)
 			select {

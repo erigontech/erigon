@@ -43,7 +43,7 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	reverseDownloadCh chan types.Header
+	reverseDownloadCh chan privateapi.PayloadMessage
 	waitingPosHeaders *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
@@ -61,7 +61,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	reverseDownloadCh chan types.Header,
+	reverseDownloadCh chan privateapi.PayloadMessage,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -96,6 +96,12 @@ func SpawnStageHeaders(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 	var blockNumber uint64
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		tx.Rollback()
+	}
 	roTx, err := cfg.db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -108,10 +114,10 @@ func SpawnStageHeaders(
 	}
 
 	isTrans, err := rawdb.Transitioned(roTx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-
 	if err != nil {
 		return err
 	}
+	roTx.Rollback()
 
 	if isTrans {
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test)
@@ -133,7 +139,8 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
-	header := <-cfg.reverseDownloadCh
+	payloadMessage := <-cfg.reverseDownloadCh
+	header := payloadMessage.Header
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -174,7 +181,8 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		/*if err := cfg.hd.VerifyHeader(&header); err != nil { Disable for now
+		// Disabled for
+		/*if err := cfg.hd.VerifyHeader(header); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.statusCh <- privateapi.ExecutionStatus{
 				Status:          privateapi.Invalid,
@@ -190,9 +198,17 @@ func HeadersPOS(
 			LatestValidHash: headerHash,
 		}
 
-		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 			return err
 		}
+		// We can insert raw bodies immediately and skip bodies
+		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(tx, stages.Bodies, headerNumber); err != nil {
+			return err
+		}
+
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
@@ -278,7 +294,7 @@ func HeadersPOS(
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
 			return err
 		}
-		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+		return headerInserter.FeedHeaderPoS(tx, header, h.Hash())
 	}
 
 	if err := headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
@@ -289,11 +305,11 @@ func HeadersPOS(
 		return err
 	}
 
-	if err := cfg.hd.VerifyHeader(&header); err != nil {
+	if err := cfg.hd.VerifyHeader(header); err != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 		return nil
 	}
-	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return err
 	}
 	if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {

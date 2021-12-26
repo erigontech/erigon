@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -56,7 +57,7 @@ type PayloadAttributes struct {
 type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
-	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
+	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
 }
 
@@ -99,9 +100,12 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 			"status": reply.Status,
 		}, nil
 	}
+	encodedPayloadId := make([]byte, 8)
+	binary.BigEndian.PutUint64(encodedPayloadId, reply.PayloadId)
+	// Answer
 	return map[string]interface{}{
 		"status":    reply.Status,
-		"payloadId": hexutil.Uint64(reply.PayloadId),
+		"payloadId": hexutil.Bytes(encodedPayloadId),
 	}, nil
 }
 
@@ -156,8 +160,9 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 	}, nil
 }
 
-func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error) {
-	payload, err := e.api.EngineGetPayloadV1(ctx, (uint64)(payloadID))
+func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	payload, err := e.api.EngineGetPayloadV1(ctx, decodedPayloadId)
 	if err != nil {
 		return nil, err
 	}

@@ -52,7 +52,7 @@ type EthBackendServer struct {
 	nextPayloadId   uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send reverse sync starting point to staged sync
-	reverseDownloadCh chan<- types.Header
+	reverseDownloadCh chan<- PayloadMessage
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Last block number sent over via reverseDownloadCh
@@ -79,8 +79,14 @@ type ExecutionStatus struct {
 	Error           error
 }
 
+// The message we are going to send to the stage sync in ExecutePayload
+type PayloadMessage struct {
+	Header *types.Header
+	Body   *types.RawBody
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- types.Header, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
 	assembledBlock *types.Block,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -221,20 +227,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		eip1559 = true
 	}
 
-	// Extra data can go from 0 to 32 bytes, so it can be treated as an hash
-	var transactions types.Transactions
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
-	for _, encodedTx := range req.Transactions {
-		var tx types.Transaction
-		var err error
-		reader.Reset(encodedTx)
-		stream.Reset(reader, 0)
-		if tx, err = types.DecodeTransaction(stream); err != nil {
-			return nil, err
-		}
-		transactions = append(transactions, tx)
-	}
 	header := types.Header{
 		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
 		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
@@ -252,37 +244,21 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(transactions),
+		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
-	fmt.Printf("Parent: ")
-	fmt.Println(header.ParentHash)
-	fmt.Printf("Coinbase: ")
-	fmt.Println(header.Coinbase)
-	fmt.Printf("Root: ")
-	fmt.Println(header.Root)
-	fmt.Printf("ReceiptHash: ")
-	fmt.Println(header.ReceiptHash)
-	fmt.Printf("Bloom: ")
-	fmt.Println(header.Bloom)
-	fmt.Printf("MixDigest: ")
-	fmt.Println(header.MixDigest)
-	fmt.Printf("Block Number: ")
-	fmt.Println(header.Number.Uint64())
-	fmt.Printf("GasLimit: ")
-	fmt.Println(header.GasLimit)
-	fmt.Printf("GasUsed: ")
-	fmt.Println(header.GasUsed)
-	fmt.Printf("Time: ")
-	fmt.Println(header.Time)
-	fmt.Printf("Extra: ")
-	fmt.Println(header.Extra)
 	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
 	// Send the block over
 	s.numberSent = req.BlockNumber
-	s.reverseDownloadCh <- header
+	s.reverseDownloadCh <- PayloadMessage{
+		Header: &header,
+		Body: &types.RawBody{
+			Transactions: req.Transactions,
+			Uncles:       nil,
+		},
+	}
 
 	executedStatus := <-s.statusCh
 
@@ -314,7 +290,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
-func (s *EthBackendServer) EngineForkchoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
+func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.config.TerminalTotalDifficulty == nil {
