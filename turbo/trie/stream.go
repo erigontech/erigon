@@ -683,7 +683,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				aEmptyRoot = a.IsEmptyRoot()
 				copy(aRoot[:], a.Root[:])
 				fieldSet = 0
-				if a.Balance.Sign() != 0 {
+				if !a.Balance.IsZero() {
 					fieldSet |= AccountFieldBalanceOnly
 				}
 				if a.Nonce != 0 {

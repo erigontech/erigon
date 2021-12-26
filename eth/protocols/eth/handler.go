@@ -25,9 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -91,37 +89,6 @@ type TxPool interface {
 	Get(hash common.Hash) types.Transaction
 }
 
-// MakeProtocols constructs the P2P protocol definitions for `eth`.
-func MakeProtocols(backend Backend, readNodeInfo func() *NodeInfo, dnsdisc enode.Iterator, chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) []p2p.Protocol {
-	protocols := make([]p2p.Protocol, len(ProtocolVersions))
-	for i, version := range ProtocolVersions {
-		version := version // Closure
-
-		protocols[i] = p2p.Protocol{
-			Name:    ProtocolName,
-			Version: version,
-			Length:  protocolLengths[version],
-			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				peer := NewPeer(version, p, rw, backend.TxPool())
-				defer peer.Close()
-
-				return backend.RunPeer(peer, func(peer *Peer) error {
-					return Handle(backend, peer)
-				})
-			},
-			NodeInfo: func() interface{} {
-				return readNodeInfo()
-			},
-			PeerInfo: func(id enode.ID) interface{} {
-				return backend.PeerInfo(id)
-			},
-			Attributes:     []enr.Entry{CurrentENREntry(chainConfig, genesisHash, headHeight)},
-			DialCandidates: dnsdisc,
-		}
-	}
-	return protocols
-}
-
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata
 // known about the host peer.
 type NodeInfo struct {
@@ -163,25 +130,6 @@ type Decoder interface {
 	Time() time.Time
 }
 
-var eth65 = map[uint64]msgHandler{
-	// old 64 messages
-	GetBlockHeadersMsg: handleGetBlockHeaders,
-	BlockHeadersMsg:    handleBlockHeaders,
-	GetBlockBodiesMsg:  handleGetBlockBodies,
-	BlockBodiesMsg:     handleBlockBodies,
-	GetNodeDataMsg:     handleGetNodeData,
-	NodeDataMsg:        handleNodeData,
-	GetReceiptsMsg:     handleGetReceipts,
-	ReceiptsMsg:        handleReceipts,
-	NewBlockHashesMsg:  handleNewBlockhashes,
-	NewBlockMsg:        handleNewBlock,
-	TransactionsMsg:    handleTransactions,
-	// New eth65 messages
-	NewPooledTransactionHashesMsg: handleNewPooledTransactionHashes,
-	GetPooledTransactionsMsg:      handleGetPooledTransactions,
-	PooledTransactionsMsg:         handlePooledTransactions,
-}
-
 var eth66 = map[uint64]msgHandler{
 	// eth64 announcement messages (no id)
 	NewBlockHashesMsg: handleNewBlockhashes,
@@ -215,10 +163,7 @@ func handleMessage(backend Backend, peer *Peer) error {
 	}
 	defer msg.Discard()
 
-	var handlers = eth65
-	if peer.Version() >= ETH66 {
-		handlers = eth66
-	}
+	handlers := eth66
 
 	if handler := handlers[msg.Code]; handler != nil {
 		return handler(backend, msg, peer)

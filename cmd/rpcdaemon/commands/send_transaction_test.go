@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
@@ -71,7 +72,7 @@ func TestSendRawTransaction(t *testing.T) {
 	txPool := txpool.NewTxpoolClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, false), m.DB, nil, txPool, nil, 5000000)
+	api := commands.NewEthAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, nil, txPool, nil, 5000000)
 
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)

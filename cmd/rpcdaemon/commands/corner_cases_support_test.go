@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +19,9 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	defer db.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, false), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		db, nil, nil, nil, 5000000)
 	ctx := context.Background()
 
 	a, err := api.GetTransactionByBlockNumberAndIndex(ctx, 10_000, 1)

@@ -90,14 +90,25 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			return nil, err
 		}
 
-		begin = 0
-		if crit.FromBlock != nil && crit.FromBlock.Sign() > 0 {
-			begin = crit.FromBlock.Uint64()
+		begin = latest
+		if crit.FromBlock != nil {
+			if crit.FromBlock.Sign() >= 0 {
+				begin = crit.FromBlock.Uint64()
+			} else if !crit.FromBlock.IsInt64() || crit.FromBlock.Int64() != int64(rpc.LatestBlockNumber) {
+				return nil, fmt.Errorf("negative value for FromBlock: %v", crit.FromBlock)
+			}
 		}
 		end = latest
-		if crit.ToBlock != nil && crit.ToBlock.Sign() > 0 {
-			end = crit.ToBlock.Uint64()
+		if crit.ToBlock != nil {
+			if crit.ToBlock.Sign() >= 0 {
+				end = crit.ToBlock.Uint64()
+			} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+				return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+			}
 		}
+	}
+	if end < begin {
+		return nil, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 
 	blockNumbers := roaring.New()
@@ -254,11 +265,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
 	}
 	var txIndex uint64
+	var found bool
 	for idx, txn := range block.Transactions() {
 		if txn.Hash() == hash {
 			txIndex = uint64(idx)
+			found = true
 			break
 		}
+	}
+	if !found {
+		return nil, nil
 	}
 
 	cc, err := api.chainConfig(tx)

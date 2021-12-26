@@ -115,15 +115,21 @@ func (h Header) EncodingSize() int {
 		encodingSize += 33 /* MixDigest */ + 9 /* BlockNonce */
 	}
 	encodingSize++
-	var diffLen int
-	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
-		diffLen = (h.Difficulty.BitLen() + 7) / 8
+	var diffBitLen, diffLen int
+	if h.Difficulty != nil {
+		diffBitLen = h.Difficulty.BitLen()
+		if diffBitLen >= 8 {
+			diffLen = (diffBitLen + 7) / 8
+		}
 	}
 	encodingSize += diffLen
 	encodingSize++
-	var numberLen int
-	if h.Number != nil && h.Number.BitLen() >= 8 {
-		numberLen = (h.Number.BitLen() + 7) / 8
+	var numberBitLen, numberLen int
+	if h.Number != nil {
+		numberBitLen = h.Number.BitLen()
+		if numberBitLen >= 8 {
+			numberLen = (numberBitLen + 7) / 8
+		}
 	}
 	encodingSize += numberLen
 	encodingSize++
@@ -159,11 +165,12 @@ func (h Header) EncodingSize() int {
 		encodingSize += len(h.Extra)
 	}
 	// size of BaseFee
-	var baseFeeLen int
+	var baseFeeBitLen, baseFeeLen int
 	if h.Eip1559 {
 		encodingSize++
-		if h.BaseFee.BitLen() >= 8 {
-			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
+		baseFeeBitLen = h.BaseFee.BitLen()
+		if baseFeeBitLen >= 8 {
+			baseFeeLen = (baseFeeBitLen + 7) / 8
 		}
 		encodingSize += baseFeeLen
 	}
@@ -187,16 +194,22 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	}
 
 	encodingSize++
-	var diffLen int
-	if h.Difficulty != nil && h.Difficulty.BitLen() >= 8 {
-		diffLen = (h.Difficulty.BitLen() + 7) / 8
+	var diffBitLen, diffLen int
+	if h.Difficulty != nil {
+		diffBitLen = h.Difficulty.BitLen()
+		if diffBitLen >= 8 {
+			diffLen = (diffBitLen + 7) / 8
+		}
 	}
 	encodingSize += diffLen
 
 	encodingSize++
-	var numberLen int
-	if h.Number != nil && h.Number.BitLen() >= 8 {
-		numberLen = (h.Number.BitLen() + 7) / 8
+	var numberBitLen, numberLen int
+	if h.Number != nil {
+		numberBitLen = h.Number.BitLen()
+		if numberBitLen >= 8 {
+			numberLen = (numberBitLen + 7) / 8
+		}
 	}
 	encodingSize += numberLen
 
@@ -234,11 +247,12 @@ func (h Header) EncodeRLP(w io.Writer) error {
 		}
 		encodingSize += len(h.Extra)
 	}
-	var baseFeeLen int
+	var baseFeeBitLen, baseFeeLen int
 	if h.Eip1559 {
 		encodingSize++
-		if h.BaseFee.BitLen() >= 8 {
-			baseFeeLen = (h.BaseFee.BitLen() + 7) / 8
+		baseFeeBitLen = h.BaseFee.BitLen()
+		if baseFeeBitLen >= 8 {
+			baseFeeLen = (baseFeeBitLen + 7) / 8
 		}
 		encodingSize += baseFeeLen
 	}
@@ -296,30 +310,34 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(h.Bloom.Bytes()); err != nil {
 		return err
 	}
-	if h.Difficulty != nil && h.Difficulty.BitLen() > 0 && h.Difficulty.BitLen() < 8 {
-		b[0] = byte(h.Difficulty.Uint64())
+	if diffBitLen < 8 {
+		if diffBitLen > 0 {
+			b[0] = byte(h.Difficulty.Uint64())
+		} else {
+			b[0] = 128
+		}
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
 		b[0] = 128 + byte(diffLen)
-		if h.Difficulty != nil {
-			h.Difficulty.FillBytes(b[1 : 1+diffLen])
-		}
+		h.Difficulty.FillBytes(b[1 : 1+diffLen])
 		if _, err := w.Write(b[:1+diffLen]); err != nil {
 			return err
 		}
 	}
-	if h.Number != nil && h.Number.BitLen() > 0 && h.Number.BitLen() < 8 {
-		b[0] = byte(h.Number.Uint64())
+	if numberBitLen < 8 {
+		if numberBitLen > 0 {
+			b[0] = byte(h.Number.Uint64())
+		} else {
+			b[0] = 128
+		}
 		if _, err := w.Write(b[:1]); err != nil {
 			return err
 		}
 	} else {
 		b[0] = 128 + byte(numberLen)
-		if h.Number != nil {
-			h.Number.FillBytes(b[1 : 1+numberLen])
-		}
+		h.Number.FillBytes(b[1 : 1+numberLen])
 		if _, err := w.Write(b[:1+numberLen]); err != nil {
 			return err
 		}
@@ -388,8 +406,12 @@ func (h Header) EncodeRLP(w io.Writer) error {
 	}
 
 	if h.Eip1559 {
-		if h.BaseFee.BitLen() > 0 && h.BaseFee.BitLen() < 8 {
-			b[0] = byte(h.BaseFee.Uint64())
+		if baseFeeBitLen < 8 {
+			if baseFeeBitLen > 0 {
+				b[0] = byte(h.BaseFee.Uint64())
+			} else {
+				b[0] = 128
+			}
 			if _, err := w.Write(b[:1]); err != nil {
 				return err
 			}
@@ -401,6 +423,7 @@ func (h Header) EncodeRLP(w io.Writer) error {
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -463,18 +486,12 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for Bloom: %d", len(b))
 	}
 	copy(h.Bloom[:], b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Difficulty: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Difficulty: %d", len(b))
-	}
 	h.Difficulty = new(big.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Number: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Number: %d", len(b))
 	}
 	h.Number = new(big.Int).SetBytes(b)
 	if h.GasLimit, err = s.Uint(); err != nil {
@@ -513,7 +530,7 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("wrong size for Nonce: %d", len(b))
 		}
 		copy(h.Nonce[:], b)
-		if b, err = s.Bytes(); err != nil {
+		if b, err = s.Uint256Bytes(); err != nil {
 			if errors.Is(err, rlp.EOL) {
 				h.BaseFee = nil
 				h.Eip1559 = false
@@ -523,9 +540,6 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 				return nil
 			}
 			return fmt.Errorf("read BaseFee: %w", err)
-		}
-		if len(b) > 32 {
-			return fmt.Errorf("wrong size for BaseFee: %d", len(b))
 		}
 		h.Eip1559 = true
 		h.BaseFee = new(big.Int).SetBytes(b)
@@ -595,6 +609,17 @@ func (h *Header) EmptyBody() bool {
 // EmptyReceipts returns true if there are no receipts for this header/block.
 func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
+}
+
+func (h *Header) copySeal() []rlp.RawValue {
+	seal := h.Seal
+	if len(seal) > 0 {
+		seal = make([]rlp.RawValue, len(seal))
+		for i, s := range h.Seal {
+			seal[i] = common.CopyBytes(s)
+		}
+	}
+	return seal
 }
 
 // Body is a simple (mutable, non-safe) data container for storing and moving
@@ -984,12 +1009,7 @@ func CopyHeader(h *Header) *Header {
 		cpy.Extra = make([]byte, len(h.Extra))
 		copy(cpy.Extra, h.Extra)
 	}
-	if len(h.Seal) > 0 {
-		cpy.Seal = make([]rlp.RawValue, len(h.Seal))
-		for i := range h.Seal {
-			cpy.Seal[i] = common.CopyBytes(h.Seal[i])
-		}
-	}
+	cpy.Seal = h.copySeal()
 	return &cpy
 }
 
@@ -1171,7 +1191,8 @@ func (b *Block) Time() uint64         { return b.header.Time }
 
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }
-func (b *Block) Nonce() uint64            { return binary.BigEndian.Uint64(b.header.Nonce[:]) }
+func (b *Block) Nonce() BlockNonce        { return b.header.Nonce }
+func (b *Block) NonceU64() uint64         { return b.header.Nonce.Uint64() }
 func (b *Block) Bloom() Bloom             { return b.header.Bloom }
 func (b *Block) Coinbase() common.Address { return b.header.Coinbase }
 func (b *Block) Root() common.Hash        { return b.header.Root }
@@ -1186,7 +1207,9 @@ func (b *Block) BaseFee() *big.Int {
 	}
 	return new(big.Int).Set(b.header.BaseFee)
 }
+func (b *Block) Seal() (seal []rlp.RawValue) { return b.header.copySeal() }
 
+// Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
 // Body returns the non-header content of the block.

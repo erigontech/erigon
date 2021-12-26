@@ -31,7 +31,6 @@ import (
 
 type DynamicFeeTransaction struct {
 	CommonTx
-	ChainID    *uint256.Int
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
@@ -71,15 +70,15 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{
 				time: tx.time,
 			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  common.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			ChainID: new(uint256.Int),
+			Nonce:   tx.Nonce,
+			To:      tx.To, // TODO: copy pointed-to address
+			Data:    common.CopyBytes(tx.Data),
+			Gas:     tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
 		AccessList: make(AccessList, len(tx.AccessList)),
-		ChainID:    new(uint256.Int),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}
@@ -113,10 +112,6 @@ func (tx *DynamicFeeTransaction) Size() common.StorageSize {
 	c := tx.EncodingSize()
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
-}
-
-func (tx DynamicFeeTransaction) Protected() bool {
-	return true
 }
 
 func (tx DynamicFeeTransaction) EncodingSize() int {
@@ -378,28 +373,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for ChainID: %d", len(b))
 	}
 	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
 	tx.Tip = new(uint256.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -415,11 +401,8 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
@@ -431,29 +414,19 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode V
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	return s.ListEnd()
-
 }
 
 // AsMessage returns the transaction as a core.Message.
@@ -529,10 +502,6 @@ func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int
 	return &tx.V, &tx.R, &tx.S
 }
 
-func (tx DynamicFeeTransaction) GetChainID() *uint256.Int {
-	return tx.ChainID
-}
-
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
 		return sc.(common.Address), nil
@@ -545,29 +514,18 @@ func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
 	return addr, nil
 }
 
-func (tx DynamicFeeTransaction) GetSender() (common.Address, bool) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
-func (tx *DynamicFeeTransaction) SetSender(addr common.Address) {
-	tx.from.Store(addr)
-}
-
 // NewTransaction creates an unsigned eip1559 transaction.
 func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			Nonce: nonce,
-			To:    &to,
-			Value: amount,
-			Gas:   gasLimit,
-			Data:  data,
+			ChainID: &chainID,
+			Nonce:   nonce,
+			To:      &to,
+			Value:   amount,
+			Gas:     gasLimit,
+			Data:    data,
 		},
-		ChainID: &chainID,
-		Tip:     gasTip,
-		FeeCap:  gasFeeCap,
+		Tip:    gasTip,
+		FeeCap: gasFeeCap,
 	}
 }

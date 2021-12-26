@@ -3,14 +3,16 @@ on:
   push:
     branches:
       - devel
+      - stable
   pull_request:
     branches:
       - devel
+      - stable
 jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-10.15 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -42,7 +44,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v2
         with:
-          version: v1.41
+          version: v1.42
           skip-go-installation: true
           skip-pkg-cache: true
           skip-build-cache: true
@@ -68,7 +70,7 @@ jobs:
         shell: powershell
 
   docker:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
       - run: git submodule update --init --recursive --force

@@ -185,12 +185,21 @@ func (b *BlockGen) PrevBlock(index int) *types.Block {
 // tied to chain length directly.
 func (b *BlockGen) OffsetTime(seconds int64) {
 	b.header.Time += uint64(seconds)
-	if b.header.Time <= b.parent.Header().Time {
+	parent := b.parent
+	if b.header.Time <= parent.Time() {
 		panic("block time out of range")
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
-	parent := b.parent.Header()
-	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.Seal)
+	b.header.Difficulty = b.engine.CalcDifficulty(
+		chainreader,
+		b.header.Time,
+		parent.Time(),
+		parent.Difficulty(),
+		parent.NumberU64(),
+		parent.Hash(),
+		parent.UncleHash(),
+		parent.Seal(),
+	)
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -276,7 +285,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
@@ -367,7 +376,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(tx)
-		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.Number().Uint64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
@@ -399,10 +408,10 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		Difficulty: engine.CalcDifficulty(chain, time,
 			time-10,
 			parent.Difficulty(),
-			parent.Number().Uint64(),
+			parent.NumberU64(),
 			parent.Hash(),
 			parent.UncleHash(),
-			parent.Header().Seal,
+			parent.Seal(),
 		),
 		GasLimit: CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
@@ -435,3 +444,4 @@ func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header      
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }

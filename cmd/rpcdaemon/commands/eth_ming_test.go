@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
 )
@@ -20,7 +21,7 @@ func TestPendingBlock(t *testing.T) {
 	mining := txpool.NewMiningClient(conn)
 	ff := filters.New(ctx, nil, nil, mining)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, false), nil, nil, nil, mining, 5000000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), nil, nil, nil, mining, 5000000)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)
@@ -32,10 +33,10 @@ func TestPendingBlock(t *testing.T) {
 	ff.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
 	block := api.pendingBlock()
 
-	require.Equal(t, block.Number().Uint64(), expect)
+	require.Equal(t, block.NumberU64(), expect)
 	select {
 	case got := <-ch:
-		require.Equal(t, expect, got.Number().Uint64())
+		require.Equal(t, expect, got.NumberU64())
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("timeout waiting for  expected notification")
 	}

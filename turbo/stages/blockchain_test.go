@@ -45,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // So we can deterministically seed different blockchains
@@ -1082,8 +1081,6 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 // Tests that doing large reorgs works even if the state associated with the
 // forking point is not available any more.
 func TestLargeReorgTrieGC(t *testing.T) {
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Generate the original common chain segment and the two competing forks
 
 	m, m2 := stages.Mock(t), stages.Mock(t)
@@ -1143,8 +1140,6 @@ func TestLargeReorgTrieGC(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/issues/18977
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	// Generate a canonical chain to act as the main dataset
 	m := stages.Mock(t)
 
@@ -1948,12 +1943,12 @@ func TestEIP1559Transition(t *testing.T) {
 			var chainID uint256.Int
 			chainID.SetFromBig(gspec.Config.ChainID)
 			var tx types.Transaction = &types.DynamicFeeTransaction{
-				ChainID: &chainID,
 				CommonTx: types.CommonTx{
-					Nonce: 0,
-					To:    &aa,
-					Gas:   30000,
-					Data:  []byte{},
+					ChainID: &chainID,
+					Nonce:   0,
+					To:      &aa,
+					Gas:     30000,
+					Data:    []byte{},
 				},
 				FeeCap:     new(uint256.Int).Mul(new(uint256.Int).SetUint64(5), new(uint256.Int).SetUint64(params.GWei)),
 				Tip:        u256.Num2,

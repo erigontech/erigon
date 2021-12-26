@@ -13,14 +13,15 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/sentry/download"
+	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -35,9 +36,11 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -58,11 +61,11 @@ type MockSentry struct {
 	MiningSync    *stagedsync.Sync
 	PendingBlocks chan *types.Block
 	MinedBlocks   chan *types.Block
-	downloader    *download.ControlServerImpl
+	downloader    *sentry.ControlServerImpl
 	Key           *ecdsa.PrivateKey
 	Genesis       *types.Block
 	SentryClient  direct.SentryClient
-	PeerId        *ptypes.H512
+	PeerId        *ptypes.H256
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	streams       map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages  []*proto_sentry.OutboundMessageData
@@ -72,18 +75,18 @@ type MockSentry struct {
 
 	Notifications *stagedsync.Notifications
 
-	// Pool v2
-	TxPoolV2Fetch      *txpool2.Fetch
-	TxPoolV2Send       *txpool2.Send
-	TxPoolV2GrpcServer *txpool2.GrpcServer
-	TxPoolV2           *txpool2.TxPool
-	txPoolV2DB         kv.RwDB
+	// TxPool
+	TxPoolFetch      *txpool.Fetch
+	TxPoolSend       *txpool.Send
+	TxPoolGrpcServer *txpool.GrpcServer
+	TxPool           *txpool.TxPool
+	txPoolDB         kv.RwDB
 }
 
 func (ms *MockSentry) Close() {
 	ms.cancel()
-	if ms.txPoolV2DB != nil {
-		ms.txPoolV2DB.Close()
+	if ms.txPoolDB != nil {
+		ms.txPoolDB.Close()
 	}
 	ms.DB.Close()
 }
@@ -190,7 +193,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId: gointerfaces.ConvertBytesToH512([]byte("12345")),
+		PeerId: gointerfaces.ConvertHashToH256([32]byte{0x12, 0x34, 0x50}), // "12345"
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -199,7 +202,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 	var err error
 
-	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) []byte { return nil }
+	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) (enode.ID, bool) { return enode.ID{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
@@ -213,38 +216,37 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
-	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) []byte { return nil }
+	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool) { return enode.ID{}, false }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
 	if !cfg.TxPool.Disable {
-		cfg.TxPool.V2 = true
-		poolCfg := txpool2.DefaultConfig
-		newTxs := make(chan txpool2.Hashes, 1024)
+		poolCfg := txpool.DefaultConfig
+		newTxs := make(chan txpool.Hashes, 1024)
 		if t != nil {
 			t.Cleanup(func() {
 				close(newTxs)
 			})
 		}
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
-		mock.TxPoolV2, err = txpool2.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.txPoolV2DB = memdb.NewPoolDB()
+		mock.txPoolDB = memdb.NewPoolDB()
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
-		mock.TxPoolV2Fetch = txpool2.NewFetch(mock.Ctx, sentries, mock.TxPoolV2, stateChangesClient, mock.DB, mock.txPoolV2DB, *chainID)
-		mock.TxPoolV2Fetch.SetWaitGroup(&mock.ReceiveWg)
-		mock.TxPoolV2Send = txpool2.NewSend(mock.Ctx, sentries, mock.TxPoolV2)
-		mock.TxPoolV2GrpcServer = txpool2.NewGrpcServer(mock.Ctx, mock.TxPoolV2, mock.txPoolV2DB, *chainID)
+		mock.TxPoolFetch = txpool.NewFetch(mock.Ctx, sentries, mock.TxPool, stateChangesClient, mock.DB, mock.txPoolDB, *chainID)
+		mock.TxPoolFetch.SetWaitGroup(&mock.ReceiveWg)
+		mock.TxPoolSend = txpool.NewSend(mock.Ctx, sentries, mock.TxPool)
+		mock.TxPoolGrpcServer = txpool.NewGrpcServer(mock.Ctx, mock.TxPool, mock.txPoolDB, *chainID)
 
-		mock.TxPoolV2Fetch.ConnectCore()
+		mock.TxPoolFetch.ConnectCore()
 		mock.StreamWg.Add(1)
-		mock.TxPoolV2Fetch.ConnectSentries()
+		mock.TxPoolFetch.ConnectSentries()
 		mock.StreamWg.Wait()
 
-		go txpool2.MainLoop(mock.Ctx, mock.txPoolV2DB, mock.DB, mock.TxPoolV2, newTxs, mock.TxPoolV2Send, mock.TxPoolV2GrpcServer.NewSlotsStreams, func() {})
+		go txpool.MainLoop(mock.Ctx, mock.txPoolDB, mock.DB, mock.TxPool, newTxs, mock.TxPoolSend, mock.TxPoolGrpcServer.NewSlotsStreams, func() {})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -259,7 +261,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.downloader, err = download.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
+	mock.downloader, err = sentry.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -267,17 +269,28 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
+
+	blockReader := snapshotsync.NewBlockReader()
+	var allSnapshots *snapshotsync.AllSnapshots
+	var snapshotsDownloader proto_downloader.DownloaderClient
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
 			mock.downloader.Hd,
+			make(chan privateapi.ExecutionStatus),
 			*mock.ChainConfig,
 			sendHeaderRequest,
 			propagateNewBlockHashes,
 			penalize,
 			cfg.BatchSize,
 			false,
-		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir), stagedsync.StageBodiesCfg(
+			nil,
+			nil,
+			allSnapshots,
+			snapshotsDownloader,
+			blockReader,
+			mock.tmpdir,
+		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
 			sendBodyRequest,
@@ -286,22 +299,31 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BodyDownloadTimeoutSeconds,
 			*mock.ChainConfig,
 			cfg.BatchSize,
-		), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune), stagedsync.StageExecuteBlocksCfg(
-			mock.DB,
-			prune,
-			cfg.BatchSize,
-			nil,
-			mock.ChainConfig,
-			mock.Engine,
-			&vm.Config{},
-			mock.Notifications.Accumulator,
-			cfg.StateStream,
-			mock.tmpdir,
-		), stagedsync.StageTranspileCfg(
-			mock.DB,
-			cfg.BatchSize,
-			mock.ChainConfig,
-		), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageTxPoolCfg(mock.DB, nil, cfg.TxPool, func() {}), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
+			allSnapshots,
+			blockReader,
+		), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, allSnapshots),
+			stagedsync.StageExecuteBlocksCfg(
+				mock.DB,
+				prune,
+				cfg.BatchSize,
+				nil,
+				mock.ChainConfig,
+				mock.Engine,
+				&vm.Config{},
+				mock.Notifications.Accumulator,
+				cfg.StateStream,
+				mock.tmpdir,
+				blockReader,
+			),
+			stagedsync.StageTranspileCfg(mock.DB, cfg.BatchSize, mock.ChainConfig),
+			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
+			stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir, blockReader),
+			stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
+			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
+			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -318,10 +340,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
-			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, nil, mock.TxPoolV2, nil, mock.tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, mock.tmpdir),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, mock.tmpdir),
 			stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir),
-			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir),
+			stagedsync.StageTrieCfg(mock.DB, false, true, mock.tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, mock.Ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,
@@ -329,13 +351,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	)
 
 	mock.StreamWg.Add(1)
-	go download.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	go sentry.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go download.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	go sentry.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go download.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
+	go sentry.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.downloader, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 
 	return mock
@@ -428,13 +450,13 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 	initialCycle := false
 	highestSeenHeader := chain.TopBlock.NumberU64()
-	if ms.TxPoolV2 != nil {
+	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
 	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
-	if ms.TxPoolV2 != nil {
+	if ms.TxPool != nil {
 		ms.ReceiveWg.Wait() // Wait for TxPool notification
 	}
 	// Check if the latest header was imported or rolled back

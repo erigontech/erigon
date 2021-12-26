@@ -69,6 +69,8 @@ type Config struct {
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
 
+	DownloaderAddr string
+
 	// IPCPath is the requested location to place the IPC endpoint. If the path is
 	// a simple file name, it is placed inside the data directory (or on the root
 	// pipe path on Windows), whereas if it's a resolvable path name (absolute or
@@ -160,6 +162,9 @@ type Config struct {
 	TLSCACert           string
 
 	MdbxAugumentLimit uint64
+
+	// HealthCheck enables standard grpc health check
+	HealthCheck bool
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into

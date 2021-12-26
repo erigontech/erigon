@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 
 	"github.com/stretchr/testify/assert"
@@ -69,7 +70,8 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// Populate account & storage trie DB tables
 	// ----------------------------------------------------------------
 
-	cfg := StageTrieCfg(nil, false, true, t.TempDir())
+	blockReader := snapshotsync.NewBlockReader()
+	cfg := StageTrieCfg(nil, false, true, t.TempDir(), blockReader)
 	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
@@ -188,7 +190,8 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	hash6 := common.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, t.TempDir()), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	blockReader := snapshotsync.NewBlockReader()
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, t.TempDir(), blockReader), common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -249,7 +252,8 @@ func TestStorageDeletion(t *testing.T) {
 	// Populate account & storage trie DB tables
 	// ----------------------------------------------------------------
 
-	cfg := StageTrieCfg(nil, false, true, t.TempDir())
+	blockReader := snapshotsync.NewBlockReader()
+	cfg := StageTrieCfg(nil, false, true, t.TempDir(), blockReader)
 	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 

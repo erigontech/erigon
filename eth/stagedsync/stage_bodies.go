@@ -9,11 +9,14 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -22,25 +25,29 @@ import (
 type BodiesCfg struct {
 	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
-	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) []byte
+	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool)
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
+	snapshots       *snapshotsync.AllSnapshots
+	blockReader     interfaces.FullBlockReader
 }
 
 func StageBodiesCfg(
 	db kv.RwDB,
 	bd *bodydownload.BodyDownload,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) []byte,
+	bodyReqSend func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool),
 	penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator,
 	timeout int,
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
+	snapshots *snapshotsync.AllSnapshots,
+	blockReader interfaces.FullBlockReader,
 ) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize}
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -54,7 +61,6 @@ func BodiesForward(
 ) error {
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
-
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -65,6 +71,15 @@ func BodiesForward(
 		defer tx.Rollback()
 	}
 	timeout := cfg.timeout
+
+	if cfg.snapshots != nil {
+		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+				return err
+			}
+			s.BlockNumber = cfg.snapshots.BlocksAvailable()
+		}
+	}
 	// This will update bd.maxProgress
 	if _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
@@ -78,6 +93,7 @@ func BodiesForward(
 	if bodyProgress == headerProgress {
 		return nil
 	}
+
 	logPrefix := s.LogPrefix()
 	if headerProgress <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
@@ -88,12 +104,21 @@ func BodiesForward(
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+
+	// Property of blockchain: same block in different forks will have different hashes.
+	// Means - can mark all canonical blocks as non-canonical on unwind, and
+	// do opposite here - without storing any meta-info.
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery); err != nil {
+		return fmt.Errorf("make block canonical: %w", err)
+	}
+
 	var prevDeliveredCount float64 = 0
 	var prevWastedCount float64 = 0
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
 	var req *bodydownload.BodyRequest
-	var peer []byte
+	var peer enode.ID
+	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
 	noProgressCount := 0 // How many time the progress was printed without actual progress
@@ -103,39 +128,41 @@ Loop:
 		if req == nil {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 		}
-		peer = nil
+		peer = enode.ID{}
+		sentToPeer = false
 		if req != nil {
 			start := time.Now()
-			peer = cfg.bodyReqSend(ctx, req)
+			peer, sentToPeer = cfg.bodyReqSend(ctx, req)
 			d2 += time.Since(start)
 		}
-		if req != nil && peer != nil {
+		if req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
 		}
-		for req != nil && peer != nil {
+		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, blockNum, currentTime, cfg.blockPropagator)
+			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
-			peer = nil
+			peer = enode.ID{}
+			sentToPeer = false
 			if req != nil {
 				start = time.Now()
-				peer = cfg.bodyReqSend(ctx, req)
+				peer, sentToPeer = cfg.bodyReqSend(ctx, req)
 				d2 += time.Since(start)
 			}
-			if req != nil && peer != nil {
+			if req != nil && sentToPeer {
 				start = time.Now()
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
@@ -158,12 +185,15 @@ Loop:
 				u.UnwindTo(blockHeight-1, header.Hash())
 				break Loop
 			}
-			if err = rawdb.WriteRawBody(tx, header.Hash(), blockHeight, rawBody); err != nil {
+
+			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+			if err = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody); err != nil {
 				return fmt.Errorf("writing block body: %w", err)
 			}
+
 			if blockHeight > bodyProgress {
 				bodyProgress = blockHeight
-				if err = stages.SaveStageProgress(tx, stages.Bodies, blockHeight); err != nil {
+				if err = s.Update(tx, blockHeight); err != nil {
 					return fmt.Errorf("saving Bodies progress: %w", err)
 				}
 			}
@@ -242,6 +272,13 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 			return err
 		}
 		defer tx.Rollback()
+	}
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if err := rawdb.MakeBodiesNonCanonical(tx, u.UnwindPoint+1, ctx, u.LogPrefix(), logEvery); err != nil {
+		return err
 	}
 
 	if err = u.Done(tx); err != nil {

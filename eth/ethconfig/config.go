@@ -29,17 +29,19 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -116,10 +118,9 @@ func init() {
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled bool
-	Mode    snapshotsync.SnapshotMode
-	Dir     string
-	Seeding bool
+	Enabled             bool
+	Dir                 string
+	ChainSnapshotConfig *snapshothashes.Config
 }
 
 // Config contains configuration options for ETH protocol.
@@ -137,9 +138,10 @@ type Config struct {
 
 	P2PEnabled bool
 
-	Prune        prune.Mode
-	BatchSize    datasize.ByteSize // Batch size for execution stage
-	BadBlockHash common.Hash       // hash of the block marked as bad
+	Prune     prune.Mode
+	BatchSize datasize.ByteSize // Batch size for execution stage
+
+	BadBlockHash common.Hash // hash of the block marked as bad
 
 	Snapshot Snapshot
 
@@ -158,8 +160,9 @@ type Config struct {
 	// Ethash options
 	Ethash ethash.Config
 
-	Clique params.SnapshotConfig
+	Clique params.ConsensusSnapshotConfig
 	Aura   params.AuRaConfig
+	Parlia params.ParliaConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -181,7 +184,7 @@ type Config struct {
 	SyncLoopThrottle time.Duration
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, genesisHash common.Hash) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -197,7 +200,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			log.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
 		default:
-			engine := ethash.New(ethash.Config{
+			eng = ethash.New(ethash.Config{
 				CachesInMem:      consensusCfg.CachesInMem,
 				CachesLockMmap:   consensusCfg.CachesLockMmap,
 				DatasetDir:       consensusCfg.DatasetDir,
@@ -205,11 +208,14 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
 				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
 			}, notify, noverify)
-			eng = engine
 		}
-	case *params.SnapshotConfig:
+	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
+		}
+	case *params.ParliaConfig:
+		if chainConfig.Parlia != nil {
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), genesisHash)
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
@@ -225,5 +231,9 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		panic("unknown config" + spew.Sdump(config))
 	}
 
-	return eng
+	if chainConfig.TerminalTotalDifficulty == nil {
+		return eng
+	} else {
+		return serenity.New(eng) // the Merge
+	}
 }

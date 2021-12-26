@@ -6,20 +6,21 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"math/big"
 	"net/http"
+	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"os/signal"
+	"path"
 	"runtime"
 	"runtime/pprof"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -55,12 +55,15 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/wcharczuk/go-chart/v2"
+	atomic2 "go.uber.org/atomic"
 )
 
 const ASSERT = false
@@ -984,7 +987,8 @@ func regenerate(chaindata string) error {
 	}
 	syncHeadHeader := rawdb.ReadHeader(tx, hash, to)
 	expectedRootHash := syncHeadHeader.Root
-	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, ""), expectedRootHash, nil)
+	blockReader := snapshotsync.NewBlockReader()
+	_, err = stagedsync.RegenerateIntermediateHashes("", tx, stagedsync.StageTrieCfg(db, true, true, "", blockReader), expectedRootHash, nil)
 	tool.Check(err)
 	log.Info("Regeneration ended")
 	return tx.Commit()
@@ -1184,11 +1188,6 @@ func dumpState(chaindata string, block int, name string) error {
 		return err
 	}
 	defer cc.Close()
-	var hc kv.Cursor
-	if hc, err = tx.Cursor(kv.Code); err != nil {
-		return err
-	}
-	defer hc.Close()
 	i := 0
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	k, v, e := sc.First()
@@ -1217,8 +1216,8 @@ func dumpState(chaindata string, block int, name string) error {
 				return err
 			}
 			if a.CodeHash != trie.EmptyCodeHash {
-				var code []byte
-				if _, code, err = hc.SeekExact(a.CodeHash[:]); err != nil {
+				code, err := tx.GetOne(kv.Code, a.CodeHash[:])
+				if err != nil {
 					return err
 				}
 				if len(code) != 0 {
@@ -1310,7 +1309,7 @@ func mphf(chaindata string, block int) error {
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   int(count),
 		BucketSize: 2000,
-		Salt:       0,
+		Salt:       1,
 		LeafSize:   8,
 		TmpDir:     "",
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
@@ -1458,7 +1457,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			inv[filtered[i]] = i
 		}
 		//log.Info("Inverted array done")
-		lcp := make([]byte, n)
+		lcp := make([]int32, n)
 		var k int
 		// Process all suffixes one by one starting from
 		// first suffix in txt[]
@@ -1481,8 +1480,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 			for i+k < n && j+k < n && superstring[(i+k)*2] != 0 && superstring[(j+k)*2] != 0 && superstring[(i+k)*2+1] == superstring[(j+k)*2+1] {
 				k++
 			}
-
-			lcp[inv[i]] = byte(k) // lcp for the present suffix.
+			lcp[inv[i]] = int32(k) // lcp for the present suffix.
 
 			// Deleting the starting character from the string.
 			if k > 0 {
@@ -1491,16 +1489,22 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
-		/*
+
+		if ASSERT {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])
 				p2 := int(filtered[i+1])
-				for p1+prefixLen < n && p2+prefixLen < n && superstring[(p1+prefixLen)*2] != 0 && superstring[(p2+prefixLen)*2] != 0 && superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
+				for p1+prefixLen < n &&
+					p2+prefixLen < n &&
+					superstring[(p1+prefixLen)*2] != 0 &&
+					superstring[(p2+prefixLen)*2] != 0 &&
+					superstring[(p1+prefixLen)*2+1] == superstring[(p2+prefixLen)*2+1] {
 					prefixLen++
 				}
 				if prefixLen != int(lcp[i]) {
-					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i])
+					log.Error("Mismatch", "prefixLen", prefixLen, "lcp[i]", lcp[i], "i", i)
+					break
 				}
 				l := int(lcp[i]) // Length of potential dictionary word
 				if l < 2 {
@@ -1510,9 +1514,9 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				for s := 0; s < l; s++ {
 					dictKey[s] = superstring[(filtered[i]+s)*2+1]
 				}
-				fmt.Printf("%d %d %s\n", filtered[i], lcp[i], dictKey)
+				//fmt.Printf("%d %d %s\n", filtered[i], lcp[i], dictKey)
 			}
-		*/
+		}
 		//log.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
 		b := inv
@@ -1524,7 +1528,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				continue
 			}
 			for l := int(lcp[i]); l > int(lcp[i+1]); l-- {
-				if l < minPatternLen {
+				if l < minPatternLen || l > maxPatternLen {
 					continue
 				}
 				// Go back
@@ -1549,7 +1553,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 				score := uint64(repeats * int(l-4))
 				if score > minPatternScore {
-					// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 					dictKey := make([]byte, l)
 					for s := 0; s < l; s++ {
 						dictKey[s] = superstring[(filtered[i]+s)*2+1]
@@ -1566,108 +1569,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 	completion.Done()
 }
 
-type DictionaryItem struct {
-	word  []byte
-	score uint64
-}
-
-type DictionaryBuilder struct {
-	limit         int
-	lastWord      []byte
-	lastWordScore uint64
-	items         []DictionaryItem
-}
-
-func (db DictionaryBuilder) Len() int {
-	return len(db.items)
-}
-
-func (db DictionaryBuilder) Less(i, j int) bool {
-	if db.items[i].score == db.items[j].score {
-		return bytes.Compare(db.items[i].word, db.items[j].word) < 0
-	}
-	return db.items[i].score < db.items[j].score
-}
-
-func (db *DictionaryBuilder) Swap(i, j int) {
-	db.items[i], db.items[j] = db.items[j], db.items[i]
-}
-
-func (db *DictionaryBuilder) Push(x interface{}) {
-	db.items = append(db.items, x.(DictionaryItem))
-}
-
-func (db *DictionaryBuilder) Pop() interface{} {
-	old := db.items
-	n := len(old)
-	x := old[n-1]
-	db.items = old[0 : n-1]
-	return x
-}
-
-func (db *DictionaryBuilder) processWord(word []byte, score uint64) {
-	heap.Push(db, DictionaryItem{word: word, score: score})
-	if db.Len() > db.limit {
-		// Remove the element with smallest score
-		heap.Pop(db)
-	}
-}
-
-func (db *DictionaryBuilder) compressLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	score := binary.BigEndian.Uint64(v)
-	if bytes.Equal(k, db.lastWord) {
-		db.lastWordScore += score
-	} else {
-		if db.lastWord != nil {
-			db.processWord(db.lastWord, db.lastWordScore)
-		}
-		db.lastWord = common.CopyBytes(k)
-		db.lastWordScore = score
-	}
-	return nil
-}
-
-func (db *DictionaryBuilder) finish() {
-	if db.lastWord != nil {
-		db.processWord(db.lastWord, db.lastWordScore)
-	}
-}
-
-type DictAggregator struct {
-	lastWord      []byte
-	lastWordScore uint64
-	collector     *etl.Collector
-}
-
-func (da *DictAggregator) processWord(word []byte, score uint64) error {
-	var scoreBuf [8]byte
-	binary.BigEndian.PutUint64(scoreBuf[:], score)
-	return da.collector.Collect(word, scoreBuf[:])
-}
-
-func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	score := binary.BigEndian.Uint64(v)
-	if bytes.Equal(k, da.lastWord) {
-		da.lastWordScore += score
-	} else {
-		if da.lastWord != nil {
-			if err := da.processWord(da.lastWord, da.lastWordScore); err != nil {
-				return err
-			}
-		}
-		da.lastWord = common.CopyBytes(k)
-		da.lastWordScore = score
-	}
-	return nil
-}
-
-func (da *DictAggregator) finish() error {
-	if da.lastWord != nil {
-		return da.processWord(da.lastWord, da.lastWordScore)
-	}
-	return nil
-}
-
 const CompressLogPrefix = "compress"
 
 // superstringLimit limits how large can one "superstring" get before it is processed
@@ -1677,56 +1578,40 @@ const superstringLimit = 16 * 1024 * 1024
 
 // minPatternLen is minimum length of pattern we consider to be included into the dictionary
 const minPatternLen = 5
+const maxPatternLen = 64
 
 // minPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const minPatternScore = 1024
 
-// maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
-// Large values increase memory consumption of dictionary reduction phase
-const maxDictPatterns = 1024 * 1024
-
-func compress1(chaindata string, name string) error {
+func compress1(chaindata string, fileName, segmentFileName string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
-	chainConfig := tool.ChainConfigFromDB(database)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	var superstring []byte
 	// Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 	// We only consider values with length > 2, because smaller values are not compressible without going into bits
-	f, err := os.Open(name + ".dat")
-	if err != nil {
-		return err
-	}
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
+	var superstring []byte
+
+	workers := runtime.NumCPU() / 2
 	// Collector for dictionary words (sorted by their score)
 	tmpDir := ""
-	ch := make(chan []byte, runtime.NumCPU())
+	ch := make(chan []byte, workers)
 	var wg sync.WaitGroup
-	wg.Add(runtime.NumCPU())
-	collectors := make([]*etl.Collector, runtime.NumCPU())
-	for i := 0; i < runtime.NumCPU(); i++ {
+	wg.Add(workers)
+	collectors := make([]*etl.Collector, workers)
+	for i := 0; i < workers; i++ {
 		collector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		collectors[i] = collector
 		go processSuperstring(ch, collector, &wg)
 	}
-	var buf []byte
-	l, e := binary.ReadUvarint(r)
 	i := 0
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		if len(superstring)+2*int(l)+2 > superstringLimit {
+	if err := snapshotsync.ReadSimpleFile(fileName+".dat", func(v []byte) error {
+		if len(superstring)+2*len(v)+2 > superstringLimit {
 			ch <- superstring
 			superstring = nil
 		}
-		for _, a := range buf[:l] {
+		for _, a := range v {
 			superstring = append(superstring, 1, a)
 		}
 		superstring = append(superstring, 0, 0)
@@ -1734,15 +1619,10 @@ func compress1(chaindata string, name string) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("Dictionary preprocessing", "millions", i/1_000_000)
+			log.Info("Dictionary preprocessing", "processed", fmt.Sprintf("%dK", i/1_000))
 		}
-
-	}
-	itemsCount := i
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	if err = f.Close(); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	if len(superstring) > 0 {
@@ -1750,50 +1630,21 @@ func compress1(chaindata string, name string) error {
 	}
 	close(ch)
 	wg.Wait()
-	dictCollector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	dictAggregator := &DictAggregator{collector: dictCollector}
-	for _, collector := range collectors {
-		if err = collector.Load(nil, "", dictAggregator.aggLoadFunc, etl.TransformArgs{}); err != nil {
-			return err
-		}
-		collector.Close()
-	}
-	if err = dictAggregator.finish(); err != nil {
-		return err
-	}
-	db := &DictionaryBuilder{limit: maxDictPatterns} // Only collect 1m words with highest scores
-	if err = dictCollector.Load(nil, "", db.compressLoadFunc, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	db.finish()
-	dictCollector.Close()
-	var df *os.File
-	df, err = os.Create(name + ".dictionary.txt")
+
+	db, err := compress.DictionaryBuilderFromCollectors(context.Background(), CompressLogPrefix, tmpDir, collectors)
 	if err != nil {
+		panic(err)
+	}
+	if err := compress.PersistDictrionary(fileName+".dictionary.txt", db); err != nil {
 		return err
 	}
-	w := bufio.NewWriterSize(df, etl.BufIOSize)
-	// Sort dictionary builder
-	sort.Sort(db)
 
-	for i := len(db.items); i > 0; i-- {
-		fmt.Fprintf(w, "%d %x\n", db.items[i-1].score, db.items[i-1].word)
-	}
-	if err = w.Flush(); err != nil {
-		return err
-	}
-	df.Close()
-
-	if err := reducedict(name); err != nil {
-		return err
-	}
-	if err := _createIdx(*chainID, name, itemsCount); err != nil {
+	if err := reducedict(fileName, segmentFileName); err != nil {
 		return err
 	}
 	return nil
 }
 
-// DynamicCell represents result of dynamic programming for certain starting position
 type DynamicCell struct {
 	optimStart  int
 	coverStart  int
@@ -2018,7 +1869,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize *uint64, outputSize *uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -2037,8 +1888,8 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 				return
 			}
 		}
-		atomic.AddUint64(inputSize, 1+uint64(len(input)-8))
-		atomic.AddUint64(outputSize, uint64(len(output)))
+		inputSize.Add(1 + uint64(len(input)-8))
+		outputSize.Add(uint64(len(output)))
 		posMap[uint64(len(input)-8+1)]++
 		posMap[0]++
 	}
@@ -2283,30 +2134,16 @@ func (hf *HuffmanCoder) flush() error {
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(name string) error {
+func reducedict(name string, segmentFileName string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	// Read up the dictionary
-	df, err := os.Open(name + ".dictionary.txt")
-	if err != nil {
-		return err
-	}
-	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
+
+	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
 	var pt patricia.PatriciaTree
 	code2pattern := make([]*Pattern, 0, 256)
-	ds := bufio.NewScanner(df)
-	for ds.Scan() {
-		tokens := strings.Split(ds.Text(), " ")
-		var score int64
-		if score, err = strconv.ParseInt(tokens[0], 10, 64); err != nil {
-			return err
-		}
-		var word []byte
-		if word, err = hex.DecodeString(tokens[1]); err != nil {
-			return err
-		}
+	if err := compress.ReadDictrionary(name+".dictionary.txt", func(score uint64, word []byte) error {
 		p := &Pattern{
-			score:    uint64(score),
+			score:    score,
 			uses:     0,
 			code:     uint64(len(code2pattern)),
 			codeBits: 0,
@@ -2314,72 +2151,57 @@ func reducedict(name string) error {
 		}
 		pt.Insert(word, p)
 		code2pattern = append(code2pattern, p)
-	}
-	if err = df.Close(); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	log.Info("dictionary file parsed", "entries", len(code2pattern))
-	statefile := name + ".dat"
-	f, err := os.Open(statefile)
-	if err != nil {
-		return err
-	}
-	r := bufio.NewReader(f)
-	var buf []byte
 	tmpDir := ""
 	ch := make(chan []byte, 10000)
-	var inputSize, outputSize uint64
+	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var wg sync.WaitGroup
+	workers := runtime.NumCPU() / 2
 	var collectors []*etl.Collector
 	var posMaps []map[uint64]uint64
-	for i := 0; i < runtime.NumCPU(); i++ {
+	for i := 0; i < workers; i++ {
 		collector := etl.NewCollector(CompressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		collectors = append(collectors, collector)
 		posMap := make(map[uint64]uint64)
 		posMaps = append(posMaps, posMap)
 		wg.Add(1)
-		go reduceDictWorker(ch, &wg, &pt, collector, &inputSize, &outputSize, posMap)
+		go reduceDictWorker(ch, &wg, &pt, collector, inputSize, outputSize, posMap)
 	}
-	l, e := binary.ReadUvarint(r)
-	i := 0
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		input := make([]byte, 8+int(l))
-		binary.BigEndian.PutUint64(input, uint64(i))
-		copy(input[8:], buf[:l])
+	var wordsCount uint64
+	if err := snapshotsync.ReadSimpleFile(name+".dat", func(v []byte) error {
+		input := make([]byte, 8+int(len(v)))
+		binary.BigEndian.PutUint64(input, wordsCount)
+		copy(input[8:], v)
 		ch <- input
-		i++
+		wordsCount++
 		select {
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info("Replacement preprocessing", "millions", i/1_000_000, "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+			log.Info("Replacement preprocessing", "processed", fmt.Sprintf("%dK", wordsCount/1_000), "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	if err = f.Close(); err != nil {
+		return nil
+	}); err != nil {
 		return err
 	}
 	close(ch)
 	wg.Wait()
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Done", "input", common.StorageSize(atomic.LoadUint64(&inputSize)), "output", common.StorageSize(atomic.LoadUint64(&outputSize)), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	log.Info("Done", "input", common.StorageSize(inputSize.Load()), "output", common.StorageSize(outputSize.Load()), "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
 	posMap := make(map[uint64]uint64)
 	for _, m := range posMaps {
 		for l, c := range m {
 			posMap[l] += c
 		}
 	}
-	fmt.Printf("posMap = %v\n", posMap)
+	//fmt.Printf("posMap = %v\n", posMap)
 	var patternList PatternList
 	for _, p := range code2pattern {
 		if p.uses > 0 {
@@ -2387,6 +2209,12 @@ func reducedict(name string) error {
 		}
 	}
 	sort.Sort(&patternList)
+	if len(patternList) == 0 {
+		log.Warn("dictionary is empty")
+		//err := fmt.Errorf("dictionary is empty")
+		//panic(err)
+		//return err
+	}
 	// Calculate offsets of the dictionary patterns and total size
 	var offset uint64
 	numBuf := make([]byte, binary.MaxVarintLen64)
@@ -2396,7 +2224,7 @@ func reducedict(name string) error {
 		offset += uint64(n + len(p.w))
 	}
 	patternCutoff := offset // All offsets below this will be considered patterns
-	i = 0
+	i := 0
 	log.Info("Effective dictionary", "size", patternList.Len())
 	// Build Huffman tree for codes
 	var codeHeap PatternHeap
@@ -2447,23 +2275,32 @@ func reducedict(name string) error {
 		heap.Push(&codeHeap, h)
 		huffs = append(huffs, h)
 	}
-	root := heap.Pop(&codeHeap).(*PatternHuff)
+	root := &PatternHuff{}
+	if len(patternList) > 0 {
+		root = heap.Pop(&codeHeap).(*PatternHuff)
+	}
 	var cf *os.File
-	if cf, err = os.Create(name + ".compressed.dat"); err != nil {
+	var err error
+	if cf, err = os.Create(segmentFileName); err != nil {
 		return err
 	}
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
-	// First, output dictionary
+	// 1-st, output dictionary
+	binary.BigEndian.PutUint64(numBuf, wordsCount) // Dictionary size
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	// 2-nd, output dictionary
 	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Secondly, output directory root
+	// 3-rd, output directory root
 	binary.BigEndian.PutUint64(numBuf, root.offset)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	// Thirdly, output pattern cutoff offset
+	// 4-th, output pattern cutoff offset
 	binary.BigEndian.PutUint64(numBuf, patternCutoff)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
@@ -2611,7 +2448,7 @@ func reducedict(name string) error {
 		}
 	}
 	log.Info("Positional dictionary", "size", offset, "position cutoff", positionCutoff)
-	df, err = os.Create("huffman_codes.txt")
+	df, err := os.Create("huffman_codes.txt")
 	if err != nil {
 		return err
 	}
@@ -2716,172 +2553,150 @@ func reducedict(name string) error {
 	}
 	return nil
 }
-func recsplitLookup(chaindata, name string) error {
+func recsplitWholeChain(chaindata string) error {
+	blocksPerFile := uint64(*blockTotal) //uint64(500_000)
+	lastChunk := func(tx kv.Tx, blocksPerFile uint64) (uint64, error) {
+		c, err := tx.Cursor(kv.BlockBody)
+		if err != nil {
+			return 0, err
+		}
+		k, _, err := c.Last()
+		if err != nil {
+			return 0, err
+		}
+		last := binary.BigEndian.Uint64(k)
+		// TODO: enable next condition (disabled for tests)
+		//if last > params.FullImmutabilityThreshold {
+		//	last -= params.FullImmutabilityThreshold
+		//} else {
+		//	last = 0
+		//}
+		last = last - last%blocksPerFile
+		return last, nil
+	}
+
+	var last uint64
+
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	d, err := compress.NewDecompressor(name + ".compressed.dat")
-	if err != nil {
+	_ = chainID
+	if err := database.View(context.Background(), func(tx kv.Tx) (err error) {
+		last, err = lastChunk(tx, blocksPerFile)
+		return err
+	}); err != nil {
 		return err
 	}
-	defer d.Close()
+	database.Close()
+	dataDir := path.Dir(chaindata)
+	snapshotDir := path.Join(dataDir, "snapshots")
+	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
 
-	idx := recsplit.MustOpen(name + ".idx")
-	defer idx.Close()
+	log.Info("Last body number", "last", last)
+	for i := uint64(*block); i < last; i += blocksPerFile {
+		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
 
-	var word, word2 = make([]byte, 0, 4096), make([]byte, 0, 4096)
-	wc := 0
-	g := d.MakeGetter()
-	dataGetter := d.MakeGetter()
-
-	parseCtx := txpool.NewTxParseContext(*chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	var sender [20]byte
-	var l1, l2, total time.Duration
-	start := time.Now()
-	var prev []byte
-	var prevOffset uint64
-	for g.HasNext() {
-		word, _ = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
-			return err
+		log.Info("Creating", "file", fileName+".seg")
+		db := mdbx.MustOpen(chaindata)
+		if err := snapshotsync.DumpBodies(db, "", i, int(blocksPerFile)); err != nil {
+			panic(err)
 		}
-		wc++
-
-		t := time.Now()
-		recID := idx.Lookup(slot.IdHash[:])
-		l1 += time.Since(t)
-		t = time.Now()
-		offset := idx.Lookup2(recID)
-		l2 += time.Since(t)
-		if ASSERT {
-			var dataP uint64
-			if prev != nil {
-				dataGetter.Reset(prevOffset)
-				word2, dataP = dataGetter.Next(word2[:0])
-				if !bytes.Equal(word, word2) {
-					fmt.Printf("wc=%d, %d,%d\n", wc, offset, dataP-uint64(len(word2)))
-					fmt.Printf("word: %x,%x\n\n", word, word2)
-					panic(fmt.Errorf("getter returned wrong data. IdHash=%x, offset=%x", slot.IdHash[:], offset))
-				}
-			}
-			prev = common.CopyBytes(word)
-			prevOffset = offset
+		db.Close()
+		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
+		if err := compress1(chaindata, fileName, segmentFile); err != nil {
+			panic(err)
 		}
+		//if err := snapshotsync.BodiesIdx(segmentFile, i); err != nil {
+		//	panic(err)
+		//}
+		_ = os.Remove(fileName + ".dat")
 
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Info("Checked", "millions", float64(wc)/1_000_000,
-				"lookup", time.Duration(int64(l1)/int64(wc)), "lookup2", time.Duration(int64(l2)/int64(wc)),
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
-			)
+		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
+		log.Info("Creating", "file", fileName+".seg")
+		db = mdbx.MustOpen(chaindata)
+		if err := snapshotsync.DumpHeaders(db, "", i, int(blocksPerFile)); err != nil {
+			panic(err)
 		}
+		db.Close()
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		if err := compress1(chaindata, fileName, segmentFile); err != nil {
+			panic(err)
+		}
+		//if err := snapshotsync.HeadersHashIdx(segmentFile, i); err != nil {
+		//	panic(err)
+		//}
+		_ = os.Remove(fileName + ".dat")
+
+		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
+		log.Info("Creating", "file", fileName+".seg")
+		db = mdbx.MustOpen(chaindata)
+		firstTxID, err := snapshotsync.DumpTxs(db, "", i, int(blocksPerFile))
+		if err != nil {
+			panic(err)
+		}
+		db.Close()
+		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		if err := compress1(chaindata, fileName, segmentFile); err != nil {
+			panic(err)
+		}
+		_ = firstTxID
+		//if err := snapshotsync.TransactionsHashIdx(*chainID, firstTxID, segmentFile); err != nil {
+		//	panic(err)
+		//}
+		_ = os.Remove(fileName + ".dat")
+
+		//nolint
+		//break // TODO: remove me - useful for tests
 	}
-
-	total = time.Since(start)
-	log.Info("Average decoding time", "lookup", time.Duration(int64(l1)/int64(wc)), "lookup + lookup2", time.Duration(int64(l2)/int64(wc)), "items", wc, "total", total)
 	return nil
 }
 
-func createIdx(chaindata string, name string) error {
+func checkBlockSnapshot(chaindata string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
+	dataDir := path.Dir(chaindata)
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	_ = chainID
+
+	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), snapshothashes.KnownConfig(chainConfig.ChainName))
+	snapshots.ReopenSegments()
+	snapshots.ReopenIndices()
+	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
+	//	panic(err)
+	//}
+
+	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+	tx, err := database.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
-	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	g := d.MakeGetter()
-	var word = make([]byte, 0, 4*1024)
-	wc := 0
-	for g.HasNext() {
-		word, _ = g.Next(word[:0])
-		wc++
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
-		}
-	}
-	return _createIdx(*chainID, name, wc)
-}
-func _createIdx(chainID uint256.Int, name string, count int) error {
-	d, err := compress.NewDecompressor(name + ".compressed.dat")
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   int(count),
-		Enums:      true,
-		BucketSize: 2000,
-		Salt:       0,
-		LeafSize:   8,
-		TmpDir:     "",
-		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
-			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
-		IndexFile: name + ".idx",
-	})
-	if err != nil {
-		return err
-	}
+	defer tx.Rollback()
 
-RETRY:
-
-	var word = make([]byte, 0, 256)
-	g := d.MakeGetter()
-	wc := 0
-	var pos uint64
-	parseCtx := txpool.NewTxParseContext(chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	var sender [20]byte
-
-	for g.HasNext() {
-		word, pos = g.Next(word[:0])
-		if _, err := parseCtx.ParseTransaction(word[1:], 0, &slot, sender[:]); err != nil {
+	for i := uint64(0); i < snapshots.BlocksAvailable(); i++ {
+		hash, err := rawdb.ReadCanonicalHash(tx, i)
+		if err != nil {
 			return err
 		}
-		if err := rs.AddKey(slot.IdHash[:], pos); err != nil {
+		blockFromDB := rawdb.ReadBlock(tx, hash, i)
+		blockFromSnapshot, _, err := snBlockReader.BlockWithSenders(context.Background(), tx, hash, i)
+		if err != nil {
 			return err
 		}
-		wc++
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
+
+		if blockFromSnapshot.Hash() != blockFromDB.Hash() {
+			panic(i)
 		}
-	}
-	log.Info("Building recsplit...")
-
-	if err = rs.Build(); err != nil {
-		return err
-	}
-
-	if rs.Collision() {
-		log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-		rs.ResetNextSalt()
-		goto RETRY
+		if i%1_000 == 0 {
+			log.Info(fmt.Sprintf("Block Num: %dK", i/1_000))
+		}
 	}
 	return nil
 }
+
 func decompress(name string) error {
-	d, err := compress.NewDecompressor(name + ".compressed.dat")
+	d, err := compress.NewDecompressor(name + ".seg")
 	if err != nil {
 		return err
 	}
@@ -3588,87 +3403,6 @@ func fixState(chaindata string) error {
 	return tx.Commit()
 }
 
-func dumpTxs(chaindata string, block uint64, totalBlocks int, name string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	chainConfig := tool.ChainConfigFromDB(db)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-
-	tx, err := db.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	var txs kv.Cursor
-	if txs, err = tx.Cursor(kv.EthTx); err != nil {
-		return err
-	}
-	defer txs.Close()
-	var bodies kv.Cursor
-	if bodies, err = tx.Cursor(kv.BlockBody); err != nil {
-		return err
-	}
-	defer bodies.Close()
-	f, err := os.Create(name + ".dat")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	w := bufio.NewWriterSize(f, etl.BufIOSize)
-	defer w.Flush()
-	i := 0
-	numBuf := make([]byte, binary.MaxVarintLen64)
-	blockEncoded := dbutils.EncodeBlockNumber(block)
-	parseCtx := txpool.NewTxParseContext(*chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	k, v, e := bodies.Seek(blockEncoded)
-	for ; k != nil && e == nil; k, v, e = bodies.Next() {
-		bodyNum := binary.BigEndian.Uint64(k)
-		if bodyNum >= block+uint64(*blockTotal) {
-			break
-		}
-		var body types.BodyForStorage
-		if e = rlp.DecodeBytes(v, &body); err != nil {
-			return e
-		}
-		if body.TxAmount > 0 {
-			binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-			tk, tv, te := txs.Seek(numBuf[:8])
-			for ; tk != nil && te == nil; tk, tv, te = txs.Next() {
-				txId := binary.BigEndian.Uint64(tk)
-				if txId >= body.BaseTxId+uint64(body.TxAmount) {
-					break
-				}
-				if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
-					panic(err)
-				}
-				tv = append(append([]byte{}, slot.IdHash[:1]...), tv...)
-				n := binary.PutUvarint(numBuf, uint64(len(tv)))
-				if _, e = w.Write(numBuf[:n]); e != nil {
-					return err
-				}
-				if len(tv) > 0 {
-					if _, e = w.Write(tv); e != nil {
-						return e
-					}
-				}
-				i++
-				if i%1_000_000 == 0 {
-					log.Info("Wrote into file", "million txs", i/1_000_000, "block num", bodyNum)
-				}
-			}
-			if te != nil && !errors.Is(te, io.EOF) {
-				return te
-			}
-		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	return nil
-}
-
 func trimTxs(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -3883,142 +3617,6 @@ func scanReceipts2(chaindata string) error {
 	return nil
 }
 
-func scanReceipts(chaindata string, block uint64) error {
-	f, err := os.Create("fixed.txt")
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	blockNum, err := changeset.AvailableFrom(tx)
-	if err != nil {
-		return err
-	}
-	if block > blockNum {
-		blockNum = block
-	}
-
-	chainConfig := tool.ChainConfig(tx)
-	vmConfig := vm.Config{}
-	noOpWriter := state.NewNoopWriter()
-	var buf bytes.Buffer
-	fixedCount := 0
-	logInterval := 30 * time.Second
-	logEvery := time.NewTicker(logInterval)
-	var key [8]byte
-	var v []byte
-	for ; true; blockNum++ {
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("Commit", "block", blockNum, "fixed", fixedCount)
-			tx.Commit()
-			if tx, err = db.BeginRw(context.Background()); err != nil {
-				return err
-			}
-		}
-		var hash common.Hash
-		if hash, err = rawdb.ReadCanonicalHash(tx, blockNum); err != nil {
-			return err
-		}
-		if hash == (common.Hash{}) {
-			break
-		}
-		binary.BigEndian.PutUint64(key[:], blockNum)
-		if v, err = tx.GetOne(kv.Receipts, key[:]); err != nil {
-			return err
-		}
-		var receipts types.Receipts
-		if err = cbor.Unmarshal(&receipts, bytes.NewReader(v)); err == nil {
-			broken := false
-			for _, receipt := range receipts {
-				if receipt.CumulativeGasUsed < 10000 {
-					broken = true
-					break
-				}
-			}
-			if !broken {
-				continue
-			}
-		} else {
-			// Receipt is using old CBOR encoding
-			var oldReceipts migrations.OldReceipts
-			if err = cbor.Unmarshal(&oldReceipts, bytes.NewReader(v)); err != nil {
-				return err
-			}
-			var body *types.Body
-			if chainConfig.IsBerlin(blockNum) {
-				body = rawdb.ReadBodyWithTransactions(tx, hash, blockNum)
-			}
-			receipts = make(types.Receipts, len(oldReceipts))
-			for i, oldReceipt := range oldReceipts {
-				receipts[i] = new(types.Receipt)
-				receipts[i].PostState = oldReceipt.PostState
-				receipts[i].Status = oldReceipt.Status
-				receipts[i].CumulativeGasUsed = oldReceipt.CumulativeGasUsed
-				if body != nil {
-					receipts[i].Type = body.Transactions[i].Type()
-				}
-			}
-			buf.Reset()
-			if err = cbor.Marshal(&buf, receipts); err != nil {
-				return err
-			}
-			if err = tx.Put(kv.Receipts, common.CopyBytes(key[:]), common.CopyBytes(buf.Bytes())); err != nil {
-				return err
-			}
-			fixedCount++
-			continue
-		}
-		var block *types.Block
-		if block, _, err = rawdb.ReadBlockWithSenders(tx, hash, blockNum); err != nil {
-			return err
-		}
-
-		dbstate := state.NewPlainState(tx, block.NumberU64()-1)
-		intraBlockState := state.New(dbstate)
-
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-		contractHasTEVM := ethdb.GetHasTEVM(tx)
-		receipts1, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
-		if err1 != nil {
-			return err1
-		}
-		fix := true
-		if chainConfig.IsByzantium(blockNum) {
-			receiptSha := types.DeriveSha(receipts1)
-			if receiptSha != block.Header().ReceiptHash {
-				fmt.Printf("(retrace) mismatched receipt headers for block %d: %x, %x\n", block.NumberU64(), receiptSha, block.Header().ReceiptHash)
-				fix = false
-			}
-		}
-		if fix {
-			// All good, we can fix receipt record
-			buf.Reset()
-			err := cbor.Marshal(&buf, receipts1)
-			if err != nil {
-				return fmt.Errorf("encode block receipts for block %d: %w", blockNum, err)
-			}
-			if err = tx.Put(kv.Receipts, key[:], buf.Bytes()); err != nil {
-				return fmt.Errorf("writing receipts for block %d: %w", blockNum, err)
-			}
-			if _, err = w.Write([]byte(fmt.Sprintf("%d\n", blockNum))); err != nil {
-				return err
-			}
-			fixedCount++
-		}
-	}
-	return tx.Commit()
-}
-
 func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
 	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
@@ -4043,7 +3641,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
+		if _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
@@ -4075,8 +3673,8 @@ func devTx(chaindata string) error {
 }
 
 func main() {
+	debug.RaiseFdLimit()
 	flag.Parse()
-
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*verbosity), log.StderrHandler))
 
 	if *cpuprofile != "" {
@@ -4227,9 +3825,6 @@ func main() {
 	case "scanTxs":
 		err = scanTxs(*chaindata)
 
-	case "scanReceipts":
-		err = scanReceipts(*chaindata, uint64(*block))
-
 	case "scanReceipts2":
 		err = scanReceipts2(*chaindata)
 
@@ -4241,17 +3836,15 @@ func main() {
 	case "dumpState":
 		err = dumpState(*chaindata, int(*block), *name)
 	case "compress":
-		err = compress1(*chaindata, *name)
-	case "createIdx":
-		err = createIdx(*chaindata, *name)
-	case "recsplitLookup":
-		err = recsplitLookup(*chaindata, *name)
+		err = compress1(*chaindata, *name, *name)
+	case "recsplitWholeChain":
+		err = recsplitWholeChain(*chaindata)
+	case "checkBlockSnapshot":
+		err = checkBlockSnapshot(*chaindata)
 	case "decompress":
 		err = decompress(*name)
 	case "genstate":
 		err = genstate()
-	case "dumpTxs":
-		err = dumpTxs(*chaindata, uint64(*block), int(*blockTotal), *name)
 	}
 
 	if err != nil {

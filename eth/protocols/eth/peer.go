@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -66,7 +67,7 @@ func max(a, b int) int { //nolint:unparam
 
 // Peer is a collection of relevant information we have about a `eth` peer.
 type Peer struct {
-	id string // Unique ID for the peer, cached
+	id enode.ID // Unique ID for the peer, cached
 
 	*p2p.Peer                   // The embedded P2P package peer
 	rw        p2p.MsgReadWriter // Input/output streams for snap
@@ -92,7 +93,7 @@ type Peer struct {
 // version.
 func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Peer {
 	peer := &Peer{
-		id:              p.ID().String(),
+		id:              p.ID(),
 		Peer:            p,
 		rw:              rw,
 		version:         version,
@@ -108,9 +109,8 @@ func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter, txpool TxPool) *Pe
 	// Start up all the broadcasters
 	go peer.broadcastBlocks()
 	go peer.broadcastTransactions()
-	if version >= ETH65 {
-		go peer.announceTransactions()
-	}
+	go peer.announceTransactions()
+
 	return peer
 }
 
@@ -122,7 +122,7 @@ func (p *Peer) Close() {
 }
 
 // ID retrieves the peer's unique identifier.
-func (p *Peer) ID() string {
+func (p *Peer) ID() enode.ID {
 	return p.id
 }
 

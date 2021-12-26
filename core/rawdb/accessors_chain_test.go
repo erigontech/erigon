@@ -154,7 +154,7 @@ func TestBlockStorage(t *testing.T) {
 	}
 	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored header not found")
-	} else if entry.Hash() != block.Header().Hash() {
+	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
 	if entry := ReadBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry == nil {
@@ -186,8 +186,10 @@ func TestPartialBlockStorage(t *testing.T) {
 		TxHash:      types.EmptyRootHash,
 		ReceiptHash: types.EmptyRootHash,
 	})
+	header := block.Header() // Not identical to struct literal above, due to other fields
+
 	// Store a header and check that it's not recognized as a block
-	WriteHeader(tx, block.Header())
+	WriteHeader(tx, header)
 	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
@@ -203,7 +205,7 @@ func TestPartialBlockStorage(t *testing.T) {
 	DeleteBody(tx, block.Hash(), block.NumberU64())
 
 	// Store a header and a body separately and check reassembly
-	WriteHeader(tx, block.Header())
+	WriteHeader(tx, header)
 	if err := WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		t.Fatal(err)
 	}

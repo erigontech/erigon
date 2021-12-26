@@ -465,21 +465,15 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read ChainID: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for ChainID: %d", len(b))
 	}
 	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -495,11 +489,8 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Value: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
@@ -511,25 +502,16 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read AccessList: %w", err)
 	}
 	// decode V
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
-	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
-	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read S: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	if err := s.ListEnd(); err != nil {
@@ -634,15 +616,4 @@ func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 	}
 	tx.from.Store(addr)
 	return addr, nil
-}
-
-func (tx AccessListTx) GetSender() (common.Address, bool) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
-func (tx *AccessListTx) SetSender(addr common.Address) {
-	tx.from.Store(addr)
 }

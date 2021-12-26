@@ -87,7 +87,7 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	// Prefix logs with node ID.
 	lprefix := fmt.Sprintf("(%s)", ln.ID().TerminalString())
 	lfmt := log.TerminalFormat()
-	cfg.Log = testlog.Logger(t, log.LvlInfo)
+	cfg.Log = testlog.Logger(t, log.LvlError)
 	cfg.Log.SetHandler(log.FuncHandler(func(r *log.Record) error {
 		t.Logf("%s %s", lprefix, lfmt.Format(r))
 		return nil
@@ -727,7 +727,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln.Set(enr.UDP(30303))
 	test.udp, err = ListenV5(test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
-		Log:          testlog.Logger(t, log.LvlInfo),
+		Log:          testlog.Logger(t, log.LvlError),
 		ValidSchemes: enode.ValidSchemesForTesting,
 	})
 	if err != nil {

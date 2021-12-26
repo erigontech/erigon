@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -81,6 +82,7 @@ type EthAPI interface {
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
+	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
@@ -105,10 +107,11 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	TevmEnabled bool // experiment
+	_blockReader interfaces.BlockReader
+	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -118,7 +121,7 @@ func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, singleNodeMode boo
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -159,11 +162,18 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 			return it.(*types.Block), nil
 		}
 	}
-	block, _, err := rawdb.ReadBlockWithSenders(tx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-
+	if block == nil { // don't save nil's to cache
+		return nil, nil
+	}
+	// don't save empty blocks to cache, because in Erigon
+	// if block become non-canonical - we remove it's transactions, but block can become canonical in future
+	if block.Transactions().Len() == 0 {
+		return block, nil
+	}
 	if api.blocksLRU != nil {
 		api.blocksLRU.Add(hash, block)
 	}

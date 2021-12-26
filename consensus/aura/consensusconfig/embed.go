@@ -2,7 +2,8 @@ package consensusconfig
 
 import (
 	_ "embed"
-	"github.com/ledgerwatch/erigon/params"
+
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 //go:embed poasokol.json
@@ -13,9 +14,9 @@ var Kovan []byte
 
 func GetConfigByChain(chainName string) []byte {
 	switch chainName {
-	case params.SokolChainName:
+	case networkname.SokolChainName:
 		return Sokol
-	case params.KovanChainName:
+	case networkname.KovanChainName:
 		return Kovan
 	default:
 		return Sokol

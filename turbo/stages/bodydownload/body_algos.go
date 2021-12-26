@@ -7,13 +7,15 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -26,7 +28,7 @@ const BlockBufferSize = 128
 // validated at this point.
 // It returns 2 errors - first is Validation error (reason to penalize peer and continue processing other
 // bodies), second is internal runtime error (like network error or db error)
-type VerifyUnclesFunc func(peerID string, header *types.Header, uncles []*types.Header) error
+type VerifyUnclesFunc func(peerID enode.ID, header *types.Header, uncles []*types.Header) error
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
@@ -53,7 +55,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 		bd.deliveriesB[i] = nil
 		bd.requests[i] = nil
 	}
-	bd.peerMap = make(map[string]int)
+	bd.peerMap = make(map[enode.ID]int)
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
@@ -76,7 +78,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	if blockNum < bd.requestedLow {
 		blockNum = bd.requestedLow
 	}
@@ -98,7 +100,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 			if currentTime < req.waitUntil {
 				continue
 			}
-			bd.peerMap[string(req.peerID)]++
+			bd.peerMap[req.peerID]++
 			bd.requests[blockNum-bd.requestedLow] = nil
 		}
 		var hash common.Hash
@@ -109,17 +111,21 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveriesH[blockNum-bd.requestedLow]
 			if header == nil {
-				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			hash = header.Hash()
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(db, blockNum)
 			if err != nil {
-				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
-			header = rawdb.ReadHeader(db, hash, blockNum)
+
+			header, err = blockReader.Header(context.Background(), db, hash, blockNum)
+			if err != nil {
+				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+			}
 			if header == nil {
-				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, debug.Callers(7))
+				return nil, 0, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
 			}
 
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
@@ -175,7 +181,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockNum uint64, currentTime
 	return bodyReq, blockNum, nil
 }
 
-func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer []byte) {
+func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer enode.ID) {
 	for _, blockNum := range bodyReq.BlockNums {
 		if blockNum < bd.requestedLow {
 			continue
@@ -189,7 +195,7 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID string) {
+func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, lenOfP2PMsg uint64, peerID enode.ID) {
 	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
@@ -341,11 +347,11 @@ func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	return bd.deliveredCount, bd.wastedCount
 }
 
-func (bd *BodyDownload) GetPenaltyPeers() [][]byte {
-	peers := make([][]byte, len(bd.peerMap))
+func (bd *BodyDownload) GetPenaltyPeers() []enode.ID {
+	peers := make([]enode.ID, len(bd.peerMap))
 	i := 0
 	for p := range bd.peerMap {
-		peers[i] = []byte(p)
+		peers[i] = p
 		i++
 	}
 	return peers
@@ -357,7 +363,7 @@ func (bd *BodyDownload) PrintPeerMap() {
 		fmt.Printf("%s = %d\n", p, n)
 	}
 	fmt.Printf("---------------------------\n")
-	bd.peerMap = make(map[string]int)
+	bd.peerMap = make(map[enode.ID]int)
 }
 
 func (bd *BodyDownload) AddToPrefetch(block *types.Block) {

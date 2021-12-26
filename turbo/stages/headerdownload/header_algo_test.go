@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func TestInserter1(t *testing.T) {
@@ -36,17 +38,24 @@ func TestInserter1(t *testing.T) {
 	}
 	defer tx.Rollback()
 	hi := NewHeaderInserter("headers", big.NewInt(0), 0)
-	var h1, h2 types.Header
-	h1.Number = big.NewInt(1)
-	h1.Difficulty = big.NewInt(10)
-	h1.ParentHash = genesis.Hash()
-	h2.Number = big.NewInt(2)
-	h2.Difficulty = big.NewInt(1010)
-	h2.ParentHash = h1.Hash()
-	if err = hi.FeedHeader(tx, &h1, 1); err != nil {
+	h1 := types.Header{
+		Number:     big.NewInt(1),
+		Difficulty: big.NewInt(10),
+		ParentHash: genesis.Hash(),
+	}
+	h1Hash := h1.Hash()
+	h2 := types.Header{
+		Number:     big.NewInt(2),
+		Difficulty: big.NewInt(1010),
+		ParentHash: h1Hash,
+	}
+	h2Hash := h2.Hash()
+	data1, _ := rlp.EncodeToBytes(&h1)
+	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReader(), &h1, data1, h1Hash, 1); err != nil {
 		t.Errorf("feed empty header 1: %v", err)
 	}
-	if err = hi.FeedHeader(tx, &h2, 2); err != nil {
+	data2, _ := rlp.EncodeToBytes(&h2)
+	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReader(), &h2, data2, h2Hash, 2); err != nil {
 		t.Errorf("feed empty header 2: %v", err)
 	}
 }

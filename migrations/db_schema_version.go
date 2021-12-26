@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-var dbSchemaVersion = Migration{
-	Name: "db_schema_version",
+var dbSchemaVersion5 = Migration{
+	Name: "db_schema_version5",
 	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {

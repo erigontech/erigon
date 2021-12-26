@@ -5,7 +5,7 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test ./... -p 2
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags `git rev-list --tags="v*" --max-count=1`)
-GOBUILD = env GO111MODULE=on $(GO) build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
+GOBUILD = $(GO) build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
 GO_DBG_BUILD = $(GO) build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
 
 GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
@@ -39,6 +39,7 @@ geth: erigon
 erigon: go-version
 	@echo "Building Erigon"
 	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	git submodule update --init --recursive --force
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
@@ -95,24 +96,26 @@ evm:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
-seeder:
-	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
+downloader:
+	git submodule update --init --recursive --force
+	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
+	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
 
-sndownloader:
-	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
+devnettest:
+	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
+	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
 
-tracker:
-	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
-
-db-tools: libmdbx
+db-tools:
 	@echo "Building db-tools"
-	git submodule update --init --recursive
+
+	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	rm -rf libmdbx
+	rm -rf cmd/downloader/trackers/trackerslist
+	rm -rf turbo/snapshotsync/snapshothashes/erigon-snapshots
+	git submodule update --init --recursive --force
+
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
@@ -137,9 +140,10 @@ lintci-deps:
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.42.1
 
 clean:
-	env GO111MODULE=on go clean -cache
+	go clean -cache
 	rm -fr build/*
 	cd libmdbx/ && make clean
+	./build/bin/golangci-lint cache clean
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.

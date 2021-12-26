@@ -149,6 +149,11 @@ var (
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
 		Value: "",
 	}
+
+	HealthCheckFlag = cli.BoolFlag{
+		Name:  "healthcheck",
+		Usage: "Enable grpc health check",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -205,6 +210,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			cfg.BadBlockHash = common.BytesToHash(bytes)
 		}
 	}
+
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -275,7 +281,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 }
 
 // setPrivateApi populates configuration fields related to the remote
-// read-only interface to the databae
+// read-only interface to the database
 func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))
@@ -299,4 +305,5 @@ func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 		cfg.TLSKeyFile = keyFile
 		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
+	cfg.HealthCheck = ctx.GlobalBool(HealthCheckFlag.Name)
 }

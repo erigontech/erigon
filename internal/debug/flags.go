@@ -106,14 +106,14 @@ var Flags = []cli.Flag{
 //var glogger *log.GlogHandler
 
 func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	//glogger = log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	//glogger.Verbosity(log.LvlInfo)
 	//log.Root().SetHandler(glogger)
 }
 
 func SetupCobra(cmd *cobra.Command) error {
-	raiseFdLimit()
+	RaiseFdLimit()
 	flags := cmd.Flags()
 	lvl, err := flags.GetInt(verbosityFlag.Name)
 	if err != nil {
@@ -209,7 +209,7 @@ func SetupCobra(cmd *cobra.Command) error {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(ctx *cli.Context) error {
-	raiseFdLimit()
+	RaiseFdLimit()
 	//var ostream log.Handler
 	//output := io.Writer(os.Stderr)
 	if ctx.GlobalBool(logjsonFlag.Name) {
@@ -294,8 +294,8 @@ func Exit() {
 	_ = Handler.StopGoTrace()
 }
 
-// raiseFdLimit raises out the number of allowed file handles per process
-func raiseFdLimit() {
+// RaiseFdLimit raises out the number of allowed file handles per process
+func RaiseFdLimit() {
 	limit, err := fdlimit.Maximum()
 	if err != nil {
 		log.Error("Failed to retrieve file descriptor allowance", "error", err)

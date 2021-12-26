@@ -44,6 +44,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
+	StarknetType
 )
 
 // Transaction is an Ethereum transaction.
@@ -81,6 +82,8 @@ type Transaction interface {
 	Sender(Signer) (common.Address, error)
 	GetSender() (common.Address, bool)
 	SetSender(common.Address)
+	IsContractDeploy() bool
+	IsStarkNet() bool
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -92,6 +95,16 @@ type TransactionMisc struct {
 	hash atomic.Value //nolint:structcheck
 	size atomic.Value //nolint:structcheck
 	from atomic.Value
+}
+
+type RawTransactions [][]byte
+
+func (t RawTransactions) Len() int {
+	return len(t)
+}
+
+func (t RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+	w.Write(t[i])
 }
 
 func (tm TransactionMisc) Time() time.Time {
@@ -134,6 +147,12 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		tx = t
 	case DynamicFeeTxType:
 		t := &DynamicFeeTransaction{}
+		if err = t.DecodeRLP(s); err != nil {
+			return nil, err
+		}
+		tx = t
+	case StarknetType:
+		t := &StarknetTransaction{}
 		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}

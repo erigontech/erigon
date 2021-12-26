@@ -24,19 +24,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func init() {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-}
 func TestClientRequest(t *testing.T) {
 	server := newTestServer()
 	defer server.Stop()
@@ -259,10 +256,8 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 			}
 			if !shouldPanic && err != nil {
 				t.Errorf("EthSubscribe shouldn't have panicked for %#v", arg)
-				buf := make([]byte, 1024*1024)
-				buf = buf[:runtime.Stack(buf, false)]
 				t.Error(err)
-				t.Error(string(buf))
+				t.Error(dbg.Stack())
 			}
 		}()
 		client.EthSubscribe(context.Background(), arg, "foo_bar")

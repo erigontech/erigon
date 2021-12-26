@@ -25,6 +25,7 @@ type Sync struct {
 	timings      []Timing
 	logPrefixes  []string
 }
+
 type Timing struct {
 	isUnwind bool
 	isPrune  bool
@@ -191,6 +192,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageS
 func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
+
 	for !s.IsDone() {
 		var badBlockUnwind bool
 		if s.unwindPoint != nil {

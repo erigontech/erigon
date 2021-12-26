@@ -100,11 +100,11 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 	value, x := stack.Back(1), stack.Back(0)
 	key := common.Hash(x.Bytes32())
 	var current uint256.Int
-	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
+	evm.IntraBlockState().GetState(contract.Address(), &key, &current)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
-	if evm.ChainRules.IsPetersburg || !evm.ChainRules.IsConstantinople {
+	if evm.ChainRules().IsPetersburg || !evm.ChainRules().IsConstantinople {
 		// This checks for 3 scenario's and calculates gas accordingly:
 		//
 		// 1. From a zero-value address to a non-zero value         (NEW VALUE)
@@ -114,7 +114,7 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 		case current.IsZero() && !value.IsZero(): // 0 => non 0
 			return params.SstoreSetGas, nil
 		case !current.IsZero() && value.IsZero(): // non 0 => 0
-			evm.IntraBlockState.AddRefund(params.SstoreRefundGas)
+			evm.IntraBlockState().AddRefund(params.SstoreRefundGas)
 			return params.SstoreClearGas, nil
 		default: // non 0 => non 0 (or 0 => 0)
 			return params.SstoreResetGas, nil
@@ -138,28 +138,28 @@ func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, me
 		return params.NetSstoreNoopGas, nil
 	}
 	var original uint256.Int
-	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
+	evm.IntraBlockState().GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
 		}
 		if value.IsZero() { // delete slot (2.1.2b)
-			evm.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
+			evm.IntraBlockState().AddRefund(params.NetSstoreClearRefund)
 		}
 		return params.NetSstoreCleanGas, nil // write existing slot (2.1.2)
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			evm.IntraBlockState.SubRefund(params.NetSstoreClearRefund)
+			evm.IntraBlockState().SubRefund(params.NetSstoreClearRefund)
 		} else if value.IsZero() { // delete slot (2.2.1.2)
-			evm.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
+			evm.IntraBlockState().AddRefund(params.NetSstoreClearRefund)
 		}
 	}
 	if original.Eq(value) {
 		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
-			evm.IntraBlockState.AddRefund(params.NetSstoreResetClearRefund)
+			evm.IntraBlockState().AddRefund(params.NetSstoreResetClearRefund)
 		} else { // reset to original existing slot (2.2.2.2)
-			evm.IntraBlockState.AddRefund(params.NetSstoreResetRefund)
+			evm.IntraBlockState().AddRefund(params.NetSstoreResetRefund)
 		}
 	}
 
@@ -188,35 +188,35 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 	value, x := stack.Back(1), stack.Back(0)
 	key := common.Hash(x.Bytes32())
 	var current uint256.Int
-	evm.IntraBlockState.GetState(contract.Address(), &key, &current)
+	evm.IntraBlockState().GetState(contract.Address(), &key, &current)
 
 	if current.Eq(value) { // noop (1)
 		return params.SloadGasEIP2200, nil
 	}
 
 	var original uint256.Int
-	evm.IntraBlockState.GetCommittedState(contract.Address(), &key, &original)
+	evm.IntraBlockState().GetCommittedState(contract.Address(), &key, &original)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return params.SstoreSetGasEIP2200, nil
 		}
 		if value.IsZero() { // delete slot (2.1.2b)
-			evm.IntraBlockState.AddRefund(params.SstoreClearsScheduleRefundEIP2200)
+			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
 		return params.SstoreResetGasEIP2200, nil // write existing slot (2.1.2)
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			evm.IntraBlockState.SubRefund(params.SstoreClearsScheduleRefundEIP2200)
+			evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200)
 		} else if value.IsZero() { // delete slot (2.2.1.2)
-			evm.IntraBlockState.AddRefund(params.SstoreClearsScheduleRefundEIP2200)
+			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
 	}
 	if original.Eq(value) {
 		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
-			evm.IntraBlockState.AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
+			evm.IntraBlockState().AddRefund(params.SstoreSetGasEIP2200 - params.SloadGasEIP2200)
 		} else { // reset to original existing slot (2.2.2.2)
-			evm.IntraBlockState.AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
+			evm.IntraBlockState().AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
 		}
 	}
 	return params.SloadGasEIP2200, nil // dirty update (2.2)
@@ -336,11 +336,11 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		transfersValue = !stack.Back(2).IsZero()
 		address        = common.Address(stack.Back(1).Bytes20())
 	)
-	if evm.ChainRules.IsEIP158 {
-		if transfersValue && evm.IntraBlockState.Empty(address) {
+	if evm.ChainRules().IsEIP158 {
+		if transfersValue && evm.IntraBlockState().Empty(address) {
 			gas += params.CallNewAccountGas
 		}
-	} else if !evm.IntraBlockState.Exist(address) {
+	} else if !evm.IntraBlockState().Exist(address) {
 		gas += params.CallNewAccountGas
 	}
 	if transfersValue {
@@ -355,7 +355,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		return 0, ErrGasUintOverflow
 	}
 
-	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -374,13 +374,13 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 		gas      uint64
 		overflow bool
 	)
-	if stack.Back(2).Sign() != 0 {
+	if !stack.Back(2).IsZero() {
 		gas += params.CallValueTransferGas
 	}
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -395,7 +395,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if err != nil {
 		return 0, err
 	}
-	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -411,7 +411,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 	if err != nil {
 		return 0, err
 	}
-	evm.callGasTemp, err = callGas(evm.ChainRules.IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -425,22 +425,22 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	var gas uint64
 	// EIP150 homestead gas reprice fork:
-	if evm.ChainRules.IsEIP150 {
+	if evm.ChainRules().IsEIP150 {
 		gas = params.SelfdestructGasEIP150
 		var address = common.Address(stack.Back(0).Bytes20())
 
-		if evm.ChainRules.IsEIP158 {
+		if evm.ChainRules().IsEIP158 {
 			// if empty and transfers value
-			if evm.IntraBlockState.Empty(address) && evm.IntraBlockState.GetBalance(contract.Address()).Sign() != 0 {
+			if evm.IntraBlockState().Empty(address) && !evm.IntraBlockState().GetBalance(contract.Address()).IsZero() {
 				gas += params.CreateBySelfdestructGas
 			}
-		} else if !evm.IntraBlockState.Exist(address) {
+		} else if !evm.IntraBlockState().Exist(address) {
 			gas += params.CreateBySelfdestructGas
 		}
 	}
 
-	if !evm.IntraBlockState.HasSuicided(contract.Address()) {
-		evm.IntraBlockState.AddRefund(params.SelfdestructRefundGas)
+	if !evm.IntraBlockState().HasSuicided(contract.Address()) {
+		evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
 	}
 	return gas, nil
 }

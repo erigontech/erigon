@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -43,6 +44,16 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
+
+	difficulty := new(big.Int)
+
+	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
+		// TODO: Turn DIFFICULTY into RANDOM when the Merge is done.
+		difficulty.SetBytes(header.MixDigest[:])
+	} else {
+		difficulty.Set(header.Difficulty)
+	}
 	if contractHasTEVM == nil {
 		contractHasTEVM = func(_ common.Hash) (bool, error) {
 			return false, nil
@@ -55,7 +66,7 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 		Coinbase:        beneficiary,
 		BlockNumber:     header.Number.Uint64(),
 		Time:            header.Time,
-		Difficulty:      new(big.Int).Set(header.Difficulty),
+		Difficulty:      difficulty,
 		BaseFee:         &baseFee,
 		GasLimit:        header.GasLimit,
 		ContractHasTEVM: contractHasTEVM,
