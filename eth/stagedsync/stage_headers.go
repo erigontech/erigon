@@ -167,6 +167,8 @@ func HeadersPOS(
 		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 		return nil
 	}
+	// Set chain reader
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	logPrefix := s.LogPrefix()
 	logEvery := time.NewTicker(logInterval)
@@ -181,7 +183,6 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		// Disabled for
 		/*if err := cfg.hd.VerifyHeader(header); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.statusCh <- privateapi.ExecutionStatus{
@@ -233,8 +234,6 @@ func HeadersPOS(
 	cfg.hd.SetFetching(true)
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
-
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
 	prevProgress := headerNumber

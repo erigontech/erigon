@@ -611,14 +611,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 
-		mineEvery := time.NewTicker(3 * time.Second)
+		mineEvery := time.NewTicker(1 * time.Second)
 		defer mineEvery.Stop()
 
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 		for {
-			mineEvery.Reset(3 * time.Second)
+			mineEvery.Reset(1 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
 				hasWork = true

@@ -56,7 +56,6 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	// If we are on proof-of-stake, we send our block to the engine API
 	if isTrans {
 		*cfg.assembledBlock = *block
-		return nil
 	}
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
