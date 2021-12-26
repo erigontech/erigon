@@ -23,12 +23,12 @@ linters-settings:
   gocritic:
     # Which checks should be enabled; can't be combined with 'disabled-checks';
     # See https://go-critic.github.io/overview#checks-overview
-    # To check which checks are enabled run `GL_DEBUG=gocritic golangci-lint run`
+    # To check which checks are enabled run `GL_DEBUG=gocritic ./build/bin/golangci-lint run`
     # By default list of stable checks is used.
     enabled-checks:
       - ruleguard
       - truncateCmp
-    #      - defaultCaseOrder
+      # - defaultCaseOrder
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
@@ -52,9 +52,10 @@ linters-settings:
       - performance
     disabled-tags:
       - experimental
-    ruleguard:
-      rules: "rules.go"
+      - opinionated
     settings:
+      ruleguard:
+        rules: "rules.go"
       hugeParam:
         # size in bytes that makes the warning trigger (default 80)
         sizeThreshold: 1000
