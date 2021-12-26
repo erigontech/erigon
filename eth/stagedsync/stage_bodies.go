@@ -72,7 +72,6 @@ func BodiesForward(
 	}
 	timeout := cfg.timeout
 
-	// Check if we are not done already
 	if cfg.snapshots != nil {
 		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
 			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {

@@ -168,6 +168,7 @@ func (back *RemoteBackend) EngineExecutePayloadV1(ctx context.Context, payload *
 func (back *RemoteBackend) EngineForkchoiceUpdateV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	return back.remoteEthBackend.EngineForkChoiceUpdatedV1(ctx, request)
 }
+
 func (back *RemoteBackend) EngineGetPayloadV1(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayload, err error) {
 	return back.remoteEthBackend.EngineGetPayloadV1(ctx, &remote.EngineGetPayloadRequest{
 		PayloadId: payloadId,
