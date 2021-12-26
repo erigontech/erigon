@@ -160,11 +160,9 @@ func readPlainStateOnce(
 	bufferSize := etl.BufferOptimalSize
 
 	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
+	defer accCollector.Close()
 	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
-	defer func() {
-		accCollector.Close()
-		storageCollector.Close()
-	}()
+	defer storageCollector.Close()
 
 	t := time.Now()
 	logEvery := time.NewTicker(30 * time.Second)
