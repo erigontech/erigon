@@ -1164,7 +1164,7 @@ func (c *Compressor) processSuperstring() error {
 					lastK = k
 				}
 			}
-			score := uint64(repeats * int(l))
+			score := uint64(repeats * int(l-4))
 			if score >= c.minPatternScore {
 				// Dictionary key is the concatenation of the score and the dictionary word (to later aggregate the scores from multiple chunks)
 				c.collectBuf = c.collectBuf[:8]

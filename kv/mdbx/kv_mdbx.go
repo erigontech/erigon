@@ -382,6 +382,7 @@ func (db *MdbxKV) BeginRw(_ context.Context) (txn kv.RwTx, err error) {
 			db.wg.Add(1)
 		}
 	}()
+
 	tx, err := db.env.BeginTxn(nil, 0)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
