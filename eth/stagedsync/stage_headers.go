@@ -96,16 +96,6 @@ func SpawnStageHeaders(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
 	var blockNumber uint64
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		tx.Rollback()
-	}
-	roTx, err := cfg.db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
 
 	if s == nil {
 		blockNumber = 0
@@ -113,11 +103,10 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
-	isTrans, err := rawdb.Transitioned(roTx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
 	}
-	roTx.Rollback()
 
 	if isTrans {
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test)
@@ -136,20 +125,25 @@ func HeadersPOS(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
+	// We need to have another write transaction for the miner in case we want to validate.
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	payloadMessage := <-cfg.reverseDownloadCh
 	header := payloadMessage.Header
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
+	// Initialize Tx Only when payload is loaded
+	var err error
+	tx, err = cfg.db.BeginRw(ctx)
+	if err != nil {
+		return err
 	}
+	defer tx.Rollback()
+
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 
 	headerNumber := header.Number.Uint64()
@@ -167,7 +161,7 @@ func HeadersPOS(
 		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 		return nil
 	}
-	// Set chain reader
+	// Set chain header reader right
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	logPrefix := s.LogPrefix()
@@ -214,11 +208,10 @@ func HeadersPOS(
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
 
-		if !useExternalTx {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
+		if err := tx.Commit(); err != nil {
+			return err
 		}
+
 		return nil
 	}
 
@@ -315,11 +308,10 @@ func HeadersPOS(
 		return fmt.Errorf("fix canonical chain: %w", err)
 	}
 
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -349,9 +341,6 @@ func HeadersPOW(
 	var headerProgress uint64
 	var err error
 
-	if !useExternalTx {
-		defer tx.Rollback()
-	}
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
