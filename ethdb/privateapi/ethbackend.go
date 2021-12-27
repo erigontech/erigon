@@ -337,6 +337,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	header.MixDigest = gointerfaces.ConvertH256ToHash(req.Prepare.Random)
 	header.Time = req.Prepare.Timestamp
 	header.Coinbase = gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
+	header.UncleHash = types.EmptyUncleHash
 	blockhash := header.Hash()
 	// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
 	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
