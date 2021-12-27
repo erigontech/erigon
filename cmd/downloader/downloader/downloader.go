@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -12,8 +13,10 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
+	"github.com/c2h5oh/datasize"
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
@@ -24,27 +27,36 @@ type Client struct {
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadLimit, uploadLimit datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(downloadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(uploadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
+
+	// debug
+	if lg.Debug == verbosity {
+		torrentConfig.Debug = true
+	}
+	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
+
 	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
 	if err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
 
-	torrentClient, err := torrent.NewClient(torrentConfig)
+	return torrentConfig, progressStore, nil
+}
+
+func New(cfg *torrent.ClientConfig, progressStore storage.PieceCompletion) (*Client, error) {
+	torrentClient, err := torrent.NewClient(cfg)
 	if err != nil {
-		log.Error("Fail to start torrnet client", "err", err)
-		return nil, fmt.Errorf("fail to start: %w", err)
+		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
-
-	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", seeding, torrentClient.PeerID()))
-
 	return &Client{
 		Cli:                  torrentClient,
 		pieceCompletionStore: progressStore,
@@ -54,11 +66,6 @@ func New(snapshotsDir string, seeding bool, peerID string) (*Client, error) {
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 	torrentConfig.ListenPort = 0
-
-	// debug
-	torrentConfig.Debug = false
-	torrentConfig.Logger = NewAdapterLogger()
-	torrentConfig.Logger = torrentConfig.Logger.FilterLevel(lg.Info)
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -76,9 +83,6 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
 	torrentConfig.TorrentPeersHighWater = 100     // default: 500
 	torrentConfig.TorrentPeersLowWater = 50       // default: 50
-
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(32*1024*1024, 2*DefaultPieceSize)   // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(64*1024*1024, 2*DefaultPieceSize) // default: unlimited
 
 	return torrentConfig
 }
@@ -104,7 +108,9 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 	interval := time.Second * 5
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
+	var m runtime.MemStats
 	var stats aggStats
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -128,6 +134,10 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				continue
 			}
 
+			runtime.ReadMemStats(&m)
+			alloc := common.StorageSize(m.Alloc)
+			sys := common.StorageSize(m.Sys)
+
 			stats = calcStats(stats, interval, torrentClient)
 			if allComplete {
 				log.Info(fmt.Sprintf(
@@ -136,7 +146,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 					humanize.Bytes(uint64(stats.writeBytesPerSec)),
 					stats.peersCount,
 					stats.torrentsCount,
-				))
+				), "alloc", alloc, "sys", sys)
 				continue
 			}
 
@@ -147,7 +157,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				humanize.Bytes(uint64(stats.writeBytesPerSec)),
 				stats.peersCount,
 				stats.torrentsCount,
-			))
+			), "alloc", alloc, "sys", sys)
 		}
 	}
 }
@@ -249,12 +259,6 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 	}); err != nil {
 		return err
 	}
-
-	pieces := 0
-	for _, t := range torrentClient.Torrents() {
-		pieces += t.NumPieces()
-	}
-	fmt.Printf("trackers: %d, pieces %d\n", len(Trackers), pieces)
 
 	//waitForChecksumVerify(ctx, torrentClient)
 	return nil

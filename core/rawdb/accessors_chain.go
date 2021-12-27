@@ -367,14 +367,6 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
-// HasBody verifies the existence of a block body corresponding to the hash.
-func HasBody(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash)); !has || err != nil {
-		return false
-	}
-	return true
-}
-
 func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
@@ -502,7 +494,7 @@ func WriteRawBodyIfNotExists(db kv.StatelessRwTx, hash common.Hash, number uint6
 	return WriteRawBody(db, hash, number, body)
 }
 
-func WriteRawBody(db kv.StatelessWriteTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBody(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err

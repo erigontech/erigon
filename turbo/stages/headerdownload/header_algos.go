@@ -617,6 +617,10 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
+func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
+	return hd.engine.VerifyHeader(hd.headerReader, header, true /* seal */)
+}
+
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
@@ -643,7 +647,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		if !link.preverified {
 			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
-			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
+			} else if err := hd.VerifyHeader(link.header); err != nil {
 				log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
@@ -714,7 +718,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	// Handle request after closing collectors
-	if hd.canonicalHashesCollector == nil || hd.headersCollector == nil {
+	if hd.headersCollector == nil {
 		return nil
 	}
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
@@ -733,9 +737,6 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 			return nil
 		}
 		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
-			return err
-		}
-		if err := hd.canonicalHashesCollector.Collect(dbutils.EncodeBlockNumber(header.Number.Uint64()), header.Hash().Bytes()); err != nil {
 			return err
 		}
 		hd.expectedHash = segmentFragment.Header.ParentHash
@@ -807,11 +808,11 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 
 func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader interfaces.HeaderReader) FeedHeaderFunc {
 	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (*big.Int, error) {
-		return hi.FeedHeader(db, headerReader, header, headerRaw, hash, blockHeight)
+		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight)
 	}
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil, nil
@@ -894,7 +895,7 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 			hi.unwindPoint = forkingPoint
 			hi.unwind = true
 		}
-		// This makes sure we end up chosing the chain with the max total difficulty
+		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
@@ -907,6 +908,41 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, headerReader interface
 
 	hi.prevHash = hash
 	return td, nil
+}
+
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
+	blockHeight := header.Number.Uint64()
+	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
+
+	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
+	if err != nil || parentTd == nil {
+		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+	}
+	td := new(big.Int).Add(parentTd, header.Difficulty)
+	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
+	}
+
+	headerRaw, err := rlp.EncodeToBytes(header)
+	if err != nil {
+		return fmt.Errorf("[%s] failed to to RLP encode header %x %d: %v", hi.logPrefix, hash, blockHeight, err)
+	}
+	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
+		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+
+	if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
+		return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
+	}
+	if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
+		return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+	}
+
+	hi.highest = blockHeight
+	hi.highestHash = hash
+	hi.highestTimestamp = header.Time
+
+	return nil
 }
 
 func (hi *HeaderInserter) GetHighest() uint64 {
@@ -1039,12 +1075,6 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headersCollector = collector
-}
-
-func (hd *HeaderDownload) SetCanonicalHashesCollector(collector *etl.Collector) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.canonicalHashesCollector = collector
 }
 
 func (hd *HeaderDownload) SetPOSSync(posSync bool) {

@@ -9,7 +9,9 @@ import (
 	"path"
 	"time"
 
+	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -34,10 +36,12 @@ import (
 )
 
 var (
-	datadir           string
-	seeding           bool
-	asJson            bool
-	downloaderApiAddr string
+	datadir                          string
+	seeding                          bool
+	asJson                           bool
+	downloaderApiAddr                string
+	torrentVerbosity                 string
+	downloadLimitStr, uploadLimitStr string
 )
 
 func init() {
@@ -48,6 +52,9 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
+	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Info.LogString(), "DEBUG | INFO | WARN | ERROR")
+	rootCmd.Flags().StringVar(&downloadLimitStr, "download.limit", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadLimitStr, "upload.limit", "1gb", "bytes per second, example: 32mb")
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
@@ -93,21 +100,20 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context, cmd *cobra.Command) error {
-	var cc *params.ChainConfig
-	{
-		chaindataDir := path.Join(datadir, "chaindata")
-		if err := os.MkdirAll(chaindataDir, 0755); err != nil {
-			return err
-		}
-		chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
-		if err != nil {
-			return fmt.Errorf("%w, path: %s", err, chaindataDir)
-		}
-		cc = tool.ChainConfigFromDB(chaindata)
-		chaindata.Close()
+	snapshotsDir := path.Join(datadir, "snapshots")
+	torrentLogLevel, ok := downloader.String2LogLevel[torrentVerbosity]
+	if !ok {
+		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
 	}
 
-	snapshotsDir := path.Join(datadir, "snapshots")
+	var downloadLimit, uploadLimit datasize.ByteSize
+	if err := downloadLimit.UnmarshalText([]byte(downloadLimitStr)); err != nil {
+		return err
+	}
+	if err := uploadLimit.UnmarshalText([]byte(uploadLimitStr)); err != nil {
+		return err
+	}
+
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
 	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
 		return err
@@ -120,7 +126,12 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)
 		}
-		t, err = downloader.New(snapshotsDir, seeding, string(peerID))
+
+		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadLimit, uploadLimit)
+		if err != nil {
+			return err
+		}
+		t, err = downloader.New(cfg, pieceStore)
 		if err != nil {
 			return err
 		}
@@ -130,6 +141,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 				return fmt.Errorf("save peer id: %w", err)
 			}
 		}
+		log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
 		return nil
 	}); err != nil {
 		return err
@@ -139,6 +151,20 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
+	}
+
+	var cc *params.ChainConfig
+	{
+		chaindataDir := path.Join(datadir, "chaindata")
+		if err := os.MkdirAll(chaindataDir, 0755); err != nil {
+			return err
+		}
+		chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
+		if err != nil {
+			return fmt.Errorf("%w, path: %s", err, chaindataDir)
+		}
+		cc = tool.ChainConfigFromDB(chaindata)
+		chaindata.Close()
 	}
 
 	snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)

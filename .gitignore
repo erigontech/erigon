@@ -76,3 +76,5 @@ genesis.json
 datadir/
 erigon
 integration
+
+go.work

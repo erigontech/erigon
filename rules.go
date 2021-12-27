@@ -1,8 +1,10 @@
+//go:build gorules
 // +build gorules
 
 package gorules
 
 // https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module
+// to apply changes in this file, please do: ./build/bin/golangci-lint cache clean
 import (
 	"github.com/quasilyte/go-ruleguard/dsl"
 	//quasilyterules "github.com/quasilyte/ruleguard-rules-test"

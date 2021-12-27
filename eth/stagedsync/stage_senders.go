@@ -156,9 +156,11 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			case <-quitCh:
 				return
 			case <-logEvery.C:
+				n := s.BlockNumber
 				if j != nil {
-					log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", s.BlockNumber+uint64(j.index))
+					n += uint64(j.index)
 				}
+				log.Info(fmt.Sprintf("[%s] Recovery", logPrefix), "block_number", n)
 			case j, ok = <-out:
 				if !ok {
 					return
