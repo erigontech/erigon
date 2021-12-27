@@ -307,7 +307,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 	block := s.assembledBlock.Load().(*types.Block)
 
-	if parent != rawdb.ReadHeadBlockHash(tx) || block.Header().ParentHash != parent || *s.waitingForBeaconChain == 0 {
+	if parent != rawdb.ReadHeadBlockHash(tx) || block.Header().ParentHash != parent || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
 		}, nil
