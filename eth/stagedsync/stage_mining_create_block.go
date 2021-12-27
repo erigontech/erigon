@@ -34,10 +34,17 @@ type MiningBlock struct {
 	RemoteTxs types.TransactionsStream
 }
 
+// In case we are proposing during proof-of-stake and we are supplied with header fields already
+type PresetHeaderFields struct {
+	Timestamp uint64
+	Random    common.Hash
+}
+
 type MiningState struct {
 	MiningConfig    *params.MiningConfig
 	PendingResultCh chan *types.Block
 	MiningResultCh  chan *types.Block
+	ProposeBlockCh  chan *types.Block
 	MiningBlock     *MiningBlock
 }
 
@@ -46,29 +53,32 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 		MiningConfig:    cfg,
 		PendingResultCh: make(chan *types.Block, 1),
 		MiningResultCh:  make(chan *types.Block, 1),
+		ProposeBlockCh:  make(chan *types.Block, 1),
 		MiningBlock:     &MiningBlock{},
 	}
 }
 
 type MiningCreateBlockCfg struct {
-	db          kv.RwDB
-	miner       MiningState
-	chainConfig params.ChainConfig
-	engine      consensus.Engine
-	txPool2     *txpool.TxPool
-	txPool2DB   kv.RoDB
-	tmpdir      string
+	db           kv.RwDB
+	miner        MiningState
+	chainConfig  params.ChainConfig
+	engine       consensus.Engine
+	txPool2      *txpool.TxPool
+	txPool2DB    kv.RoDB
+	presetFields PresetHeaderFields
+	tmpdir       string
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, presetFields PresetHeaderFields, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:          db,
-		miner:       miner,
-		chainConfig: chainConfig,
-		engine:      engine,
-		txPool2:     txPool2,
-		txPool2DB:   txPool2DB,
-		tmpdir:      tmpdir,
+		db:           db,
+		miner:        miner,
+		chainConfig:  chainConfig,
+		engine:       engine,
+		txPool2:      txPool2,
+		txPool2DB:    txPool2DB,
+		tmpdir:       tmpdir,
+		presetFields: presetFields,
 	}
 }
 
@@ -99,6 +109,10 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
 	}
 
+	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
 	blockNum := executionAt + 1
 	var txs []types.Transaction
 	if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
@@ -288,7 +302,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	current.Header = header
-	current.Uncles = makeUncles(env.uncles)
+	if isTrans {
+		current.Header.Time = cfg.presetFields.Timestamp
+		current.Header.MixDigest = cfg.presetFields.Random
+		current.Uncles = nil
+	} else {
+		current.Uncles = makeUncles(env.uncles)
+	}
 	return nil
 }
 

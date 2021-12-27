@@ -58,8 +58,8 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32       // atomic boolean flag
-	assembledBlock        *atomic.Value // block assembled in mining stages for N+1
+	waitingForBeaconChain *uint32           // atomic boolean flag
+	assemblePayloadFunc   assembleStartFunc // starts assembling payload
 	mu                    sync.Mutex
 }
 
@@ -69,6 +69,8 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 }
+
+type assembleStartFunc func(timestamp uint64, random common.Hash) (types.Block, error)
 
 // This is the status of a newly execute block.
 // Hash: Block hash
@@ -87,11 +89,11 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	assembledBlock *atomic.Value,
+	assemblePayloadFunc assembleStartFunc,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		assembledBlock: assembledBlock, pendingPayloads: make(map[uint64]types2.ExecutionPayload),
+		pendingPayloads: make(map[uint64]types2.ExecutionPayload), assemblePayloadFunc: assemblePayloadFunc,
 	}
 }
 
@@ -296,16 +298,17 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
-	if s.assembledBlock.Load() == nil {
-		return nil, fmt.Errorf("mining has not been enabled yet")
-	}
 	// Check if parent equate to the head
 	parent := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	block := s.assembledBlock.Load().(*types.Block)
+	random := gointerfaces.ConvertH256ToHash(req.Prepare.Random)
+	block, err := s.assemblePayloadFunc(req.Prepare.Timestamp, random)
+	if err != nil {
+		return nil, err
+	}
 
 	if parent != rawdb.ReadHeadBlockHash(tx) || block.Header().ParentHash != parent || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
@@ -330,17 +333,10 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}
 		encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 	}
-	// Compute the correct block hash, by setting up the right header
-	header := block.Header()
-	header.MixDigest = gointerfaces.ConvertH256ToHash(req.Prepare.Random)
-	header.Time = req.Prepare.Timestamp
-	header.Coinbase = gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
-	header.UncleHash = types.EmptyUncleHash
-	blockhash := header.Hash()
 	// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
 	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
 		ParentHash:    req.Forkchoice.HeadBlockHash,
-		Coinbase:      req.Prepare.FeeRecipient,
+		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
 		Timestamp:     req.Prepare.Timestamp,
 		Random:        req.Prepare.Random,
 		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
@@ -351,7 +347,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: baseFeeReply,
-		BlockHash:     gointerfaces.ConvertHashToH256(blockhash),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
 		Transactions:  encodedTransactions,
 	}
 	// successfully assembled the payload and assinged the correct id
