@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -17,7 +18,7 @@ type MiningFinishCfg struct {
 	engine         consensus.Engine
 	sealCancel     <-chan struct{}
 	miningState    MiningState
-	assembledBlock *types.Block
+	assembledBlock *atomic.Value
 }
 
 func StageMiningFinishCfg(
@@ -26,7 +27,7 @@ func StageMiningFinishCfg(
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel <-chan struct{},
-	assembledBlock *types.Block,
+	assembledBlock *atomic.Value,
 ) MiningFinishCfg {
 	return MiningFinishCfg{
 		db:             db,
@@ -55,7 +56,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	}
 	// If we are on proof-of-stake, we send our block to the engine API
 	if isTrans {
-		*cfg.assembledBlock = *block
+		cfg.assembledBlock.Store(block)
 		return nil
 	}
 	//sealHash := engine.SealHash(block.Header())

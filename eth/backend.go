@@ -134,8 +134,8 @@ type Ethereum struct {
 	// to proof-of-stake so we start reverse syncing from the header
 	reverseDownloadCh     chan privateapi.PayloadMessage
 	statusCh              chan privateapi.ExecutionStatus
-	waitingForBeaconChain uint32      // atomic boolean flag
-	assembledBlock        types.Block // Mining stages telling engine API which block has been assembled
+	waitingForBeaconChain uint32       // atomic boolean flag
+	assembledBlock        atomic.Value // Mining stages telling engine API which block has been assembled
 }
 
 // New creates a new Ethereum object (including the
@@ -336,7 +336,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		txPoolRPC = backend.txPool2GrpcServer
 	}
 
-	backend.assembledBlock = types.Block{}
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
 	backend.quitMining = make(chan struct{})
 	backend.miningSealingQuit = make(chan struct{})

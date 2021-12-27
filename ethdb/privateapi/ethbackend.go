@@ -58,8 +58,8 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32      // atomic boolean flag
-	assembledBlock        *types.Block // block assembled in mining stages for N+1
+	waitingForBeaconChain *uint32       // atomic boolean flag
+	assembledBlock        *atomic.Value // block assembled in mining stages for N+1
 	mu                    sync.Mutex
 }
 
@@ -87,7 +87,7 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	assembledBlock *types.Block,
+	assembledBlock *atomic.Value,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
@@ -296,7 +296,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
-	if s.assembledBlock == nil {
+	if s.assembledBlock.Load() == nil {
 		return nil, fmt.Errorf("mining has not been enabled yet")
 	}
 	// Check if parent equate to the head
@@ -305,21 +305,23 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	if parent != rawdb.ReadHeadBlockHash(tx) || s.assembledBlock.Header().ParentHash != parent || *s.waitingForBeaconChain == 0 {
+	block := s.assembledBlock.Load().(*types.Block)
+
+	if parent != rawdb.ReadHeadBlockHash(tx) || block.Header().ParentHash != parent || *s.waitingForBeaconChain == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
 		}, nil
 	}
 	var baseFeeReply *types2.H256
-	if s.assembledBlock.Header().BaseFee != nil {
+	if block.Header().BaseFee != nil {
 		var baseFee uint256.Int
-		baseFee.SetFromBig(s.assembledBlock.Header().BaseFee)
+		baseFee.SetFromBig(block.Header().BaseFee)
 		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
 	}
 	var encodedTransactions [][]byte
 	buf := bytes.NewBuffer(nil)
 
-	for _, tx := range s.assembledBlock.Transactions() {
+	for _, tx := range block.Transactions() {
 		buf.Reset()
 
 		err := rlp.Encode(buf, tx)
@@ -329,7 +331,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 	}
 	// Compute the correct block hash, by setting up the right header
-	header := s.assembledBlock.Header()
+	header := block.Header()
 	header.Difficulty = serenity.SerenityDifficulty
 	header.Nonce = serenity.SerenityNonce
 	header.MixDigest = gointerfaces.ConvertH256ToHash(req.Prepare.Random)
@@ -342,13 +344,13 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		Coinbase:      req.Prepare.FeeRecipient,
 		Timestamp:     req.Prepare.Timestamp,
 		Random:        req.Prepare.Random,
-		StateRoot:     gointerfaces.ConvertHashToH256(s.assembledBlock.Root()),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(s.assembledBlock.ReceiptHash()),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(s.assembledBlock.Bloom().Bytes()),
-		GasLimit:      s.assembledBlock.GasLimit(),
-		GasUsed:       s.assembledBlock.GasUsed(),
-		BlockNumber:   s.assembledBlock.NumberU64(),
-		ExtraData:     s.assembledBlock.Extra(),
+		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
+		GasLimit:      block.GasLimit(),
+		GasUsed:       block.GasUsed(),
+		BlockNumber:   block.NumberU64(),
+		ExtraData:     block.Extra(),
 		BaseFeePerGas: baseFeeReply,
 		BlockHash:     gointerfaces.ConvertHashToH256(blockhash),
 		Transactions:  encodedTransactions,
