@@ -27,10 +27,9 @@ var snapshotCommand = cli.Command{
 	Name: "snapshot",
 	Subcommands: []cli.Command{
 		{
-			Name:      "create",
-			Usage:     "Create snapshots",
-			ArgsUsage: "<root>",
-			Action:    MigrateFlags(doSnapshotCommand),
+			Name:   "create",
+			Usage:  "Create snapshots",
+			Action: doSnapshotCommand,
 			Flags: []cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
@@ -56,9 +55,12 @@ var (
 )
 
 func doSnapshotCommand(ctx *cli.Context) error {
-	fromBlock := ctx.GlobalUint64(SnapshotFromFlag.Name)
-	segmentSize := ctx.GlobalUint64(SnapshotSegmentSizeFlag.Name)
-	dataDir := ctx.GlobalString(utils.DataDirFlag.Name)
+	fromBlock := ctx.Uint64(SnapshotFromFlag.Name)
+	segmentSize := ctx.Uint64(SnapshotSegmentSizeFlag.Name)
+	if segmentSize < 1000 {
+		return fmt.Errorf("too small --segment.size %d", segmentSize)
+	}
+	dataDir := ctx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
 
 	chainDB := mdbx.MustOpen(path.Join(dataDir, "chaindata"))
