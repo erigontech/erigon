@@ -131,10 +131,11 @@ func HeadersPOS(
 			return err
 		}
 	}
-	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
+	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	payloadMessage := <-cfg.reverseDownloadCh
+	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 	header := payloadMessage.Header
 	// Initialize Tx Only when payload is loaded
 	var err error
@@ -143,8 +144,6 @@ func HeadersPOS(
 		return err
 	}
 	defer tx.Rollback()
-
-	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()

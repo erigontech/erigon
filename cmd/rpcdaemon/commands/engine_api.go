@@ -43,7 +43,7 @@ type ExecutionPayload struct {
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
 	SafeBlockHash      common.Hash `json:"safeBlockHash"             gencodec:"required"`
-	FizalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
+	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -87,7 +87,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 		},
 		Forkchoice: &remote.EngineForkChoiceUpdated{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FizalizedBlockHash),
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
 		},
 	})
