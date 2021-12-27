@@ -401,7 +401,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: (hexutil.Uint64)(res.UsedGas)}, nil
+			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}, nil
 		}
 		prevTracer = tracer
 	}

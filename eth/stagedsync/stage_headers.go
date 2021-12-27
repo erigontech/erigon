@@ -231,10 +231,10 @@ func HeadersPOS(
 	prevProgress := headerNumber
 
 	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer headerCollector.Close()
 	cfg.hd.SetHeadersCollector(headerCollector)
 	// Cleanup after we finish backward sync
 	defer func() {
-		headerCollector.Close()
 		cfg.hd.SetHeadersCollector(nil)
 		cfg.hd.Unsync()
 		cfg.hd.SetFetching(false)
