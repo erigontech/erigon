@@ -70,10 +70,9 @@ message EngineExecutePayloadReply {
 }
 
 message EnginePreparePayload {
-  types.H256 parentHash = 1;
-  uint64 timestamp = 2;
-  types.H256 random = 3;
-  types.H160 feeRecipient = 4;
+  uint64 timestamp = 1;
+  types.H256 random = 2;
+  types.H160 feeRecipient = 3;
 }
 
 message EngineForkChoiceUpdated {
@@ -83,8 +82,8 @@ message EngineForkChoiceUpdated {
 }
 
 message EngineForkChoiceUpdatedRequest {
-  EnginePreparePayload headBlockHash = 1;
-  EngineForkChoiceUpdated safeBlockHash = 2;
+  EngineForkChoiceUpdated forkchoice = 1;
+  EnginePreparePayload prepare = 2;
 }
 
 message EngineForkChoiceUpdatedReply {
