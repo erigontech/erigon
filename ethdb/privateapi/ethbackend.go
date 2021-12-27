@@ -332,8 +332,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// Compute the correct block hash, by setting up the right header
 	header := block.Header()
-	header.Difficulty = serenity.SerenityDifficulty
-	header.Nonce = serenity.SerenityNonce
 	header.MixDigest = gointerfaces.ConvertH256ToHash(req.Prepare.Random)
 	header.Time = req.Prepare.Timestamp
 	header.Coinbase = gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
