@@ -47,18 +47,19 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	continue
 	//}
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts)
-	*current = MiningBlock{} // hack to clean global data
-
-	isTrans, err := rawdb.Transitioned(tx, block.NumberU64()-1, cfg.chainConfig.TerminalTotalDifficulty)
+	isTrans, err := rawdb.Transitioned(tx, current.Header.Number.Uint64()-1, cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
 	}
+
 	// If we are on proof-of-stake, we send our block to the engine API
 	if isTrans {
-		cfg.assembledBlock.Store(block)
+		cfg.assembledBlock.Store(types.NewBlock(current.Header, current.Txs, nil, current.Receipts))
 		return nil
 	}
+
+	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts)
+	*current = MiningBlock{} // hack to clean global data
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
 	//if sealHash == prev {
