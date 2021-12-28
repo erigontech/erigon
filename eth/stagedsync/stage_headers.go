@@ -204,7 +204,8 @@ func HeadersPOS(
 		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 			return err
 		}
-		// We can insert raw bodies immediately and skip bodies
+		// We can insert raw bodies immediately and skip stage 3. (stage 2 will not be skipped)
+		// TODO(Giulio2002): Fix inconsistency
 		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
 			return err
 		}
