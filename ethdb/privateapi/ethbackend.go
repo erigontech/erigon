@@ -70,7 +70,7 @@ type EthBackend interface {
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 }
 
-type assembleStartFunc func(timestamp uint64, random common.Hash) (types.Block, error)
+type assembleStartFunc func(timestamp uint64, random common.Hash, suggestedFeeRecipient common.Address) (types.Block, error)
 
 // This is the status of a newly execute block.
 // Hash: Block hash
@@ -305,7 +305,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, err
 	}
 	random := gointerfaces.ConvertH256ToHash(req.Prepare.Random)
-	block, err := s.assemblePayloadFunc(req.Prepare.Timestamp, random)
+	suggestedFeeRecipient := gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
+	block, err := s.assemblePayloadFunc(req.Prepare.Timestamp, random, suggestedFeeRecipient)
 	if err != nil {
 		return nil, err
 	}

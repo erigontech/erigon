@@ -405,10 +405,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
-	startAssembleFunc := func(timestamp uint64, random common.Hash) (types.Block, error) {
+	startAssembleFunc := func(timestamp uint64, random common.Hash, suggestedFeeRecipient common.Address) (types.Block, error) {
 		presets := stagedsync.PresetHeaderFields{
-			Timestamp: timestamp,
-			Random:    random,
+			Timestamp:             timestamp,
+			Random:                random,
+			SuggestedFeeRecipient: suggestedFeeRecipient,
 		}
 		proposing := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,

@@ -36,8 +36,9 @@ type MiningBlock struct {
 
 // In case we are proposing during proof-of-stake and we are supplied with header fields already
 type PresetHeaderFields struct {
-	Timestamp uint64
-	Random    common.Hash
+	Timestamp             uint64
+	Random                common.Hash
+	SuggestedFeeRecipient common.Address
 }
 
 type MiningState struct {
