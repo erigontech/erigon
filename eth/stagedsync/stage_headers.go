@@ -95,6 +95,15 @@ func SpawnStageHeaders(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 	var blockNumber uint64
 
 	if s == nil {
@@ -111,7 +120,7 @@ func SpawnStageHeaders(
 	if isTrans {
 		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test)
 	} else {
-		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test)
+		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
 }
 
@@ -323,16 +332,8 @@ func HeadersPOW(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	useExternalTx bool,
 ) error {
-	useExternalTx := tx != nil
-	if !useExternalTx {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg); err != nil {
 		return err
 	}
