@@ -21,7 +21,6 @@ import (
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
 	"os"
-	"runtime"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
@@ -47,21 +46,12 @@ var (
 		Usage: "Per-module verbosity: comma-separated list of <pattern>=<level> (e.g. eth/*=5,p2p=4)",
 		Value: "",
 	}
-	backtraceAtFlag = cli.StringFlag{
-		Name:  "backtrace",
-		Usage: "Request a stack trace at a specific logging statement (e.g. \"block.go:271\")",
-		Value: "",
-	}
 	metricsAddrFlag = cli.StringFlag{
 		Name: "metrics.addr",
 	}
 	metricsPortFlag = cli.UintFlag{
 		Name:  "metrics.port",
 		Value: 6060,
-	}
-	debugFlag = cli.BoolFlag{
-		Name:  "debug",
-		Usage: "Prepends log messages with call-site location (file and line number)",
 	}
 	pprofFlag = cli.BoolFlag{
 		Name:  "pprof",
@@ -77,15 +67,6 @@ var (
 		Usage: "pprof HTTP server listening interface",
 		Value: "127.0.0.1",
 	}
-	memprofilerateFlag = cli.IntFlag{
-		Name:  "pprof.memprofilerate",
-		Usage: "Turn on memory profiling with the given rate",
-		Value: runtime.MemProfileRate,
-	}
-	blockprofilerateFlag = cli.IntFlag{
-		Name:  "pprof.blockprofilerate",
-		Usage: "Turn on block profiling with the given rate",
-	}
 	cpuprofileFlag = cli.StringFlag{
 		Name:  "pprof.cpuprofile",
 		Usage: "Write CPU profile to the given file",
@@ -98,9 +79,9 @@ var (
 
 // Flags holds all command-line flags required for debugging.
 var Flags = []cli.Flag{
-	verbosityFlag, logjsonFlag, vmoduleFlag, backtraceAtFlag, debugFlag,
-	pprofFlag, pprofAddrFlag, pprofPortFlag, memprofilerateFlag,
-	blockprofilerateFlag, cpuprofileFlag, traceFlag,
+	verbosityFlag, logjsonFlag, //backtraceAtFlag, vmoduleFlag, debugFlag,
+	pprofFlag, pprofAddrFlag, pprofPortFlag,
+	cpuprofileFlag, traceFlag,
 }
 
 //var glogger *log.GlogHandler
@@ -139,14 +120,6 @@ func SetupCobra(cmd *cobra.Command) error {
 	*/
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lvl), log.StderrHandler))
 
-	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
-	if err != nil {
-		return err
-	}
-	blockprofilerate, err := flags.GetInt(blockprofilerateFlag.Name)
-	if err != nil {
-		return err
-	}
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
 		return err
@@ -157,8 +130,6 @@ func SetupCobra(cmd *cobra.Command) error {
 	}
 
 	// profiling, tracing
-	runtime.MemProfileRate = memprofilerate
-	Handler.SetBlockProfileRate(blockprofilerate)
 	if traceFile != "" {
 		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
 			return err2
@@ -230,11 +201,6 @@ func Setup(ctx *cli.Context) error {
 			ctx.GlobalString(backtraceAtFlag.Name),
 		)
 	*/
-
-	// profiling, tracing
-	runtime.MemProfileRate = ctx.GlobalInt(memprofilerateFlag.Name)
-
-	Handler.SetBlockProfileRate(ctx.GlobalInt(blockprofilerateFlag.Name))
 
 	if traceFile := ctx.GlobalString(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
