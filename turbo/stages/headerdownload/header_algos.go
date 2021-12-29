@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -676,7 +675,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		}
 		if td != nil {
 			// Check if transition to proof-of-stake happened and stop forward syncing
-			if terminalTotalDifficulty != nil && (link.header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 || td.Cmp(terminalTotalDifficulty) >= 0) {
+			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 				hd.highestInDb = link.blockHeight
 				return true, nil
 			}
