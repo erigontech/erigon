@@ -132,9 +132,9 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh    chan types.Header
-	statusCh             chan privateapi.ExecutionStatus
-	waitingForPOSHeaders uint32 // atomic boolean flag
+	reverseDownloadCh     chan privateapi.PayloadMessage
+	statusCh              chan privateapi.ExecutionStatus
+	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -344,7 +344,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
-	backend.reverseDownloadCh = make(chan types.Header)
+	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.statusCh = make(chan privateapi.ExecutionStatus)
 
 	var blockReader interfaces.FullBlockReader
@@ -404,9 +404,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	atomic.StoreUint32(&backend.waitingForPOSHeaders, 0)
+	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -478,7 +478,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders,
+		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
 		backend.downloaderClient)
 	if err != nil {
 		return nil, err

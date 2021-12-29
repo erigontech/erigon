@@ -3,11 +3,13 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
@@ -38,6 +40,13 @@ type ExecutionPayload struct {
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
+type ForkChoiceState struct {
+	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
+	SafeBlockHash      common.Hash `json:"safeBlockHash"             gencodec:"required"`
+	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
+}
+
+// PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
 	Random                common.Hash    `json:"random"                gencodec:"required"`
@@ -46,9 +55,9 @@ type PayloadAttributes struct {
 
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
-	ForkchoiceUpdatedV1(context.Context, struct{}, *PayloadAttributes) (map[string]interface{}, error)
+	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
-	GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error)
+	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
 }
 
@@ -62,16 +71,42 @@ type EngineImpl struct {
 // ForkchoiceUpdatedV1 is executed only if we are running a beacon validator,
 // in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
 // if the payloadAttributes is different than null, we return
-func (e *EngineImpl) ForkchoiceUpdatedV1(_ context.Context, _ struct{}, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
 	if payloadAttributes == nil {
 		return map[string]interface{}{
-			"status":    "SUCCESS",
-			"payloadId": nil,
+			"status": "SUCCESS",
 		}, nil
 	}
 	// Request for assembling payload
-	return nil, fmt.Errorf("invalid request")
+	reply, err := e.api.EngineForkchoiceUpdateV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
+		Prepare: &remote.EnginePreparePayload{
+			Timestamp:    uint64(payloadAttributes.Timestamp),
+			Random:       gointerfaces.ConvertHashToH256(payloadAttributes.Random),
+			FeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		},
+		Forkchoice: &remote.EngineForkChoiceUpdated{
+			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
+			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Process reply
+	if reply.Status == "SYNCING" {
+		return map[string]interface{}{
+			"status": reply.Status,
+		}, nil
+	}
+	encodedPayloadId := make([]byte, 8)
+	binary.BigEndian.PutUint64(encodedPayloadId, reply.PayloadId)
+	// Answer
+	return map[string]interface{}{
+		"status":    reply.Status,
+		"payloadId": hexutil.Bytes(encodedPayloadId),
+	}, nil
 }
 
 // ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things
@@ -86,9 +121,6 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 			return nil, fmt.Errorf("invalid request")
 		}
 	}
-	// Maximum length of extra is 32 bytes so we can use the hash datatype
-	extra := common.BytesToHash(payload.ExtraData)
-
 	log.Info("Received Payload from beacon-chain")
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
@@ -107,7 +139,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		GasLimit:      (uint64)(payload.GasLimit),
 		GasUsed:       (uint64)(payload.GasUsed),
 		Timestamp:     (uint64)(payload.Timestamp),
-		ExtraData:     gointerfaces.ConvertHashToH256(extra),
+		ExtraData:     payload.ExtraData,
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
 		Transactions:  transactions,
@@ -120,7 +152,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
 		return map[string]interface{}{
 			"status":          res.Status,
-			"latestValidHash": common.Bytes2Hex(latestValidHash.Bytes()),
+			"latestValidHash": latestValidHash,
 		}, nil
 	}
 	return map[string]interface{}{
@@ -128,13 +160,13 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 	}, nil
 }
 
-func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64) (*ExecutionPayload, error) {
-	payload, err := e.api.EngineGetPayloadV1(ctx, (uint64)(payloadID))
+func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	payload, err := e.api.EngineGetPayloadV1(ctx, decodedPayloadId)
 	if err != nil {
 		return nil, err
 	}
 	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
-	var extra common.Hash = gointerfaces.ConvertH256ToHash(payload.ExtraData)
 
 	var baseFee *big.Int
 	if payload.BaseFeePerGas != nil {
@@ -157,7 +189,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Uint64)
 		GasLimit:      hexutil.Uint64(payload.GasLimit),
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
-		ExtraData:     extra[:],
+		ExtraData:     payload.ExtraData,
 		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
@@ -176,20 +208,16 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 
 	for _, blockHash := range blockHashes {
 		hash := *blockHash.BlockHash
-
 		block, err := e.blockByHashWithSenders(tx, hash)
 		if err != nil {
 			return nil, err
 		}
-
 		if block == nil {
 			continue
 		}
 
 		var bloom types.Bloom = block.Bloom()
-
 		buf := bytes.NewBuffer(nil)
-
 		var encodedTransactions []hexutil.Bytes
 
 		for _, tx := range block.Transactions() {
@@ -199,7 +227,6 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 			if err != nil {
 				return nil, fmt.Errorf("broken tx rlp: %w", err)
 			}
-
 			encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 		}
 
@@ -219,7 +246,6 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 			BlockHash:     block.Hash(),
 			Transactions:  encodedTransactions,
 		}
-
 	}
 	return blockHashToBody, nil
 }

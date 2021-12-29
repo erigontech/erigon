@@ -43,7 +43,7 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	reverseDownloadCh chan types.Header
+	reverseDownloadCh chan privateapi.PayloadMessage
 	waitingPosHeaders *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
@@ -61,7 +61,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	reverseDownloadCh chan types.Header,
+	reverseDownloadCh chan privateapi.PayloadMessage,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -104,7 +104,6 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-
 	var blockNumber uint64
 
 	if s == nil {
@@ -114,7 +113,6 @@ func SpawnStageHeaders(
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-
 	if err != nil {
 		return err
 	}
@@ -137,11 +135,12 @@ func HeadersPOS(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
-	header := <-cfg.reverseDownloadCh
+	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
+	payloadMessage := <-cfg.reverseDownloadCh
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+	header := payloadMessage.Header
 
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
@@ -158,6 +157,8 @@ func HeadersPOS(
 		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 		return nil
 	}
+	// Set chain header reader right
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	logPrefix := s.LogPrefix()
 	logEvery := time.NewTicker(logInterval)
@@ -172,7 +173,7 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil && parent.Hash() == header.ParentHash {
-		if err := cfg.hd.VerifyHeader(&header); err != nil {
+		if err := cfg.hd.VerifyHeader(header); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.statusCh <- privateapi.ExecutionStatus{
 				Status:          privateapi.Invalid,
@@ -188,18 +189,27 @@ func HeadersPOS(
 			LatestValidHash: headerHash,
 		}
 
-		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 			return err
 		}
+		// We can insert raw bodies immediately and skip stage 3. (stage 2 will not be skipped)
+		// TODO(Giulio2002): Fix inconsistency
+		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(tx, stages.Bodies, headerNumber); err != nil {
+			return err
+		}
+
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
-
 		if !useExternalTx {
 			if err := tx.Commit(); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	}
 
@@ -215,8 +225,6 @@ func HeadersPOS(
 	cfg.hd.SetFetching(true)
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
-
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
 	prevProgress := headerNumber
@@ -287,11 +295,11 @@ func HeadersPOS(
 		return err
 	}
 
-	if err := cfg.hd.VerifyHeader(&header); err != nil {
+	if err := cfg.hd.VerifyHeader(header); err != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 		return nil
 	}
-	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return err
 	}
 	if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
@@ -303,6 +311,7 @@ func HeadersPOS(
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -324,9 +333,6 @@ func HeadersPOW(
 	var headerProgress uint64
 	var err error
 
-	if !useExternalTx {
-		defer tx.Rollback()
-	}
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
