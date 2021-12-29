@@ -291,7 +291,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	return nil, fmt.Errorf("unknown payload")
 }
 
-// EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
+// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new bloc
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
