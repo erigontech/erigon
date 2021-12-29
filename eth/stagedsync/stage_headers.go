@@ -134,12 +134,6 @@ func HeadersPOS(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
-	// We need to have another write transaction for the miner in case we want to validate.
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
@@ -147,12 +141,15 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 	header := payloadMessage.Header
 	// Initialize Tx Only when payload is loaded
-	var err error
-	tx, err = cfg.db.BeginRw(ctx)
-	if err != nil {
-		return err
+	useExternal := tx != nil
+	if !useExternal {
+		var err error
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 	}
-	defer tx.Rollback()
 
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
@@ -216,9 +213,10 @@ func HeadersPOS(
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
-
-		if err := tx.Commit(); err != nil {
-			return err
+		if !useExternal {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -316,9 +314,10 @@ func HeadersPOS(
 	if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 		return fmt.Errorf("fix canonical chain: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return err
+	if !useExternal {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
 	}
 
 	return nil
