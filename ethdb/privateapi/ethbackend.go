@@ -48,7 +48,7 @@ type EthBackendServer struct {
 	blockReader interfaces.BlockReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
-	nextPayloadId   uint64
+	payloadId       uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send reverse sync starting point to staged sync
 	reverseDownloadCh chan<- PayloadMessage
@@ -311,7 +311,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	// Hash is incorrect because mining archittecture has yet to be implemented
-	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
+	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
 		ParentHash:    req.Forkchoice.HeadBlockHash,
 		Coinbase:      req.Prepare.FeeRecipient,
 		Timestamp:     req.Prepare.Timestamp,
@@ -328,10 +328,10 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		Transactions:  [][]byte{},
 	}
 	// successfully assembled the payload and assinged the correct id
-	defer func() { s.nextPayloadId++ }()
+	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
 		Status:    "SUCCESS",
-		PayloadId: s.nextPayloadId,
+		PayloadId: s.payloadId,
 	}, nil
 }
 
