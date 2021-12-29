@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
@@ -54,6 +55,16 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 	//prev = sealHash
 
+	// If we are on POS, we will send the result on the POS channel
+	isTrans, err := rawdb.Transitioned(tx, block.Header().Number.Uint64(), cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
+
+	if isTrans {
+		cfg.miningState.MiningResultPOSCh <- block
+		return nil
+	}
 	// Tests may set pre-calculated nonce
 	if block.NonceU64() != 0 {
 		cfg.miningState.MiningResultCh <- block

@@ -106,6 +106,7 @@ type Ethereum struct {
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
+	miningStateBlock  *stagedsync.MiningBlock
 
 	// downloader fields
 	sentryCtx           context.Context
@@ -132,10 +133,11 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh      chan privateapi.PayloadMessage
-	statusCh               chan privateapi.ExecutionStatus
-	requestValidationPOSCh chan bool
-	waitingForBeaconChain  uint32 // atomic boolean flag
+	reverseDownloadCh         chan privateapi.PayloadMessage
+	statusCh                  chan privateapi.ExecutionStatus
+	validationParametersPOSCh chan privateapi.ValidationParameters
+	requestValidationPOSCh    chan bool
+	waitingForBeaconChain     uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -346,8 +348,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
-	backend.statusCh = make(chan privateapi.ExecutionStatus)
-	backend.requestValidationPOSCh = make(chan bool)
+	backend.statusCh = make(chan privateapi.ExecutionStatus, 1)
+	backend.requestValidationPOSCh = make(chan bool, 1)
+	backend.validationParametersPOSCh = make(chan privateapi.ValidationParameters, 1)
+	backend.miningStateBlock = miner.MiningBlock
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
@@ -408,7 +412,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain, backend.requestValidationPOSCh)
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
+		backend.requestValidationPOSCh, backend.validationParametersPOSCh, miner.MiningResultPOSCh)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -614,6 +619,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		mineEvery := time.NewTicker(3 * time.Second)
 		defer mineEvery.Stop()
 
+		isPOS := false
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
@@ -623,6 +629,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			select {
 			case <-s.notifyMiningAboutNewTxs:
 				hasWork = true
+			case validationParameters := <-s.validationParametersPOSCh:
+				// Preset mining state
+				isPOS = true
+				s.miningStateBlock.Header = &types.Header{
+					MixDigest: validationParameters.Random,
+					Time:      validationParameters.Timestamp,
+				}
+				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
 			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:
@@ -638,7 +652,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				return
 			}
 
-			if !works && hasWork {
+			if !works && hasWork && !isPOS {
 				works = true
 				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
 			}

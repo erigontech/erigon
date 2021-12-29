@@ -35,18 +35,20 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig    *params.MiningConfig
-	PendingResultCh chan *types.Block
-	MiningResultCh  chan *types.Block
-	MiningBlock     *MiningBlock
+	MiningConfig      *params.MiningConfig
+	PendingResultCh   chan *types.Block
+	MiningResultCh    chan *types.Block
+	MiningResultPOSCh chan *types.Block
+	MiningBlock       *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
-		MiningConfig:    cfg,
-		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
-		MiningBlock:     &MiningBlock{},
+		MiningConfig:      cfg,
+		PendingResultCh:   make(chan *types.Block, 1),
+		MiningResultCh:    make(chan *types.Block, 1),
+		MiningResultPOSCh: make(chan *types.Block, 1),
+		MiningBlock:       &MiningBlock{},
 	}
 }
 
@@ -97,6 +99,11 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+	}
+
+	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
 	}
 
 	blockNum := executionAt + 1
@@ -161,10 +168,15 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	// re-written miner/worker.go:commitNewWork
-	timestamp := time.Now().Unix()
-	if parent.Time >= uint64(timestamp) {
-		timestamp = int64(parent.Time + 1)
+	var timestamp int64
+	// If we are on proof-of-stake timestamp should be already set for us
+	if !isTrans {
+		timestamp = time.Now().Unix()
+		if parent.Time >= uint64(timestamp) {
+			timestamp = int64(parent.Time + 1)
+		}
 	}
+
 	num := parent.Number
 	header := &types.Header{
 		ParentHash: parent.Hash(),
@@ -285,6 +297,15 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 				uncles = append(uncles, uncle)
 			}
 		}
+	}
+
+	if isTrans {
+		// We apply pre-made fields
+		header.MixDigest = current.Header.MixDigest
+		header.Time = current.Header.Time
+		current.Header = header
+		current.Uncles = nil
+		return nil
 	}
 
 	current.Header = header

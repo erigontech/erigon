@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -57,9 +58,11 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain  *uint32 // atomic boolean flag
-	requestValidationPOSCh chan<- bool
-	mu                     sync.Mutex
+	waitingForBeaconChain     *uint32                     // atomic boolean flag
+	requestValidationPOSCh    chan<- bool                 // with this channel we tell the stagedsync that we want to assemble a block
+	validationParametersPOSCh chan<- ValidationParameters // Tell the mining goroutine the beacon-chain set parameters for the new block
+	miningResultPOSCh         <-chan *types.Block
+	mu                        sync.Mutex
 }
 
 type EthBackend interface {
@@ -84,13 +87,21 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
+// The message we are going to send to the stage sync in ExecutePayload
+type ValidationParameters struct {
+	Timestamp             uint64
+	Random                common.Hash
+	SuggestedFeeRecipient common.Address
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	requestValidationCh <-chan bool,
+	requestValidationCh chan<- bool, validationParametersPOSCh chan<- ValidationParameters, miningResultPOSCh <-chan *types.Block,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]types2.ExecutionPayload),
+		pendingPayloads: make(map[uint64]types2.ExecutionPayload), requestValidationPOSCh: requestValidationCh,
+		validationParametersPOSCh: validationParametersPOSCh, miningResultPOSCh: miningResultPOSCh,
 	}
 }
 
@@ -313,24 +324,53 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// Tell the stage headers to leave space for the write transaction for mining stages
 	s.requestValidationPOSCh <- true
-
-	// Hash is incorrect because mining archittecture has yet to be implemented
-	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
-		ParentHash:    req.Forkchoice.HeadBlockHash,
-		Coinbase:      req.Prepare.FeeRecipient,
-		Timestamp:     req.Prepare.Timestamp,
-		Random:        req.Prepare.Random,
-		StateRoot:     gointerfaces.ConvertHashToH256(headHeader.Root),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(types.EmptyRootHash),
-		LogsBloom:     &types2.H2048{},
-		GasLimit:      headHeader.GasLimit,
-		GasUsed:       0,
-		BlockNumber:   headHeader.Number.Uint64() + 1,
-		ExtraData:     []byte{},
-		BaseFeePerGas: &types2.H256{},
-		BlockHash:     gointerfaces.ConvertHashToH256(headHeader.Hash()),
-		Transactions:  [][]byte{},
+	random := gointerfaces.ConvertH256ToHash(req.Prepare.Random)
+	timestamp := req.Prepare.Timestamp
+	s.validationParametersPOSCh <- ValidationParameters{
+		Random:                random,
+		Timestamp:             timestamp,
+		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient),
 	}
+	id := s.payloadId
+	go func() {
+		block := <-s.miningResultPOSCh
+		var baseFeeReply *types2.H256
+		if block.Header().Eip1559 {
+			var baseFee uint256.Int
+			baseFee.SetFromBig(block.Header().BaseFee)
+			baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
+		}
+		var encodedTransactions [][]byte
+		buf := bytes.NewBuffer(nil)
+
+		for _, tx := range block.Transactions() {
+			buf.Reset()
+
+			err := rlp.Encode(buf, tx)
+			if err != nil {
+				log.Warn("broken tx rlp", "err", err.Error())
+				return
+			}
+			encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
+		}
+		// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
+		s.pendingPayloads[id] = types2.ExecutionPayload{
+			ParentHash:    req.Forkchoice.HeadBlockHash,
+			Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
+			Timestamp:     req.Prepare.Timestamp,
+			Random:        req.Prepare.Random,
+			StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
+			ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
+			LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
+			GasLimit:      block.GasLimit(),
+			GasUsed:       block.GasUsed(),
+			BlockNumber:   block.NumberU64(),
+			ExtraData:     block.Extra(),
+			BaseFeePerGas: baseFeeReply,
+			BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+			Transactions:  encodedTransactions,
+		}
+	}()
 	// successfully assembled the payload and assinged the correct id
 	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{

@@ -147,6 +147,8 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 		break
 	case <-cfg.requestValidationPOSCh:
+		fmt.Println("ak")
+		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 		if !useExternalTx {
 			return tx.Commit()
 		}
