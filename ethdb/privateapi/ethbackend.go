@@ -322,7 +322,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		GasLimit:      headHeader.GasLimit,
 		GasUsed:       0,
 		BlockNumber:   headHeader.Number.Uint64() + 1,
-		ExtraData:     headHeader.Extra,
+		ExtraData:     []byte{},
 		BaseFeePerGas: &types2.H256{},
 		BlockHash:     gointerfaces.ConvertHashToH256(headHeader.Hash()),
 		Transactions:  [][]byte{},
