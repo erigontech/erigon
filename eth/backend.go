@@ -132,9 +132,10 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh     chan privateapi.PayloadMessage
-	statusCh              chan privateapi.ExecutionStatus
-	waitingForBeaconChain uint32 // atomic boolean flag
+	reverseDownloadCh      chan privateapi.PayloadMessage
+	statusCh               chan privateapi.ExecutionStatus
+	requestValidationPOSCh chan bool
+	waitingForBeaconChain  uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -346,6 +347,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.statusCh = make(chan privateapi.ExecutionStatus)
+	backend.requestValidationPOSCh = make(chan bool)
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
@@ -406,7 +408,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain)
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain, backend.requestValidationPOSCh)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -479,7 +481,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
-		backend.downloaderClient)
+		backend.downloaderClient, backend.requestValidationPOSCh)
 	if err != nil {
 		return nil, err
 	}

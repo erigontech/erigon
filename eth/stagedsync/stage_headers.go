@@ -46,9 +46,10 @@ type HeadersCfg struct {
 	reverseDownloadCh chan privateapi.PayloadMessage
 	waitingPosHeaders *uint32 // atomic boolean flag
 
-	snapshots          *snapshotsync.AllSnapshots
-	snapshotDownloader proto_downloader.DownloaderClient
-	blockReader        interfaces.FullBlockReader
+	snapshots              *snapshotsync.AllSnapshots
+	snapshotDownloader     proto_downloader.DownloaderClient
+	blockReader            interfaces.FullBlockReader
+	requestValidationPOSCh chan bool
 }
 
 func StageHeadersCfg(
@@ -67,22 +68,24 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
+	requestValidationPOSCh chan bool,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                 db,
-		hd:                 headerDownload,
-		statusCh:           statusCh,
-		chainConfig:        chainConfig,
-		headerReqSend:      headerReqSend,
-		announceNewHashes:  announceNewHashes,
-		penalize:           penalize,
-		batchSize:          batchSize,
-		noP2PDiscovery:     noP2PDiscovery,
-		reverseDownloadCh:  reverseDownloadCh,
-		waitingPosHeaders:  waitingPosHeaders,
-		snapshots:          snapshots,
-		snapshotDownloader: snapshotDownloader,
-		blockReader:        blockReader,
+		db:                     db,
+		hd:                     headerDownload,
+		statusCh:               statusCh,
+		chainConfig:            chainConfig,
+		headerReqSend:          headerReqSend,
+		announceNewHashes:      announceNewHashes,
+		penalize:               penalize,
+		batchSize:              batchSize,
+		noP2PDiscovery:         noP2PDiscovery,
+		reverseDownloadCh:      reverseDownloadCh,
+		waitingPosHeaders:      waitingPosHeaders,
+		snapshots:              snapshots,
+		snapshotDownloader:     snapshotDownloader,
+		blockReader:            blockReader,
+		requestValidationPOSCh: requestValidationPOSCh,
 	}
 }
 
@@ -137,8 +140,19 @@ func HeadersPOS(
 ) error {
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
+	var payloadMessage privateapi.PayloadMessage
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
-	payloadMessage := <-cfg.reverseDownloadCh
+	// Decide what kind of action we need to take place
+	select {
+	case payloadMessage = <-cfg.reverseDownloadCh:
+		break
+	case <-cfg.requestValidationPOSCh:
+		if !useExternalTx {
+			return tx.Commit()
+		}
+		return nil
+	}
+
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 	header := payloadMessage.Header
 

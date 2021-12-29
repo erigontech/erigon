@@ -57,8 +57,9 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32 // atomic boolean flag
-	mu                    sync.Mutex
+	waitingForBeaconChain  *uint32 // atomic boolean flag
+	requestValidationPOSCh chan<- bool
+	mu                     sync.Mutex
 }
 
 type EthBackend interface {
@@ -85,6 +86,7 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	requestValidationCh <-chan bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
@@ -309,6 +311,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 			Status: string(Syncing),
 		}, nil
 	}
+	// Tell the stage headers to leave space for the write transaction for mining stages
+	s.requestValidationPOSCh <- true
 
 	// Hash is incorrect because mining archittecture has yet to be implemented
 	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
