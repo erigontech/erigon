@@ -207,7 +207,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	// Discard all previous prepared payloads if another block was proposed
-	s.nextPayloadId = 0
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// If another payload is already commissioned then we just reply with syncing
 	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
