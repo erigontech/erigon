@@ -118,7 +118,7 @@ func SpawnStageHeaders(
 	}
 
 	if isTrans {
-		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test)
+		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
@@ -133,6 +133,7 @@ func HeadersPOS(
 	cfg HeadersCfg,
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	useExternalTx bool,
 ) error {
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
@@ -140,16 +141,6 @@ func HeadersPOS(
 	payloadMessage := <-cfg.reverseDownloadCh
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 	header := payloadMessage.Header
-	// Initialize Tx Only when payload is loaded
-	useExternal := tx != nil
-	if !useExternal {
-		var err error
-		tx, err = cfg.db.BeginRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-	}
 
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
@@ -213,7 +204,7 @@ func HeadersPOS(
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
-		if !useExternal {
+		if !useExternalTx {
 			if err := tx.Commit(); err != nil {
 				return err
 			}
@@ -314,7 +305,8 @@ func HeadersPOS(
 	if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 		return fmt.Errorf("fix canonical chain: %w", err)
 	}
-	if !useExternal {
+
+	if !useExternalTx {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
