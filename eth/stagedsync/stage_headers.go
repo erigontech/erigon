@@ -284,7 +284,7 @@ func HeadersPOS(
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
 			return err
 		}
-		return headerInserter.FeedHeaderPoS(tx, header, h.Hash())
+		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
 
 	if err := headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
