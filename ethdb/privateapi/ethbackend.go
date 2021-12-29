@@ -8,7 +8,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -58,8 +57,7 @@ type EthBackendServer struct {
 	// Last block number sent over via reverseDownloadCh
 	numberSent uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32           // atomic boolean flag
-	assemblePayloadFunc   assembleStartFunc // starts assembling payload
+	waitingForBeaconChain *uint32 // atomic boolean flag
 	mu                    sync.Mutex
 }
 
@@ -69,8 +67,6 @@ type EthBackend interface {
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
 }
-
-type assembleStartFunc func(timestamp uint64, random common.Hash, suggestedFeeRecipient common.Address) (types.Block, error)
 
 // This is the status of a newly execute block.
 // Hash: Block hash
@@ -89,11 +85,10 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	assemblePayloadFunc assembleStartFunc,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]types2.ExecutionPayload), assemblePayloadFunc: assemblePayloadFunc,
+		pendingPayloads: make(map[uint64]types2.ExecutionPayload),
 	}
 }
 
@@ -304,52 +299,34 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	random := gointerfaces.ConvertH256ToHash(req.Prepare.Random)
-	suggestedFeeRecipient := gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
-	block, err := s.assemblePayloadFunc(req.Prepare.Timestamp, random, suggestedFeeRecipient)
+
+	headHeader, err := rawdb.ReadHeaderByHash(tx, parent)
 	if err != nil {
 		return nil, err
 	}
 
-	if parent != rawdb.ReadHeadBlockHash(tx) || block.Header().ParentHash != parent || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 || headHeader == nil {
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
 		}, nil
 	}
-	var baseFeeReply *types2.H256
-	if block.Header().BaseFee != nil {
-		var baseFee uint256.Int
-		baseFee.SetFromBig(block.Header().BaseFee)
-		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
-	}
-	var encodedTransactions [][]byte
-	buf := bytes.NewBuffer(nil)
 
-	for _, tx := range block.Transactions() {
-		buf.Reset()
-
-		err := rlp.Encode(buf, tx)
-		if err != nil {
-			return nil, fmt.Errorf("broken tx rlp: %w", err)
-		}
-		encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
-	}
-	// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
+	// Hash is incorrect because mining archittecture has yet to be implemented
 	s.pendingPayloads[s.nextPayloadId] = types2.ExecutionPayload{
 		ParentHash:    req.Forkchoice.HeadBlockHash,
-		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
+		Coinbase:      req.Prepare.FeeRecipient,
 		Timestamp:     req.Prepare.Timestamp,
 		Random:        req.Prepare.Random,
-		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
-		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
-		GasLimit:      block.GasLimit(),
-		GasUsed:       block.GasUsed(),
-		BlockNumber:   block.NumberU64(),
-		ExtraData:     block.Extra(),
-		BaseFeePerGas: baseFeeReply,
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
-		Transactions:  encodedTransactions,
+		StateRoot:     gointerfaces.ConvertHashToH256(headHeader.Root),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(types.EmptyRootHash),
+		LogsBloom:     &types2.H2048{},
+		GasLimit:      headHeader.GasLimit,
+		GasUsed:       0,
+		BlockNumber:   headHeader.Number.Uint64() + 1,
+		ExtraData:     headHeader.Extra,
+		BaseFeePerGas: &types2.H256{},
+		BlockHash:     gointerfaces.ConvertHashToH256(headHeader.Hash()),
+		Transactions:  [][]byte{},
 	}
 	// successfully assembled the payload and assinged the correct id
 	defer func() { s.nextPayloadId++ }()

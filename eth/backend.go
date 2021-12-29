@@ -393,7 +393,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, stagedsync.PresetHeaderFields{}, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
@@ -405,28 +405,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
-	startAssembleFunc := func(timestamp uint64, random common.Hash, suggestedFeeRecipient common.Address) (types.Block, error) {
-		presets := stagedsync.PresetHeaderFields{
-			Timestamp:             timestamp,
-			Random:                random,
-			SuggestedFeeRecipient: suggestedFeeRecipient,
-		}
-		proposing := stagedsync.New(
-			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, presets, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
-				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposing); err != nil {
-			return types.Block{}, err
-		}
-		block := <-miner.ProposeBlockCh
-		return *block, nil
-	}
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain, startAssembleFunc)
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -635,7 +615,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
-		roTx, err := s.chainDB.BeginRo(ctx)
 		if err != nil {
 			log.Warn("mining", "err", err)
 			return
@@ -657,18 +636,6 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					log.Warn("mining", "err", err)
 				}
 			case <-quitCh:
-				return
-			}
-
-			headNumber := rawdb.ReadCurrentBlockNumber(roTx)
-			isTrans, err := rawdb.Transitioned(roTx, *headNumber, s.chainConfig.TerminalTotalDifficulty)
-			if err != nil {
-				log.Warn("mining", "err", err)
-				return
-			}
-
-			if isTrans {
-				log.Info("Validating on PoS engine")
 				return
 			}
 

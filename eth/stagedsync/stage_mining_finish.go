@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
@@ -38,24 +37,15 @@ func StageMiningFinishCfg(
 func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit <-chan struct{}) error {
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
+
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	//if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
 	//	continue
 	//}
 
-	isTrans, err := rawdb.Transitioned(tx, current.Header.Number.Uint64()-1, cfg.chainConfig.TerminalTotalDifficulty)
-	if err != nil {
-		return err
-	}
-
-	// If we are on proof-of-stake, we send our block to the engine API
-	if isTrans {
-		cfg.miningState.ProposeBlockCh <- types.NewBlock(current.Header, current.Txs, nil, current.Receipts)
-		return nil
-	}
-
 	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts)
 	*current = MiningBlock{} // hack to clean global data
+
 	//sealHash := engine.SealHash(block.Header())
 	// Reject duplicate sealing work due to resubmitting.
 	//if sealHash == prev {
