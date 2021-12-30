@@ -231,7 +231,6 @@ func NewStagedSync(
 	statusCh chan privateapi.ExecutionStatus,
 	waitingForPOSHeaders *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	requestValidationPOSCh chan bool,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.AllSnapshots
@@ -259,7 +258,6 @@ func NewStagedSync(
 			snapshotDownloader,
 			blockReader,
 			tmpdir,
-			requestValidationPOSCh,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,

@@ -136,7 +136,6 @@ type Ethereum struct {
 	reverseDownloadCh         chan privateapi.PayloadMessage
 	statusCh                  chan privateapi.ExecutionStatus
 	validationParametersPOSCh chan privateapi.ValidationParameters
-	requestValidationPOSCh    chan bool
 	waitingForBeaconChain     uint32 // atomic boolean flag
 }
 
@@ -349,7 +348,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.statusCh = make(chan privateapi.ExecutionStatus, 1)
-	backend.requestValidationPOSCh = make(chan bool, 1)
 	backend.validationParametersPOSCh = make(chan privateapi.ValidationParameters, 1)
 	backend.miningStateBlock = miner.MiningBlock
 
@@ -413,7 +411,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
-		backend.requestValidationPOSCh, backend.validationParametersPOSCh, miner.MiningResultPOSCh)
+		backend.sentryControlServer.Hd.SkipCycleHack, backend.validationParametersPOSCh, miner.MiningResultPOSCh)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -486,7 +484,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
-		backend.downloaderClient, backend.requestValidationPOSCh)
+		backend.downloaderClient)
 	if err != nil {
 		return nil, err
 	}

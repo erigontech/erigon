@@ -46,10 +46,9 @@ type HeadersCfg struct {
 	reverseDownloadCh chan privateapi.PayloadMessage
 	waitingPosHeaders *uint32 // atomic boolean flag
 
-	snapshots              *snapshotsync.AllSnapshots
-	snapshotDownloader     proto_downloader.DownloaderClient
-	blockReader            interfaces.FullBlockReader
-	requestValidationPOSCh chan bool
+	snapshots          *snapshotsync.AllSnapshots
+	snapshotDownloader proto_downloader.DownloaderClient
+	blockReader        interfaces.FullBlockReader
 }
 
 func StageHeadersCfg(
@@ -68,24 +67,22 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
-	requestValidationPOSCh chan bool,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                     db,
-		hd:                     headerDownload,
-		statusCh:               statusCh,
-		chainConfig:            chainConfig,
-		headerReqSend:          headerReqSend,
-		announceNewHashes:      announceNewHashes,
-		penalize:               penalize,
-		batchSize:              batchSize,
-		noP2PDiscovery:         noP2PDiscovery,
-		reverseDownloadCh:      reverseDownloadCh,
-		waitingPosHeaders:      waitingPosHeaders,
-		snapshots:              snapshots,
-		snapshotDownloader:     snapshotDownloader,
-		blockReader:            blockReader,
-		requestValidationPOSCh: requestValidationPOSCh,
+		db:                 db,
+		hd:                 headerDownload,
+		statusCh:           statusCh,
+		chainConfig:        chainConfig,
+		headerReqSend:      headerReqSend,
+		announceNewHashes:  announceNewHashes,
+		penalize:           penalize,
+		batchSize:          batchSize,
+		noP2PDiscovery:     noP2PDiscovery,
+		reverseDownloadCh:  reverseDownloadCh,
+		waitingPosHeaders:  waitingPosHeaders,
+		snapshots:          snapshots,
+		snapshotDownloader: snapshotDownloader,
+		blockReader:        blockReader,
 	}
 }
 
@@ -146,8 +143,7 @@ func HeadersPOS(
 	select {
 	case payloadMessage = <-cfg.reverseDownloadCh:
 		break
-	case <-cfg.requestValidationPOSCh:
-		fmt.Println("ak")
+	case <-cfg.hd.SkipCycleHack:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 		if !useExternalTx {
 			return tx.Commit()
