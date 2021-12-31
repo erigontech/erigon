@@ -11,7 +11,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -32,11 +31,11 @@ func NewServer(db kv.RwDB, client *Client, snapshotDir string) (*SNDownloaderSer
 	return sn, nil
 }
 
-func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentClient *torrent.Client, config *snapshothashes.Config) error {
+func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentClient *torrent.Client) error {
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
-	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient, config.Preverified); err != nil {
+	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient); err != nil {
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {
@@ -44,7 +43,6 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentCl
 		t.AllowDataUpload()
 		t.DownloadAll()
 	}
-
 	return nil
 }
 
