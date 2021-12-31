@@ -391,7 +391,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	// proof-of-work mining: we use a gouroutine to mine
+	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
@@ -405,7 +405,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	// proof-of-stake mining: we initiates different gorountines for different payloads
+	// proof-of-stake mining
 	validationPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
 		validationSync := stagedsync.New(
@@ -428,6 +428,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return block, nil
 	}
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
+	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
 		backend.sentryControlServer.Hd.SkipCycleHack, validationPOS, miner.MiningResultPOSCh, config.Miner.EnabledPOS)
