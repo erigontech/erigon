@@ -54,7 +54,7 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 
 type ValidationParametersPOS struct {
 	Random                common.Hash
-	SuggestedFeeRecipient common.Address // For now, we apply a suggested recipient only if etherbase is
+	SuggestedFeeRecipient common.Address // For now, we apply a suggested recipient only if etherbase is unset
 	Timestamp             uint64
 }
 
@@ -95,10 +95,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		staleThreshold = 7
 	)
 
-	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
-		return fmt.Errorf("refusing to mine without etherbase")
-	}
-
 	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -112,6 +108,14 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
+	}
+
+	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
+		if !isTrans {
+			return fmt.Errorf("refusing to mine without etherbase")
+		}
+		// If we do not have an etherbase, let's use the suggested one
+		coinbase = cfg.validationParametersPOS.SuggestedFeeRecipient
 	}
 
 	blockNum := executionAt + 1

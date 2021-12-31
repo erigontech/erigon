@@ -107,7 +107,6 @@ type Ethereum struct {
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
-	miningStateBlock  *stagedsync.MiningBlock
 
 	// downloader fields
 	sentryCtx           context.Context
@@ -348,7 +347,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.statusCh = make(chan privateapi.ExecutionStatus, 1)
-	backend.miningStateBlock = miner.MiningBlock
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
@@ -432,8 +430,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
-		backend.sentryControlServer.Hd.SkipCycleHack, validationPOS, miner.MiningResultPOSCh)
+		backend.sentryControlServer.Hd.SkipCycleHack, validationPOS, miner.MiningResultPOSCh, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
+	// If we enabled the proposer flag we initiates the block proposing thread
+	if config.Miner.EnabledPOS {
+		ethBackendRPC.StartProposer()
+	}
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
 		if stack.Config().TLSConnection {
