@@ -61,4 +61,3 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 // re-start downloader 
 ```
 
-

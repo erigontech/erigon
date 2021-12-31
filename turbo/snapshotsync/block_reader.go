@@ -232,10 +232,10 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	back.lock.Lock()
 	defer back.lock.Unlock()
 
-	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.Idx.BaseDataID())
-	bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Bodies.Idx.BaseDataID())
+	headerOffset := sn.HeaderHashIdx.Lookup2(blockHeight - sn.HeaderHashIdx.BaseDataID())
+	bodyOffset := sn.BodyNumberIdx.Lookup2(blockHeight - sn.BodyNumberIdx.BaseDataID())
 
-	gg := sn.Headers.Segment.MakeGetter()
+	gg := sn.Headers.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
 	h := &types.Header{}
@@ -243,7 +243,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, err
 	}
 
-	gg = sn.Bodies.Segment.MakeGetter()
+	gg = sn.Bodies.MakeGetter()
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
 	b := &types.BodyForStorage{}
@@ -252,15 +252,15 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, err
 	}
 
-	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
-		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.Transactions.Idx.BaseDataID(), sn.Transactions.File)
+	if b.BaseTxId < sn.TxnHashIdx.BaseDataID() {
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.TxnHashIdx.BaseDataID(), sn.Transactions.FilePath())
 	}
 
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
 	if b.TxAmount > 0 {
-		txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
-		gg = sn.Transactions.Segment.MakeGetter()
+		txnOffset := sn.TxnHashIdx.Lookup2(b.BaseTxId - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
+		gg = sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
 		for i := uint32(0); i < b.TxAmount; i++ {
@@ -287,8 +287,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn *BlocksSnapshot) (*types.Header, error) {
 	buf := make([]byte, 16)
 
-	headerOffset := sn.Headers.Idx.Lookup2(blockHeight - sn.Headers.Idx.BaseDataID())
-	gg := sn.Headers.Segment.MakeGetter()
+	headerOffset := sn.HeaderHashIdx.Lookup2(blockHeight - sn.HeaderHashIdx.BaseDataID())
+	gg := sn.Headers.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
 	h := &types.Header{}
@@ -301,9 +301,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *BlocksSnapshot) (*types.Body, []common.Address, uint64, uint32, error) {
 	buf := make([]byte, 16)
 
-	bodyOffset := sn.Bodies.Idx.Lookup2(blockHeight - sn.Bodies.Idx.BaseDataID())
+	bodyOffset := sn.BodyNumberIdx.Lookup2(blockHeight - sn.BodyNumberIdx.BaseDataID())
 
-	gg := sn.Bodies.Segment.MakeGetter()
+	gg := sn.Bodies.MakeGetter()
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
 	b := &types.BodyForStorage{}
@@ -312,15 +312,15 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 		return nil, nil, 0, 0, err
 	}
 
-	if b.BaseTxId < sn.Transactions.Idx.BaseDataID() {
-		return nil, nil, 0, 0, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.Transactions.Idx.BaseDataID(), sn.Transactions.File)
+	if b.BaseTxId < sn.TxnHashIdx.BaseDataID() {
+		return nil, nil, 0, 0, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.TxnHashIdx.BaseDataID(), sn.Transactions.FilePath())
 	}
 
 	txs := make([]types.Transaction, b.TxAmount)
 	senders := make([]common.Address, b.TxAmount)
 	if b.TxAmount > 0 {
-		txnOffset := sn.Transactions.Idx.Lookup2(b.BaseTxId - sn.Transactions.Idx.BaseDataID()) // need subtract baseID of indexFile
-		gg = sn.Transactions.Segment.MakeGetter()
+		txnOffset := sn.TxnHashIdx.Lookup2(b.BaseTxId - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
+		gg = sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
 		for i := uint32(0); i < b.TxAmount; i++ {
