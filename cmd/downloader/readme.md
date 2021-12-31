@@ -6,6 +6,13 @@ Historical data - is immutable, files have .seg extension.
 
 ## Architecture
 
+Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files can be created 4 ways:
+
+- Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger creation of .torrent files
+- Erigon can create new .seg file, Downloader will scan .seg file and create .torrent
+- operator can manually copy .torrent files (rsync from other server or restore from backup)
+- operator can manually copy .seg file, Downloader will scan .seg file and create .torrent
+
 Erigon does:
 
 - connect to Downloader
@@ -15,12 +22,9 @@ Erigon does:
 
 Downloader does:
 
-- create .torrent files in <your_datadir>/snapshot directory (can be used by any torrent client)
-- download everything. Currently rely on https://github.com/ngosang/trackerslist
-  see [./trackers/embed.go](./trackers/embed.go)
+- Read .torrent files, download everything described by .torrent files
+- Use https://github.com/ngosang/trackerslist see [./trackers/embed.go](./trackers/embed.go)
 - automatically seeding
-- operator can manually copy .seg files to <your_datadir>/snapshot directory, then Downloader will not download files (
-  but will verify it's hash).
 
 ## How to
 
