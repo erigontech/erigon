@@ -24,18 +24,18 @@ import (
 const ASSERT = false
 
 var snapshotCommand = cli.Command{
-	Name: "snapshot",
+	Name:        "snapshots",
+	Description: `Manage snapshots`,
 	Subcommands: []cli.Command{
 		{
 			Name:   "create",
-			Usage:  "Create snapshots",
 			Action: doSnapshotCommand,
 			Flags: []cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotSegmentSizeFlag,
 			},
-			Description: ``,
+			Description: `Create snapshots`,
 		},
 	},
 }

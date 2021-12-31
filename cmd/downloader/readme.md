@@ -43,4 +43,18 @@ downloader --download.limit=10mb --upload.limit=10mb
 downloader print_torrent_files --datadir=<your_datadir>
 ```
 
+### Create new snapshots
+
+```
+rm <your_datadir>/snapshots/*.torrent
+erigon snapshots create --datadir=<your_datadir> --from=0 --segment.size=500_000
+```
+
+### Download snapshots to new server
+
+```
+rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshots/
+// re-start downloader 
+```
+
 
