@@ -375,10 +375,11 @@ func (s *EthBackendServer) StartProposer() {
 			// Tell the stage headers to leave space for the write transaction for mining stages
 			s.skipCycleHack <- struct{}{}
 			// Go over each payload and re-update them
-			for id, payload := range s.pendingPayloads {
-				random := gointerfaces.ConvertH256ToHash(payload.Random)
-				coinbase := gointerfaces.ConvertH160toAddress(payload.Coinbase)
-				timestamp := payload.Timestamp
+			for id := range s.pendingPayloads {
+				// we do not want to make a copy of the payload in the loop because it contains a lock
+				random := gointerfaces.ConvertH256ToHash(s.pendingPayloads[id].Random)
+				coinbase := gointerfaces.ConvertH160toAddress(s.pendingPayloads[id].Coinbase)
+				timestamp := s.pendingPayloads[id].Timestamp
 				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
 				if err != nil {
 					log.Warn("Error during block assembling", "err", err.Error())
@@ -409,8 +410,8 @@ func (s *EthBackendServer) StartProposer() {
 				s.pendingPayloads[id] = types2.ExecutionPayload{
 					ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
 					Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
-					Timestamp:     payload.Timestamp,
-					Random:        payload.Random,
+					Timestamp:     s.pendingPayloads[id].Timestamp,
+					Random:        s.pendingPayloads[id].Random,
 					StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
 					ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
 					LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
