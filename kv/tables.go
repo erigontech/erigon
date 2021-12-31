@@ -210,7 +210,7 @@ const (
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderPrefixOld = "h"            // block_num_u64 + hash -> header
-	HeaderNumber    = "HeaderNumber" // headerNumberPrefix + hash -> num (uint64 big endian)
+	HeaderNumber    = "HeaderNumber" // header_hash -> num_u64
 
 	HeaderCanonical = "CanonicalHeader"        // block_num_u64 -> header hash
 	Headers         = "Header"                 // block_num_u64 + hash -> header (RLP)

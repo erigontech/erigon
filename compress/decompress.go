@@ -82,6 +82,8 @@ func (d *Decompressor) Close() error {
 	return nil
 }
 
+func (d *Decompressor) FilePath() string { return d.compressedFile }
+
 type Dictionary struct {
 	data       []byte
 	rootOffset uint64
