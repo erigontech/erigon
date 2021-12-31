@@ -52,25 +52,33 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 	}
 }
 
-type MiningCreateBlockCfg struct {
-	db          kv.RwDB
-	miner       MiningState
-	chainConfig params.ChainConfig
-	engine      consensus.Engine
-	txPool2     *txpool.TxPool
-	txPool2DB   kv.RoDB
-	tmpdir      string
+type ValidationParametersPOS struct {
+	Random                common.Hash
+	SuggestedFeeRecipient common.Address // For now, we apply a suggested recipient only if etherbase is
+	Timestamp             uint64
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, tmpdir string) MiningCreateBlockCfg {
+type MiningCreateBlockCfg struct {
+	db                      kv.RwDB
+	miner                   MiningState
+	chainConfig             params.ChainConfig
+	engine                  consensus.Engine
+	txPool2                 *txpool.TxPool
+	txPool2DB               kv.RoDB
+	tmpdir                  string
+	validationParametersPOS *ValidationParametersPOS
+}
+
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, validationParametersPOS *ValidationParametersPOS, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:          db,
-		miner:       miner,
-		chainConfig: chainConfig,
-		engine:      engine,
-		txPool2:     txPool2,
-		txPool2DB:   txPool2DB,
-		tmpdir:      tmpdir,
+		db:                      db,
+		miner:                   miner,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		txPool2:                 txPool2,
+		txPool2DB:               txPool2DB,
+		tmpdir:                  tmpdir,
+		validationParametersPOS: validationParametersPOS,
 	}
 }
 
@@ -301,8 +309,9 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	if isTrans {
 		// We apply pre-made fields
-		header.MixDigest = current.Header.MixDigest
-		header.Time = current.Header.Time
+		header.MixDigest = cfg.validationParametersPOS.Random
+		header.Time = cfg.validationParametersPOS.Timestamp
+
 		current.Header = header
 		current.Uncles = nil
 		return nil

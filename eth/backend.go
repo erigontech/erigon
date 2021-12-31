@@ -64,6 +64,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
@@ -133,10 +134,9 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh         chan privateapi.PayloadMessage
-	statusCh                  chan privateapi.ExecutionStatus
-	validationParametersPOSCh chan privateapi.ValidationParameters
-	waitingForBeaconChain     uint32 // atomic boolean flag
+	reverseDownloadCh     chan privateapi.PayloadMessage
+	statusCh              chan privateapi.ExecutionStatus
+	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -348,7 +348,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.statusCh = make(chan privateapi.ExecutionStatus, 1)
-	backend.validationParametersPOSCh = make(chan privateapi.ValidationParameters, 1)
 	backend.miningStateBlock = miner.MiningBlock
 
 	var blockReader interfaces.FullBlockReader
@@ -394,10 +393,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-
+	// proof-of-work mining: we use a gouroutine to mine
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
@@ -408,10 +407,32 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
+	// proof-of-stake mining: we initiates different gorountines for different payloads
+	validationPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
+		miningStatePos := stagedsync.NewMiningState(&config.Miner)
+		validationSync := stagedsync.New(
+			stagedsync.MiningStages(backend.sentryCtx,
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.ValidationParametersPOS{
+					Random:                random,
+					SuggestedFeeRecipient: suggestedFeeRecipient,
+					Timestamp:             timestamp,
+				}, tmpdir),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
+				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
+			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+		// We start the mining step
+		if err := stages2.MiningStep(ctx, backend.chainDB, validationSync); err != nil {
+			return nil, err
+		}
+		block := <-miningStatePos.MiningResultPOSCh
+		return block, nil
+	}
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
-		backend.sentryControlServer.Hd.SkipCycleHack, backend.validationParametersPOSCh, miner.MiningResultPOSCh)
+		backend.sentryControlServer.Hd.SkipCycleHack, validationPOS, miner.MiningResultPOSCh)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
@@ -617,24 +638,21 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		mineEvery := time.NewTicker(3 * time.Second)
 		defer mineEvery.Stop()
 
-		isPOS := false
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
+
+		tx, err := s.chainDB.BeginRo(ctx)
+		if err != nil {
+			log.Warn("mining", "err", err)
+			return
+		}
 
 		for {
 			mineEvery.Reset(3 * time.Second)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
 				hasWork = true
-			case validationParameters := <-s.validationParametersPOSCh:
-				// Preset mining state
-				isPOS = true
-				s.miningStateBlock.Header = &types.Header{
-					MixDigest: validationParameters.Random,
-					Time:      validationParameters.Timestamp,
-				}
-				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
 			case <-mineEvery.C:
 				hasWork = true
 			case err := <-errc:
@@ -649,8 +667,23 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			case <-quitCh:
 				return
 			}
+			// Check if we transitioned and if we did halt POW mining
+			headNumber, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				log.Warn("mining", "err", err)
+				return
+			}
 
-			if !works && hasWork && !isPOS {
+			isTrans, err := rawdb.Transitioned(tx, headNumber, s.chainConfig.TerminalTotalDifficulty)
+			if err != nil {
+				log.Warn("mining", "err", err)
+				return
+			}
+			if isTrans {
+				return
+			}
+
+			if !works && hasWork {
 				works = true
 				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
 			}

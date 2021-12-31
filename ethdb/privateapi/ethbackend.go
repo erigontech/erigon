@@ -33,6 +33,8 @@ const (
 	Invalid PayloadStatus = "INVALID"
 )
 
+type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error)
+
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 // 2.1.0 - add NetPeerCount function
@@ -57,13 +59,13 @@ type EthBackendServer struct {
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain     *uint32                     // atomic boolean flag
-	skipCycleHack             chan struct{}               // with this channel we tell the stagedsync that we want to assemble a block
-	validationParametersPOSCh chan<- ValidationParameters // Tell the mining goroutine the beacon-chain set parameters for the new block
-	miningResultPOSCh         <-chan *types.Block
-	stopAssembleThreads       chan bool
-	posWg                     sync.WaitGroup
-	mu                        sync.Mutex
+	waitingForBeaconChain *uint32       // atomic boolean flag
+	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
+	miningResultPOSCh     <-chan *types.Block
+	assemblePayloadPOS    assemblePayloadPOSFunc
+	stopAssembleThreads   chan struct{}
+	posWg                 sync.WaitGroup
+	mu                    sync.Mutex
 }
 
 type EthBackend interface {
@@ -88,21 +90,14 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
-// The message we are going to send to the stage sync in ExecutePayload
-type ValidationParameters struct {
-	Timestamp             uint64
-	Random                common.Hash
-	SuggestedFeeRecipient common.Address
-}
-
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	skipCycleHack chan struct{}, validationParametersPOSCh chan<- ValidationParameters, miningResultPOSCh <-chan *types.Block,
+	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, miningResultPOSCh <-chan *types.Block,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
-		validationParametersPOSCh: validationParametersPOSCh, miningResultPOSCh: miningResultPOSCh, stopAssembleThreads: make(chan bool),
+		assemblePayloadPOS: assemblePayloadPOS, miningResultPOSCh: miningResultPOSCh, stopAssembleThreads: make(chan struct{}),
 	}
 }
 
@@ -273,11 +268,11 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if executedStatus.Error != nil {
 		return nil, executedStatus.Error
 	}
-	// Close all mining processes
+	// Close mining processes
 	close(s.stopAssembleThreads)
 	s.posWg.Wait()
 	// reopen channel
-	s.stopAssembleThreads = make(chan bool)
+	s.stopAssembleThreads = make(chan struct{})
 	// Discard all payload assembled
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// Send reply over
@@ -290,20 +285,25 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 	// Wait 0.2 seconds in case mining process has not started
 	time.Sleep(200 * time.Millisecond)
+	s.mu.Lock()
 	payload, ok := s.pendingPayloads[req.PayloadId]
-	if ok {
-		return &payload, nil
+	if !ok {
+		return nil, fmt.Errorf("unknown payload")
 	}
+	// Close mining processes
+	close(s.stopAssembleThreads)
+	s.mu.Unlock()
+	s.posWg.Wait()
+	// reopen channel
+	s.stopAssembleThreads = make(chan struct{})
+	return &payload, nil
 
-	return nil, fmt.Errorf("unknown payload")
 }
 
 // EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new bloc
@@ -337,7 +337,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	s.skipCycleHack <- struct{}{}
 	random := gointerfaces.ConvertH256ToHash(req.Prepare.Random)
 	timestamp := req.Prepare.Timestamp
-	SuggestedFeeRecipient := gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
+	suggestedFeeRecipient := gointerfaces.ConvertH160toAddress(req.Prepare.FeeRecipient)
 
 	id := s.payloadId
 	s.posWg.Add(1)
@@ -345,13 +345,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		defer s.posWg.Done()
 		// Until we stop
 		for {
-			s.mu.Lock()
-			s.validationParametersPOSCh <- ValidationParameters{
-				Random:                random,
-				Timestamp:             timestamp,
-				SuggestedFeeRecipient: SuggestedFeeRecipient,
+
+			block, err := s.assemblePayloadPOS(random, suggestedFeeRecipient, timestamp)
+			if err != nil {
+				log.Warn("Error during block assembling", "err", err.Error())
+				return
 			}
-			block := <-s.miningResultPOSCh
 			var baseFeeReply *types2.H256
 			if block.Header().BaseFee != nil {
 				var baseFee uint256.Int
@@ -366,11 +365,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 				err := rlp.Encode(buf, tx)
 				if err != nil {
-					log.Warn("broken tx rlp", "err", err.Error())
+					log.Warn("Broken tx rlp", "err", err.Error())
 					return
 				}
 				encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 			}
+			s.mu.Lock()
 			// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
 			s.pendingPayloads[id] = types2.ExecutionPayload{
 				ParentHash:    req.Forkchoice.HeadBlockHash,
@@ -390,7 +390,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 			}
 			s.mu.Unlock()
 
-			timer := time.NewTimer(100 * time.Millisecond)
+			timer := time.NewTimer(time.Second)
 			select {
 			case <-timer.C:
 			case <-s.stopAssembleThreads:
