@@ -372,14 +372,14 @@ func (s *EthBackendServer) StartProposer() {
 				continue
 			}
 			s.mu.Lock()
-			// Tell the stage headers to leave space for the write transaction for mining stages
-			s.skipCycleHack <- struct{}{}
 			// Go over each payload and re-update them
 			for id := range s.pendingPayloads {
 				// we do not want to make a copy of the payload in the loop because it contains a lock
 				random := gointerfaces.ConvertH256ToHash(s.pendingPayloads[id].Random)
 				coinbase := gointerfaces.ConvertH160toAddress(s.pendingPayloads[id].Coinbase)
 				timestamp := s.pendingPayloads[id].Timestamp
+				// Tell the stage headers to leave space for the write transaction for mining stages
+				s.skipCycleHack <- struct{}{}
 				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
 				if err != nil {
 					log.Warn("Error during block assembling", "err", err.Error())
