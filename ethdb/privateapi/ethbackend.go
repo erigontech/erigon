@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -63,8 +62,8 @@ type EthBackendServer struct {
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
 	assemblePayloadPOS    assemblePayloadPOSFunc
 	proposing             bool
-	pauseAssemble         *uint32
-	mu                    sync.Mutex // Engine API is syncronous, we want to avoid CL to call different APIs at the same time
+	mu                    sync.Mutex // Engine API is asyncronous, we want to avoid CL to call different APIs at the same time
+	condPauseAssemble     sync.Cond  // We use it to determine if we can assemble payloads or not or if we finished an assembling process
 }
 
 type EthBackend interface {
@@ -96,8 +95,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
-		assemblePayloadPOS: assemblePayloadPOS, pauseAssemble: new(uint32),
-		proposing: proposing,
+		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, condPauseAssemble: *sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -270,7 +268,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, executedStatus.Error
 	}
 	// Discard all payload assembled
-	atomic.StoreUint32(s.pauseAssemble, 1)
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// Send reply over
 	reply := remote.EngineExecutePayloadReply{Status: string(executedStatus.Status)}
@@ -282,13 +279,9 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
+	s.condPauseAssemble.L.Lock()
+	defer s.condPauseAssemble.L.Unlock()
 	// Wait some time in case validition process has not started
-	timer := time.NewTimer(100 * time.Millisecond)
-	select {
-	case <-timer.C:
-	case <-ctx.Done():
-		return nil, fmt.Errorf("execution layer interrupted")
-	}
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
@@ -300,11 +293,16 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	payload, ok := s.pendingPayloads[req.PayloadId]
-	if !ok || payload.BlockNumber == 0 {
+	if !ok {
 		return nil, fmt.Errorf("unknown payload")
 	}
+	if payload.BlockNumber == 0 {
+		s.mu.Unlock()
+		// Wait for payloads assembling thread to finish
+		s.condPauseAssemble.Wait()
+		s.mu.Lock()
+	}
 	// stop assembling payloads
-	atomic.StoreUint32(s.pauseAssemble, 1)
 	return &payload, nil
 
 }
@@ -313,6 +311,9 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.condPauseAssemble.L.Lock()
+	defer s.condPauseAssemble.L.Unlock()
+
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
@@ -347,7 +348,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		Timestamp: req.Prepare.Timestamp,
 		Coinbase:  req.Prepare.FeeRecipient,
 	}
-	atomic.StoreUint32(s.pauseAssemble, 0)
+	s.condPauseAssemble.Broadcast()
 	// successfully assembled the payload and assigned the correct id
 	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
@@ -357,20 +358,14 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 }
 
 func (s *EthBackendServer) StartProposer() {
-	go func() {
-		atomic.StoreUint32(s.pauseAssemble, 1)
-		for {
-			// Wait really little, this is just not to kill the CPU
-			timer := time.NewTimer(20 * time.Millisecond)
 
-			select {
-			case <-timer.C:
-			case <-s.ctx.Done():
-				return
-			}
-			if atomic.LoadUint32(s.pauseAssemble) == 1 {
-				continue
-			}
+	go func() {
+		s.condPauseAssemble.L.Lock()
+		defer s.condPauseAssemble.L.Unlock()
+
+		for {
+			// Wait until we need to process new payloads
+			s.condPauseAssemble.Wait()
 			s.mu.Lock()
 			// Go over each payload and re-update them
 			for id := range s.pendingPayloads {
@@ -428,6 +423,8 @@ func (s *EthBackendServer) StartProposer() {
 					Transactions:  encodedTransactions,
 				}
 			}
+			// Broadcast the signal that an entire loop over pending payloads has been executed
+			s.condPauseAssemble.Broadcast()
 			s.mu.Unlock()
 		}
 	}()
