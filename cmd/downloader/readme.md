@@ -41,16 +41,17 @@ erigon --downloader.api.addr=127.0.0.1:9093 --experimental.snapshot
 downloader --download.limit=10mb --upload.limit=10mb
 ```
 
-### Print current .torrent files in format compatible with https://github.com/ledgerwatch/erigon-snapshot
+### Print info_hashes in format compatible with https://github.com/ledgerwatch/erigon-snapshot
 
 ```
-downloader torrent_files --datadir=<your_datadir>
+downloader info_hashes --datadir=<your_datadir>
 ```
 
-### Re-Create .torrent files https://github.com/ledgerwatch/erigon-snapshot
+### Force re-calculate info_hashes , then print https://github.com/ledgerwatch/erigon-snapshot
 
 ```
 // will re-read all .seg files (high disk IO)
+// also does remove and create .torrent files
 downloader info_hashes --datadir=<your_datadir> --rebuild
 ```
 
