@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/parallelcompress"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
@@ -33,6 +34,7 @@ var snapshotCommand = cli.Command{
 			Flags: []cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
+				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
 			},
 			Description: `Create snapshots`,
@@ -46,6 +48,11 @@ var (
 		Usage:    "From block number",
 		Required: true,
 	}
+	SnapshotToFlag = cli.Uint64Flag{
+		Name:     "to",
+		Usage:    "To block number. Zero - means unlimited.",
+		Required: true,
+	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:     "segment.size",
 		Usage:    "Amount of blocks in each segment",
@@ -56,6 +63,7 @@ var (
 
 func doSnapshotCommand(ctx *cli.Context) error {
 	fromBlock := ctx.Uint64(SnapshotFromFlag.Name)
+	toBlock := ctx.Uint64(SnapshotToFlag.Name)
 	segmentSize := ctx.Uint64(SnapshotSegmentSizeFlag.Name)
 	if segmentSize < 1000 {
 		return fmt.Errorf("too small --segment.size %d", segmentSize)
@@ -66,44 +74,48 @@ func doSnapshotCommand(ctx *cli.Context) error {
 	chainDB := mdbx.MustOpen(path.Join(dataDir, "chaindata"))
 	defer chainDB.Close()
 
-	if err := snapshotBlocks(chainDB, fromBlock, segmentSize, snapshotDir); err != nil {
+	if err := snapshotBlocks(chainDB, fromBlock, toBlock, segmentSize, snapshotDir); err != nil {
 		log.Error("Error", "err", err)
 	}
 	return nil
 }
 
-func snapshotBlocks(chainDB kv.RoDB, fromBlock, blocksPerFile uint64, snapshotDir string) error {
-	lastChunk := func(tx kv.Tx, blocksPerFile uint64) (uint64, error) {
-		c, err := tx.Cursor(kv.BlockBody)
-		if err != nil {
-			return 0, err
-		}
-		k, _, err := c.Last()
-		if err != nil {
-			return 0, err
-		}
-		last := binary.BigEndian.Uint64(k)
-		// TODO: enable next condition (disabled for tests)
-		//if last > params.FullImmutabilityThreshold {
-		//	last -= params.FullImmutabilityThreshold
-		//} else {
-		//	last = 0
-		//}
-		last = last - last%blocksPerFile
-		return last, nil
-	}
-
+func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapshotDir string) error {
 	var last uint64
+
+	if toBlock > 0 {
+		last = toBlock
+	} else {
+		lastChunk := func(tx kv.Tx, blocksPerFile uint64) (uint64, error) {
+			c, err := tx.Cursor(kv.BlockBody)
+			if err != nil {
+				return 0, err
+			}
+			k, _, err := c.Last()
+			if err != nil {
+				return 0, err
+			}
+			last := binary.BigEndian.Uint64(k)
+			if last > params.FullImmutabilityThreshold {
+				last -= params.FullImmutabilityThreshold
+			} else {
+				last = 0
+			}
+			last = last - last%blocksPerFile
+			return last, nil
+		}
+
+		if err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+			last, err = lastChunk(tx, blocksPerFile)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
 
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
-	if err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		last, err = lastChunk(tx, blocksPerFile)
-		return err
-	}); err != nil {
-		return err
-	}
 	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
 
 	log.Info("Last body number", "last", last)
