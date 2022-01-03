@@ -34,8 +34,8 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(downloadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(uploadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadLimit.Bytes()), 2*DefaultPieceSize)     // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
 
 	// debug
 	if lg.Debug == verbosity {
