@@ -360,15 +360,15 @@ func (s *EthBackendServer) StartProposer() {
 	go func() {
 		atomic.StoreUint32(s.pauseAssemble, 1)
 		for {
-			if atomic.LoadUint32(s.pauseAssemble) == 1 || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
-				// Wait really little, this is just not to kill the CPU
-				timer := time.NewTimer(20 * time.Millisecond)
+			// Wait really little, this is just not to kill the CPU
+			timer := time.NewTimer(20 * time.Millisecond)
 
-				select {
-				case <-timer.C:
-				case <-s.ctx.Done():
-					return
-				}
+			select {
+			case <-timer.C:
+			case <-s.ctx.Done():
+				return
+			}
+			if atomic.LoadUint32(s.pauseAssemble) == 1 {
 				continue
 			}
 			s.mu.Lock()
@@ -425,14 +425,6 @@ func (s *EthBackendServer) StartProposer() {
 				}
 			}
 			s.mu.Unlock()
-
-			timer := time.NewTimer(300 * time.Millisecond)
-
-			select {
-			case <-timer.C:
-			case <-s.ctx.Done():
-				return
-			}
 		}
 	}()
 }
