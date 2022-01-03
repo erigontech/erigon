@@ -406,11 +406,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	// proof-of-stake mining
-	validationPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
+	assembleBlockPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
-		validationSync := stagedsync.New(
+		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.ValidationParametersPOS{
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.BlockProposerParametersPOS{
 					Random:                random,
 					SuggestedFeeRecipient: suggestedFeeRecipient,
 					Timestamp:             timestamp,
@@ -421,7 +421,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, validationSync); err != nil {
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultPOSCh
@@ -431,7 +431,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForBeaconChain,
-		backend.sentryControlServer.Hd.SkipCycleHack, validationPOS, miner.MiningResultPOSCh, config.Miner.EnabledPOS)
+		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
 	if config.Miner.EnabledPOS {

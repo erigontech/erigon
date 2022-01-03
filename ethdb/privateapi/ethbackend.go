@@ -61,11 +61,10 @@ type EthBackendServer struct {
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
-	miningResultPOSCh     <-chan *types.Block
 	assemblePayloadPOS    assemblePayloadPOSFunc
 	proposing             bool
 	pauseAssemble         *uint32
-	mu                    sync.Mutex
+	mu                    sync.Mutex // Engine API is syncronous, we want to avoid CL to call different APIs at the same time
 }
 
 type EthBackend interface {
@@ -92,12 +91,12 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, miningResultPOSCh <-chan *types.Block, proposing bool,
+	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
-		assemblePayloadPOS: assemblePayloadPOS, miningResultPOSCh: miningResultPOSCh, pauseAssemble: new(uint32),
+		assemblePayloadPOS: assemblePayloadPOS, pauseAssemble: new(uint32),
 		proposing: proposing,
 	}
 }
@@ -210,7 +209,8 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
-
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
@@ -348,7 +348,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		Coinbase:  req.Prepare.FeeRecipient,
 	}
 	atomic.StoreUint32(s.pauseAssemble, 0)
-	// successfully assembled the payload and assinged the correct id
+	// successfully assembled the payload and assigned the correct id
 	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
 		Status:    "SUCCESS",

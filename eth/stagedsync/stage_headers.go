@@ -144,9 +144,6 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 	case <-cfg.hd.SkipCycleHack:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
-		if !useExternalTx {
-			return tx.Commit()
-		}
 		return nil
 	}
 

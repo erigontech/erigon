@@ -52,7 +52,7 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 	}
 }
 
-type ValidationParametersPOS struct {
+type BlockProposerParametersPOS struct {
 	Random                common.Hash
 	SuggestedFeeRecipient common.Address // For now, we apply a suggested recipient only if etherbase is unset
 	Timestamp             uint64
@@ -66,10 +66,10 @@ type MiningCreateBlockCfg struct {
 	txPool2                 *txpool.TxPool
 	txPool2DB               kv.RoDB
 	tmpdir                  string
-	validationParametersPOS *ValidationParametersPOS
+	blockProposerParameters *BlockProposerParametersPOS
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, validationParametersPOS *ValidationParametersPOS, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockProposerParameters *BlockProposerParametersPOS, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:                      db,
 		miner:                   miner,
@@ -78,7 +78,7 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params
 		txPool2:                 txPool2,
 		txPool2DB:               txPool2DB,
 		tmpdir:                  tmpdir,
-		validationParametersPOS: validationParametersPOS,
+		blockProposerParameters: blockProposerParameters,
 	}
 }
 
@@ -115,7 +115,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			return fmt.Errorf("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
-		coinbase = cfg.validationParametersPOS.SuggestedFeeRecipient
+		coinbase = cfg.blockProposerParameters.SuggestedFeeRecipient
 	}
 
 	blockNum := executionAt + 1
@@ -228,8 +228,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	if isTrans {
 		// We apply pre-made fields
-		header.MixDigest = cfg.validationParametersPOS.Random
-		header.Time = cfg.validationParametersPOS.Timestamp
+		header.MixDigest = cfg.blockProposerParameters.Random
+		header.Time = cfg.blockProposerParameters.Timestamp
 
 		current.Header = header
 		current.Uncles = nil
