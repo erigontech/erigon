@@ -54,8 +54,6 @@ type EthBackendServer struct {
 	reverseDownloadCh chan<- PayloadMessage
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
-	// Last block number sent over via reverseDownloadCh
-	numberSent uint64
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32 // atomic boolean flag
 	mu                    sync.Mutex
@@ -245,7 +243,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
 	// Send the block over
-	s.numberSent = req.BlockNumber
 	s.reverseDownloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
