@@ -226,6 +226,16 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return err
 	}
 
+	if isTrans {
+		// We apply pre-made fields
+		header.MixDigest = cfg.validationParametersPOS.Random
+		header.Time = cfg.validationParametersPOS.Timestamp
+
+		current.Header = header
+		current.Uncles = nil
+		return nil
+	}
+
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
 	if daoBlock := cfg.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
@@ -309,16 +319,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 				uncles = append(uncles, uncle)
 			}
 		}
-	}
-
-	if isTrans {
-		// We apply pre-made fields
-		header.MixDigest = cfg.validationParametersPOS.Random
-		header.Time = cfg.validationParametersPOS.Timestamp
-
-		current.Header = header
-		current.Uncles = nil
-		return nil
 	}
 
 	current.Header = header
