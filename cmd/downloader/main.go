@@ -39,6 +39,7 @@ var (
 	datadir                          string
 	seeding                          bool
 	asJson                           bool
+	forceRebuild                     bool
 	downloaderApiAddr                string
 	torrentVerbosity                 string
 	downloadLimitStr, uploadLimitStr string
@@ -58,6 +59,8 @@ func init() {
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
+	printInfoHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
+
 	rootCmd.AddCommand(printInfoHashes)
 }
 
@@ -199,6 +202,18 @@ var printInfoHashes = &cobra.Command{
 	Example: "go run ./cmd/downloader print_info_hashes --datadir <your_datadir> ",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		snapshotsDir := path.Join(datadir, "snapshots")
+		ctx := cmd.Context()
+
+		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
+			if err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+				return os.Remove(torrentFilePath)
+			}); err != nil {
+				return err
+			}
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotsDir); err != nil {
+				return err
+			}
+		}
 
 		res := map[string]string{}
 		err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
