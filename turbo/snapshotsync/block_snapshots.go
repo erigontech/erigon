@@ -36,7 +36,7 @@ import (
 
 type BlocksSnapshot struct {
 	Bodies        *compress.Decompressor // value: rlp(types.BodyForStorage)
-	Headers       *compress.Decompressor // value: header_rlp
+	Headers       *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
 	Transactions  *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
 	BodyNumberIdx *recsplit.Index        // block_num_u64     -> bodies_segment_offset
 	HeaderHashIdx *recsplit.Index        // header_hash       -> headers_segment_offset
@@ -624,7 +624,15 @@ func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) 
 			log.Warn("header missed", "block_num", blockNum, "hash", fmt.Sprintf("%x", v))
 			return true, nil
 		}
-		if err := f.Append(dataRLP); err != nil {
+		h := types.Header{}
+		if err := rlp.DecodeBytes(dataRLP, &h); err != nil {
+			return false, err
+		}
+
+		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
+		value[0] = h.Hash()[0]
+		copy(value[1:], dataRLP)
+		if err := f.Append(value); err != nil {
 			return false, err
 		}
 
@@ -743,7 +751,7 @@ func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error
 	defer logEvery.Stop()
 	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
-		if err := rlp.DecodeBytes(word, &h); err != nil {
+		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
 			return err
 		}
 		if err := idx.AddKey(h.Hash().Bytes(), offset); err != nil {
@@ -844,15 +852,15 @@ RETRY:
 }
 
 func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) error {
+	word := make([]byte, 0, 4096)
+	r := bytes.NewReader(nil)
 	for _, sn := range s.blocks {
 		d := sn.Headers
 		g := d.MakeGetter()
-		word := make([]byte, 0, 4096)
-		header := new(types.Header)
-		r := bytes.NewReader(nil)
 		for g.HasNext() {
+			header := new(types.Header)
 			word, _ = g.Next(word[:0])
-			r.Reset(word)
+			r.Reset(word[1:])
 			if err := rlp.Decode(r, header); err != nil {
 				return err
 			}

@@ -16,6 +16,8 @@ type BlockReader interface {
 type HeaderReader interface {
 	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error)
 	HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error)
+	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
+	CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error)
 }
 
 type BodyReader interface {

@@ -138,7 +138,7 @@ var (
 	ErrNoStatusMsg             = errors.New("no status message")
 	errMsgTooLarge             = errors.New("message too long")
 	errDecode                  = errors.New("invalid message")
-	errInvalidMsgCode          = errors.New("invalid message code")
+	errInvalidMsgCode          = errors.New("invalid message code") //nolint
 	ErrProtocolVersionMismatch = errors.New("protocol version mismatch")
 	ErrNetworkIDMismatch       = errors.New("network ID mismatch")
 	ErrGenesisMismatch         = errors.New("genesis mismatch")
