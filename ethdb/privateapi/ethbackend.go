@@ -374,6 +374,10 @@ func (s *EthBackendServer) StartProposer() {
 			s.mu.Lock()
 			// Go over each payload and re-update them
 			for id := range s.pendingPayloads {
+				// If we already assembled this block, let's just skip it
+				if s.pendingPayloads[id].BlockNumber != 0 {
+					continue
+				}
 				// we do not want to make a copy of the payload in the loop because it contains a lock
 				random := gointerfaces.ConvertH256ToHash(s.pendingPayloads[id].Random)
 				coinbase := gointerfaces.ConvertH160toAddress(s.pendingPayloads[id].Coinbase)
