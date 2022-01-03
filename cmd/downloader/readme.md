@@ -47,7 +47,7 @@ downloader --download.limit=10mb --upload.limit=10mb
 downloader info_hashes --datadir=<your_datadir>
 ```
 
-### Force re-calculate info_hashes , then print https://github.com/ledgerwatch/erigon-snapshot
+### Force re-calculate info_hashes and print in format compatible with https://github.com/ledgerwatch/erigon-snapshot
 
 ```
 // will re-read all .seg files (high disk IO)
