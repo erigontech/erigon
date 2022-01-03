@@ -44,7 +44,7 @@ downloader --download.limit=10mb --upload.limit=10mb
 ### Add hashes to https://github.com/ledgerwatch/erigon-snapshot
 
 ```
-downloader print_torrent_files --datadir=<your_datadir>
+downloader torrent_files --datadir=<your_datadir>
 ```
 
 ### Create new snapshots
