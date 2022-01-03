@@ -173,6 +173,7 @@ func CreateTorrentFile(root string, info *metainfo.Info, mi *metainfo.MetaInfo) 
 	return nil
 }
 
+// nolint
 func segmentFileNameFromTorrentFileName(in string) string {
 	ext := filepath.Ext(in)
 	return in[0 : len(in)-len(ext)]
