@@ -42,21 +42,18 @@ var snapshotCommand = cli.Command{
 
 var (
 	SnapshotFromFlag = cli.Uint64Flag{
-		Name:     "from",
-		Usage:    "From block number",
-		Required: true,
+		Name:  "from",
+		Usage: "From block number",
+		Value: 0,
 	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
-		Name:     "segment.size",
-		Usage:    "Amount of blocks in each segment",
-		Value:    500_000,
-		Required: true,
+		Name:  "segment.size",
+		Usage: "Amount of blocks in each segment",
+		Value: 500_000,
 	}
 )
 
 func doSnapshotCommand(ctx *cli.Context) error {
-	fmt.Printf("success\n")
-	return nil
 	fromBlock := ctx.Uint64(SnapshotFromFlag.Name)
 	segmentSize := ctx.Uint64(SnapshotSegmentSizeFlag.Name)
 	if segmentSize < 1000 {
