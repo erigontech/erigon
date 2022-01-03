@@ -50,7 +50,7 @@ var (
 	}
 	SnapshotToFlag = cli.Uint64Flag{
 		Name:     "to",
-		Usage:    "To block number",
+		Usage:    "To block number. Zero - means unlimited.",
 		Required: true,
 	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
