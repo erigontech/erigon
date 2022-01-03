@@ -8,7 +8,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.18.1
 	github.com/anacrolix/go-libutp v1.1.0
 	github.com/anacrolix/log v0.10.0
-	github.com/anacrolix/torrent v1.39.1
+	github.com/anacrolix/torrent v1.40.0
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/consensys/gnark-crypto v0.4.0
