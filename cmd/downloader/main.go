@@ -198,8 +198,8 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 }
 
 var printInfoHashes = &cobra.Command{
-	Use:     "torrent_files",
-	Example: "go run ./cmd/downloader torrent_files --datadir <your_datadir> ",
+	Use:     "info_hashes",
+	Example: "go run ./cmd/downloader info_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		snapshotsDir := path.Join(datadir, "snapshots")
 		ctx := cmd.Context()
