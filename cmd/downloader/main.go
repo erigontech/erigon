@@ -36,13 +36,13 @@ import (
 )
 
 var (
-	datadir                          string
-	seeding                          bool
-	asJson                           bool
-	forceRebuild                     bool
-	downloaderApiAddr                string
-	torrentVerbosity                 string
-	downloadLimitStr, uploadLimitStr string
+	datadir                       string
+	seeding                       bool
+	asJson                        bool
+	forceRebuild                  bool
+	downloaderApiAddr             string
+	torrentVerbosity              string
+	downloadRateStr, uploadRteStr string
 )
 
 func init() {
@@ -54,8 +54,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Info.LogString(), "DEBUG | INFO | WARN | ERROR")
-	rootCmd.Flags().StringVar(&downloadLimitStr, "download.limit", "1gb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadLimitStr, "upload.limit", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "1gb", "bytes per second, example: 32mb")
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
@@ -109,15 +109,15 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
 	}
 
-	var downloadLimit, uploadLimit datasize.ByteSize
-	if err := downloadLimit.UnmarshalText([]byte(downloadLimitStr)); err != nil {
+	var downloadRate, uploadRate datasize.ByteSize
+	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
 		return err
 	}
-	if err := uploadLimit.UnmarshalText([]byte(uploadLimitStr)); err != nil {
+	if err := uploadRate.UnmarshalText([]byte(uploadRteStr)); err != nil {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("get peer id: %w", err)
 		}
 
-		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadLimit, uploadLimit)
+		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate)
 		if err != nil {
 			return err
 		}
