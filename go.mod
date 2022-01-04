@@ -21,7 +21,7 @@ require (
 	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.12.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
-	github.com/flanglet/kanzi-go v1.9.0
+	github.com/flanglet/kanzi-go v1.9.1-0.20211212184056-72dda96261ee
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
 	github.com/gofrs/flock v0.8.1
