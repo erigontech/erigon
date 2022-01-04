@@ -535,7 +535,7 @@ type TraceFilterMode string
 
 const (
 	// Default mode for TraceFilter. Unions results referred to addresses from FromAddress or ToAddress
-	TraceFilterModeUnion        = "union"
+	TraceFilterModeUnion = "union"
 	// IntersectionMode retrives results referred to addresses provided both in FromAddress and ToAddress
 	TraceFilterModeIntersection = "intersection"
 )
