@@ -44,7 +44,7 @@ type HeadersCfg struct {
 	noP2PDiscovery        bool
 	tmpdir                string
 	reverseDownloadCh     chan privateapi.PayloadMessage
-	unwindForkChoicePOSCh chan common.Hash
+	unwindForkChoicePOSCh chan types.Header
 	waitingPosHeaders     *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
@@ -63,7 +63,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan privateapi.PayloadMessage,
-	unwindForkChoicePOSCh chan common.Hash,
+	unwindForkChoicePOSCh chan types.Header,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -145,6 +145,11 @@ func HeadersPOS(
 	// Decide what kind of action we need to take place
 	select {
 	case payloadMessage = <-cfg.reverseDownloadCh:
+	case forkChoiceUpdateHeader := <-cfg.unwindForkChoicePOSCh:
+		forkChoiceHeaderNumber := forkChoiceUpdateHeader.Number.Uint64()
+		u.UnwindTo(forkChoiceHeaderNumber-1, common.Hash{})
+		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
+		return nil
 	case <-cfg.hd.SkipCycleHack:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 		return nil
