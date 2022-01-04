@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -1087,28 +1088,32 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
-func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
+func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64, blockReader interfaces.FullBlockReader) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}
 	if ancestor == 1 {
+		header, err := blockReader.Header(context.Background(), db, hash, number)
+		if err != nil {
+			panic(err)
+		}
 		// in this case it is cheaper to just read the header
-		if header := ReadHeader(db, hash, number); header != nil {
+		if header != nil {
 			return header.ParentHash, number - 1
 		}
 		return common.Hash{}, 0
 	}
 	for ancestor != 0 {
-		h, err := ReadCanonicalHash(db, number)
+		h, err := blockReader.CanonicalHash(context.Background(), db, number)
 		if err != nil {
 			panic(err)
 		}
 		if h == hash {
-			ancestorHash, err := ReadCanonicalHash(db, number-ancestor)
+			ancestorHash, err := blockReader.CanonicalHash(context.Background(), db, number-ancestor)
 			if err != nil {
 				panic(err)
 			}
-			h, err := ReadCanonicalHash(db, number)
+			h, err := blockReader.CanonicalHash(context.Background(), db, number)
 			if err != nil {
 				panic(err)
 			}
@@ -1122,7 +1127,10 @@ func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNo
 		}
 		*maxNonCanonical--
 		ancestor--
-		header := ReadHeader(db, hash, number)
+		header, err := blockReader.Header(context.Background(), db, hash, number)
+		if err != nil {
+			panic(err)
+		}
 		if header == nil {
 			return common.Hash{}, 0
 		}
