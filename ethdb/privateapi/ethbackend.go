@@ -58,7 +58,7 @@ type EthBackendServer struct {
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Send hash of header we are unwinding to
-	unwindForkChoicePOSCh chan<- types.Header
+	unwindForkChoicePOSCh chan<- common.Hash
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -328,13 +328,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		// TODO(enriavil1): make unwind happen
 
 		//req.forkchoice.HeadBlockHash
-		parentHeader, err := rawdb.ReadHeaderByHash(tx, parentHash)
 
-		if err != nil {
-			return nil, err
-		}
-
-		s.unwindForkChoicePOSCh <- *parentHeader
+		s.unwindForkChoicePOSCh <- parentHash
 
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
