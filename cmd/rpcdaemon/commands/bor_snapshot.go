@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -204,24 +203,19 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 		return "", err
 	}
 	defer tx.Rollback()
-	currentHeaderNumber := rawdb.ReadCurrentHeader(tx).Number.Uint64()
+	header := rawdb.ReadCurrentHeader(tx)
+	var currentHeaderNumber uint64 = 0
+	if header == nil {
+		return "", &bor.InvalidStartEndBlockError{start, end, currentHeaderNumber}
+	}
+	currentHeaderNumber = header.Number.Uint64()
 	if start > end || end > currentHeaderNumber {
 		return "", &bor.InvalidStartEndBlockError{start, end, currentHeaderNumber}
 	}
 	blockHeaders := make([]*types.Header, end-start+1)
-	wg := new(sync.WaitGroup)
-	concurrent := make(chan bool, 20)
-	for i := start; i <= end; i++ {
-		wg.Add(1)
-		concurrent <- true
-		go func(number uint64) {
-			blockHeaders[number-start], _ = getHeaderByNumber(rpc.BlockNumber(number), api, tx)
-			<-concurrent
-			wg.Done()
-		}(i)
+	for number := start; number <= end; number++ {
+		blockHeaders[number-start], _ = getHeaderByNumber(rpc.BlockNumber(number), api, tx)
 	}
-	wg.Wait()
-	close(concurrent)
 
 	headers := make([][32]byte, nextPowerOfTwo(length))
 	for i := 0; i < len(blockHeaders); i++ {
