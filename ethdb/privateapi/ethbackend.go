@@ -63,7 +63,8 @@ type EthBackendServer struct {
 	assemblePayloadPOS    assemblePayloadPOSFunc
 	proposing             bool
 	mu                    sync.Mutex // Engine API is asyncronous, we want to avoid CL to call different APIs at the same time
-	condPauseAssemble     sync.Cond  // We use it to determine if we can assemble payloads or not or if we finished an assembling process
+	condPauseAssemble     *sync.Cond // We use it to determine if we can assemble payloads or not
+	condFinishAssemble    *sync.Cond // We use it to determined if we an assembling
 }
 
 type EthBackend interface {
@@ -95,7 +96,8 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
-		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, condPauseAssemble: *sync.NewCond(&sync.Mutex{}),
+		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, condPauseAssemble: sync.NewCond(&sync.Mutex{}),
+		condFinishAssemble: sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -279,8 +281,8 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
-	s.condPauseAssemble.L.Lock()
-	defer s.condPauseAssemble.L.Unlock()
+	s.condFinishAssemble.L.Lock()
+	defer s.condFinishAssemble.L.Unlock()
 	// Wait some time in case validition process has not started
 
 	if !s.proposing {
@@ -299,7 +301,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	if payload.BlockNumber == 0 {
 		s.mu.Unlock()
 		// Wait for payloads assembling thread to finish
-		s.condPauseAssemble.Wait()
+		s.condFinishAssemble.Wait()
 		s.mu.Lock()
 	}
 	// stop assembling payloads
@@ -348,6 +350,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		Timestamp: req.Prepare.Timestamp,
 		Coinbase:  req.Prepare.FeeRecipient,
 	}
+	// Unpause assemble process
 	s.condPauseAssemble.Broadcast()
 	// successfully assembled the payload and assigned the correct id
 	defer func() { s.payloadId++ }()
@@ -362,9 +365,11 @@ func (s *EthBackendServer) StartProposer() {
 	go func() {
 		s.condPauseAssemble.L.Lock()
 		defer s.condPauseAssemble.L.Unlock()
+		s.condFinishAssemble.L.Lock()
+		defer s.condFinishAssemble.L.Unlock()
 
 		for {
-			// Wait until we need to process new payloads
+			// Wait until we have to process new payloads
 			s.condPauseAssemble.Wait()
 			s.mu.Lock()
 			// Go over each payload and re-update them
@@ -424,7 +429,7 @@ func (s *EthBackendServer) StartProposer() {
 				}
 			}
 			// Broadcast the signal that an entire loop over pending payloads has been executed
-			s.condPauseAssemble.Broadcast()
+			s.condFinishAssemble.Broadcast()
 			s.mu.Unlock()
 		}
 	}()
