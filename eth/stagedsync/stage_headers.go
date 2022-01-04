@@ -137,8 +137,16 @@ func HeadersPOS(
 ) error {
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
+	var payloadMessage privateapi.PayloadMessage
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
-	payloadMessage := <-cfg.reverseDownloadCh
+	// Decide what kind of action we need to take place
+	select {
+	case payloadMessage = <-cfg.reverseDownloadCh:
+	case <-cfg.hd.SkipCycleHack:
+		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+		return nil
+	}
+
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 	header := payloadMessage.Header
 

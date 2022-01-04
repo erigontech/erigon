@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -30,6 +31,8 @@ const (
 	Valid   PayloadStatus = "VALID"
 	Invalid PayloadStatus = "INVALID"
 )
+
+type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error)
 
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
@@ -55,8 +58,12 @@ type EthBackendServer struct {
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32 // atomic boolean flag
-	mu                    sync.Mutex
+	waitingForBeaconChain *uint32       // atomic boolean flag
+	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
+	assemblePayloadPOS    assemblePayloadPOSFunc
+	proposing             bool
+	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	shutdown              bool
 }
 
 type EthBackend interface {
@@ -83,10 +90,12 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]types2.ExecutionPayload),
+		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
+		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -198,14 +207,14 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 
 // EngineExecutePayloadV1, executes payload
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+	s.syncCond.L.Lock()
+	defer s.syncCond.L.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-	// Discard all previous prepared payloads if another block was proposed
-	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// If another payload is already commissioned then we just reply with syncing
 	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		// We are still syncing a commissioned payload
@@ -252,11 +261,13 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	}
 
 	executedStatus := <-s.statusCh
-
+	// Discard all previous prepared payloads if another block was proposed
 	if executedStatus.Error != nil {
 		return nil, executedStatus.Error
 	}
-
+	// Discard all payload assembled
+	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
+	// Send reply over
 	reply := remote.EngineExecutePayloadReply{Status: string(executedStatus.Status)}
 	if executedStatus.LatestValidHash != (common.Hash{}) {
 		reply.LatestValidHash = gointerfaces.ConvertHashToH256(executedStatus.LatestValidHash)
@@ -266,27 +277,41 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.syncCond.L.Lock()
+	defer s.syncCond.L.Unlock()
+
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
+	}
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	payload, ok := s.pendingPayloads[req.PayloadId]
-	if ok {
-		return &payload, nil
+	for {
+		payload, ok := s.pendingPayloads[req.PayloadId]
+		if !ok {
+			return nil, fmt.Errorf("unknown payload")
+		}
+
+		if payload.BlockNumber != 0 {
+			return &payload, nil
+		}
+
+		// Wait for payloads assembling thread to finish
+		s.syncCond.Wait()
 	}
-	return nil, fmt.Errorf("unknown payload")
 }
 
 // EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new bloc
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.syncCond.L.Lock()
+	defer s.syncCond.L.Unlock()
+
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
+
 	// Check if parent equate to the head
 	parent := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
 	tx, err := s.db.BeginRo(ctx)
@@ -294,40 +319,120 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, err
 	}
 
-	headHeader, err := rawdb.ReadHeaderByHash(tx, parent)
-	if err != nil {
-		return nil, err
-	}
-
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 || headHeader == nil {
+	if parent != rawdb.ReadHeadHeaderHash(tx) {
+		// TODO(enriavil1): make unwind happen
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
 		}, nil
 	}
 
-	// Hash is incorrect because mining archittecture has yet to be implemented
-	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
-		ParentHash:    req.Forkchoice.HeadBlockHash,
-		Coinbase:      req.Prepare.FeeRecipient,
-		Timestamp:     req.Prepare.Timestamp,
-		Random:        req.Prepare.Random,
-		StateRoot:     gointerfaces.ConvertHashToH256(headHeader.Root),
-		ReceiptRoot:   gointerfaces.ConvertHashToH256(types.EmptyRootHash),
-		LogsBloom:     &types2.H2048{},
-		GasLimit:      headHeader.GasLimit,
-		GasUsed:       0,
-		BlockNumber:   headHeader.Number.Uint64() + 1,
-		ExtraData:     []byte{},
-		BaseFeePerGas: &types2.H256{},
-		BlockHash:     gointerfaces.ConvertHashToH256(headHeader.Hash()),
-		Transactions:  [][]byte{},
+	// Same if we are not waiting for the beacon chain
+	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+		return &remote.EngineForkChoiceUpdatedReply{
+			Status: string(Syncing),
+		}, nil
 	}
-	// successfully assembled the payload and assinged the correct id
+
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
+	}
+
+	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
+		Random:    req.Prepare.Random,
+		Timestamp: req.Prepare.Timestamp,
+		Coinbase:  req.Prepare.FeeRecipient,
+	}
+	// Unpause assemble process
+	s.syncCond.Broadcast()
+	// successfully assembled the payload and assigned the correct id
 	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
 		Status:    "SUCCESS",
 		PayloadId: s.payloadId,
 	}, nil
+}
+
+func (s *EthBackendServer) StartProposer() {
+
+	go func() {
+		s.syncCond.L.Lock()
+		defer s.syncCond.L.Unlock()
+
+		for {
+			// Wait until we have to process new payloads
+			s.syncCond.Wait()
+
+			if s.shutdown {
+				return
+			}
+
+			// Go over each payload and re-update them
+			for id := range s.pendingPayloads {
+				// If we already assembled this block, let's just skip it
+				if s.pendingPayloads[id].BlockNumber != 0 {
+					continue
+				}
+				// we do not want to make a copy of the payload in the loop because it contains a lock
+				random := gointerfaces.ConvertH256ToHash(s.pendingPayloads[id].Random)
+				coinbase := gointerfaces.ConvertH160toAddress(s.pendingPayloads[id].Coinbase)
+				timestamp := s.pendingPayloads[id].Timestamp
+				// Tell the stage headers to leave space for the write transaction for mining stages
+				s.skipCycleHack <- struct{}{}
+
+				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
+				if err != nil {
+					log.Warn("Error during block assembling", "err", err.Error())
+					return
+				}
+				var baseFeeReply *types2.H256
+				if block.Header().BaseFee != nil {
+					var baseFee uint256.Int
+					baseFee.SetFromBig(block.Header().BaseFee)
+					baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
+				}
+				var encodedTransactions [][]byte
+				buf := bytes.NewBuffer(nil)
+
+				for _, tx := range block.Transactions() {
+					buf.Reset()
+
+					err := rlp.Encode(buf, tx)
+					if err != nil {
+						log.Warn("Broken tx rlp", "err", err.Error())
+						return
+					}
+					encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
+				}
+				// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
+				s.pendingPayloads[id] = types2.ExecutionPayload{
+					ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
+					Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
+					Timestamp:     s.pendingPayloads[id].Timestamp,
+					Random:        s.pendingPayloads[id].Random,
+					StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
+					ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
+					LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
+					GasLimit:      block.GasLimit(),
+					GasUsed:       block.GasUsed(),
+					BlockNumber:   block.NumberU64(),
+					ExtraData:     block.Extra(),
+					BaseFeePerGas: baseFeeReply,
+					BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+					Transactions:  encodedTransactions,
+				}
+			}
+			// Broadcast the signal that an entire loop over pending payloads has been executed
+			s.syncCond.Broadcast()
+		}
+	}()
+}
+
+func (s *EthBackendServer) StopProposer() {
+	s.syncCond.L.Lock()
+	defer s.syncCond.L.Unlock()
+
+	s.shutdown = true
+	s.syncCond.Broadcast()
 }
 
 func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {
