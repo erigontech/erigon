@@ -595,10 +595,10 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeo
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
+	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	strideHeight := hd.highestInDb + stride
-	lowestAnchorHeight := hd.topSeenHeight + 1 // Inclusive upper bound
+	lowestAnchorHeight := hd.topSeenHeightPoW + 1 // Inclusive upper bound
 	if lowestAnchorHeight <= strideHeight {
 		return nil
 	}
@@ -700,7 +700,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		hd.insertList = append(hd.insertList, linksInFuture...)
 		linksInFuture = nil //nolint
 	}
-	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
+	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
 func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
@@ -990,9 +990,9 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		}
 		return
 	}
-	if highestNum > hd.topSeenHeight {
+	if highestNum > hd.topSeenHeightPoW {
 		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
-			hd.topSeenHeight = highestNum
+			hd.topSeenHeightPoW = highestNum
 		}
 	}
 
@@ -1036,7 +1036,19 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.topSeenHeight
+	if hd.topSeenHeightPoW > hd.topSeenHeightPoS {
+		return hd.topSeenHeightPoW
+	} else {
+		return hd.topSeenHeightPoS
+	}
+}
+
+func (hd *HeaderDownload) UpdateTopSeenHeightPoS(blockHeight uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if blockHeight > hd.topSeenHeightPoS {
+		hd.topSeenHeightPoS = blockHeight
+	}
 }
 
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {

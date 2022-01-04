@@ -145,6 +145,8 @@ func HeadersPOS(
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
+	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
+
 	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
 		cfg.statusCh <- privateapi.ExecutionStatus{Error: err}

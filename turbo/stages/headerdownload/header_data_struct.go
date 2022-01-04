@@ -217,10 +217,11 @@ type HeaderDownload struct {
 	persistedLinkLimit int    // Maximum allowed number of persisted links
 	anchorLimit        int    // Maximum allowed number of anchors
 	highestInDb        uint64 // Height of the highest block header in the database
-	topSeenHeight      uint64
-	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
-	fetching           bool // Set when the stage that is actively fetching the headers is in progress
+	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
+	fetching           bool   // Set when the stage that is actively fetching the headers is in progress
+	topSeenHeightPoW   uint64
 	// proof-of-stake
+	topSeenHeightPoS     uint64
 	lastProcessedPayload uint64         // The last header number inserted when processing the chain backwards
 	expectedHash         common.Hash    // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
 	synced               bool           // if we found a canonical hash during backward sync, in this case our sync process is done
