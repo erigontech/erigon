@@ -23,6 +23,10 @@ func NewBlockReader() *BlockReader {
 	return &BlockReader{}
 }
 
+func (back *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
+	return rawdb.ReadCanonicalHash(tx, blockHeight)
+}
+
 func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeader(tx, hash, blockHeight)
 	return h, nil
@@ -48,6 +52,10 @@ func (back *BlockReader) BodyRlp(ctx context.Context, tx kv.Tx, hash common.Hash
 func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	h := rawdb.ReadHeaderByNumber(tx, blockHeight)
 	return h, nil
+}
+
+func (back *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+	return rawdb.ReadHeaderByHash(tx, hash)
 }
 
 func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
@@ -146,6 +154,44 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	return back.headerFromSnapshot(blockHeight, sn)
 }
 
+// HeaderByHash - will search header in all snapshots starting from recent
+func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+	h, err := rawdb.ReadHeaderByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if h != nil {
+		return h, nil
+	}
+
+	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
+		h, err := back.headerFromSnapshotByHash(hash, back.sn.blocks[i])
+		if err != nil {
+			return nil, nil
+		}
+		if h != nil {
+			return h, nil
+		}
+	}
+	return nil, nil
+}
+
+func (back *BlockReaderWithSnapshots) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		return rawdb.ReadCanonicalHash(tx, blockHeight)
+	}
+
+	h, err := back.headerFromSnapshot(blockHeight, sn)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if h == nil {
+		return common.Hash{}, err
+	}
+	return h.Hash(), nil
+}
+
 func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
@@ -239,7 +285,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
 	h := &types.Header{}
-	if err = rlp.DecodeBytes(buf, h); err != nil {
+	if err = rlp.DecodeBytes(buf[1:], h); err != nil {
 		return nil, nil, err
 	}
 
@@ -292,8 +338,34 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
 	h := &types.Header{}
-	if err := rlp.DecodeBytes(buf, h); err != nil {
+	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
 		return nil, err
+	}
+	return h, nil
+}
+
+// headerFromSnapshotByHash - getting header by hash AND ensure that it has correct hash
+// because HeaderByHash method will search header in all snapshots - and may request header which doesn't exists
+// but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
+// to make sure is to fetch it and compare hash
+func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *BlocksSnapshot) (*types.Header, error) {
+	buf := make([]byte, 16)
+
+	localID := sn.HeaderHashIdx.Lookup(hash[:])
+	headerOffset := sn.HeaderHashIdx.Lookup2(localID)
+	gg := sn.Headers.MakeGetter()
+	gg.Reset(headerOffset)
+	buf, _ = gg.Next(buf[:0])
+	if hash[0] != buf[1] {
+		return nil, nil
+	}
+
+	h := &types.Header{}
+	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
+		return nil, err
+	}
+	if h.Hash() != hash {
+		return nil, nil
 	}
 	return h, nil
 }
