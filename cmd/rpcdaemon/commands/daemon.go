@@ -14,11 +14,18 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db kv.RoDB,
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
+func APIList(
+	ctx context.Context,
+	db kv.RoDB,
+	borDb kv.RoDB,
+	eth services.ApiBackend,
+	txPool txpool.TxpoolClient,
+	mining txpool.MiningClient,
+	filters *filters.Filters,
 	stateCache kvcache.Cache,
 	blockReader interfaces.BlockReader,
-	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+	cfg cli.Flags, customAPIList []rpc.API,
+) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
@@ -34,7 +41,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	web3Impl := NewWeb3APIImpl(eth)
 	dbImpl := NewDBAPIImpl() /* deprecated */
 	engineImpl := NewEngineAPI(base, db)
-	borImpl := NewBorAPI(base, db)
+	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {

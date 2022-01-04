@@ -17,19 +17,20 @@ type BorAPI interface {
 	GetCurrentProposer() (common.Address, error)
 	GetCurrentValidators() ([]*bor.Validator, error)
 	GetRootHash(start uint64, end uint64) (string, error)
-	Test() (string, error)
 }
 
 // BorImpl is implementation of the BorAPI interface
 type BorImpl struct {
 	*BaseAPI
-	db kv.RoDB
+	db    kv.RoDB // the chain db
+	borDb kv.RoDB // the consensus db
 }
 
 // NewBorAPI returns BorImpl instance
-func NewBorAPI(base *BaseAPI, db kv.RoDB) *BorImpl {
+func NewBorAPI(base *BaseAPI, db kv.RoDB, borDb kv.RoDB) *BorImpl {
 	return &BorImpl{
 		BaseAPI: base,
 		db:      db,
+		borDb:   borDb,
 	}
 }
