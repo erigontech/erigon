@@ -49,9 +49,9 @@ var (
 		Value: 0,
 	}
 	SnapshotToFlag = cli.Uint64Flag{
-		Name:     "to",
-		Usage:    "To block number. Zero - means unlimited.",
-		Required: true,
+		Name:  "to",
+		Usage: "To block number. Zero - means unlimited.",
+		Value: 0,
 	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
