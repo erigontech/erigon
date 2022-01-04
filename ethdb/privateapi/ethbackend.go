@@ -384,7 +384,9 @@ func (s *EthBackendServer) StartProposer() {
 				timestamp := s.pendingPayloads[id].Timestamp
 				// Tell the stage headers to leave space for the write transaction for mining stages
 				s.skipCycleHack <- struct{}{}
+				s.mu.Unlock()
 				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
+				s.mu.Lock()
 				if err != nil {
 					log.Warn("Error during block assembling", "err", err.Error())
 					s.mu.Unlock()
