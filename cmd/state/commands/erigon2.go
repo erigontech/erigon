@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"os"
 	"os/signal"
 	"path"
@@ -115,11 +116,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if err4 != nil {
 		return err4
 	}
-	genesisW, err5 := agg.MakeStateWriter(rwTx, 0)
-	if err5 != nil {
-		return err5
+	w := agg.MakeStateWriter()
+	if err = w.Reset(rwTx, 0); err != nil {
+		return err
 	}
-	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: genesisW}); err != nil {
+	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
 	if err = rwTx.Commit(); err != nil {
@@ -153,8 +154,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		if check {
 			checkR = state.NewPlainState(historyTx, block-1)
 		}
-		var w *aggregator.Writer
-		if w, err = agg.MakeStateWriter(rwTx, block); err != nil {
+		if err = w.Reset(rwTx, block); err != nil {
 			return err
 		}
 		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
@@ -194,6 +194,16 @@ type WriterWrapper struct {
 	w        *aggregator.Writer
 }
 
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
+}
+
 func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	enc, err := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
 	if err != nil {
@@ -214,9 +224,33 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 		}
 		return nil, nil
 	}
+
 	var a accounts.Account
-	if err = a.DecodeForStorage(enc); err != nil {
-		return nil, err
+	a.Reset()
+	pos := 0
+	nonceBytes := int(enc[pos])
+	pos++
+	if nonceBytes > 0 {
+		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		pos += nonceBytes
+	}
+	balanceBytes := int(enc[pos])
+	pos++
+	if balanceBytes > 0 {
+		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	codeHashBytes := int(enc[pos])
+	pos++
+	if codeHashBytes > 0 {
+		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
+		pos += codeHashBytes
+	}
+	incBytes := int(enc[pos])
+	pos++
+	if incBytes > 0 {
+		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+		pos += incBytes
 	}
 	if rw.checkR != nil {
 		if !a.Equals(checkA) {
@@ -300,8 +334,70 @@ func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64,
 }
 
 func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	value := make([]byte, account.EncodingLengthForStorage())
-	account.EncodeForStorage(value)
+	var l int
+	l++
+	if account.Nonce > 0 {
+		l += (bits.Len64(account.Nonce) + 7) / 8
+	}
+	l++
+	if !account.Balance.IsZero() {
+		l += account.Balance.ByteLen()
+	}
+	l++
+	if !account.IsEmptyCodeHash() {
+		l += 32
+	}
+	l++
+	if account.Incarnation > 0 {
+		l += (bits.Len64(account.Incarnation) + 7) / 8
+	}
+	value := make([]byte, l)
+	pos := 0
+	if account.Nonce == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		nonceBytes := (bits.Len64(account.Nonce) + 7) / 8
+		value[pos] = byte(nonceBytes)
+		var nonce = account.Nonce
+		for i := nonceBytes; i > 0; i-- {
+			value[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+	if account.Balance.IsZero() {
+		value[pos] = 0
+		pos++
+	} else {
+		balanceBytes := account.Balance.ByteLen()
+		value[pos] = byte(balanceBytes)
+		pos++
+		account.Balance.WriteToSlice(value[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	if account.IsEmptyCodeHash() {
+		value[pos] = 0
+		pos++
+	} else {
+		value[pos] = 32
+		pos++
+		copy(value[pos:pos+32], account.CodeHash[:])
+		pos += 32
+	}
+	if account.Incarnation == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		incBytes := (bits.Len64(account.Incarnation) + 7) / 8
+		value[pos] = byte(incBytes)
+		var inc = account.Incarnation
+		for i := incBytes; i > 0; i-- {
+			value[pos+i] = byte(inc)
+			inc >>= 8
+		}
+		pos += incBytes + 1
+	}
 	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
 		return err
 	}
