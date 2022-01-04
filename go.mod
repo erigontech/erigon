@@ -45,8 +45,8 @@ require (
 	github.com/pelletier/go-toml v1.9.3
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.4
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
-	github.com/rs/cors v1.8.0
-	github.com/shirou/gopsutil/v3 v3.21.11
+	github.com/rs/cors v1.8.2
+	github.com/shirou/gopsutil/v3 v3.21.12
 	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.1-0.20210427113832-6241f9ab9942
