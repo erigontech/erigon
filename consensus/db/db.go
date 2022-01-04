@@ -7,6 +7,7 @@ import (
 )
 
 func OpenDatabase(path string, logger log.Logger, inmem bool) kv.RwDB {
+	log.Info("Opening consensus db", "path", path, "in memory", inmem)
 	opts := mdbx.NewMDBX(logger)
 	if inmem {
 		opts = opts.InMem()
