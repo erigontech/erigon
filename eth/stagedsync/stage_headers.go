@@ -33,18 +33,19 @@ import (
 )
 
 type HeadersCfg struct {
-	db                kv.RwDB
-	hd                *headerdownload.HeaderDownload
-	statusCh          chan privateapi.ExecutionStatus
-	chainConfig       params.ChainConfig
-	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
-	announceNewHashes func(context.Context, []headerdownload.Announce)
-	penalize          func(context.Context, []headerdownload.PenaltyItem)
-	batchSize         datasize.ByteSize
-	noP2PDiscovery    bool
-	tmpdir            string
-	reverseDownloadCh chan privateapi.PayloadMessage
-	waitingPosHeaders *uint32 // atomic boolean flag
+	db                    kv.RwDB
+	hd                    *headerdownload.HeaderDownload
+	statusCh              chan privateapi.ExecutionStatus
+	chainConfig           params.ChainConfig
+	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
+	announceNewHashes     func(context.Context, []headerdownload.Announce)
+	penalize              func(context.Context, []headerdownload.PenaltyItem)
+	batchSize             datasize.ByteSize
+	noP2PDiscovery        bool
+	tmpdir                string
+	reverseDownloadCh     chan privateapi.PayloadMessage
+	unwindForkChoicePOSCh chan common.Hash
+	waitingPosHeaders     *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -62,6 +63,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan privateapi.PayloadMessage,
+	unwindForkChoicePOSCh chan common.Hash,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -69,20 +71,21 @@ func StageHeadersCfg(
 	tmpdir string,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                 db,
-		hd:                 headerDownload,
-		statusCh:           statusCh,
-		chainConfig:        chainConfig,
-		headerReqSend:      headerReqSend,
-		announceNewHashes:  announceNewHashes,
-		penalize:           penalize,
-		batchSize:          batchSize,
-		noP2PDiscovery:     noP2PDiscovery,
-		reverseDownloadCh:  reverseDownloadCh,
-		waitingPosHeaders:  waitingPosHeaders,
-		snapshots:          snapshots,
-		snapshotDownloader: snapshotDownloader,
-		blockReader:        blockReader,
+		db:                    db,
+		hd:                    headerDownload,
+		statusCh:              statusCh,
+		chainConfig:           chainConfig,
+		headerReqSend:         headerReqSend,
+		announceNewHashes:     announceNewHashes,
+		penalize:              penalize,
+		batchSize:             batchSize,
+		noP2PDiscovery:        noP2PDiscovery,
+		reverseDownloadCh:     reverseDownloadCh,
+		unwindForkChoicePOSCh: unwindForkChoicePOSCh,
+		waitingPosHeaders:     waitingPosHeaders,
+		snapshots:             snapshots,
+		snapshotDownloader:    snapshotDownloader,
+		blockReader:           blockReader,
 	}
 }
 

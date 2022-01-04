@@ -57,6 +57,8 @@ type EthBackendServer struct {
 	reverseDownloadCh chan<- PayloadMessage
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
+	// Send hash of header we are unwinding to
+	unwindForkChoicePOSCh chan<- common.Hash
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -306,7 +308,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	}
 }
 
-// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new bloc
+// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
@@ -316,14 +318,18 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	// Check if parent equate to the head
-	parent := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
+	parentHash := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if parent != rawdb.ReadHeadHeaderHash(tx) {
+	if parentHash != rawdb.ReadHeadHeaderHash(tx) {
 		// TODO(enriavil1): make unwind happen
+
+		//req.forkchoice.HeadBlockHash
+		s.unwindForkChoicePOSCh <- parentHash
+
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
 		}, nil
