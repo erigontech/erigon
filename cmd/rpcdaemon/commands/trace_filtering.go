@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -259,7 +260,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			toAddresses[*addr] = struct{}{}
 
 			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil && err != ethdb.ErrKeyNotFound {
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				stream.WriteNil()
 				return err
 			}
@@ -269,7 +270,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 
 			b, err = bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil && err != ethdb.ErrKeyNotFound {
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				stream.WriteNil()
 				return err
 			}
@@ -285,6 +286,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			if addr != nil {
 				b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
 				if err != nil {
+					if errors.Is(err, ethdb.ErrKeyNotFound) {
+						continue
+					}
 					stream.WriteNil()
 					return err
 				}
@@ -296,6 +300,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			if addr != nil {
 				b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
 				if err != nil {
+					if errors.Is(err, ethdb.ErrKeyNotFound) {
+						continue
+					}
 					stream.WriteNil()
 					return err
 				}
