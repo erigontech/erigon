@@ -855,7 +855,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		lastTxnID := sn.Transactions.Idx.BaseDataID() + uint64(sn.Transactions.Segment.Count())
+		lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
 		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
 			return err
 		}

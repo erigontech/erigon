@@ -153,24 +153,34 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	var cc *params.ChainConfig
-	{
-		chaindataDir := path.Join(datadir, "chaindata")
-		if err := os.MkdirAll(chaindataDir, 0755); err != nil {
-			return err
-		}
-		chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
-		if err != nil {
-			return fmt.Errorf("%w, path: %s", err, chaindataDir)
-		}
-		cc = tool.ChainConfigFromDB(chaindata)
-		chaindata.Close()
-	}
-
-	snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli, snapshotsCfg)
+	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli)
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
+	}
+
+	if downloader.ASSERT {
+		var cc *params.ChainConfig
+		{
+			chaindataDir := path.Join(datadir, "chaindata")
+			if err := os.MkdirAll(chaindataDir, 0755); err != nil {
+				return err
+			}
+			chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
+			if err != nil {
+				return fmt.Errorf("%w, path: %s", err, chaindataDir)
+			}
+			cc = tool.ChainConfigFromDB(chaindata)
+			chaindata.Close()
+		}
+
+		snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
+		for _, t := range t.Cli.Torrents() {
+			expectHashStr := snapshotsCfg.Preverified[t.Info().Name]
+			expectHash := metainfo.NewHashFromHex(expectHashStr)
+			if t.InfoHash() != expectHash {
+				return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", t.Info().Name, t.InfoHash(), expectHash)
+			}
+		}
 	}
 
 	go downloader.MainLoop(ctx, t.Cli)

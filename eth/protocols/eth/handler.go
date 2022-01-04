@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"fmt"
 	"math/big"
 	"time"
 
@@ -112,61 +111,7 @@ func ReadNodeInfo(getter kv.Getter, config *params.ChainConfig, genesisHash comm
 	}
 }
 
-// Handle is invoked whenever an `eth` connection is made that successfully passes
-// the protocol handshake. This method will keep processing messages until the
-// connection is torn down.
-func Handle(backend Backend, peer *Peer) error {
-	for {
-		if err := handleMessage(backend, peer); err != nil {
-			peer.Log().Debug("Message handling failed in `eth`", "err", err)
-			return err
-		}
-	}
-}
-
-type msgHandler func(backend Backend, msg Decoder, peer *Peer) error
 type Decoder interface {
 	Decode(val interface{}) error
 	Time() time.Time
-}
-
-var eth66 = map[uint64]msgHandler{
-	// eth64 announcement messages (no id)
-	NewBlockHashesMsg: handleNewBlockhashes,
-	NewBlockMsg:       handleNewBlock,
-	TransactionsMsg:   handleTransactions,
-	// eth65 announcement messages (no id)
-	NewPooledTransactionHashesMsg: handleNewPooledTransactionHashes,
-	// eth66 messages with request-id
-	GetBlockHeadersMsg:       handleGetBlockHeaders66,
-	BlockHeadersMsg:          handleBlockHeaders66,
-	GetBlockBodiesMsg:        handleGetBlockBodies66,
-	BlockBodiesMsg:           handleBlockBodies66,
-	GetNodeDataMsg:           handleGetNodeData66,
-	NodeDataMsg:              handleNodeData66,
-	GetReceiptsMsg:           handleGetReceipts66,
-	ReceiptsMsg:              handleReceipts66,
-	GetPooledTransactionsMsg: handleGetPooledTransactions66,
-	PooledTransactionsMsg:    handlePooledTransactions66,
-}
-
-// handleMessage is invoked whenever an inbound message is received from a remote
-// peer. The remote connection is torn down upon returning any error.
-func handleMessage(backend Backend, peer *Peer) error {
-	// Read the next message from the remote peer, and ensure it's fully consumed
-	msg, err := peer.rw.ReadMsg()
-	if err != nil {
-		return err
-	}
-	if msg.Size > maxMessageSize {
-		return fmt.Errorf("%w: %v > %v", errMsgTooLarge, msg.Size, maxMessageSize)
-	}
-	defer msg.Discard()
-
-	handlers := eth66
-
-	if handler := handlers[msg.Code]; handler != nil {
-		return handler(backend, msg, peer)
-	}
-	return fmt.Errorf("%w: %v", errInvalidMsgCode, msg.Code)
 }

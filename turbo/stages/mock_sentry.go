@@ -258,10 +258,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			panic(err)
 		}
 	}
+	blockReader := snapshotsync.NewBlockReader()
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.downloader, err = sentry.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow)
+	mock.downloader, err = sentry.NewControlServer(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow, blockReader)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -270,7 +271,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 	}
 
-	blockReader := snapshotsync.NewBlockReader()
 	var allSnapshots *snapshotsync.AllSnapshots
 	var snapshotsDownloader proto_downloader.DownloaderClient
 	mock.Sync = stagedsync.New(

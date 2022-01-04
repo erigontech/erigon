@@ -27,7 +27,7 @@ type RawTxGenerator struct {
 	privateKey string
 }
 
-func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, writer io.Writer) error {
+func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, salt []byte, writer io.Writer) error {
 	privateKey, err := crypto.HexToECDSA(g.privateKey)
 	if err != nil {
 		return ErrInvalidPrivateKey
@@ -47,6 +47,7 @@ func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, 
 			Value: uint256.NewInt(1),
 			Gas:   1,
 			Data:  enc,
+			Salt:  salt,
 		},
 	}
 

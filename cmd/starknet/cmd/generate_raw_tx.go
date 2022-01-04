@@ -12,7 +12,9 @@ import (
 
 type Flags struct {
 	Contract   string
+	Salt       string
 	PrivateKey string
+	Datadir    string
 	Output     string
 }
 
@@ -27,17 +29,22 @@ func init() {
 	generateRawTxCmd.Flags().StringVarP(&flags.Contract, "contract", "c", "", "Path to compiled cairo contract in JSON format")
 	generateRawTxCmd.MarkFlagRequired("contract")
 
+	generateRawTxCmd.Flags().StringVarP(&flags.Salt, "salt", "s", "", "Cairo contract address salt")
+	generateRawTxCmd.MarkFlagRequired("salt")
+
 	generateRawTxCmd.Flags().StringVarP(&flags.PrivateKey, "private_key", "k", "", "Private key")
 	generateRawTxCmd.MarkFlagRequired("private_key")
 
-	generateRawTxCmd.Flags().StringVarP(&flags.Output, "output", "o", "", "Path to file where sign transaction will be saved")
+	rootCmd.PersistentFlags().StringVar(&flags.Datadir, "datadir", "", "path to Erigon working directory")
+
+	generateRawTxCmd.Flags().StringVarP(&flags.Output, "output", "o", "", "Path to file where sign transaction will be saved. Print to stdout if empty.")
 
 	generateRawTxCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		rawTxGenerator := services.NewRawTxGenerator(flags.PrivateKey)
 
 		fs := os.DirFS("/")
 		buf := bytes.NewBuffer(nil)
-		err := rawTxGenerator.CreateFromFS(fs, strings.Trim(flags.Contract, "/"), buf)
+		err := rawTxGenerator.CreateFromFS(fs, strings.Trim(flags.Contract, "/"), []byte(flags.Salt), buf)
 		if err != nil {
 			return err
 		}
