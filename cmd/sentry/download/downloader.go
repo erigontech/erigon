@@ -515,9 +515,12 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 		return fmt.Errorf("decode 3 NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
-	var request eth.NewBlockPacket
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+	request := &eth.NewBlockPacket{}
+	if err := rlp.DecodeBytes(inreq.Data, request); err != nil {
 		return fmt.Errorf("decode 4 NewBlockMsg: %w", err)
+	}
+	if err := request.SanityCheck(); err != nil {
+		return fmt.Errorf("newBlock66: %w", err)
 	}
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
