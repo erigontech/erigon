@@ -404,7 +404,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			parent.UncleHash(),
 			parent.Header().Seal,
 		),
-		GasLimit: CalcGasLimit(parent.GasUsed(), parent.GasLimit(), parent.GasLimit(), parent.GasLimit()),
+		GasLimit: CalcGasLimit(parent.GasLimit(), parent.GasLimit()),
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}
@@ -413,6 +413,10 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 	if chain.Config().IsLondon(header.Number.Uint64()) {
 		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
 		header.Eip1559 = true
+		if !chain.Config().IsLondon(parent.NumberU64()) {
+			parentGasLimit := parent.GasLimit() * params.ElasticityMultiplier
+			header.GasLimit = CalcGasLimit(parentGasLimit, parentGasLimit)
+		}
 	}
 	header.WithSeal = chain.Config().IsHeaderWithSeal()
 
