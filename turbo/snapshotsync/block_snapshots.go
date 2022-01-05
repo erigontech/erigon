@@ -721,7 +721,14 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 	slot := txpool.TxSlot{}
 	var sender [20]byte
 	var j uint64
-	if err := Idx(segmentFileName, firstTxID, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	d, err := compress.NewDecompressor(segmentFileName)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	total := uint64(d.Count())
+
+	if err := Idx(d, firstTxID, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:]); err != nil {
 			return err
 		}
@@ -732,7 +739,7 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("[Snapshots] TransactionsHashIdx", "millions", i/1_000_000)
+			log.Info(fmt.Sprintf("[Snapshots Indexing] TransactionsHashIdx: %s", percent(i, total)))
 		}
 		j++
 		return nil
@@ -749,7 +756,15 @@ func TransactionsHashIdx(chainID uint256.Int, firstTxID uint64, segmentFileName 
 func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
-	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+
+	d, err := compress.NewDecompressor(segmentFileName)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	total := uint64(d.Count())
+
+	if err := Idx(d, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
 			return err
@@ -762,7 +777,7 @@ func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("[Snapshots] HeadersHashIdx", "block num", h.Number.Uint64())
+			log.Info(fmt.Sprintf("[Snapshots Indexing] HeadersHashIdx: %s", percent(i, total)))
 		}
 		return nil
 	}); err != nil {
@@ -775,7 +790,15 @@ func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	num := make([]byte, 8)
-	if err := Idx(segmentFileName, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+
+	d, err := compress.NewDecompressor(segmentFileName)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	total := uint64(d.Count())
+
+	if err := Idx(d, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
@@ -784,7 +807,7 @@ func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info("[Snapshots] BodyNumberIdx", "millions", i/1_000_000)
+			log.Info(fmt.Sprintf("[Snapshots Indexing] BodyNumberIdx: %s", percent(i, total)))
 		}
 		return nil
 	}); err != nil {
@@ -794,17 +817,10 @@ func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 }
 
 // Idx - iterate over segment and building .idx file
-func Idx(segmentFileName string, firstDataID uint64, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func Idx(d *compress.Decompressor, firstDataID uint64, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+	segmentFileName := d.FilePath()
 	var extension = filepath.Ext(segmentFileName)
 	var idxFileName = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
-
-	d, err := compress.NewDecompressor(segmentFileName)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -832,11 +848,6 @@ RETRY:
 		}
 		wc++
 		pos = nextPos
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
-		}
 	}
 
 	if err = rs.Build(); err != nil {
@@ -931,4 +942,8 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		return e
 	}
 	return nil
+}
+
+func percent(progress, total uint64) string {
+	return fmt.Sprintf("%.2f%%", float32(100*(float64(progress)/float64(total))))
 }

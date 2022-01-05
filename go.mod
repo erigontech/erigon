@@ -8,7 +8,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.18.1
 	github.com/anacrolix/go-libutp v1.1.0
 	github.com/anacrolix/log v0.10.0
-	github.com/anacrolix/torrent v1.39.1
+	github.com/anacrolix/torrent v1.40.0
 	github.com/btcsuite/btcd v0.21.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/consensys/gnark-crypto v0.4.0
@@ -21,7 +21,7 @@ require (
 	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.12.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
-	github.com/flanglet/kanzi-go v1.9.0
+	github.com/flanglet/kanzi-go v1.9.1-0.20211212184056-72dda96261ee
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
 	github.com/gofrs/flock v0.8.1
@@ -45,8 +45,8 @@ require (
 	github.com/pelletier/go-toml v1.9.3
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.4
 	github.com/quasilyte/go-ruleguard/dsl v0.3.6
-	github.com/rs/cors v1.8.0
-	github.com/shirou/gopsutil/v3 v3.21.11
+	github.com/rs/cors v1.8.2
+	github.com/shirou/gopsutil/v3 v3.21.12
 	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.1-0.20210427113832-6241f9ab9942
