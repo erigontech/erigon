@@ -105,10 +105,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	defer func() {
 		rwTx.Rollback()
 	}()
-	var tx kv.Tx
-	defer func() {
-		tx.Rollback()
-	}()
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
@@ -123,9 +119,18 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
+	if err = w.Finish(); err != nil {
+		return err
+	}
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
+	var tx kv.Tx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
 	for !interrupt {
 		block++
 		if block >= blockNum {
