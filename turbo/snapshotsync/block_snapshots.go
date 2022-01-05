@@ -803,8 +803,6 @@ func Idx(segmentFileName string, firstDataID uint64, walker func(idx *recsplit.R
 		return err
 	}
 	defer d.Close()
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -832,11 +830,6 @@ RETRY:
 		}
 		wc++
 		pos = nextPos
-		select {
-		default:
-		case <-logEvery.C:
-			log.Info("[Filling recsplit] Processed", "millions", wc/1_000_000)
-		}
 	}
 
 	if err = rs.Build(); err != nil {
