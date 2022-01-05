@@ -27,15 +27,16 @@ type Client struct {
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadLimit, uploadLimit datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(downloadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(uploadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
 
 	// debug
 	if lg.Debug == verbosity {

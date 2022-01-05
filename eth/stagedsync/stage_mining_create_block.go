@@ -193,7 +193,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
+		GasLimit:   core.CalcGasLimit(parent.GasLimit, cfg.miner.MiningConfig.GasLimit),
 		Extra:      cfg.miner.MiningConfig.ExtraData,
 		Time:       uint64(timestamp),
 	}
@@ -204,7 +204,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
 		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
 			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
-			header.GasLimit = core.CalcGasLimit(parent.GasUsed, parentGasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil)
+			header.GasLimit = core.CalcGasLimit(parentGasLimit, cfg.miner.MiningConfig.GasLimit)
 		}
 	}
 	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)

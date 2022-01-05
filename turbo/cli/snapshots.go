@@ -26,38 +26,37 @@ const ASSERT = false
 
 var snapshotCommand = cli.Command{
 	Name:        "snapshots",
-	Description: `Manage snapshots`,
+	Description: `Managing snapshots (historical data partitions)`,
 	Subcommands: []cli.Command{
 		{
 			Name:   "create",
 			Action: doSnapshotCommand,
+			Usage:  "Create snapshots for given range of blocks",
 			Flags: []cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
 			},
-			Description: `Create snapshots`,
 		},
 	},
 }
 
 var (
 	SnapshotFromFlag = cli.Uint64Flag{
-		Name:     "from",
-		Usage:    "From block number",
-		Required: true,
+		Name:  "from",
+		Usage: "From block number",
+		Value: 0,
 	}
 	SnapshotToFlag = cli.Uint64Flag{
-		Name:     "to",
-		Usage:    "To block number. Zero - means unlimited.",
-		Required: true,
+		Name:  "to",
+		Usage: "To block number. Zero - means unlimited.",
+		Value: 0,
 	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
-		Name:     "segment.size",
-		Usage:    "Amount of blocks in each segment",
-		Value:    500_000,
-		Required: true,
+		Name:  "segment.size",
+		Usage: "Amount of blocks in each segment",
+		Value: 500_000,
 	}
 )
 
@@ -71,7 +70,7 @@ func doSnapshotCommand(ctx *cli.Context) error {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
 
-	chainDB := mdbx.MustOpen(path.Join(dataDir, "chaindata"))
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(chainDB, fromBlock, toBlock, segmentSize, snapshotDir); err != nil {
