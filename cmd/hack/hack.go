@@ -2351,6 +2351,15 @@ func devTx(chaindata string) error {
 	return nil
 }
 
+func mainnetGenesis() error {
+	g := core.DefaultGenesisBlock()
+	_, _, err := g.ToBlock()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -2520,6 +2529,8 @@ func main() {
 		err = decompress(*name)
 	case "genstate":
 		err = genstate()
+	case "mainnetGenesis":
+		err = mainnetGenesis()
 	}
 
 	if err != nil {
