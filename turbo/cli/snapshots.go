@@ -70,7 +70,7 @@ func doSnapshotCommand(ctx *cli.Context) error {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
 
-	chainDB := mdbx.MustOpen(path.Join(dataDir, "chaindata"))
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(chainDB, fromBlock, toBlock, segmentSize, snapshotDir); err != nil {
