@@ -10,6 +10,7 @@ import (
 	"runtime"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -17,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/parallelcompress"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
@@ -132,7 +132,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Bodies", fileName, segmentFile, workers); err != nil {
+		if err := compress.Compress("Bodies", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -143,7 +143,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Headers", fileName, segmentFile, workers); err != nil {
+		if err := compress.Compress("Headers", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -155,7 +155,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Transactions", fileName, segmentFile, workers); err != nil {
+		if err := compress.Compress("Transactions", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
