@@ -97,8 +97,6 @@ func NewAllSnapshots(dir string, cfg *snapshothashes.Config) *AllSnapshots {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		panic(err)
 	}
-	fmt.Printf("alex: %d, %d\n", cfg.ExpectBlocks, len(cfg.Preverified))
-	panic(1)
 	return &AllSnapshots{dir: dir, cfg: cfg}
 }
 
