@@ -812,8 +812,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	// Fill kv.HeaderTD table from snapshots
-	c, _ := tx.Cursor(kv.HeaderTD)
-	count, _ := c.Count()
+	c, err := tx.Cursor(kv.HeaderTD)
+	if err != nil {
+		return err
+	}
+	count, err := c.Count()
+	if err != nil {
+		return err
+	}
 	if count == 0 || count == 1 { // genesis does write 1 record
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
@@ -839,21 +845,23 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 
-		// Fill kv.HeaderCanonical table from snapshots
-		tx.ClearBucket(kv.HeaderCanonical)
-		if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
-			return err
-		}
+		if lastHeader != nil {
+			// Fill kv.HeaderCanonical table from snapshots
+			tx.ClearBucket(kv.HeaderCanonical)
+			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+				return err
+			}
 
-		sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
-		if !ok {
-			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
-		}
+			sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+			if !ok {
+				return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+			}
 
-		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
-		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-			return err
+			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+			lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				return err
+			}
 		}
 	}
 
