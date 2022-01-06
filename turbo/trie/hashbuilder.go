@@ -414,6 +414,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		}
 		ni += 2
 	}
+	capture := common.CopyBytes(branchHash[:common.HashLength+1])
 	if _, err := hb.sha.Write(branchHash[:common.HashLength+1]); err != nil {
 		return err
 	}
@@ -422,7 +423,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		return err
 	}
 	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
-	fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, branchHash[:common.HashLength+1], hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
+	fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
 		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
 	}
