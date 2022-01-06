@@ -27,6 +27,7 @@ import (
 type PayloadStatus string
 
 const (
+	Success PayloadStatus = "SUCCESS"
 	Syncing PayloadStatus = "SYNCING"
 	Valid   PayloadStatus = "VALID"
 	Invalid PayloadStatus = "INVALID"
@@ -329,6 +330,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 		//req.forkchoice.HeadBlockHash
 		s.unwindForkChoicePOSCh <- parentHash
+
+		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+			return &remote.EngineForkChoiceUpdatedReply{
+				Status: string(Success),
+			}, nil
+		}
 
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
