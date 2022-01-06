@@ -28,7 +28,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -191,7 +190,7 @@ type Config struct {
 	WithoutHeimdall bool
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, dataDir string) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -232,7 +231,8 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 
 	case *params.BorConfig:
 		if chainConfig.Bor != nil {
-			eng = bor.New(chainConfig, db.OpenDatabase(path.Join(paths.DefaultDataDir()+"bor"), logger, true), HeimdallURL, WithoutHeimdall)
+			borDbPath := path.Join(dataDir, "bor") // bor consensus path: datadir/bor
+			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
 		}
 	}
 

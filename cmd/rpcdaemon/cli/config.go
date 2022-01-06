@@ -215,25 +215,37 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, stateCache kvcache.Cache, blockReader interfaces.BlockReader, err error) {
+func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, stateCache kvcache.Cache, blockReader interfaces.BlockReader, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
 
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.SingleNodeMode {
 		var rwKv kv.RwDB
+		log.Trace("Creating chain db", "path", cfg.Chaindata)
 		rwKv, err = kv2.NewMDBX(logger).Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, err
 		}
 		if compatErr := checkDbCompatibility(ctx, rwKv); compatErr != nil {
-			return nil, nil, nil, nil, nil, nil, compatErr
+			return nil, nil, nil, nil, nil, nil, nil, compatErr
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
 		blockReader = snapshotsync.NewBlockReader()
+
+		// bor (consensus) specific db
+		var borKv kv.RoDB
+		borDbPath := path.Join(cfg.Datadir, "bor")
+		log.Trace("Creating consensus db", "path", borDbPath)
+		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Readonly().Open()
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, err
+		}
+		// Skip the compatibility check, until we have a schema in erigon-lib
+		borDb = borKv
 	} else {
 		if cfg.StateCache.KeysLimit > 0 {
 			stateCache = kvcache.New(cfg.StateCache)
@@ -244,22 +256,22 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	}
 
 	if cfg.PrivateApiAddr == "" {
-		return db, eth, txPool, mining, stateCache, blockReader, nil
+		return db, borDb, eth, txPool, mining, stateCache, blockReader, nil
 	}
 
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("open tls cert: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open tls cert: %w", err)
 	}
 	conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
 
 	kvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
@@ -271,7 +283,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	if cfg.TxPoolV2 {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
 	mining = services.NewMiningService(txpoolConn)
@@ -294,7 +306,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			rootCancel()
 		}
 	}()
-	return db, eth, txPool, mining, stateCache, blockReader, err
+	return db, borDb, eth, txPool, mining, stateCache, blockReader, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

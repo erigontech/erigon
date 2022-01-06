@@ -1061,9 +1061,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	engine = ethash.NewFaker()
 	switch chain {
 	case params.SokolChainName, params.KovanChainName:
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false, "", true)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false, "", true, datadir)
 	case params.MumbaiChainName, params.BorMainnetChainName:
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, chainConfig.Bor, nil, false, HeimdallURL, false)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, chainConfig.Bor, nil, false, HeimdallURL, false, datadir)
 	}
 
 	events := privateapi.NewEvents()
