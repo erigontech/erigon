@@ -348,6 +348,7 @@ var (
 	}
 
 	MumbaiChainConfig = &ChainConfig{
+		ChainName:           MumbaiChainName,
 		ChainID:             big.NewInt(80001),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -389,6 +390,7 @@ var (
 	}
 
 	BorMainnetChainConfig = &ChainConfig{
+		ChainName:           BorMainnetChainName,
 		ChainID:             big.NewInt(137),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
