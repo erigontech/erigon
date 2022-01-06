@@ -324,7 +324,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, err
 	}
 
-	if parentHash != rawdb.ReadHeadHeaderHash(tx){
+	if parentHash != rawdb.ReadHeadHeaderHash(tx) {
 		// TODO(enriavil1): make unwind happen
 
 		//req.forkchoice.HeadBlockHash

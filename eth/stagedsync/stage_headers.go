@@ -141,20 +141,26 @@ func HeadersPOS(
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	var payloadMessage privateapi.PayloadMessage
+	var forkChoiceUpdateHash common.Hash
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Decide what kind of action we need to take place
 	select {
 	case payloadMessage = <-cfg.reverseDownloadCh:
-	case forkChoiceUpdateHash := <-cfg.unwindForkChoicePOSCh:
+	case forkChoiceUpdateHash = <-cfg.unwindForkChoicePOSCh:
+		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+		tx.Has(kv.HeaderNumber, hash[:])
 		forkChoiceUpdateHeader, err := rawdb.ReadHeaderByHash(tx, forkChoiceUpdateHash)
 
 		if err != nil {
+			cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
 			return err
 		}
 
 		forkChoiceHeaderNumber := forkChoiceUpdateHeader.Number.Uint64()
+
 		u.UnwindTo(forkChoiceHeaderNumber-1, common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
+
 		return nil
 	case <-cfg.hd.SkipCycleHack:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
