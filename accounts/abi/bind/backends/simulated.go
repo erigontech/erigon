@@ -266,7 +266,14 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if txn != nil {
 		return txn, true, nil
 	}
-	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash)
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	if err != nil {
+		return nil, false, err
+	}
+	if blockNumber == nil {
+		return nil, false, ethereum.NotFound
+	}
+	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash, *blockNumber)
 	if err != nil {
 		return nil, false, err
 	}

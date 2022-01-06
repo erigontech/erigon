@@ -26,7 +26,14 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	txn, blockHash, blockNumber, txIndex, err := rawdb.ReadTransaction(tx, hash)
+	blockNum, err := rawdb.ReadTxLookupEntry(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if blockNum == nil {
+		return nil, nil
+	}
+	txn, blockHash, blockNumber, txIndex, err := rawdb.ReadTransaction(tx, hash, *blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +88,14 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	defer tx.Rollback()
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
-	txn, _, _, _, err := rawdb.ReadTransaction(tx, hash)
+	blockNum, err := rawdb.ReadTxLookupEntry(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if blockNum == nil {
+		return nil, nil
+	}
+	txn, _, _, _, err := rawdb.ReadTransaction(tx, hash, *blockNum)
 	if err != nil {
 		return nil, err
 	}
