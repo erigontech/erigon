@@ -735,16 +735,18 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 	return nil
 }
 
-func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFileName string, expectedCount uint64, tmpDir string) error {
+func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	_, fileName := filepath.Split(segmentFilePath)
+
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
 	var sender [20]byte
 	var j uint64
 
-	d, err := compress.NewDecompressor(segmentFileName)
+	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
@@ -813,7 +815,7 @@ RETRY:
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[Snapshots Indexing] TransactionsHashIdx: %s", percent(i, total)))
+			log.Info(fmt.Sprintf("[Snapshots Indexing] TransactionsHashIdx: %s, %s", percent(i, total), fileName))
 		}
 		j++
 		return nil
@@ -847,11 +849,12 @@ RETRY:
 }
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
+func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
+	_, fileName := filepath.Split(segmentFilePath)
 
-	d, err := compress.NewDecompressor(segmentFileName)
+	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
@@ -871,7 +874,7 @@ func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[Snapshots Indexing] HeadersHashIdx: %s", percent(i, total)))
+			log.Info(fmt.Sprintf("[Snapshots Indexing] HeadersHashIdx: %s, %s", percent(i, total), fileName))
 		}
 		return nil
 	}); err != nil {
@@ -880,12 +883,13 @@ func HeadersHashIdx(segmentFileName string, firstBlockNumInSegment uint64) error
 	return nil
 }
 
-func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
+func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
+	_, fileName := filepath.Split(segmentFilePath)
 	num := make([]byte, 8)
 
-	d, err := compress.NewDecompressor(segmentFileName)
+	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
@@ -901,7 +905,7 @@ func BodiesIdx(segmentFileName string, firstBlockNumInSegment uint64) error {
 		select {
 		default:
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[Snapshots Indexing] BodyNumberIdx: %s", percent(i, total)))
+			log.Info(fmt.Sprintf("[Snapshots Indexing] BodyNumberIdx: %s, %s", percent(i, total), fileName))
 		}
 		return nil
 	}); err != nil {
