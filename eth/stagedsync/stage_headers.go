@@ -68,9 +68,6 @@ func StageHeadersCfg(
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
 ) HeadersCfg {
-	if blockReader == nil {
-		panic(1)
-	}
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
