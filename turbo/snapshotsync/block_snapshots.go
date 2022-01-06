@@ -782,7 +782,7 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 
 RETRY:
 	blockNum := firstBlockNum
-	var body *types.BodyForStorage
+	body := &types.BodyForStorage{}
 	bodyGetter := sn.Bodies.MakeGetter()
 	bodyGetter.Reset(0)
 	buf, _ = bodyGetter.Next(buf[:0])
