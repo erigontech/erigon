@@ -388,7 +388,7 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *ty
 	var err error
 	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
 	if err != nil {
-		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
 		return nil
 	}
 	return body
@@ -402,7 +402,7 @@ func NonCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uin
 	var err error
 	body.Transactions, err = NonCanonicalTransactions(db, baseTxId, txAmount)
 	if err != nil {
-		log.Error("failed ReadTransaction", "hash", hash, "block", number, "err", err)
+		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
 		return nil
 	}
 	return body

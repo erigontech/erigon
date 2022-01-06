@@ -74,6 +74,17 @@ func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Tx, hash co
 	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 }
 
+func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
+	if err != nil {
+		return 0, false, err
+	}
+	if n == nil {
+		return 0, false, nil
+	}
+	return *n, true, nil
+}
+
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
@@ -356,7 +367,7 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 	gg := sn.Headers.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
-	if hash[0] != buf[1] {
+	if hash[0] != buf[0] {
 		return nil, nil
 	}
 
@@ -412,4 +423,34 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 	body := new(types.Body)
 	body.Uncles = b.Uncles
 	return body, senders, b.BaseTxId, b.TxAmount, nil
+}
+
+func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
+	if err != nil {
+		return 0, false, err
+	}
+	if n != nil {
+		return *n, true, nil
+	}
+
+	buf := make([]byte, 16)
+	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
+		sn := back.sn.blocks[i]
+
+		localID := sn.TxnHashIdx.Lookup(txnHash[:])
+		offset := sn.TxnHashIdx.Lookup2(localID)
+		gg := sn.Transactions.MakeGetter()
+		gg.Reset(offset)
+		buf, _ = gg.Next(buf[:0])
+		if txnHash[0] != buf[0] {
+			continue
+		}
+
+		localID = sn.TxnHash2BlockNumIdx.Lookup(txnHash[:])
+		blockNum := sn.TxnHash2BlockNumIdx.Lookup2(localID)
+		return blockNum, true, nil
+	}
+
+	return 0, false, nil
 }
