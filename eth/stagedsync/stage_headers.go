@@ -148,17 +148,14 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 	case forkChoiceUpdateHash = <-cfg.unwindForkChoicePOSCh:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
-		tx.Has(kv.HeaderNumber, hash[:])
-		forkChoiceUpdateHeader, err := rawdb.ReadHeaderByHash(tx, forkChoiceUpdateHash)
+		forkChoiceHeaderNumber, err := rawdb.GetNumberByHash(tx, forkChoiceUpdateHash)
 
 		if err != nil {
 			cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
 			return err
 		}
 
-		forkChoiceHeaderNumber := forkChoiceUpdateHeader.Number.Uint64()
-
-		u.UnwindTo(forkChoiceHeaderNumber-1, common.Hash{})
+		u.UnwindTo(uint64(forkChoiceHeaderNumber-1), common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 
 		return nil

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -1228,4 +1229,20 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	}
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
+}
+
+func GetNumberByHash(tx kv.RwTx, hash common.Hash) (int64, error) {
+	val, err := tx.GetOne(kv.HeaderNumber, hash.Bytes())
+
+	if err != nil {
+		return -1, err
+	}
+
+	if len(val) <= 0 {
+		return -1, errors.New("hash is not in db")
+	}
+
+	number := int64(binary.BigEndian.Uint64(val))
+
+	return number, nil
 }
