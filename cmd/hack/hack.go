@@ -24,6 +24,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -1417,7 +1418,7 @@ func genstate() error {
 }
 
 func compress1(fileName, segmentFileName string) error {
-	return parallelcompress.Compress("hack", fileName, segmentFileName)
+	return compress.Compress("hack", fileName, segmentFileName, runtime.GOMAXPROCS(-1))
 }
 func decompress(name string) error {
 	return parallelcompress.Decompress("hack", name)
