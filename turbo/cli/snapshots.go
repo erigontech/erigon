@@ -11,6 +11,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -40,6 +41,14 @@ var snapshotCommand = cli.Command{
 				SnapshotSegmentSizeFlag,
 			},
 		},
+		{
+			Name:   "index",
+			Action: doIndicesCommand,
+			Usage:  "Create all indices for snapshots",
+			Flags: []cli.Flag{
+				utils.DataDirFlag,
+			},
+		},
 	},
 }
 
@@ -61,6 +70,22 @@ var (
 	}
 )
 
+func doIndicesCommand(cliCtx *cli.Context) error {
+	ctx, cancel := utils.RootContext()
+	defer cancel()
+
+	dataDir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir := path.Join(dataDir, "snapshots")
+	tmpDir := path.Join(dataDir, etl.TmpDirName)
+
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
+	defer chainDB.Close()
+
+	if err := rebuildIndices(ctx, chainDB, snapshotDir, tmpDir); err != nil {
+		log.Error("Error", "err", err)
+	}
+	return nil
+}
 func doSnapshotCommand(ctx *cli.Context) error {
 	fromBlock := ctx.Uint64(SnapshotFromFlag.Name)
 	toBlock := ctx.Uint64(SnapshotToFlag.Name)
@@ -76,6 +101,34 @@ func doSnapshotCommand(ctx *cli.Context) error {
 
 	if err := snapshotBlocks(chainDB, fromBlock, toBlock, segmentSize, snapshotDir); err != nil {
 		log.Error("Error", "err", err)
+	}
+	return nil
+}
+
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir string) error {
+	chainConfig := tool.ChainConfigFromDB(chainDB)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	_ = chainID
+	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
+
+	workers := runtime.NumCPU() - 1
+	if workers < 1 {
+		workers = 1
+	}
+
+	allSnapshots := snapshotsync.NewAllSnapshots(snapshotDir, snapshothashes.KnownConfig(chainConfig.ChainName))
+	if err := allSnapshots.ReopenSegments(); err != nil {
+		return err
+	}
+	idxFilesList, err := snapshotsync.IdxFilesList(snapshotDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range idxFilesList {
+		_ = os.Remove(f)
+	}
+	if err := allSnapshots.BuildIndices(ctx, *chainID, tmpDir); err != nil {
+		return err
 	}
 	return nil
 }

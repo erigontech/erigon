@@ -60,6 +60,7 @@ var (
 )
 
 var AllSnapshotTypes = []SnapshotType{Headers, Bodies, Transactions}
+var AllIdxTypes = []SnapshotType{Headers, Bodies, Transactions, Transactions2Block}
 
 var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
@@ -431,6 +432,18 @@ func segments(dir string, ofType SnapshotType) ([]string, error) {
 	sort.Strings(res)
 	return res, nil
 }
+
+func IdxFilesList(dir string) (res []string, err error) {
+	for _, t := range AllIdxTypes {
+		files, err := idxFiles(dir, t)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, files...)
+	}
+	return res, nil
+}
+
 func idxFiles(dir string, ofType SnapshotType) ([]string, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
