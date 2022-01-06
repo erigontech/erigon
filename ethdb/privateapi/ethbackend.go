@@ -91,11 +91,11 @@ type PayloadMessage struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- common.Hash, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
+		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, unwindForkChoicePOSCh: unwindForkChoicePOSCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
@@ -324,11 +324,10 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, err
 	}
 
-	if parentHash != rawdb.ReadHeadHeaderHash(tx) {
+	if parentHash != rawdb.ReadHeadHeaderHash(tx){
 		// TODO(enriavil1): make unwind happen
 
 		//req.forkchoice.HeadBlockHash
-
 		s.unwindForkChoicePOSCh <- parentHash
 
 		return &remote.EngineForkChoiceUpdatedReply{
