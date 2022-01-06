@@ -1117,6 +1117,24 @@ func (hd *HeaderDownload) Fetching() bool {
 	return hd.fetching
 }
 
+func (hd *HeaderDownload) GetPendingExecutionStatus() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingExecutionStatus
+}
+
+func (hd *HeaderDownload) SetPendingExecutionStatus(header common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingExecutionStatus = header
+}
+
+func (hd *HeaderDownload) ClearPendingExecutionStatus() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingExecutionStatus = common.Hash{}
+}
+
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	buf := bytes.NewBuffer(nil)
 	if err := header.EncodeRLP(buf); err != nil {

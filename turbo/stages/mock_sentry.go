@@ -277,7 +277,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
 			mock.DB,
 			mock.downloader.Hd,
-			make(chan privateapi.ExecutionStatus),
 			*mock.ChainConfig,
 			sendHeaderRequest,
 			propagateNewBlockHashes,
@@ -452,7 +451,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
