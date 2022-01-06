@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"runtime"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -118,6 +119,11 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
 
 	log.Info("Last body number", "last", last)
+	workers := runtime.NumCPU() - 1
+	if workers < 1 {
+		workers = 1
+	}
+
 	for i := fromBlock; i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
 
@@ -126,7 +132,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Bodies", fileName, segmentFile); err != nil {
+		if err := parallelcompress.Compress("Bodies", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -137,7 +143,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Headers", fileName, segmentFile); err != nil {
+		if err := parallelcompress.Compress("Headers", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -149,7 +155,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Transactions", fileName, segmentFile); err != nil {
+		if err := parallelcompress.Compress("Transactions", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
