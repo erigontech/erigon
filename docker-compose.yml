@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.30.2
+    image: prom/prometheus:v2.32.1
     user: 1000:1000 # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:8.2.2
+    image: grafana/grafana:8.3.3
     user: 1000:1000 # Uses erigon user from Dockerfile
     ports:
       - "3000:3000"
