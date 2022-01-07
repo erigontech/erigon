@@ -868,7 +868,7 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 	for !interrupt {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		tool.Check(err)
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNum)
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNum)
 
 		if body == nil {
 			break
@@ -1676,7 +1676,7 @@ func mint(chaindata string, block uint64) error {
 			fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 		}
 		prevBlock = blockNumber
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
 		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
 		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNumber)
 		if errSenders != nil {

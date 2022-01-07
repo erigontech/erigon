@@ -69,6 +69,13 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 // re-start downloader 
 ```
 
+### Re-create all .idx files
+
+```
+// Disk-read-intense
+erigon snapshots index --datadir=<your_datadir>
+```
+
 ## Known Issues
 
 - RPCDaemon with --datadir option need restart to make new segments available
