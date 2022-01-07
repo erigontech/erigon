@@ -1231,7 +1231,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
 
-func GetNumberByHash(tx kv.RwTx, hash common.Hash) (int64, error) {
+func ReadBlockhashNumber(tx kv.RwTx, hash common.Hash) (int64, error) {
 	val, err := tx.GetOne(kv.HeaderNumber, hash.Bytes())
 
 	if err != nil {
