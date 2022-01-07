@@ -467,43 +467,6 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 	return
 }
 
-/*
-// TxnByHashDeprecated - deprecated because it's too high-level method, we need more low-level methods now
-func (back *BlockReaderWithSnapshots) TxnByHashDeprecated(ctx context.Context, tx kv.Tx, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
-	txn, blockHash, blockNum, txnIndex, err = rawdb.ReadTransactionByHash(tx, txnHash)
-	if err != nil {
-		return
-	}
-	if txn != nil {
-		return
-	}
-
-	buf := make([]byte, 128)
-	txn, blockNum, txnID, err := back.txnByHash(txnHash, buf)
-	if err != nil {
-		return
-	}
-
-	sn, ok := back.sn.Blocks(blockNum)
-	if !ok {
-		return
-	}
-	_, blockBaseTxnID, txsAmount, err := back.bodyFromSnapshot(blockNum, sn, buf)
-	if err != nil {
-		return
-	}
-	txnIndex = blockBaseTxnID - txnID
-	if txnIndex > uint64(txsAmount) {
-		err = fmt.Errorf("TxnByHash: txnIndex > txsAmount: %d > %d", txnIndex, txsAmount)
-		return
-	}
-	header, err := back.headerFromSnapshot(blockNum, sn, buf)
-	if err != nil {
-		return
-	}
-	return txn, header.Hash(), blockNum, txnIndex, nil
-}
-
 // TxnLookup - find blockNumber and txnID by txnHash
 func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
@@ -514,38 +477,9 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 		return *n, true, nil
 	}
 
-	buf := make([]byte, 16)
-	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
-		sn := back.sn.blocks[i]
-
-		localID := sn.TxnHashIdx.Lookup(txnHash[:])
-		offset := sn.TxnHashIdx.Lookup2(localID)
-		gg := sn.Transactions.MakeGetter()
-		gg.Reset(offset)
-		buf, _ = gg.Next(buf[:0])
-		if txnHash[0] != buf[0] { // basic txnHash check - reducing false-positives
-			continue
-		}
-
-		localID = sn.TxnHash2BlockNumIdx.Lookup(txnHash[:])
-		blockNum := sn.TxnHash2BlockNumIdx.Lookup2(localID)
-
-		sender := buf[1 : 1+20]
-		txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
-		if err != nil {
-			return 0, false, err
-		}
-		txn.SetSender(common.BytesToAddress(sender))
-
-		// final txnHash check  - completely avoid false-positives
-		if txn.Hash() != txnHash {
-			return 0, false, nil
-		}
-
-		// localID + sn.TxnHashIdx.BaseDataID()
-		return blockNum, true, nil
+	txn, blockNum, _, err := back.txnByHash(txnHash, nil)
+	if txn == nil {
+		return 0, false, nil
 	}
-
-	return 0, false, nil
+	return blockNum, true, nil
 }
-*/
