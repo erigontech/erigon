@@ -31,7 +31,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		return nil, err
 	}
 
-	blockNumber, ok, err := api._blockReader.TxnLookup(ctx, tx, txHash)
+	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}

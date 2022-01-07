@@ -157,6 +157,9 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	return nil
 }
 
+func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	panic("not implemented yet")
+}
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }

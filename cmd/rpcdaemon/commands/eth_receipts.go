@@ -248,7 +248,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	blockNum, ok, err := api._blockReader.TxnLookup(ctx, tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}

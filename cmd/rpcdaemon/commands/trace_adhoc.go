@@ -696,7 +696,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	blockNum, ok, err := api._blockReader.TxnLookup(ctx, tx, txHash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}

@@ -29,7 +29,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	defer tx.Rollback()
 
 	// Retrieve the transaction and assemble its EVM context
-	blockNum, ok, err := api._blockReader.TxnLookup(ctx, tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return err
 	}

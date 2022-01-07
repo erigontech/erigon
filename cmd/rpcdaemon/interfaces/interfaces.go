@@ -41,7 +41,7 @@ type HeaderAndCanonicalReader interface {
 
 type BlockAndTxnReader interface {
 	BlockReader
-	HeaderReader
+	//HeaderReader
 	TxnReader
 }
 
