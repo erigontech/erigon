@@ -24,6 +24,7 @@ import (
 	"math"
 	"math/bits"
 	"os"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
@@ -493,7 +494,9 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build() error {
-	if err := os.MkdirAll(rs.indexFile, 0744); err != nil {
+	_, fileName := filepath.Split(rs.indexFile)
+	tmpIdxFilePath := filepath.Join(rs.tmpDir, fileName)
+	if err := os.MkdirAll(rs.tmpDir, 0744); err != nil {
 		return err
 	}
 
@@ -504,7 +507,7 @@ func (rs *RecSplit) Build() error {
 		return fmt.Errorf("expected keys %d, got %d", rs.keyExpectedCount, rs.keysAdded)
 	}
 	var err error
-	if rs.indexF, err = os.Create(rs.indexFile); err != nil {
+	if rs.indexF, err = os.Create(tmpIdxFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
 	defer rs.indexF.Sync()
@@ -615,6 +618,14 @@ func (rs *RecSplit) Build() error {
 	// Write out elias fano
 	if err := rs.ef.Write(rs.indexW); err != nil {
 		return fmt.Errorf("writing elias fano: %w", err)
+	}
+
+	_ = rs.indexW.Flush()
+	_ = rs.indexF.Sync()
+	_ = rs.indexF.Close()
+	_ = os.MkdirAll(rs.indexFile, 0744)
+	if err := os.Rename(tmpIdxFilePath, rs.indexFile); err != nil {
+		return err
 	}
 	return nil
 }
