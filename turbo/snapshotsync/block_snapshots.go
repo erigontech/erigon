@@ -738,7 +738,7 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	_, fileName := filepath.Split(segmentFilePath)
+	dir, fileName := filepath.Split(segmentFilePath)
 
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
@@ -755,6 +755,8 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 
 	buf := make([]byte, 1024)
 
+	tmpPath1 := path.Join(tmpDir, IdxFileName(sn.From, sn.To, Transactions))
+	finalPath1 := path.Join(dir, IdxFileName(sn.From, sn.To, Transactions))
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
 		Enums:      true,
@@ -762,12 +764,14 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  IdxFileName(sn.From, sn.To, Transactions),
+		IndexFile:  tmpPath1,
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
 		return err
 	}
+	tmpPath2 := path.Join(tmpDir, IdxFileName(sn.From, sn.To, Transactions2Block))
+	finalPath2 := path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block))
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
 		Enums:      true,
@@ -775,7 +779,7 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  IdxFileName(sn.From, sn.To, Transactions2Block),
+		IndexFile:  tmpPath2,
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
@@ -844,6 +848,14 @@ RETRY:
 
 	if j != expectedCount {
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
+	}
+
+	//move from tmp dir - when no errors
+	if err = os.Rename(tmpPath1, finalPath1); err != nil {
+		return err
+	}
+	if err = os.Rename(tmpPath2, finalPath2); err != nil {
+		return err
 	}
 	return nil
 }

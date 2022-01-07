@@ -89,7 +89,7 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blocknum)
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
 		}

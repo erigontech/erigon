@@ -246,7 +246,7 @@ func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db kv.Tx, hash common.Hash, number uint64) rlp.RawValue {
-	body := ReadBodyWithTransactions(db, hash, number)
+	body := ReadCanonicalBodyWithTransactions(db, hash, number)
 	bodyRlp, err := rlp.EncodeToBytes(body)
 	if err != nil {
 		log.Error("ReadBodyRLP failed", "err", err)
@@ -368,6 +368,7 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
+// ReadBodyByNumber - returns canonical block body
 func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, error) {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {
@@ -380,13 +381,38 @@ func ReadBodyByNumber(db kv.Tx, number uint64) (*types.Body, uint64, uint32, err
 	return body, baseTxId, txAmount, nil
 }
 
-func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*types.Body, error) {
+	canonicalHash, err := ReadCanonicalHash(db, number)
+	if err != nil {
+		return nil, fmt.Errorf("read canonical hash failed: %d, %w", number, err)
+	}
+	if canonicalHash == hash {
+		return ReadCanonicalBodyWithTransactions(db, hash, number), nil
+	}
+	return ReadNonCanonicalBodyWithTransactions(db, hash, number), nil
+}
+
+func ReadCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
 	body, baseTxId, txAmount := ReadBody(db, hash, number)
 	if body == nil {
 		return nil
 	}
 	var err error
 	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
+	if err != nil {
+		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+	return body
+}
+
+func ReadNonCanonicalBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+	body, baseTxId, txAmount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil
+	}
+	var err error
+	body.Transactions, err = NonCanonicalTransactions(db, baseTxId, txAmount)
 	if err != nil {
 		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
 		return nil
@@ -936,7 +962,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if header == nil {
 		return nil
 	}
-	body := ReadBodyWithTransactions(tx, hash, number)
+	body := ReadCanonicalBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil
 	}
@@ -948,7 +974,7 @@ func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64)
 	if header == nil {
 		return nil, nil, fmt.Errorf("header not found for block %d, %x", number, hash)
 	}
-	body := ReadBodyWithTransactions(tx, hash, number)
+	body := ReadCanonicalBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil, nil, fmt.Errorf("body not found for block %d, %x", number, hash)
 	}
