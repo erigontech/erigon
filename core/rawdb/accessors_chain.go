@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -1238,8 +1237,8 @@ func ReadBlockHashNumber(tx kv.RwTx, hash common.Hash) (int64, error) {
 		return -1, err
 	}
 
-	if len(val) <= 0 {
-		return -1, errors.New("number not found in db")
+	if len(val) == 0 {
+		return -1, nil
 	}
 
 	number := int64(binary.BigEndian.Uint64(val))
