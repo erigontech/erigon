@@ -997,7 +997,7 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 	return len(body) > 0
 }
 
-func ReadBlockWithSenders(db kv.Tx, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
+func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
 	block := ReadBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
