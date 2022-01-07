@@ -105,7 +105,14 @@ func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 }
 
 func (back *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	panic("not implemented yet")
+	reply, err := back.client.TxnLookup(ctx, &remote.TxnLookupRequest{TxnHash: gointerfaces.ConvertHashToH256(txnHash)})
+	if err != nil {
+		return 0, false, err
+	}
+	if reply == nil {
+		return 0, false, nil
+	}
+	return reply.BlockNumber, true, nil
 }
 
 func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
