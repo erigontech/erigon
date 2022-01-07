@@ -84,6 +84,12 @@ func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash co
 	}
 	return *n, true, nil
 }
+func (back *BlockReader) TxnByHashDeprecated(ctx context.Context, tx kv.Tx, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
+	return rawdb.ReadTransactionByHash(tx, txnHash)
+}
+func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+}
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient

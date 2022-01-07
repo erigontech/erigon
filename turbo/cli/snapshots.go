@@ -111,11 +111,6 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir st
 	_ = chainID
 	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
 
-	workers := runtime.NumCPU() - 1
-	if workers < 1 {
-		workers = 1
-	}
-
 	allSnapshots := snapshotsync.NewAllSnapshots(snapshotDir, snapshothashes.KnownConfig(chainConfig.ChainName))
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err

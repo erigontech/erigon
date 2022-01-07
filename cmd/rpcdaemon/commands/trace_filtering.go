@@ -31,21 +31,28 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		return nil, err
 	}
 
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, ok, err := api._blockReader.TxnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
-	if blockNumber == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+	if !ok {
+		return nil, nil
+	}
+	block, err := api.blockByNumberWithSenders(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
 	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
+		return nil, fmt.Errorf("could not find block  %d", blockNumber)
 	}
 	var txIndex int
 	for idx, txn := range block.Transactions() {
@@ -54,7 +61,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 			break
 		}
 	}
-	bn := hexutil.Uint64(*blockNumber)
+	bn := hexutil.Uint64(blockNumber)
 
 	parentNr := bn
 	if parentNr > 0 {
@@ -63,7 +70,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, blockNumber))
 	if err != nil {
 		return nil, err
 	}
