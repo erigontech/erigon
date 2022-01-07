@@ -155,6 +155,11 @@ func HeadersPOS(
 			return err
 		}
 
+		if forkChoiceHeaderNumber == -1 {
+			cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Success}
+			return nil
+		}
+
 		u.UnwindTo(uint64(forkChoiceHeaderNumber-1), common.Hash{})
 		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 
