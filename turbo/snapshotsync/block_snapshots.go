@@ -306,12 +306,12 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		if err := HeadersHashIdx(f, sn.From); err != nil {
+		if err := HeadersHashIdx(f, sn.From, tmpDir); err != nil {
 			return err
 		}
 
 		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		if err := BodiesIdx(f, sn.From); err != nil {
+		if err := BodiesIdx(f, sn.From, tmpDir); err != nil {
 			return err
 		}
 	}
@@ -738,7 +738,7 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	_, fileName := filepath.Split(segmentFilePath)
+	dir, fileName := filepath.Split(segmentFilePath)
 
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
@@ -762,7 +762,7 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  IdxFileName(sn.From, sn.To, Transactions),
+		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions)),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
@@ -775,7 +775,7 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  IdxFileName(sn.From, sn.To, Transactions2Block),
+		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
@@ -845,11 +845,12 @@ RETRY:
 	if j != expectedCount {
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 	}
+
 	return nil
 }
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
+func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	_, fileName := filepath.Split(segmentFilePath)
@@ -861,7 +862,7 @@ func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error
 	defer d.Close()
 	total := uint64(d.Count())
 
-	if err := Idx(d, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
 			return err
@@ -883,7 +884,7 @@ func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error
 	return nil
 }
 
-func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
+func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	_, fileName := filepath.Split(segmentFilePath)
@@ -896,7 +897,7 @@ func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
 	defer d.Close()
 	total := uint64(d.Count())
 
-	if err := Idx(d, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
@@ -931,10 +932,10 @@ func forEach(d *compress.Decompressor, walker func(i, offset uint64, word []byte
 }
 
 // Idx - iterate over segment and building .idx file
-func Idx(d *compress.Decompressor, firstDataID uint64, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	segmentFileName := d.FilePath()
 	var extension = filepath.Ext(segmentFileName)
-	var idxFileName = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
+	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -942,8 +943,8 @@ func Idx(d *compress.Decompressor, firstDataID uint64, walker func(idx *recsplit
 		BucketSize: 2000,
 		Salt:       0,
 		LeafSize:   8,
-		TmpDir:     "",
-		IndexFile:  idxFileName,
+		TmpDir:     tmpDir,
+		IndexFile:  idxFilePath,
 		BaseDataID: firstDataID,
 	})
 	if err != nil {

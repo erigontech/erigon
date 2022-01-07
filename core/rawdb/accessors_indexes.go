@@ -80,7 +80,7 @@ func ReadTransactionByHash(db kv.Tx, hash common.Hash) (types.Transaction, commo
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	body := ReadBodyWithTransactions(db, blockHash, *blockNumber)
+	body := ReadCanonicalBodyWithTransactions(db, blockHash, *blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, nil
@@ -109,7 +109,7 @@ func ReadTransaction(db kv.Tx, hash common.Hash, blockNumber uint64) (types.Tran
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	body := ReadBodyWithTransactions(db, blockHash, blockNumber)
+	body := ReadCanonicalBodyWithTransactions(db, blockHash, blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, nil

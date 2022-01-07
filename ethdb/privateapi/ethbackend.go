@@ -48,7 +48,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RoDB
-	blockReader interfaces.BlockReader
+	blockReader interfaces.BlockAndTxnReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
@@ -88,7 +88,7 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
@@ -181,6 +181,23 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.Protocol
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVersionRequest) (*remote.ClientVersionReply, error) {
 	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
+}
+
+func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, ok, err := s.blockReader.TxnLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &remote.TxnLookupReply{BlockNumber: blockNum}, nil
 }
 
 func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) (*remote.BlockReply, error) {
