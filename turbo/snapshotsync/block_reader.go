@@ -37,6 +37,10 @@ func (back *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Has
 	return body, nil
 }
 
+func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+}
+
 func (back *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := back.Body(ctx, tx, hash, blockHeight)
 	if err != nil {
@@ -85,10 +89,10 @@ func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash co
 	return *n, true, nil
 }
 
-//func (back *BlockReader) TxnByHashDeprecated(ctx context.Context, tx kv.Tx, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
+//func (back *BlockReader) TxnByHashDeprecated(ctx context.Context, tx kv.Getter, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
 //	return rawdb.ReadTransactionByHash(tx, txnHash)
 //}
-//func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+//func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 //	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
 //}
 
@@ -98,6 +102,10 @@ type RemoteBlockReader struct {
 
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
+}
+
+func (back *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	panic("not implemented yet")
 }
 
 func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {

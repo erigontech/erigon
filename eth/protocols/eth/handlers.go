@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader interfaces.FullBlockReader) ([]*types.Header, error) {
+func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader interfaces.HeaderAndCanonicalReader) ([]*types.Header, error) {
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)

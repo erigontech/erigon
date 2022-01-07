@@ -1114,7 +1114,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
-func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64, blockReader interfaces.FullBlockReader) (common.Hash, uint64) {
+func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64, blockReader interfaces.HeaderAndCanonicalReader) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}

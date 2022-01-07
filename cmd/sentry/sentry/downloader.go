@@ -339,10 +339,10 @@ type ControlServerImpl struct {
 	networkId   uint64
 	db          kv.RwDB
 	Engine      consensus.Engine
-	blockReader interfaces.FullBlockReader
+	blockReader interfaces.HeaderAndCanonicalReader
 }
 
-func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient, window int, blockReader interfaces.FullBlockReader) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient, window int, blockReader interfaces.HeaderAndCanonicalReader) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
