@@ -84,12 +84,13 @@ func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash co
 	}
 	return *n, true, nil
 }
-func (back *BlockReader) TxnByHashDeprecated(ctx context.Context, tx kv.Tx, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
-	return rawdb.ReadTransactionByHash(tx, txnHash)
-}
-func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
-}
+
+//func (back *BlockReader) TxnByHashDeprecated(ctx context.Context, tx kv.Tx, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
+//	return rawdb.ReadTransactionByHash(tx, txnHash)
+//}
+//func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+//	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+//}
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
@@ -259,6 +260,20 @@ func (back *BlockReaderWithSnapshots) BodyRlp(ctx context.Context, tx kv.Tx, has
 	return bodyRlp, nil
 }
 
+func (back *BlockReaderWithSnapshots) Body(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+	sn, ok := back.sn.Blocks(blockHeight)
+	if !ok {
+		body, _, _ := rawdb.ReadBody(tx, hash, blockHeight)
+		return body, nil
+	}
+
+	body, _, _, err = back.bodyFromSnapshot(blockHeight, sn, nil)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	sn, ok := back.sn.Blocks(blockHeight)
 	if !ok {
@@ -391,29 +406,19 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 }
 
 func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeight uint64, sn *BlocksSnapshot, buf []byte) (*types.Body, []common.Address, uint64, uint32, error) {
-	bodyOffset := sn.BodyNumberIdx.Lookup2(blockHeight - sn.BodyNumberIdx.BaseDataID())
-
-	gg := sn.Bodies.MakeGetter()
-	gg.Reset(bodyOffset)
-	buf, _ = gg.Next(buf[:0])
-	b := &types.BodyForStorage{}
-	reader := bytes.NewReader(buf)
-	if err := rlp.Decode(reader, b); err != nil {
+	body, baseTxnID, txsAmount, err := back.bodyFromSnapshot(blockHeight, sn, buf)
+	if err != nil {
 		return nil, nil, 0, 0, err
 	}
-
-	if b.BaseTxId < sn.TxnHashIdx.BaseDataID() {
-		return nil, nil, 0, 0, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.TxnHashIdx.BaseDataID(), sn.Transactions.FilePath())
-	}
-
-	txs := make([]types.Transaction, b.TxAmount)
-	senders := make([]common.Address, b.TxAmount)
-	if b.TxAmount > 0 {
-		txnOffset := sn.TxnHashIdx.Lookup2(b.BaseTxId - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
-		gg = sn.Transactions.MakeGetter()
+	txs := make([]types.Transaction, txsAmount)
+	senders := make([]common.Address, txsAmount)
+	reader := bytes.NewReader(buf)
+	if txsAmount > 0 {
+		txnOffset := sn.TxnHashIdx.Lookup2(baseTxnID - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
+		gg := sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
-		for i := uint32(0); i < b.TxAmount; i++ {
+		for i := uint32(0); i < txsAmount; i++ {
 			buf, _ = gg.Next(buf[:0])
 			senders[i].SetBytes(buf[1 : 1+20])
 			txRlp := buf[1+20:]
@@ -427,9 +432,7 @@ func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeig
 		}
 	}
 
-	body := new(types.Body)
-	body.Uncles = b.Uncles
-	return body, senders, b.BaseTxId, b.TxAmount, nil
+	return body, senders, baseTxnID, txsAmount, nil
 }
 
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
@@ -464,6 +467,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 	return
 }
 
+/*
 // TxnByHashDeprecated - deprecated because it's too high-level method, we need more low-level methods now
 func (back *BlockReaderWithSnapshots) TxnByHashDeprecated(ctx context.Context, tx kv.Tx, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
 	txn, blockHash, blockNum, txnIndex, err = rawdb.ReadTransactionByHash(tx, txnHash)
@@ -544,3 +548,4 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 
 	return 0, false, nil
 }
+*/
