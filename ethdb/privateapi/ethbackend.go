@@ -237,8 +237,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		// We are still syncing a commissioned payload
 		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
 	}
-	// Let's check if we have parent hash, if we have it we can process the payload right now.
-	// If not, we need to commission it and reverse-download the chain.
+
 	var baseFee *big.Int
 	eip1559 := false
 
@@ -266,12 +265,10 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
-	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
 	// Send the block over
-
 	s.reverseDownloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
