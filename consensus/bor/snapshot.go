@@ -60,7 +60,7 @@ func loadSnapshot(config *params.BorConfig, sigcache *lru.ARCCache, db kv.RwDB, 
 		return nil, err
 	}
 	defer tx.Rollback()
-	blob, err := tx.GetOne(kv.CliqueSeparate, append([]byte("bor-"), hash[:]...))
+	blob, err := tx.GetOne(kv.BorSeparate, append([]byte("bor-"), hash[:]...))
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func (s *Snapshot) store(db kv.RwDB) error {
 	}
 
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.CliqueSeparate, append([]byte("bor-"), s.Hash[:]...), blob)
+		return tx.Put(kv.BorSeparate, append([]byte("bor-"), s.Hash[:]...), blob)
 	})
 }
 
