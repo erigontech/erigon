@@ -72,6 +72,7 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 ### Re-create all .idx files
 
 ```
+// Disk-read-intense
 erigon snapshots index --datadir=<your_datadir>
 ```
 
