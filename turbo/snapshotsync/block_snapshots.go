@@ -755,8 +755,6 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 
 	buf := make([]byte, 1024)
 
-	tmpPath1 := path.Join(tmpDir, IdxFileName(sn.From, sn.To, Transactions))
-	finalPath1 := path.Join(dir, IdxFileName(sn.From, sn.To, Transactions))
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
 		Enums:      true,
@@ -764,14 +762,12 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  tmpPath1,
+		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions)),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
 		return err
 	}
-	tmpPath2 := path.Join(tmpDir, IdxFileName(sn.From, sn.To, Transactions2Block))
-	finalPath2 := path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block))
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
 		Enums:      true,
@@ -779,7 +775,7 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  tmpPath2,
+		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
@@ -850,13 +846,6 @@ RETRY:
 		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 	}
 
-	//move from tmp dir - when no errors
-	if err = os.Rename(tmpPath1, finalPath1); err != nil {
-		return err
-	}
-	if err = os.Rename(tmpPath2, finalPath2); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -947,9 +936,6 @@ func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker fun
 	segmentFileName := d.FilePath()
 	var extension = filepath.Ext(segmentFileName)
 	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
-	_, fileName := filepath.Split(idxFilePath)
-
-	idxTmpPath := path.Join(tmpDir, fileName)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -958,7 +944,7 @@ func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker fun
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  idxTmpPath,
+		IndexFile:  idxFilePath,
 		BaseDataID: firstDataID,
 	})
 	if err != nil {
@@ -988,9 +974,6 @@ RETRY:
 		return err
 	}
 
-	if err := os.Rename(idxTmpPath, idxFilePath); err != nil {
-		return err
-	}
 	return nil
 }
 
