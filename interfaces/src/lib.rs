@@ -130,7 +130,7 @@ pub mod remotekv {
 
 #[cfg(feature = "snapshotsync")]
 pub mod snapshotsync {
-    tonic::include_proto!("snapshotsync");
+    tonic::include_proto!("downloader");
 }
 
 #[cfg(feature = "txpool")]

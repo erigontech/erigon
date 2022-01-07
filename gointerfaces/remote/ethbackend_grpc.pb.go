@@ -38,7 +38,11 @@ type ETHBACKENDClient interface {
 	Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (ETHBACKEND_SubscribeClient, error)
 	// High-level method - can read block from db, snapshots or apply any other logic
 	// it doesn't provide consistency
+	// Request fields are optional - it's ok to request block only by hash or only by number
 	Block(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockReply, error)
+	// High-level method - can find block number by txn hash
+	// it doesn't provide consistency
+	TxnLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnLookupReply, error)
 	// NodeInfo collects and returns NodeInfo from all running celery instances.
 	NodeInfo(ctx context.Context, in *NodesInfoRequest, opts ...grpc.CallOption) (*NodesInfoReply, error)
 }
@@ -173,6 +177,15 @@ func (c *eTHBACKENDClient) Block(ctx context.Context, in *BlockRequest, opts ...
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) TxnLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnLookupReply, error) {
+	out := new(TxnLookupReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/TxnLookup", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *eTHBACKENDClient) NodeInfo(ctx context.Context, in *NodesInfoRequest, opts ...grpc.CallOption) (*NodesInfoReply, error) {
 	out := new(NodesInfoReply)
 	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/NodeInfo", in, out, opts...)
@@ -204,7 +217,11 @@ type ETHBACKENDServer interface {
 	Subscribe(*SubscribeRequest, ETHBACKEND_SubscribeServer) error
 	// High-level method - can read block from db, snapshots or apply any other logic
 	// it doesn't provide consistency
+	// Request fields are optional - it's ok to request block only by hash or only by number
 	Block(context.Context, *BlockRequest) (*BlockReply, error)
+	// High-level method - can find block number by txn hash
+	// it doesn't provide consistency
+	TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error)
 	// NodeInfo collects and returns NodeInfo from all running celery instances.
 	NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
@@ -246,6 +263,9 @@ func (UnimplementedETHBACKENDServer) Subscribe(*SubscribeRequest, ETHBACKEND_Sub
 }
 func (UnimplementedETHBACKENDServer) Block(context.Context, *BlockRequest) (*BlockReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Block not implemented")
+}
+func (UnimplementedETHBACKENDServer) TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TxnLookup not implemented")
 }
 func (UnimplementedETHBACKENDServer) NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeInfo not implemented")
@@ -464,6 +484,24 @@ func _ETHBACKEND_Block_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_TxnLookup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TxnLookupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).TxnLookup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/TxnLookup",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).TxnLookup(ctx, req.(*TxnLookupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ETHBACKEND_NodeInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(NodesInfoRequest)
 	if err := dec(in); err != nil {
@@ -528,6 +566,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Block",
 			Handler:    _ETHBACKEND_Block_Handler,
+		},
+		{
+			MethodName: "TxnLookup",
+			Handler:    _ETHBACKEND_TxnLookup_Handler,
 		},
 		{
 			MethodName: "NodeInfo",

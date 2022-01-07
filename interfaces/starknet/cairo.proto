@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+
+package starknet;
+
+option go_package = "./starknet;starknet";
+
+message CallRequest {
+  string method = 1;
+  map<string, google.protobuf.Any> params = 2;
+  bytes code = 3;
+}
+
+message CallResponse {
+  repeated google.protobuf.Any result = 1;
+}
+
+service CAIROVM {
+  rpc Call (CallRequest) returns (CallResponse) {}
+}

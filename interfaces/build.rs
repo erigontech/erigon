@@ -23,6 +23,10 @@ fn main() {
         protos.push("p2psentry/sentry.proto");
     }
 
+    if cfg!(feature = "starknet") {
+        protos.push("starknet/cairo.proto");
+    }
+
     if cfg!(feature = "remotekv") {
         protos.push("remote/ethbackend.proto");
         protos.push("remote/kv.proto");

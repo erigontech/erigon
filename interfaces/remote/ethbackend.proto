@@ -37,7 +37,11 @@ service ETHBACKEND {
 
   // High-level method - can read block from db, snapshots or apply any other logic
   // it doesn't provide consistency
+  // Request fields are optional - it's ok to request block only by hash or only by number
   rpc Block(BlockRequest) returns (BlockReply);
+  // High-level method - can find block number by txn hash
+  // it doesn't provide consistency
+  rpc TxnLookup(TxnLookupRequest) returns (TxnLookupReply);
   // NodeInfo collects and returns NodeInfo from all running celery instances.
   rpc NodeInfo(NodesInfoRequest) returns(NodesInfoReply);
 }
@@ -117,6 +121,14 @@ message BlockRequest {
 message BlockReply {
   bytes blockRlp = 1;
   bytes senders = 2;
+}
+
+message TxnLookupRequest {
+  types.H256 txnHash = 1;
+}
+
+message TxnLookupReply {
+  uint64 blockNumber = 1;
 }
 
 message NodesInfoRequest {
