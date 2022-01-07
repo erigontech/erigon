@@ -132,21 +132,23 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		if _, err = runBlock(intraBlockState, noOpWriter, w, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
-		if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
-			return err
+		if block+1 == blockNum {
+			if err = rwTx.ClearBucket(kv.HashedAccounts); err != nil {
+				return err
+			}
+			if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
+				return err
+			}
+			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, stateDbPath), make(chan struct{})); err != nil {
+				return err
+			}
+			var root common.Hash
+			root, err = trie.CalcRoot("genesis", rwTx)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("root for block %d=[%x]\n", block, root)
 		}
-		if err = rwTx.ClearBucket(kv.HashedStorage); err != nil {
-			return err
-		}
-		if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, stateDbPath), make(chan struct{})); err != nil {
-			return err
-		}
-		var root common.Hash
-		root, err = trie.CalcRoot("genesis", rwTx)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("root=%x\n", root)
 		if block%1000 == 0 {
 			log.Info("Processed", "blocks", block)
 		}

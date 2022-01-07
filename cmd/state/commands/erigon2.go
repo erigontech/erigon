@@ -108,7 +108,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	_, genesisIbs, err4 := genesis.ToBlock()
+	genBlock, genesisIbs, err4 := genesis.ToBlock()
 	if err4 != nil {
 		return err4
 	}
@@ -119,8 +119,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
-	if err = w.Finish(); err != nil {
+	var rootHash []byte
+	if rootHash, err = w.Finish(true); err != nil {
 		return err
+	}
+	if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
+		return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 	}
 	if err = rwTx.Commit(); err != nil {
 		return err
@@ -177,8 +181,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		default:
 		}
 		tx.Rollback()
-		if err = w.Finish(); err != nil {
+		if rootHash, err = w.Finish(true /* trace */); err != nil {
 			return err
+		}
+		if !bytes.Equal(rootHash, b.Header().Root[:]) {
+			return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", block, b.Header().Root[:], rootHash)
 		}
 		if err = rwTx.Commit(); err != nil {
 			return err

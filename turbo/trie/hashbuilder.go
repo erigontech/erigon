@@ -121,6 +121,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	if err != nil {
 		return err
 	}
+	fmt.Printf("leafHashWithKeyVal [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
 
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
