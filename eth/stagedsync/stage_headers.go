@@ -181,7 +181,7 @@ func HeadersPOS(
 		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
 		return err
 	}
-	if parent != nil && parent.Hash() == header.ParentHash {
+	if parent != nil {
 		if err := cfg.hd.VerifyHeader(header); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
