@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -1238,7 +1239,7 @@ func GetNumberByHash(tx kv.RwTx, hash common.Hash) (int64, error) {
 	}
 
 	if len(val) <= 0 {
-		return -1, nil
+		return -1, errors.New("number not found in db")
 	}
 
 	number := int64(binary.BigEndian.Uint64(val))
