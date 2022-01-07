@@ -493,6 +493,10 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build() error {
+	if err := os.MkdirAll(rs.indexFile, 0744); err != nil {
+		return err
+	}
+
 	if rs.built {
 		return fmt.Errorf("already built")
 	}
