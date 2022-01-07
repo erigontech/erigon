@@ -229,7 +229,7 @@ type HeaderDownload struct {
 	posSync                bool                            // True if the chain is syncing backwards or not
 	headersCollector       *etl.Collector                  // ETL collector for headers
 	ExecutionStatusCh      chan privateapi.ExecutionStatus // Channel to report payload execution status (engine_executePayloadV1 response)
-	pendingExecutionStatus common.Hash                     // Header whose status we still should send the the ExecutionStatusCh
+	pendingExecutionStatus common.Hash                     // Header whose status we still should send to the ExecutionStatusCh
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
