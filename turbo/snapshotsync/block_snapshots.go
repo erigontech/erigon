@@ -306,12 +306,12 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		if err := HeadersHashIdx(f, sn.From); err != nil {
+		if err := HeadersHashIdx(f, sn.From, tmpDir); err != nil {
 			return err
 		}
 
 		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		if err := BodiesIdx(f, sn.From); err != nil {
+		if err := BodiesIdx(f, sn.From, tmpDir); err != nil {
 			return err
 		}
 	}
@@ -861,7 +861,7 @@ RETRY:
 }
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
+func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	_, fileName := filepath.Split(segmentFilePath)
@@ -873,7 +873,7 @@ func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error
 	defer d.Close()
 	total := uint64(d.Count())
 
-	if err := Idx(d, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
 			return err
@@ -895,7 +895,7 @@ func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64) error
 	return nil
 }
 
-func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
+func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	_, fileName := filepath.Split(segmentFilePath)
@@ -908,7 +908,7 @@ func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64) error {
 	defer d.Close()
 	total := uint64(d.Count())
 
-	if err := Idx(d, firstBlockNumInSegment, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
@@ -943,10 +943,13 @@ func forEach(d *compress.Decompressor, walker func(i, offset uint64, word []byte
 }
 
 // Idx - iterate over segment and building .idx file
-func Idx(d *compress.Decompressor, firstDataID uint64, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	segmentFileName := d.FilePath()
 	var extension = filepath.Ext(segmentFileName)
-	var idxFileName = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
+	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
+	_, fileName := filepath.Split(idxFilePath)
+
+	idxTmpPath := path.Join(tmpDir, fileName)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -954,8 +957,8 @@ func Idx(d *compress.Decompressor, firstDataID uint64, walker func(idx *recsplit
 		BucketSize: 2000,
 		Salt:       0,
 		LeafSize:   8,
-		TmpDir:     "",
-		IndexFile:  idxFileName,
+		TmpDir:     tmpDir,
+		IndexFile:  idxTmpPath,
 		BaseDataID: firstDataID,
 	})
 	if err != nil {
@@ -985,6 +988,9 @@ RETRY:
 		return err
 	}
 
+	if err := os.Rename(idxTmpPath, idxFilePath); err != nil {
+		return err
+	}
 	return nil
 }
 
