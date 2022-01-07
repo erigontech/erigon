@@ -42,7 +42,14 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		txn, _, _, _, err := rawdb.ReadTransaction(tx, txHash)
+		blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumber == nil {
+			return nil, nil
+		}
+		txn, _, _, _, err := rawdb.ReadTransaction(tx, txHash, *blockNumber)
 		if err != nil {
 			return nil, err
 		}
