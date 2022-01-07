@@ -253,14 +253,14 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if block == nil {
-		return nil, nil
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 	var txnIndex uint64
 	var txn types.Transaction
