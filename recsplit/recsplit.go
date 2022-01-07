@@ -623,7 +623,8 @@ func (rs *RecSplit) Build() error {
 	_ = rs.indexW.Flush()
 	_ = rs.indexF.Sync()
 	_ = rs.indexF.Close()
-	_ = os.MkdirAll(rs.indexFile, 0744)
+	dir, _ := filepath.Split(rs.indexFile)
+	_ = os.MkdirAll(dir, 0744)
 	if err := os.Rename(tmpIdxFilePath, rs.indexFile); err != nil {
 		return err
 	}
