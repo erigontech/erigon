@@ -25,7 +25,9 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"strconv"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
@@ -177,6 +179,7 @@ func Main(ctx *cli.Context) error {
 		inputData.Env = &env
 	}
 	prestate.Env = *inputData.Env
+	fmt.Println(prestate.Env.Random)
 
 	vmConfig := vm.Config{
 		Tracer: tracer,
@@ -260,11 +263,36 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 		}
 	}
 	// Now, read the transaction itself
-	var tx types.Transaction
-	if err := json.Unmarshal(input, &tx); err != nil {
+	var txInterface map[string]interface{}
+	if err := json.Unmarshal(input, &txInterface); err != nil {
 		return err
 	}
-	t.tx = tx
+	// decode nonce
+	nonce, err := strconv.ParseUint(txInterface["nonce"].(string)[2:], 16, 64)
+	if err != nil {
+		return err
+	}
+	// decode recipient
+	to := common.HexToAddress(txInterface["to"].(string))
+	// decode tx value
+	value, err := uint256.FromHex(txInterface["value"].([]interface{})[0].(string))
+	if err != nil {
+		return err
+	}
+	// decode gasPrice
+	gasPrice, err := uint256.FromHex(txInterface["gasPrice"].(string))
+	if err != nil {
+		return err
+	}
+	// decode gasLimit
+	gasLimit, err := strconv.ParseUint(txInterface["gasLimit"].([]interface{})[0].(string)[2:], 16, 64)
+	if err != nil {
+		return err
+	}
+	// decode data
+	data := common.Hex2Bytes(txInterface["data"].([]interface{})[0].(string))
+	// assemble transaction
+	t.tx = types.NewTransaction(nonce, to, value, gasLimit, gasPrice, data)
 	return nil
 }
 
