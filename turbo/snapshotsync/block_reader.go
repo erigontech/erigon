@@ -367,7 +367,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles)
 	if len(senders) != block.Transactions().Len() {
-		panic(fmt.Sprintf("alex: %d, %d\n", len(block.Transactions()), len(senders)))
 		return block, senders, nil // no senders is fine - will recover them on the fly
 	}
 	block.SendersToTxs(senders)
