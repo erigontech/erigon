@@ -44,10 +44,10 @@ type RemoteBackend struct {
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
-	blockReader      interfaces.BlockReader
+	blockReader      interfaces.BlockAndTxnReader
 }
 
-func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB, blockReader interfaces.BlockReader) *RemoteBackend {
+func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB, blockReader interfaces.BlockAndTxnReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: remote.NewETHBACKENDClient(cc),
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
@@ -158,7 +158,7 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 }
 
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	panic("not implemented yet")
+	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
