@@ -33,18 +33,18 @@ import (
 )
 
 type HeadersCfg struct {
-	db                kv.RwDB
-	hd                *headerdownload.HeaderDownload
-	chainConfig       params.ChainConfig
-	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
-	announceNewHashes func(context.Context, []headerdownload.Announce)
-	penalize          func(context.Context, []headerdownload.PenaltyItem)
-	batchSize         datasize.ByteSize
-	noP2PDiscovery    bool
-	tmpdir            string
-	reverseDownloadCh chan privateapi.PayloadMessage
+	db                    kv.RwDB
+	hd                    *headerdownload.HeaderDownload
+	chainConfig           params.ChainConfig
+	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
+	announceNewHashes     func(context.Context, []headerdownload.Announce)
+	penalize              func(context.Context, []headerdownload.PenaltyItem)
+	batchSize             datasize.ByteSize
+	noP2PDiscovery        bool
+	tmpdir                string
+	reverseDownloadCh     chan privateapi.PayloadMessage
 	unwindForkChoicePOSCh chan common.Hash
-	waitingPosHeaders *uint32 // atomic boolean flag
+	waitingPosHeaders     *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -69,21 +69,21 @@ func StageHeadersCfg(
 	tmpdir string,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                 db,
-		hd:                 headerDownload,
-		chainConfig:        chainConfig,
-		headerReqSend:      headerReqSend,
-		announceNewHashes:  announceNewHashes,
-		penalize:           penalize,
-		batchSize:          batchSize,
-		tmpdir:             tmpdir,
-		noP2PDiscovery:     noP2PDiscovery,
-		reverseDownloadCh:  reverseDownloadCh,
+		db:                    db,
+		hd:                    headerDownload,
+		chainConfig:           chainConfig,
+		headerReqSend:         headerReqSend,
+		announceNewHashes:     announceNewHashes,
+		penalize:              penalize,
+		batchSize:             batchSize,
+		tmpdir:                tmpdir,
+		noP2PDiscovery:        noP2PDiscovery,
+		reverseDownloadCh:     reverseDownloadCh,
 		unwindForkChoicePOSCh: unwindForkChoicePOSCh,
-		waitingPosHeaders:  waitingPosHeaders,
-		snapshots:          snapshots,
-		snapshotDownloader: snapshotDownloader,
-		blockReader:        blockReader,
+		waitingPosHeaders:     waitingPosHeaders,
+		snapshots:             snapshots,
+		snapshotDownloader:    snapshotDownloader,
+		blockReader:           blockReader,
 	}
 }
 
@@ -149,12 +149,12 @@ func HeadersPOS(
 		forkChoiceHeaderNumber, err := rawdb.ReadBlockHashNumber(tx, forkChoiceUpdateHash)
 
 		if err != nil {
-			cfg.hd.ExecutionStatusCh  <- privateapi.ExecutionStatus{Error: err}
+			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
 			return err
 		}
 
-		if forkChoiceHeaderNumber == -1{
-			cfg.hd.ExecutionStatusCh  <- privateapi.ExecutionStatus{Status: privateapi.Success}
+		if forkChoiceHeaderNumber == -1 {
+			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Success}
 			return nil
 		}
 
