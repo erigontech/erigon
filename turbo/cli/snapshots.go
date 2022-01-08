@@ -7,8 +7,11 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"runtime"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -16,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/parallelcompress"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
@@ -26,41 +28,64 @@ const ASSERT = false
 
 var snapshotCommand = cli.Command{
 	Name:        "snapshots",
-	Description: `Manage snapshots`,
+	Description: `Managing snapshots (historical data partitions)`,
 	Subcommands: []cli.Command{
 		{
 			Name:   "create",
 			Action: doSnapshotCommand,
+			Usage:  "Create snapshots for given range of blocks",
 			Flags: []cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
 			},
-			Description: `Create snapshots`,
+		},
+		{
+			Name:   "index",
+			Action: doIndicesCommand,
+			Usage:  "Create all indices for snapshots",
+			Flags: []cli.Flag{
+				utils.DataDirFlag,
+			},
 		},
 	},
 }
 
 var (
 	SnapshotFromFlag = cli.Uint64Flag{
-		Name:     "from",
-		Usage:    "From block number",
-		Required: true,
+		Name:  "from",
+		Usage: "From block number",
+		Value: 0,
 	}
 	SnapshotToFlag = cli.Uint64Flag{
-		Name:     "to",
-		Usage:    "To block number. Zero - means unlimited.",
-		Required: true,
+		Name:  "to",
+		Usage: "To block number. Zero - means unlimited.",
+		Value: 0,
 	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
-		Name:     "segment.size",
-		Usage:    "Amount of blocks in each segment",
-		Value:    500_000,
-		Required: true,
+		Name:  "segment.size",
+		Usage: "Amount of blocks in each segment",
+		Value: 500_000,
 	}
 )
 
+func doIndicesCommand(cliCtx *cli.Context) error {
+	ctx, cancel := utils.RootContext()
+	defer cancel()
+
+	dataDir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir := path.Join(dataDir, "snapshots")
+	tmpDir := path.Join(dataDir, etl.TmpDirName)
+
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
+	defer chainDB.Close()
+
+	if err := rebuildIndices(ctx, chainDB, snapshotDir, tmpDir); err != nil {
+		log.Error("Error", "err", err)
+	}
+	return nil
+}
 func doSnapshotCommand(ctx *cli.Context) error {
 	fromBlock := ctx.Uint64(SnapshotFromFlag.Name)
 	toBlock := ctx.Uint64(SnapshotToFlag.Name)
@@ -71,11 +96,34 @@ func doSnapshotCommand(ctx *cli.Context) error {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
 
-	chainDB := mdbx.MustOpen(path.Join(dataDir, "chaindata"))
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(chainDB, fromBlock, toBlock, segmentSize, snapshotDir); err != nil {
 		log.Error("Error", "err", err)
+	}
+	return nil
+}
+
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir string) error {
+	chainConfig := tool.ChainConfigFromDB(chainDB)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	_ = chainID
+	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
+
+	allSnapshots := snapshotsync.NewAllSnapshots(snapshotDir, snapshothashes.KnownConfig(chainConfig.ChainName))
+	if err := allSnapshots.ReopenSegments(); err != nil {
+		return err
+	}
+	idxFilesList, err := snapshotsync.IdxFilesList(snapshotDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range idxFilesList {
+		_ = os.Remove(f)
+	}
+	if err := allSnapshots.BuildIndices(ctx, *chainID, tmpDir); err != nil {
+		return err
 	}
 	return nil
 }
@@ -119,6 +167,11 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
 
 	log.Info("Last body number", "last", last)
+	workers := runtime.NumCPU() - 1
+	if workers < 1 {
+		workers = 1
+	}
+
 	for i := fromBlock; i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
 
@@ -127,7 +180,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Bodies", fileName, segmentFile); err != nil {
+		if err := compress.Compress("Bodies", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -138,7 +191,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Headers", fileName, segmentFile); err != nil {
+		if err := compress.Compress("Headers", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")
@@ -150,7 +203,7 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 			panic(err)
 		}
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := parallelcompress.Compress("Transactions", fileName, segmentFile); err != nil {
+		if err := compress.Compress("Transactions", fileName, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(fileName + ".dat")

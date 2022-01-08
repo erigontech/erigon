@@ -35,7 +35,7 @@ type TxLookupEntry struct {
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db kv.Tx, txnHash common.Hash) (*uint64, error) {
+func ReadTxLookupEntry(db kv.Getter, txnHash common.Hash) (*uint64, error) {
 	data, err := db.GetOne(kv.TxLookup, txnHash.Bytes())
 	if err != nil {
 		return nil, err
@@ -63,9 +63,9 @@ func DeleteTxLookupEntry(db kv.Deleter, hash common.Hash) error {
 	return db.Delete(kv.TxLookup, hash.Bytes(), nil)
 }
 
-// ReadTransaction retrieves a specific transaction from the database, along with
+// ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
-func ReadTransaction(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadTransactionByHash(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
 	blockNumber, err := ReadTxLookupEntry(db, hash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
@@ -80,7 +80,7 @@ func ReadTransaction(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash
 	if blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	body := ReadBodyWithTransactions(db, blockHash, *blockNumber)
+	body := ReadCanonicalBodyWithTransactions(db, blockHash, *blockNumber)
 	if body == nil {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, nil
@@ -93,6 +93,35 @@ func ReadTransaction(db kv.Tx, hash common.Hash) (types.Transaction, common.Hash
 	for txIndex, tx := range body.Transactions {
 		if tx.Hash() == hash {
 			return tx, blockHash, *blockNumber, uint64(txIndex), nil
+		}
+	}
+	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)
+	return nil, common.Hash{}, 0, 0, nil
+}
+
+// ReadTransaction retrieves a specific transaction from the database, along with
+// its added positional metadata.
+func ReadTransaction(db kv.Tx, hash common.Hash, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+	blockHash, err := ReadCanonicalHash(db, blockNumber)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
+	if blockHash == (common.Hash{}) {
+		return nil, common.Hash{}, 0, 0, nil
+	}
+	body := ReadCanonicalBodyWithTransactions(db, blockHash, blockNumber)
+	if body == nil {
+		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
+		return nil, common.Hash{}, 0, 0, nil
+	}
+	senders, err1 := ReadSenders(db, blockHash, blockNumber)
+	if err1 != nil {
+		return nil, common.Hash{}, 0, 0, err1
+	}
+	body.SendersToTxs(senders)
+	for txIndex, tx := range body.Transactions {
+		if tx.Hash() == hash {
+			return tx, blockHash, blockNumber, uint64(txIndex), nil
 		}
 	}
 	log.Error("Transaction not found", "number", blockNumber, "hash", blockHash, "txhash", hash)

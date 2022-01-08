@@ -41,10 +41,18 @@ erigon --downloader.api.addr=127.0.0.1:9093 --experimental.snapshot
 downloader --download.limit=10mb --upload.limit=10mb
 ```
 
-### Add hashes to https://github.com/ledgerwatch/erigon-snapshot
+### Print info_hashes in format compatible with https://github.com/ledgerwatch/erigon-snapshot
 
 ```
-downloader print_torrent_files --datadir=<your_datadir>
+downloader info_hashes --datadir=<your_datadir>
+```
+
+### Force re-calculate info_hashes and print in format compatible with https://github.com/ledgerwatch/erigon-snapshot
+
+```
+// will re-read all .seg files (high disk IO)
+// also does remove and create .torrent files
+downloader info_hashes --datadir=<your_datadir> --rebuild
 ```
 
 ### Create new snapshots
@@ -61,3 +69,13 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 // re-start downloader 
 ```
 
+### Re-create all .idx files
+
+```
+// Disk-read-intense
+erigon snapshots index --datadir=<your_datadir>
+```
+
+## Known Issues
+
+- RPCDaemon with --datadir option need restart to make new segments available

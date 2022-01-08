@@ -79,7 +79,6 @@ var DefaultFlags = []cli.Flag{
 	utils.MiningEnabledFlag,
 	utils.ProposingEnabledFlag,
 	utils.MinerNotifyFlag,
-	utils.MinerGasTargetFlag,
 	utils.MinerGasLimitFlag,
 	utils.MinerEtherbaseFlag,
 	utils.MinerExtraDataFlag,

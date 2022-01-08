@@ -24,6 +24,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -867,7 +868,7 @@ func validateTxLookups2(db kv.RwDB, startBlock uint64, interruptCh chan bool) {
 	for !interrupt {
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		tool.Check(err)
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNum)
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNum)
 
 		if body == nil {
 			break
@@ -1417,7 +1418,7 @@ func genstate() error {
 }
 
 func compress1(fileName, segmentFileName string) error {
-	return parallelcompress.Compress("hack", fileName, segmentFileName)
+	return compress.Compress("hack", fileName, segmentFileName, runtime.GOMAXPROCS(-1))
 }
 func decompress(name string) error {
 	return parallelcompress.Decompress("hack", name)
@@ -1675,7 +1676,7 @@ func mint(chaindata string, block uint64) error {
 			fmt.Printf("Gap [%d-%d]\n", prevBlock, blockNumber-1)
 		}
 		prevBlock = blockNumber
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
 		header := rawdb.ReadHeader(tx, blockHash, blockNumber)
 		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNumber)
 		if errSenders != nil {

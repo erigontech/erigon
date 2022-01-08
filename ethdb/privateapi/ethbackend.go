@@ -49,7 +49,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RoDB
-	blockReader interfaces.BlockReader
+	blockReader interfaces.BlockAndTxnReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
@@ -91,8 +91,8 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- common.Hash, waitingForBeaconChain *uint32,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
+	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus,unwindForkChoicePOSCh chan<- common.Hash, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -186,6 +186,23 @@ func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remote.ClientVers
 	return &remote.ClientVersionReply{NodeName: common.MakeName("erigon", params.Version)}, nil
 }
 
+func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupRequest) (*remote.TxnLookupReply, error) {
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNum, ok, err := s.blockReader.TxnLookup(ctx, tx, gointerfaces.ConvertH256ToHash(req.TxnHash))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return &remote.TxnLookupReply{BlockNumber: blockNum}, nil
+}
+
 func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) (*remote.BlockReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
@@ -223,8 +240,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		// We are still syncing a commissioned payload
 		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
 	}
-	// Let's check if we have parent hash, if we have it we can process the payload right now.
-	// If not, we need to commission it and reverse-download the chain.
+
 	var baseFee *big.Int
 	eip1559 := false
 
@@ -252,12 +268,10 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
-	// Our execution layer has some problems so we return invalid
 	if header.Hash() != blockHash {
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
 	// Send the block over
-
 	s.reverseDownloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{

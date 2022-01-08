@@ -59,7 +59,7 @@ func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber
 		return Issuance{}, fmt.Errorf("could not find block header")
 	}
 
-	body := rawdb.ReadBodyWithTransactions(tx, hash, uint64(blockNr))
+	body := rawdb.ReadCanonicalBodyWithTransactions(tx, hash, uint64(blockNr))
 
 	if body == nil {
 		return Issuance{}, fmt.Errorf("could not find block body")

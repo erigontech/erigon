@@ -17,7 +17,7 @@ import (
 func APIList(ctx context.Context, db kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
-	blockReader interfaces.BlockReader,
+	blockReader interfaces.BlockAndTxnReader,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 

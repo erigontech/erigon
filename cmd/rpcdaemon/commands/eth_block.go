@@ -42,9 +42,26 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		txn, _, _, _, err := rawdb.ReadTransaction(tx, txHash)
+		blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, nil
+		}
+		block, err := api.blockByNumberWithSenders(tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+		if block == nil {
+			return nil, nil
+		}
+		var txn types.Transaction
+		for _, transaction := range block.Transactions() {
+			if transaction.Hash() == txHash {
+				txn = transaction
+				break
+			}
 		}
 		if txn == nil {
 			return nil, nil // not error, see https://github.com/ledgerwatch/turbo-geth/issues/1645

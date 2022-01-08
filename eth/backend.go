@@ -135,7 +135,6 @@ type Ethereum struct {
 	// to proof-of-stake so we start reverse syncing from the header
 	reverseDownloadCh     chan privateapi.PayloadMessage
 	unwindForkChoicePOSCh chan common.Hash
-	statusCh              chan privateapi.ExecutionStatus
 	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
@@ -393,8 +392,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.unwindForkChoicePOSCh = make(chan common.Hash)
-	backend.statusCh = make(chan privateapi.ExecutionStatus, 1)
-
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
@@ -434,7 +431,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, backend.unwindForkChoicePOSCh, &backend.waitingForBeaconChain,
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.sentryControlServer.Hd.ExecutionStatusCh, backend.unwindForkChoicePOSCh, &backend.waitingForBeaconChain,
 		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
@@ -511,7 +508,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.reverseDownloadCh, backend.unwindForkChoicePOSCh, backend.statusCh, &backend.waitingForBeaconChain,
+		backend.reverseDownloadCh, backend.unwindForkChoicePOSCh, &backend.waitingForBeaconChain,
 		backend.downloaderClient)
 	if err != nil {
 		return nil, err

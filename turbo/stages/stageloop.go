@@ -55,7 +55,29 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		if err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil); err != nil {
+		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
+
+		pendingExecutionStatus := hd.GetPendingExecutionStatus()
+		if pendingExecutionStatus != (common.Hash{}) {
+			if err != nil {
+				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
+			} else {
+				var status privateapi.PayloadStatus
+				if headBlockHash == pendingExecutionStatus {
+					status = privateapi.Valid
+				} else {
+					status = privateapi.Invalid
+				}
+				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
+					Status:          status,
+					LatestValidHash: headBlockHash,
+				}
+			}
+
+			hd.ClearPendingExecutionStatus()
+		}
+
+		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
@@ -92,7 +114,7 @@ func StageLoopStep(
 	initialCycle bool,
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
-) (err error) {
+) (headBlockHash common.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -111,7 +133,7 @@ func StageLoopStep(
 		}
 		return nil
 	}); err != nil {
-		return err
+		return headBlockHash, err
 	}
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
@@ -120,7 +142,7 @@ func StageLoopStep(
 	if canRunCycleInOneTransaction {
 		tx, err = db.BeginRw(context.Background())
 		if err != nil {
-			return err
+			return headBlockHash, err
 		}
 		defer tx.Rollback()
 	}
@@ -131,19 +153,19 @@ func StageLoopStep(
 
 	err = sync.Run(db, tx, initialCycle)
 	if err != nil {
-		return err
+		return headBlockHash, err
 	}
 	if canRunCycleInOneTransaction {
 		commitStart := time.Now()
 		errTx := tx.Commit()
 		if errTx != nil {
-			return errTx
+			return headBlockHash, errTx
 		}
 		log.Info("Commit cycle", "in", time.Since(commitStart))
 	}
 	var rotx kv.Tx
 	if rotx, err = db.BeginRo(ctx); err != nil {
-		return err
+		return headBlockHash, err
 	}
 	defer rotx.Rollback()
 
@@ -152,14 +174,15 @@ func StageLoopStep(
 	var head uint64
 	var headHash common.Hash
 	if head, err = stages.GetStageProgress(rotx, stages.Headers); err != nil {
-		return err
+		return headBlockHash, err
 	}
 	if headHash, err = rawdb.ReadCanonicalHash(rotx, head); err != nil {
-		return err
+		return headBlockHash, err
 	}
 	if headTd, err = rawdb.ReadTd(rotx, headHash, head); err != nil {
-		return err
+		return headBlockHash, err
 	}
+	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
 
 	if canRunCycleInOneTransaction && snapshotMigratorFinal != nil {
 		err = snapshotMigratorFinal(rotx)
@@ -171,7 +194,7 @@ func StageLoopStep(
 
 	headTd256, overflow := uint256.FromBig(headTd)
 	if overflow {
-		return fmt.Errorf("headTds higher than 2^256-1")
+		return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
 	}
 	updateHead(ctx, head, headHash, headTd256)
 
@@ -191,11 +214,11 @@ func StageLoopStep(
 			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
 
 		}); err != nil {
-			return err
+			return headBlockHash, err
 		}
 	}
 
-	return nil
+	return headBlockHash, nil
 }
 
 func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
@@ -229,7 +252,6 @@ func NewStagedSync(
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan privateapi.PayloadMessage,
 	unwindForkChoicePOSCh chan common.Hash,
-	statusCh chan privateapi.ExecutionStatus,
 	waitingForPOSHeaders *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
@@ -246,7 +268,6 @@ func NewStagedSync(
 		stagedsync.DefaultStages(ctx, cfg.Prune, stagedsync.StageHeadersCfg(
 			db,
 			controlServer.Hd,
-			statusCh,
 			*controlServer.ChainConfig,
 			controlServer.SendHeaderRequest,
 			controlServer.PropagateNewBlockHashes,
