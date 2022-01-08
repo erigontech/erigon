@@ -43,7 +43,7 @@ type HeadersCfg struct {
 	noP2PDiscovery        bool
 	tmpdir                string
 	reverseDownloadCh     chan privateapi.PayloadMessage
-	unwindForkChoicePOSCh chan common.Hash
+	unwindForkChoicePOSCh chan uint64
 	waitingPosHeaders     *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
@@ -61,7 +61,7 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan privateapi.PayloadMessage,
-	unwindForkChoicePOSCh chan common.Hash,
+	unwindForkChoicePOSCh chan uint64,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -139,28 +139,13 @@ func HeadersPOS(
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
 	var payloadMessage privateapi.PayloadMessage
-	var forkChoiceUpdateHash common.Hash
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Decide what kind of action we need to take place
 	select {
 	case payloadMessage = <-cfg.reverseDownloadCh:
-	case forkChoiceUpdateHash = <-cfg.unwindForkChoicePOSCh:
+	case forkChoiceUpdateNumber := <-cfg.unwindForkChoicePOSCh:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
-		forkChoiceHeaderNumber, err := rawdb.ReadBlockHashNumber(tx, forkChoiceUpdateHash)
-
-		if err != nil {
-			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
-			return err
-		}
-
-		if forkChoiceHeaderNumber == -1 {
-			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Success}
-			return nil
-		}
-
-		u.UnwindTo(uint64(forkChoiceHeaderNumber-1), common.Hash{})
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
-
+		u.UnwindTo(forkChoiceUpdateNumber, common.Hash{})
 		return nil
 	case <-cfg.hd.SkipCycleHack:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)

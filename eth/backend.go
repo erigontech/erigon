@@ -134,7 +134,7 @@ type Ethereum struct {
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
 	reverseDownloadCh     chan privateapi.PayloadMessage
-	unwindForkChoicePOSCh chan common.Hash
+	unwindForkChoicePOSCh chan uint64
 	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
@@ -391,7 +391,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
-	backend.unwindForkChoicePOSCh = make(chan common.Hash)
+	backend.unwindForkChoicePOSCh = make(chan uint64)
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,

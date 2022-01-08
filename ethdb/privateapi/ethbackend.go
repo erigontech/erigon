@@ -58,8 +58,8 @@ type EthBackendServer struct {
 	reverseDownloadCh chan<- PayloadMessage
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
-	// Send hash of header we are unwinding to
-	unwindForkChoicePOSCh chan<- common.Hash
+	// Send block number of header we are unwinding to
+	unwindForkChoicePOSCh chan<- uint64
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -92,7 +92,7 @@ type PayloadMessage struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- common.Hash, waitingForBeaconChain *uint32,
+	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- uint64, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -333,36 +333,31 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	// Check if parent equate to the head
-	parentHash := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
+	beaconHeadHash := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if parentHash != rawdb.ReadHeadHeaderHash(tx) {
-		// TODO(enriavil1): make unwind happen
-
-		//req.forkchoice.HeadBlockHash
-		s.unwindForkChoicePOSCh <- parentHash
-
-		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
-			return &remote.EngineForkChoiceUpdatedReply{
-				Status: string(Success),
-			}, nil
-		}
-
+	beaconHeadHeader, err := rawdb.ReadHeaderByHash(tx, beaconHeadHash)
+	if err != nil {
+		return nil, err
+	}
+	if beaconHeadHeader == nil || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: string(Syncing),
 		}, nil
 	}
+	// If we result to be on the incorrect fork and have the head, let's unwind to it.
+	if beaconHeadHash != rawdb.ReadHeadHeaderHash(tx) {
+		s.unwindForkChoicePOSCh <- beaconHeadHeader.Number.Uint64()
 
-	// Same if we are not waiting for the beacon chain
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: string(Syncing),
+			Status: string(Success),
 		}, nil
-	}
 
+	}
+	// If we are not proposing, we return an error
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
 	}

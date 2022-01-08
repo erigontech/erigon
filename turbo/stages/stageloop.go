@@ -251,7 +251,7 @@ func NewStagedSync(
 	tmpdir string,
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan privateapi.PayloadMessage,
-	unwindForkChoicePOSCh chan common.Hash,
+	unwindForkChoicePOSCh chan uint64,
 	waitingForPOSHeaders *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
