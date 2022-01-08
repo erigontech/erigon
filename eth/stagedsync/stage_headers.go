@@ -74,6 +74,7 @@ func StageHeadersCfg(
 		announceNewHashes:  announceNewHashes,
 		penalize:           penalize,
 		batchSize:          batchSize,
+		tmpdir:             tmpdir,
 		noP2PDiscovery:     noP2PDiscovery,
 		reverseDownloadCh:  reverseDownloadCh,
 		waitingPosHeaders:  waitingPosHeaders,
