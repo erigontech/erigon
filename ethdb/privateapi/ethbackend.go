@@ -365,11 +365,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// If we result to be on the incorrect fork and have the head, let's unwind to it.
 	if beaconHeadHash != rawdb.ReadHeadHeaderHash(tx) {
 		s.unwindForkChoicePOSCh <- beaconHeadHeader.Number.Uint64()
-
-		return &remote.EngineForkChoiceUpdatedReply{
-			Status: string(Success),
-		}, nil
-
 	}
 	// If we are not proposing, we return an error
 	if !s.proposing {
