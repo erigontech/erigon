@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -55,7 +54,7 @@ const (
 	Transactions SnapshotType = "transactions"
 )
 
-var (
+const (
 	Transactions2Block SnapshotType = "transactions-to-block"
 )
 
@@ -100,7 +99,7 @@ type AllSnapshots struct {
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
 func NewAllSnapshots(dir string, cfg *snapshothashes.Config) *AllSnapshots {
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0744); err != nil {
 		panic(err)
 	}
 	return &AllSnapshots{dir: dir, cfg: cfg}
@@ -306,12 +305,13 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		if err := HeadersHashIdx(f, sn.From, tmpDir); err != nil {
+		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
 			return err
 		}
-
-		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		if err := BodiesIdx(f, sn.From, tmpDir); err != nil {
+	}
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
 			return err
 		}
 	}
@@ -343,7 +343,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
-		if err := TransactionsHashIdx(chainID, sn, firstBody.BaseTxId, sn.From, f, expectedTxsAmount, tmpDir); err != nil {
+		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, f, expectedTxsAmount, tmpDir); err != nil {
 			return err
 		}
 	}
@@ -511,17 +511,14 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
-	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Transactions)
-	tmpFileName = path.Join(tmpdir, tmpFileName)
-
+func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := NewSimpleFile(tmpFileName)
+	f, err := NewSimpleFile(tmpFilePath)
 	if err != nil {
 		return 0, err
 	}
@@ -595,6 +592,8 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 
 			select {
 			default:
+			case <-ctx.Done():
+				return ctx.Err()
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
@@ -617,14 +616,11 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 	return firstTxID, nil
 }
 
-func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
-	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Headers)
-	tmpFileName = path.Join(tmpdir, tmpFileName)
-
+func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := NewSimpleFile(tmpFileName)
+	f, err := NewSimpleFile(tmpFilePath)
 	if err != nil {
 		return err
 	}
@@ -660,6 +656,8 @@ func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) 
 
 		select {
 		default:
+		case <-ctx.Done():
+			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -675,13 +673,10 @@ func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) 
 	return nil
 }
 
-func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
-	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Bodies)
-	tmpFileName = path.Join(tmpdir, tmpFileName)
-
+func DumpBodies(ctx context.Context, db kv.RoDB, filePath string, fromBlock uint64, blocksAmount int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	f, err := os.Create(tmpFileName)
+	f, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
@@ -721,6 +716,8 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 
 		select {
 		default:
+		case <-ctx.Done():
+			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
@@ -735,10 +732,10 @@ func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) e
 	return nil
 }
 
-func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
+func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	dir, fileName := filepath.Split(segmentFilePath)
+	dir, _ := filepath.Split(segmentFilePath)
 
 	parseCtx := txpool.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
@@ -751,7 +748,6 @@ func TransactionsHashIdx(chainID uint256.Int, sn *BlocksSnapshot, firstTxID, fir
 		return err
 	}
 	defer d.Close()
-	total := uint64(d.Count())
 
 	buf := make([]byte, 1024)
 
@@ -800,7 +796,7 @@ RETRY:
 			return err
 		}
 
-		for firstTxID+i > body.BaseTxId+uint64(body.TxAmount) { // read next
+		for firstTxID+i > body.BaseTxId+uint64(body.TxAmount) { // skip empty blocks
 			buf, _ = bodyGetter.Next(buf[:0])
 			if err := rlp.DecodeBytes(buf, body); err != nil {
 				return err
@@ -814,8 +810,10 @@ RETRY:
 
 		select {
 		default:
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[Snapshots Indexing] TransactionsHashIdx: %s, %s", percent(i, total), fileName))
+			log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
 		}
 		j++
 		return nil
@@ -850,17 +848,15 @@ RETRY:
 }
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
+func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
-	_, fileName := filepath.Split(segmentFilePath)
 
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	total := uint64(d.Count())
 
 	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
@@ -874,8 +870,10 @@ func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDi
 
 		select {
 		default:
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[Snapshots Indexing] HeadersHashIdx: %s, %s", percent(i, total), fileName))
+			log.Info("[Snapshots Indexing] HeadersHashIdx", "blockNumber", h.Number.Uint64())
 		}
 		return nil
 	}); err != nil {
@@ -884,10 +882,9 @@ func HeadersHashIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDi
 	return nil
 }
 
-func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
-	_, fileName := filepath.Split(segmentFilePath)
 	num := make([]byte, 8)
 
 	d, err := compress.NewDecompressor(segmentFilePath)
@@ -895,7 +892,6 @@ func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir str
 		return err
 	}
 	defer d.Close()
-	total := uint64(d.Count())
 
 	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
@@ -905,8 +901,10 @@ func BodiesIdx(segmentFilePath string, firstBlockNumInSegment uint64, tmpDir str
 
 		select {
 		default:
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[Snapshots Indexing] BodyNumberIdx: %s, %s", percent(i, total), fileName))
+			log.Info("[Snapshots Indexing] BodyNumberIdx", "blockNumber", firstBlockNumInSegment+i)
 		}
 		return nil
 	}); err != nil {
@@ -1017,7 +1015,6 @@ func NewSimpleFile(name string) (*SimpleFile, error) {
 func (f *SimpleFile) Close() {
 	f.w.Flush()
 	f.f.Sync()
-	//TODO: write f.count to begin of the file after sync
 	f.f.Close()
 }
 func (f *SimpleFile) Append(v []byte) error {
@@ -1032,33 +1029,4 @@ func (f *SimpleFile) Append(v []byte) error {
 		}
 	}
 	return nil
-}
-func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
-	f, err := os.Open(fileName)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
-	var buf []byte
-	l, e := binary.ReadUvarint(r)
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		if err := walker(buf[:l]); err != nil {
-			return err
-		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	return nil
-}
-
-func percent(progress, total uint64) string {
-	return fmt.Sprintf("%.2f%%", float32(100*(float64(progress)/float64(total))))
 }
