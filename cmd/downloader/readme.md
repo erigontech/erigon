@@ -69,7 +69,7 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 // re-start downloader 
 ```
 
-### Re-create all .idx files
+### Re-create all .idx files (by re-read all .seg files)
 
 ```
 // Disk-read-intense
