@@ -123,7 +123,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir st
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
-	_ = os.MkdirAll(snapshotDir, 0644)
+	_ = os.MkdirAll(snapshotDir, 0744)
 
 	allSnapshots := snapshotsync.NewAllSnapshots(snapshotDir, snapshothashes.KnownConfig(chainConfig.ChainName))
 	if err := allSnapshots.ReopenSegments(); err != nil {

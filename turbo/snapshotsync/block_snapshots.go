@@ -99,7 +99,7 @@ type AllSnapshots struct {
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
 func NewAllSnapshots(dir string, cfg *snapshothashes.Config) *AllSnapshots {
-	if err := os.MkdirAll(dir, 0644); err != nil {
+	if err := os.MkdirAll(dir, 0744); err != nil {
 		panic(err)
 	}
 	return &AllSnapshots{dir: dir, cfg: cfg}
