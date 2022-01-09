@@ -558,7 +558,13 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 	if err != nil {
 		return err
 	}
-	badBlock := u.BadBlock != (common.Hash{})
+
+	isTrans, err := rawdb.Transitioned(tx, s.BlockNumber, cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
+
+	badBlock := u.BadBlock != (common.Hash{}) || isTrans
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Mark all descendants of bad block as bad too
