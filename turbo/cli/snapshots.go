@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
@@ -34,20 +35,23 @@ var snapshotCommand = cli.Command{
 			Name:   "create",
 			Action: doSnapshotCommand,
 			Usage:  "Create snapshots for given range of blocks",
-			Flags: []cli.Flag{
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
-			},
+			}, debug.Flags...),
 		},
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
-			Flags: []cli.Flag{
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
-			},
+				SnapshotRebuildFlag,
+			}, debug.Flags...),
 		},
 	},
 }
@@ -68,6 +72,10 @@ var (
 		Usage: "Amount of blocks in each segment",
 		Value: 500_000,
 	}
+	SnapshotRebuildFlag = cli.BoolFlag{
+		Name:  "rebuild",
+		Usage: "Force rebuild",
+	}
 )
 
 func doIndicesCommand(cliCtx *cli.Context) error {
@@ -77,29 +85,37 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
 	tmpDir := path.Join(dataDir, etl.TmpDirName)
+	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 
 	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
-	if err := rebuildIndices(ctx, chainDB, snapshotDir, tmpDir); err != nil {
-		log.Error("Error", "err", err)
+	if rebuild {
+		if err := rebuildIndices(ctx, chainDB, snapshotDir, tmpDir); err != nil {
+			log.Error("Error", "err", err)
+		}
 	}
 	return nil
 }
-func doSnapshotCommand(ctx *cli.Context) error {
-	fromBlock := ctx.Uint64(SnapshotFromFlag.Name)
-	toBlock := ctx.Uint64(SnapshotToFlag.Name)
-	segmentSize := ctx.Uint64(SnapshotSegmentSizeFlag.Name)
+func doSnapshotCommand(cliCtx *cli.Context) error {
+	ctx, cancel := utils.RootContext()
+	defer cancel()
+
+	fromBlock := cliCtx.Uint64(SnapshotFromFlag.Name)
+	toBlock := cliCtx.Uint64(SnapshotToFlag.Name)
+	segmentSize := cliCtx.Uint64(SnapshotSegmentSizeFlag.Name)
 	if segmentSize < 1000 {
 		return fmt.Errorf("too small --segment.size %d", segmentSize)
 	}
-	dataDir := ctx.String(utils.DataDirFlag.Name)
+	dataDir := cliCtx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
+	tmpDir := path.Join(dataDir, etl.TmpDirName)
+	_ = os.MkdirAll(tmpDir, 0744)
 
 	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
-	if err := snapshotBlocks(chainDB, fromBlock, toBlock, segmentSize, snapshotDir); err != nil {
+	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapshotDir, tmpDir); err != nil {
 		log.Error("Error", "err", err)
 	}
 	return nil
@@ -109,7 +125,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir st
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
-	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
+	_ = os.MkdirAll(snapshotDir, 0744)
 
 	allSnapshots := snapshotsync.NewAllSnapshots(snapshotDir, snapshothashes.KnownConfig(chainConfig.ChainName))
 	if err := allSnapshots.ReopenSegments(); err != nil {
@@ -128,7 +144,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir st
 	return nil
 }
 
-func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapshotDir string) error {
+func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapshotDir, tmpDir string) error {
 	var last uint64
 
 	if toBlock > 0 {
@@ -174,39 +190,41 @@ func snapshotBlocks(chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, s
 
 	for i := fromBlock; i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
-
-		log.Info("Creating", "file", fileName+".seg")
-		if err := snapshotsync.DumpBodies(chainDB, "", i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
+		tmpFilePath := path.Join(tmpDir, fileName) + ".dat"
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
-		if err := compress.Compress("Bodies", fileName, segmentFile, workers); err != nil {
+		log.Info("Creating", "file", fileName)
+
+		if err := snapshotsync.DumpBodies(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
-		_ = os.Remove(fileName + ".dat")
+		if err := compress.Compress(ctx, "Bodies", tmpFilePath, segmentFile, workers); err != nil {
+			panic(err)
+		}
+		_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
-		log.Info("Creating", "file", fileName+".seg")
-		if err := snapshotsync.DumpHeaders(chainDB, "", i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
+		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := compress.Compress("Headers", fileName, segmentFile, workers); err != nil {
+		log.Info("Creating", "file", fileName)
+		if err := snapshotsync.DumpHeaders(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
-		_ = os.Remove(fileName + ".dat")
+		if err := compress.Compress(ctx, "Headers", tmpFilePath, segmentFile, workers); err != nil {
+			panic(err)
+		}
+		_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
-		log.Info("Creating", "file", fileName+".seg")
-		_, err := snapshotsync.DumpTxs(chainDB, "", i, int(blocksPerFile))
-		if err != nil {
-			panic(err)
-		}
+		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
-		if err := compress.Compress("Transactions", fileName, segmentFile, workers); err != nil {
+		log.Info("Creating", "file", fileName)
+		if _, err := snapshotsync.DumpTxs(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
-		_ = os.Remove(fileName + ".dat")
+		if err := compress.Compress(ctx, "Transactions", tmpFilePath, segmentFile, workers); err != nil {
+			panic(err)
+		}
+		_ = os.Remove(tmpFilePath)
 
 		//nolint
 		//break // TODO: remove me - useful for tests
