@@ -189,17 +189,7 @@ func (g *Getter) nextPattern() []byte {
 	return g.pattern()
 }
 
-func (d *Decompressor) Count() int {
-	//TODO: likely it can be optimized by don't decompress values, or even by storing count in file
-	counterGetter := d.MakeGetter()
-	word := make([]byte, 0, 64)
-	count := 0
-	for counterGetter.HasNext() {
-		word, _ = counterGetter.Next(word[:0])
-		count++
-	}
-	return count
-}
+func (d *Decompressor) Count() int { return int(d.count) }
 
 // MakeGetter creates an object that can be used to access words in the decompressor's file
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concrently
