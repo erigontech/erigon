@@ -6,7 +6,8 @@ Historical data - is immutable, files have .seg extension.
 
 ## Architecture
 
-Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files can be created 4 ways:
+Downloader works based on <your_datadir>/snapshots/*.torrent files (`etl-tmp` and `snapshots` directories MUST be on
+same drive). Such files can be created 4 ways:
 
 - Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger creation of .torrent files
 - Erigon can create new .seg file, Downloader will scan .seg file and create .torrent
