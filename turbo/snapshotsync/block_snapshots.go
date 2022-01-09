@@ -511,17 +511,14 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
-	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Transactions)
-	tmpFileName = path.Join(tmpdir, tmpFileName)
-
+func DumpTxs(db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := NewSimpleFile(tmpFileName)
+	f, err := NewSimpleFile(tmpFilePath)
 	if err != nil {
 		return 0, err
 	}
@@ -617,14 +614,11 @@ func DumpTxs(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) (fir
 	return firstTxID, nil
 }
 
-func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
-	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Headers)
-	tmpFileName = path.Join(tmpdir, tmpFileName)
-
+func DumpHeaders(db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := NewSimpleFile(tmpFileName)
+	f, err := NewSimpleFile(tmpFilePath)
 	if err != nil {
 		return err
 	}
@@ -675,13 +669,10 @@ func DumpHeaders(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) 
 	return nil
 }
 
-func DumpBodies(db kv.RoDB, tmpdir string, fromBlock uint64, blocksAmount int) error {
-	tmpFileName := TmpFileName(fromBlock, fromBlock+uint64(blocksAmount), Bodies)
-	tmpFileName = path.Join(tmpdir, tmpFileName)
-
+func DumpBodies(db kv.RoDB, filePath string, fromBlock uint64, blocksAmount int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	f, err := os.Create(tmpFileName)
+	f, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
