@@ -98,7 +98,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 func doSnapshotCommand(cliCtx *cli.Context) error {
-	return nil
 	ctx, cancel := utils.RootContext()
 	defer cancel()
 
