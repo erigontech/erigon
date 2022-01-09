@@ -73,7 +73,7 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 
 ```
 // Disk-read-intense
-erigon snapshots index --datadir=<your_datadir>
+erigon snapshots index --datadir=<your_datadir> --rebuild
 ```
 
 ## Known Issues
