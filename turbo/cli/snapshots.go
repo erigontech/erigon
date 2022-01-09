@@ -35,6 +35,7 @@ var snapshotCommand = cli.Command{
 			Name:   "create",
 			Action: doSnapshotCommand,
 			Usage:  "Create snapshots for given range of blocks",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
@@ -46,6 +47,7 @@ var snapshotCommand = cli.Command{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotRebuildFlag,
@@ -96,6 +98,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 func doSnapshotCommand(cliCtx *cli.Context) error {
+	return nil
 	ctx, cancel := utils.RootContext()
 	defer cancel()
 
