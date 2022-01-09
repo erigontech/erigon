@@ -216,7 +216,6 @@ func Setup(ctx *cli.Context) error {
 	}
 	pprofEnabled := ctx.Bool(pprofFlag.Name)
 	metricsAddr := ctx.String(metricsAddrFlag.Name)
-	fmt.Printf("pprofEnabled: %t, %t\n", ctx.GlobalBool(pprofFlag.Name), ctx.Bool(pprofFlag.Name))
 
 	if metrics.Enabled && (!pprofEnabled || metricsAddr != "") {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
