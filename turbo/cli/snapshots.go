@@ -216,7 +216,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName)
-		if _, err := snapshotsync.DumpTxs(ctx, chainDB, tmpDir, i, int(blocksPerFile)); err != nil {
+		if _, err := snapshotsync.DumpTxs(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
 		if err := compress.Compress(ctx, "Transactions", tmpFilePath, segmentFile, workers); err != nil {
