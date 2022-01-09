@@ -143,7 +143,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		BlockNumber:     pre.Env.Number,
 		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		Time:            pre.Env.Timestamp,
-		Difficulty:      pre.Env.Difficulty,
+		Difficulty:      difficulty,
 		GasLimit:        pre.Env.GasLimit,
 		GetHash:         getHash,
 	}
