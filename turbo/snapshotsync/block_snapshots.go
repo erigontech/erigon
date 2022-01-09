@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -1013,7 +1012,6 @@ func NewSimpleFile(name string) (*SimpleFile, error) {
 func (f *SimpleFile) Close() {
 	f.w.Flush()
 	f.f.Sync()
-	//TODO: write f.count to begin of the file after sync
 	f.f.Close()
 }
 func (f *SimpleFile) Append(v []byte) error {
@@ -1028,33 +1026,4 @@ func (f *SimpleFile) Append(v []byte) error {
 		}
 	}
 	return nil
-}
-func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
-	f, err := os.Open(fileName)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	r := bufio.NewReaderSize(f, etl.BufIOSize)
-	var buf []byte
-	l, e := binary.ReadUvarint(r)
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
-		if len(buf) < int(l) {
-			buf = make([]byte, l)
-		}
-		if _, e = io.ReadFull(r, buf[:l]); e != nil {
-			return e
-		}
-		if err := walker(buf[:l]); err != nil {
-			return err
-		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
-	}
-	return nil
-}
-
-func percent(progress, total uint64) string {
-	return fmt.Sprintf("%.2f%%", float32(100*(float64(progress)/float64(total))))
 }
