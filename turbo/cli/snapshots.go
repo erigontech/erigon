@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
@@ -34,21 +35,21 @@ var snapshotCommand = cli.Command{
 			Name:   "create",
 			Action: doSnapshotCommand,
 			Usage:  "Create snapshots for given range of blocks",
-			Flags: []cli.Flag{
+			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
-			},
+			}, debug.Flags...),
 		},
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
-			Flags: []cli.Flag{
+			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
 				SnapshotRebuildFlag,
-			},
+			}, debug.Flags...),
 		},
 	},
 }
