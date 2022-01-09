@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -299,7 +300,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	if executedStatus.Error != nil {
 		return nil, executedStatus.Error
 	}
-	// Discard all payload assembled
+	// Discard all payload assembled since new state has been generated
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// Send reply over
 	reply := remote.EngineExecutePayloadReply{Status: string(executedStatus.Status)}
@@ -365,6 +366,25 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// If we result to be on the incorrect fork and have the head, let's unwind to it.
 	if beaconHeadHash != rawdb.ReadHeadHeaderHash(tx) {
 		s.unwindForkChoicePOSCh <- beaconHeadHeader.Number.Uint64()
+		// Discard all payload assembled since new state has been generated
+		s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
+		currentNumber, err := stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return nil, err
+		}
+		// Wait for the unwind process to end
+		for currentNumber != beaconHeadHeader.Number.Uint64() {
+			currentNumber, err = stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	// If we are just updating forkchoice, this is enough
+	if req.Prepare == nil {
+		return &remote.EngineForkChoiceUpdatedReply{
+			Status: string(Success),
+		}, nil
 	}
 	// If we are not proposing, we return an error
 	if !s.proposing {
@@ -381,7 +401,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// successfully assembled the payload and assigned the correct id
 	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
-		Status:    "SUCCESS",
+		Status:    string(Success),
 		PayloadId: s.payloadId,
 	}, nil
 }
