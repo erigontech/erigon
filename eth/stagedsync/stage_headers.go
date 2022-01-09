@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,18 +34,19 @@ import (
 )
 
 type HeadersCfg struct {
-	db                    kv.RwDB
-	hd                    *headerdownload.HeaderDownload
-	chainConfig           params.ChainConfig
-	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
-	announceNewHashes     func(context.Context, []headerdownload.Announce)
-	penalize              func(context.Context, []headerdownload.PenaltyItem)
-	batchSize             datasize.ByteSize
-	noP2PDiscovery        bool
-	tmpdir                string
-	reverseDownloadCh     chan privateapi.PayloadMessage
-	unwindForkChoicePOSCh chan uint64
-	waitingPosHeaders     *uint32 // atomic boolean flag
+	db                      kv.RwDB
+	hd                      *headerdownload.HeaderDownload
+	chainConfig             params.ChainConfig
+	headerReqSend           func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
+	announceNewHashes       func(context.Context, []headerdownload.Announce)
+	penalize                func(context.Context, []headerdownload.PenaltyItem)
+	batchSize               datasize.ByteSize
+	noP2PDiscovery          bool
+	tmpdir                  string
+	reverseDownloadCh       chan privateapi.PayloadMessage
+	unwindForkChoicePOSCh   chan uint64
+	waitingPosHeaders       *uint32 // atomic boolean flag
+	finishHeadersUnwindCond *sync.Cond
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -66,24 +68,26 @@ func StageHeadersCfg(
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
+	finishHeadersUnwindCond *sync.Cond,
 	tmpdir string,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                    db,
-		hd:                    headerDownload,
-		chainConfig:           chainConfig,
-		headerReqSend:         headerReqSend,
-		announceNewHashes:     announceNewHashes,
-		penalize:              penalize,
-		batchSize:             batchSize,
-		tmpdir:                tmpdir,
-		noP2PDiscovery:        noP2PDiscovery,
-		reverseDownloadCh:     reverseDownloadCh,
-		unwindForkChoicePOSCh: unwindForkChoicePOSCh,
-		waitingPosHeaders:     waitingPosHeaders,
-		snapshots:             snapshots,
-		snapshotDownloader:    snapshotDownloader,
-		blockReader:           blockReader,
+		db:                      db,
+		hd:                      headerDownload,
+		chainConfig:             chainConfig,
+		headerReqSend:           headerReqSend,
+		announceNewHashes:       announceNewHashes,
+		penalize:                penalize,
+		batchSize:               batchSize,
+		tmpdir:                  tmpdir,
+		noP2PDiscovery:          noP2PDiscovery,
+		reverseDownloadCh:       reverseDownloadCh,
+		unwindForkChoicePOSCh:   unwindForkChoicePOSCh,
+		waitingPosHeaders:       waitingPosHeaders,
+		snapshots:               snapshots,
+		snapshotDownloader:      snapshotDownloader,
+		blockReader:             blockReader,
+		finishHeadersUnwindCond: finishHeadersUnwindCond,
 	}
 }
 
@@ -544,6 +548,8 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 }
 
 func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
+	cfg.finishHeadersUnwindCond.L.Lock()
+	defer cfg.finishHeadersUnwindCond.L.Unlock()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -653,6 +659,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return err
 		}
 	}
+	cfg.finishHeadersUnwindCond.Broadcast()
 	return nil
 }
 

@@ -72,24 +72,22 @@ type EngineImpl struct {
 // in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
 // if the payloadAttributes is different than null, we return
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
-	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
-	if payloadAttributes == nil {
-		return map[string]interface{}{
-			"status": "SUCCESS",
-		}, nil
-	}
-	// Request for assembling payload
-	reply, err := e.api.EngineForkchoiceUpdateV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
-		Prepare: &remote.EnginePreparePayload{
+	var prepareParameters *remote.EnginePreparePayload
+	if payloadAttributes != nil {
+		prepareParameters = &remote.EnginePreparePayload{
 			Timestamp:    uint64(payloadAttributes.Timestamp),
 			Random:       gointerfaces.ConvertHashToH256(payloadAttributes.Random),
 			FeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
-		},
+		}
+	}
+	// Request for assembling payload
+	reply, err := e.api.EngineForkchoiceUpdateV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
 		Forkchoice: &remote.EngineForkChoiceUpdated{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
 		},
+		Prepare: prepareParameters,
 	})
 	if err != nil {
 		return nil, err
