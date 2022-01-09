@@ -185,7 +185,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		if err := snapshotsync.DumpBodies(chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
-		if err := compress.Compress(ctx, "Bodies", fileName, segmentFile, workers); err != nil {
+		if err := compress.Compress(ctx, "Bodies", tmpFilePath, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)
@@ -194,10 +194,10 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", segmentFile)
-		if err := snapshotsync.DumpHeaders(chainDB, tmpDir, i, int(blocksPerFile)); err != nil {
+		if err := snapshotsync.DumpHeaders(chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
-		if err := compress.Compress(ctx, "Headers", fileName, segmentFile, workers); err != nil {
+		if err := compress.Compress(ctx, "Headers", tmpFilePath, segmentFile, workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)
@@ -206,8 +206,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", segmentFile)
-		_, err := snapshotsync.DumpTxs(chainDB, tmpDir, i, int(blocksPerFile))
-		if err != nil {
+		if _, err := snapshotsync.DumpTxs(chainDB, tmpDir, i, int(blocksPerFile)); err != nil {
 			panic(err)
 		}
 		if err := compress.Compress(ctx, "Transactions", tmpFilePath, segmentFile, workers); err != nil {
