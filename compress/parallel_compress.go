@@ -595,7 +595,9 @@ func reducedict(logPrefix, tmpFilePath, dictPath, segmentFilePath, tmpDir string
 		}
 	}
 	log.Info(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", offset, "position cutoff", positionCutoff)
-	df, err := os.Create("huffman_codes.txt")
+	huffmanFile := filepath.Join(tmpDir, "huffman_codes.txt")
+	defer os.Remove(huffmanFile)
+	df, err := os.Create(huffmanFile)
 	if err != nil {
 		return err
 	}
