@@ -281,10 +281,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 	parentHeader := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64()-1)
 
-	if err != nil {
-		return nil, err
-	}
-
 	if parentHeader != nil && *rawdb.ReadCurrentBlockNumber(tx)+1 != header.Number.Uint64() {
 		s.unwindForkChoicePOSCh <- header.Number.Uint64() - 1
 	}
