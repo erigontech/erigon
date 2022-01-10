@@ -91,7 +91,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	makeTestDb(ctx, db)
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
-	unwindForkChoicePOSCh := make(chan common.Hash)
+	unwindForkChoicePOSCh := make(chan uint64)
 	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false)
@@ -152,7 +152,7 @@ func TestMockValidExecution(t *testing.T) {
 
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
-	unwindForkChoicePOSCh := make(chan common.Hash)
+	unwindForkChoicePOSCh := make(chan uint64)
 	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false)
@@ -189,7 +189,7 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
-	unwindForkChoicePOSCh := make(chan common.Hash)
+	unwindForkChoicePOSCh := make(chan uint64)
 
 	waitingForHeaders := uint32(1)
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false)
@@ -226,7 +226,7 @@ func TestNoTTD(t *testing.T) {
 
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
-	unwindForkChoicePOSCh := make(chan common.Hash)
+	unwindForkChoicePOSCh := make(chan uint64)
 	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false)
