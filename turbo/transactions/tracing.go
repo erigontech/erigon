@@ -65,7 +65,12 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(vmenv.ChainRules(), state.NewNoopWriter())
+		_ = statedb.FinalizeTx(vmenv.ChainRules(), reader)
+
+		if idx+1 == len(block.Transactions()) {
+			// Return the state from evaluating all txs in the block, note no msg or TxContext in this case
+			return nil, BlockContext, vm.TxContext{}, statedb, reader, nil
+		}
 	}
 	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }

@@ -113,13 +113,13 @@ func TestSenders(t *testing.T) {
 	assert.NoError(t, err)
 
 	{
-		found := rawdb.ReadBodyWithTransactions(tx, common.HexToHash("01"), 1)
+		found := rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("01"), 1)
 		assert.NotNil(t, found)
 		assert.Equal(t, 2, len(found.Transactions))
-		found = rawdb.ReadBodyWithTransactions(tx, common.HexToHash("02"), 2)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("02"), 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Transactions))
-		found = rawdb.ReadBodyWithTransactions(tx, common.HexToHash("03"), 3)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("03"), 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Transactions))
 		assert.NotNil(t, 2, len(found.Uncles))

@@ -33,28 +33,19 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for ChainID: %d", len(b))
-	}
-	//tx.ChainID = new(uint256.Int).SetBytes(b)
+	tx.ChainID = new(uint256.Int).SetBytes(b)
 	if tx.Nonce, err = s.Uint(); err != nil {
 		return err
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxPriorityFeePerGas: %d", len(b))
 	}
 	tx.Tip = new(uint256.Int).SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for MaxFeePerGas: %d", len(b))
 	}
 	tx.FeeCap = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -70,14 +61,14 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
+		return err
+	}
+	if tx.Salt, err = s.Bytes(); err != nil {
 		return err
 	}
 	// decode AccessList
@@ -86,25 +77,16 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode V
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
 	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
 	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return err
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	return s.ListEnd()
@@ -115,7 +97,7 @@ func (tx StarknetTransaction) GetPrice() *uint256.Int {
 }
 
 func (tx StarknetTransaction) GetTip() *uint256.Int {
-	panic("implement me")
+	return tx.Tip
 }
 
 func (tx StarknetTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
@@ -123,7 +105,7 @@ func (tx StarknetTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.
 }
 
 func (tx StarknetTransaction) GetFeeCap() *uint256.Int {
-	panic("implement me")
+	return tx.FeeCap
 }
 
 func (tx StarknetTransaction) Cost() *uint256.Int {
@@ -184,7 +166,7 @@ func (tx StarknetTransaction) GetAccessList() AccessList {
 }
 
 func (tx StarknetTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
-	panic("implement me")
+	return &tx.V, &tx.R, &tx.S
 }
 
 func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
@@ -269,6 +251,10 @@ func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 	if err := EncodeString(tx.Data, w, b); err != nil {
 		return err
 	}
+	// encode cairo contract address salt
+	if err := EncodeString(tx.Salt, w, b); err != nil {
+		return err
+	}
 	// prefix
 	if err := EncodeStructSizePrefix(accessListLen, w, b); err != nil {
 		return err
@@ -338,6 +324,7 @@ func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, 
 		valueLen = (tx.Value.BitLen() + 7) / 8
 	}
 	payloadSize += valueLen
+
 	// size of Data
 	payloadSize++
 	switch len(tx.Data) {
@@ -352,6 +339,22 @@ func (tx StarknetTransaction) payloadSize() (payloadSize int, nonceLen, gasLen, 
 		}
 		payloadSize += len(tx.Data)
 	}
+
+	// size of cairo contract address salt
+	payloadSize++
+	switch len(tx.Salt) {
+	case 0:
+	case 1:
+		if tx.Salt[0] >= 128 {
+			payloadSize++
+		}
+	default:
+		if len(tx.Salt) >= 56 {
+			payloadSize += (bits.Len(uint(len(tx.Salt))) + 7) / 8
+		}
+		payloadSize += len(tx.Salt)
+	}
+
 	// size of AccessList
 	payloadSize++
 	accessListLen = accessListSize(tx.AccessList)
@@ -393,6 +396,7 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 			Nonce:   tx.Nonce,
 			To:      tx.To,
 			Data:    common.CopyBytes(tx.Data),
+			Salt:    common.CopyBytes(tx.Salt),
 			Gas:     tx.Gas,
 			Value:   new(uint256.Int),
 		},

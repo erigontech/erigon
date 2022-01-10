@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -597,10 +596,10 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeo
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
+	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	strideHeight := hd.highestInDb + stride
-	lowestAnchorHeight := hd.topSeenHeight + 1 // Inclusive upper bound
+	lowestAnchorHeight := hd.topSeenHeightPoW + 1 // Inclusive upper bound
 	if lowestAnchorHeight <= strideHeight {
 		return nil
 	}
@@ -677,7 +676,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		}
 		if td != nil {
 			// Check if transition to proof-of-stake happened and stop forward syncing
-			if terminalTotalDifficulty != nil && (link.header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 || td.Cmp(terminalTotalDifficulty) >= 0) {
+			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 				hd.highestInDb = link.blockHeight
 				return true, nil
 			}
@@ -702,7 +701,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		hd.insertList = append(hd.insertList, linksInFuture...)
 		linksInFuture = nil //nolint
 	}
-	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
+	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
 func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
@@ -992,9 +991,9 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		}
 		return
 	}
-	if highestNum > hd.topSeenHeight {
+	if highestNum > hd.topSeenHeightPoW {
 		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
-			hd.topSeenHeight = highestNum
+			hd.topSeenHeightPoW = highestNum
 		}
 	}
 
@@ -1038,7 +1037,19 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.topSeenHeight
+	if hd.topSeenHeightPoW > hd.topSeenHeightPoS {
+		return hd.topSeenHeightPoW
+	} else {
+		return hd.topSeenHeightPoS
+	}
+}
+
+func (hd *HeaderDownload) UpdateTopSeenHeightPoS(blockHeight uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if blockHeight > hd.topSeenHeightPoS {
+		hd.topSeenHeightPoS = blockHeight
+	}
 }
 
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
@@ -1105,6 +1116,24 @@ func (hd *HeaderDownload) Fetching() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.fetching
+}
+
+func (hd *HeaderDownload) GetPendingExecutionStatus() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingExecutionStatus
+}
+
+func (hd *HeaderDownload) SetPendingExecutionStatus(header common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingExecutionStatus = header
+}
+
+func (hd *HeaderDownload) ClearPendingExecutionStatus() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingExecutionStatus = common.Hash{}
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {

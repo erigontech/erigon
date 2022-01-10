@@ -222,7 +222,7 @@ Loop:
 			// non-canonical case
 			continue
 		}
-		body := rawdb.ReadBodyWithTransactions(tx, blockHash, blockNumber)
+		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
 
 		select {
 		case recoveryErr := <-errCh:

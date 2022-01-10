@@ -70,6 +70,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node"
@@ -135,9 +136,8 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh    chan types.Header
-	statusCh             chan privateapi.ExecutionStatus
-	waitingForPOSHeaders uint32 // atomic boolean flag
+	reverseDownloadCh     chan privateapi.PayloadMessage
+	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -308,53 +308,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			}
 		}()
 	}
-	backend.sentryControlServer, err = sentry.NewControlServer(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow)
-	if err != nil {
-		return nil, err
-	}
-	config.BodyDownloadTimeoutSeconds = 30
-
-	var txPoolRPC txpool_proto.TxpoolServer
-	var miningRPC txpool_proto.MiningServer
-	if !config.TxPool.Disable {
-		cfg := txpool2.DefaultConfig
-		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
-		cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
-		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
-		cfg.PriceBump = config.TxPool.PriceBump
-		cfg.MinFeeCap = config.TxPool.PriceLimit
-		cfg.AccountSlots = config.TxPool.AccountSlots
-		cfg.LogEvery = 1 * time.Minute
-		cfg.CommitEvery = 5 * time.Minute
-		cfg.TracedSenders = config.TxPool.TracedSenders
-
-		//cacheConfig := kvcache.DefaultCoherentCacheConfig
-		//cacheConfig.MetricsLabel = "txpool"
-
-		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
-		//defer close(newTxs)
-		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
-		)
-		if err != nil {
-			return nil, err
-		}
-		txPoolRPC = backend.txPool2GrpcServer
-	}
-
-	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
-	backend.quitMining = make(chan struct{})
-	backend.miningSealingQuit = make(chan struct{})
-	backend.pendingBlocks = make(chan *types.Block, 1)
-	backend.minedBlocks = make(chan *types.Block, 1)
-
-	miner := stagedsync.NewMiningState(&config.Miner)
-	backend.pendingBlocks = miner.PendingResultCh
-	backend.minedBlocks = miner.MiningResultCh
-	backend.reverseDownloadCh = make(chan types.Header)
-	backend.statusCh = make(chan privateapi.ExecutionStatus)
 
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
@@ -400,9 +353,57 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		blockReader = snapshotsync.NewBlockReader()
 	}
 
+	backend.sentryControlServer, err = sentry.NewControlServer(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, backend.sentries, config.BlockDownloaderWindow, blockReader)
+	if err != nil {
+		return nil, err
+	}
+	config.BodyDownloadTimeoutSeconds = 30
+
+	var txPoolRPC txpool_proto.TxpoolServer
+	var miningRPC txpool_proto.MiningServer
+	if !config.TxPool.Disable {
+		cfg := txpool2.DefaultConfig
+		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
+		cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
+		cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
+		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
+		cfg.PriceBump = config.TxPool.PriceBump
+		cfg.MinFeeCap = config.TxPool.PriceLimit
+		cfg.AccountSlots = config.TxPool.AccountSlots
+		cfg.LogEvery = 1 * time.Minute
+		cfg.CommitEvery = 5 * time.Minute
+		cfg.TracedSenders = config.TxPool.TracedSenders
+
+		//cacheConfig := kvcache.DefaultCoherentCacheConfig
+		//cacheConfig.MetricsLabel = "txpool"
+
+		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
+		//defer close(newTxs)
+		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
+			ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+		)
+		if err != nil {
+			return nil, err
+		}
+		txPoolRPC = backend.txPool2GrpcServer
+	}
+
+	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
+	backend.quitMining = make(chan struct{})
+	backend.miningSealingQuit = make(chan struct{})
+	backend.pendingBlocks = make(chan *types.Block, 1)
+	backend.minedBlocks = make(chan *types.Block, 1)
+
+	miner := stagedsync.NewMiningState(&config.Miner)
+	backend.pendingBlocks = miner.PendingResultCh
+	backend.minedBlocks = miner.MiningResultCh
+	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
+
+	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, tmpdir),
+			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
@@ -413,10 +414,38 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	atomic.StoreUint32(&backend.waitingForPOSHeaders, 0)
+	// proof-of-stake mining
+	assembleBlockPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
+		miningStatePos := stagedsync.NewMiningState(&config.Miner)
+		proposingSync := stagedsync.New(
+			stagedsync.MiningStages(backend.sentryCtx,
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.BlockProposerParametersPOS{
+					Random:                random,
+					SuggestedFeeRecipient: suggestedFeeRecipient,
+					Timestamp:             timestamp,
+				}, tmpdir),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
+				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
+				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
+			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
+		// We start the mining step
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync); err != nil {
+			return nil, err
+		}
+		block := <-miningStatePos.MiningResultPOSCh
+		return block, nil
+	}
+	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
+	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders)
+		blockReader, chainConfig, backend.reverseDownloadCh, backend.sentryControlServer.Hd.ExecutionStatusCh, &backend.waitingForBeaconChain,
+		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
+	// If we enabled the proposer flag we initiates the block proposing thread
+	if config.Miner.EnabledPOS {
+		ethBackendRPC.StartProposer()
+	}
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
 		if stack.Config().TLSConnection {
@@ -487,7 +516,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.reverseDownloadCh, backend.statusCh, &backend.waitingForPOSHeaders,
+		backend.reverseDownloadCh, &backend.waitingForBeaconChain,
 		backend.downloaderClient)
 	if err != nil {
 		return nil, err
@@ -635,6 +664,12 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		var hasWork bool
 		errc := make(chan error, 1)
 
+		tx, err := s.chainDB.BeginRo(ctx)
+		if err != nil {
+			log.Warn("mining", "err", err)
+			return
+		}
+
 		for {
 			mineEvery.Reset(3 * time.Second)
 			select {
@@ -652,6 +687,21 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 					log.Warn("mining", "err", err)
 				}
 			case <-quitCh:
+				return
+			}
+			// Check if we transitioned and if we did halt POW mining
+			headNumber, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				log.Warn("mining", "err", err)
+				return
+			}
+
+			isTrans, err := rawdb.Transitioned(tx, headNumber, s.chainConfig.TerminalTotalDifficulty)
+			if err != nil {
+				log.Warn("mining", "err", err)
+				return
+			}
+			if isTrans {
 				return
 			}
 

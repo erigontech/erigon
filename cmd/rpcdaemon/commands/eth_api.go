@@ -108,10 +108,11 @@ type BaseAPI struct {
 	_genesisLock sync.RWMutex
 
 	_blockReader interfaces.BlockReader
+	_txnReader   interfaces.TxnReader
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -121,7 +122,7 @@ func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interf
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
@@ -135,6 +136,10 @@ func (api *BaseAPI) EnableTevmExperiment() { api.TevmEnabled = true }
 func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	_, genesis, err := api.chainConfigWithGenesis(tx)
 	return genesis, err
+}
+
+func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
+	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {
@@ -175,6 +180,11 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		return block, nil
 	}
 	if api.blocksLRU != nil {
+		// calc fields before put to cache
+		for _, txn := range block.Transactions() {
+			txn.Hash()
+		}
+		block.Hash()
 		api.blocksLRU.Add(hash, block)
 	}
 	return block, nil

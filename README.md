@@ -63,7 +63,7 @@ make erigon
 
 ### Testnets
 
-If you would like to give Erigon a try, but do not have spare 2Tb on your driver, a good option is to start syncing one
+If you would like to give Erigon a try, but do not have spare 2Tb on your drive, a good option is to start syncing one
 of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 
 ```sh
@@ -118,7 +118,7 @@ Windows users may run erigon in 3 possible ways:
   been reported some anti-virus programs detect those files as possibly infected by `Win64/Kryptic.CIS` trojan horse (or
   a variant of it). Although those are false positives we have no control over 100+ vendors of security products for
   Windows and their respective detection algorythms and we understand this might make your experience with Windows
-  builds uncomfortable. To workaround the issue you might either set exlusions for your antivirus specifically
+  builds uncomfortable. To workaround the issue you might either set exclusions for your antivirus specifically
   for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two
   options
 
@@ -138,7 +138,8 @@ Windows users may run erigon in 3 possible ways:
 ### Beacon Chain
 
 Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
-relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipes are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
+relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
+ are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
 
 You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
 
@@ -146,7 +147,7 @@ If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RP
 .
 
 Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
-where <ip address> is either localhost or the IP address of the device running the JSON-RPC daemon.
+where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
     

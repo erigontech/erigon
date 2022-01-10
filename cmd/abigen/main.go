@@ -115,7 +115,6 @@ func init() {
 		aliasFlag,
 	}
 	app.Action = abigen
-	cli.CommandHelpTemplate = flags.OriginCommandHelpTemplate
 }
 
 func abigen(c *cli.Context) error {

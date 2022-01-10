@@ -35,7 +35,6 @@ import (
 type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
-	statusCh          chan privateapi.ExecutionStatus
 	chainConfig       params.ChainConfig
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
@@ -43,7 +42,7 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	reverseDownloadCh chan types.Header
+	reverseDownloadCh chan privateapi.PayloadMessage
 	waitingPosHeaders *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
@@ -54,14 +53,13 @@ type HeadersCfg struct {
 func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
-	statusCh chan privateapi.ExecutionStatus,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	reverseDownloadCh chan types.Header,
+	reverseDownloadCh chan privateapi.PayloadMessage,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -71,12 +69,12 @@ func StageHeadersCfg(
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
-		statusCh:           statusCh,
 		chainConfig:        chainConfig,
 		headerReqSend:      headerReqSend,
 		announceNewHashes:  announceNewHashes,
 		penalize:           penalize,
 		batchSize:          batchSize,
+		tmpdir:             tmpdir,
 		noP2PDiscovery:     noP2PDiscovery,
 		reverseDownloadCh:  reverseDownloadCh,
 		waitingPosHeaders:  waitingPosHeaders,
@@ -104,7 +102,6 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-
 	var blockNumber uint64
 
 	if s == nil {
@@ -114,7 +111,6 @@ func SpawnStageHeaders(
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
-
 	if err != nil {
 		return err
 	}
@@ -137,27 +133,42 @@ func HeadersPOS(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
 	// Waiting for the beacon chain
 	log.Info("Waiting for payloads...")
-	header := <-cfg.reverseDownloadCh
+	var payloadMessage privateapi.PayloadMessage
+	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
+	// Decide what kind of action we need to take place
+	select {
+	case payloadMessage = <-cfg.reverseDownloadCh:
+	case <-cfg.hd.SkipCycleHack:
+		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+		return nil
+	}
+
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
 
+	cfg.hd.ClearPendingExecutionStatus()
+
+	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
+	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
+
 	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
-		cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
+		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
 		return err
 	}
 
 	// TODO(yperbasis): handle re-orgs properly
 	if s.BlockNumber >= headerNumber && headerHash != existingHash {
 		u.UnwindTo(headerNumber-1, common.Hash{})
-		cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
+		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 		return nil
 	}
+	// Set chain header reader right
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	logPrefix := s.LogPrefix()
 	logEvery := time.NewTicker(logInterval)
@@ -168,43 +179,47 @@ func HeadersPOS(
 	// If we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
-		cfg.statusCh <- privateapi.ExecutionStatus{Error: err}
+		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
 		return err
 	}
-	if parent != nil && parent.Hash() == header.ParentHash {
-		if err := cfg.hd.VerifyHeader(&header); err != nil {
+	if parent != nil {
+		if err := cfg.hd.VerifyHeader(header); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
-			cfg.statusCh <- privateapi.ExecutionStatus{
+			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
 				Status:          privateapi.Invalid,
 				LatestValidHash: header.ParentHash,
 			}
 			return nil
 		}
 
-		// For the sake of simplicity we can just assume it will be valid for now.
-		// TODO(yperbasis): move to execution stage
-		cfg.statusCh <- privateapi.ExecutionStatus{
-			Status:          privateapi.Valid,
-			LatestValidHash: headerHash,
-		}
+		cfg.hd.SetPendingExecutionStatus(headerHash)
 
-		if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 			return err
 		}
+		// We can insert raw bodies immediately and skip stage 3. (stage 2 will not be skipped)
+		// TODO(Giulio2002): Fix inconsistency
+		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
+			return err
+		}
+		if err := stages.SaveStageProgress(tx, stages.Bodies, headerNumber); err != nil {
+			return err
+		}
+
 		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
 			return fmt.Errorf("fix canonical chain: %w", err)
 		}
-
 		if !useExternalTx {
 			if err := tx.Commit(); err != nil {
 				return err
 			}
 		}
+
 		return nil
 	}
 
 	// If we don't have the right parent, download the missing ancestors
-	cfg.statusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
+	cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 
 	cfg.hd.SetPOSSync(true)
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
@@ -215,8 +230,6 @@ func HeadersPOS(
 	cfg.hd.SetFetching(true)
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
-
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
 	prevProgress := headerNumber
@@ -287,11 +300,11 @@ func HeadersPOS(
 		return err
 	}
 
-	if err := cfg.hd.VerifyHeader(&header); err != nil {
+	if err := cfg.hd.VerifyHeader(header); err != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 		return nil
 	}
-	if err := headerInserter.FeedHeaderPoS(tx, &header, headerHash); err != nil {
+	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
 		return err
 	}
 	if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
@@ -303,6 +316,7 @@ func HeadersPOS(
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -324,9 +338,6 @@ func HeadersPOW(
 	var headerProgress uint64
 	var err error
 
-	if !useExternalTx {
-		defer tx.Rollback()
-	}
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
 	}
@@ -787,7 +798,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := cfg.snapshots.BuildIndices(ctx, *chainID); err != nil {
+			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir); err != nil {
 				return err
 			}
 		}
@@ -802,8 +813,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	// Fill kv.HeaderTD table from snapshots
-	c, _ := tx.Cursor(kv.HeaderTD)
-	count, _ := c.Count()
+	c, err := tx.Cursor(kv.HeaderTD)
+	if err != nil {
+		return err
+	}
+	count, err := c.Count()
+	if err != nil {
+		return err
+	}
 	if count == 0 || count == 1 { // genesis does write 1 record
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
@@ -829,21 +846,23 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 
-		// Fill kv.HeaderCanonical table from snapshots
-		tx.ClearBucket(kv.HeaderCanonical)
-		if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
-			return err
-		}
+		if lastHeader != nil {
+			// Fill kv.HeaderCanonical table from snapshots
+			tx.ClearBucket(kv.HeaderCanonical)
+			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+				return err
+			}
 
-		sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
-		if !ok {
-			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
-		}
+			sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+			if !ok {
+				return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+			}
 
-		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		lastTxnID := sn.Transactions.Idx.BaseDataID() + uint64(sn.Transactions.Segment.Count())
-		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-			return err
+			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+			lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				return err
+			}
 		}
 	}
 

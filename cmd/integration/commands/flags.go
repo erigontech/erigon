@@ -40,8 +40,7 @@ func must(err error) {
 func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
-	cmd.Flags().Uint64("miner.gastarget", ethconfig.Defaults.Miner.GasFloor, "Target gas floor for mined blocks")
-	cmd.Flags().Uint64("miner.gaslimit", ethconfig.Defaults.Miner.GasCeil, "Target gas ceiling for mined blocks")
+	cmd.Flags().Uint64("miner.gaslimit", ethconfig.Defaults.Miner.GasLimit, "Target gas limit for mined blocks")
 	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")

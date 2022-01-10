@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/stretchr/testify/require"
 )
@@ -20,9 +19,9 @@ import (
 // Hashes
 var (
 	startingHeadHash = common.HexToHash("0x1")
-	payload1Hash     = common.HexToHash("a1726a8541a53f098b21f58e9d1c63a450b8acbecdce0510162f8257be790320")
+	payload1Hash     = common.HexToHash("2afc6f4132be8d1fded51aa7f914fd831d2939a100f61322842ab41d7898255b")
 	payload2Hash     = common.HexToHash("a19013b8b5f95ffaa008942fd2f04f72a3ae91f54eb64a3f6f8c6630db742aef")
-	payload3Hash     = common.HexToHash("8aa80e6d2270ae7273e87fa5752d94b94a0f05da60f99fd4b8e36ca767cbae91")
+	payload3Hash     = common.HexToHash("a2dd4fc599747c1ce2176a4abae13afbc7ccb4a240f8f4cf22252767bab52f12")
 )
 
 // Payloads
@@ -34,7 +33,7 @@ var (
 		StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 		Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-		ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+		ExtraData:     make([]byte, 0),
 		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 		BlockNumber:   100,
 		GasLimit:      52,
@@ -50,7 +49,7 @@ var (
 		StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 		Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-		ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+		ExtraData:     make([]byte, 0),
 		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 		BlockNumber:   101,
 		GasLimit:      52,
@@ -66,7 +65,7 @@ var (
 		StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 		Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-		ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+		ExtraData:     make([]byte, 0),
 		BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 		BlockNumber:   51,
 		GasLimit:      52,
@@ -90,11 +89,11 @@ func TestMockDownloadRequest(t *testing.T) {
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	reverseDownloadCh := make(chan types.Header)
+	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -150,11 +149,11 @@ func TestMockValidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Header)
+	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -186,11 +185,11 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Header)
+	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 
 	waitingForHeaders := uint32(1)
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -222,11 +221,11 @@ func TestNoTTD(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan types.Header)
+	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, &waitingForHeaders)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 
@@ -240,7 +239,7 @@ func TestNoTTD(t *testing.T) {
 			StateRoot:     gointerfaces.ConvertHashToH256(common.HexToHash("0x4")),
 			Random:        gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 			LogsBloom:     gointerfaces.ConvertBytesToH2048(make([]byte, 256)),
-			ExtraData:     gointerfaces.ConvertHashToH256(common.Hash{}),
+			ExtraData:     make([]byte, 0),
 			BaseFeePerGas: gointerfaces.ConvertHashToH256(common.HexToHash("0x0b3")),
 			BlockNumber:   51,
 			GasLimit:      52,

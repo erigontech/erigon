@@ -73,6 +73,7 @@ type stEnv struct {
 	BlockHashes map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
 	Ommers      []ommer                             `json:"ommers,omitempty"`
 	BaseFee     *big.Int                            `json:"currentBaseFee,omitempty"`
+	Random      *common.Hash                        `json:"currentRandom,omitempty"`
 }
 
 type rejectedTx struct {
@@ -128,6 +129,15 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		txIndex     = 0
 	)
 	gaspool.AddGas(pre.Env.GasLimit)
+
+	difficulty := new(big.Int)
+	if pre.Env.Random == nil {
+		difficulty = pre.Env.Difficulty
+	} else {
+		// We are on POS hence difficulty opcode is now supplant with RANDOM
+		random := pre.Env.Random.Bytes()
+		difficulty.SetBytes(random)
+	}
 	vmContext := vm.BlockContext{
 		CanTransfer:     core.CanTransfer,
 		Transfer:        core.Transfer,
@@ -135,7 +145,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		BlockNumber:     pre.Env.Number,
 		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		Time:            pre.Env.Timestamp,
-		Difficulty:      pre.Env.Difficulty,
+		Difficulty:      difficulty,
 		GasLimit:        pre.Env.GasLimit,
 		GetHash:         getHash,
 	}

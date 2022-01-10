@@ -696,30 +696,29 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
-	if blockNumber == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+	if !ok {
+		return nil, nil
 	}
-
-	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
-	if bErr != nil {
-		return nil, bErr
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
+		return nil, nil
 	}
-	var txIndex int
-	for idx, txn := range block.Transactions() {
-		if txn.Hash() == txHash {
-			txIndex = idx
+	var txnIndex uint64
+	for i, transaction := range block.Transactions() {
+		if transaction.Hash() == txHash {
+			txnIndex = uint64(i)
 			break
 		}
 	}
-	bn := hexutil.Uint64(*blockNumber)
+
+	bn := hexutil.Uint64(blockNum)
 
 	parentNr := bn
 	if parentNr > 0 {
@@ -727,7 +726,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), int(txnIndex), types.MakeSigner(chainConfig, blockNum))
 	if err != nil {
 		return nil, err
 	}
@@ -749,7 +748,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 
 	for txno, trace := range traces {
 		// We're only looking for a specific transaction
-		if txno == txIndex {
+		if txno == int(txnIndex) {
 			result.Output = trace.Output
 			if traceTypeTrace {
 				result.Trace = trace.Trace

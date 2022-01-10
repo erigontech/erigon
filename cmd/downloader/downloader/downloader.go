@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -17,25 +16,27 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
 )
+
+const ASSERT = false
 
 type Client struct {
 	Cli                  *torrent.Client
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadLimit, uploadLimit datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 	torrentConfig.PeerID = peerID
 
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(downloadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(uploadLimit.Bytes()), 2*DefaultPieceSize) // default: unlimited
+	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
 
 	// debug
 	if lg.Debug == verbosity {
@@ -231,26 +232,13 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client, preverifiedHashes snapshothashes.Preverified) error {
-
+func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
 	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
 		}
 		mi.AnnounceList = Trackers
-
-		// skip non-preverified files
-		_, torrentFileName := filepath.Split(torrentFilePath)
-		segmentFileName := segmentFileNameFromTorrentFileName(torrentFileName)
-		hashString, ok := preverifiedHashes[segmentFileName]
-		if !ok {
-			return nil
-		}
-		expect := metainfo.NewHashFromHex(hashString)
-		if mi.HashInfoBytes() != expect {
-			return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", torrentFileName, mi.HashInfoBytes(), expect)
-		}
 
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
 			return err

@@ -36,12 +36,13 @@ import (
 )
 
 var (
-	datadir                          string
-	seeding                          bool
-	asJson                           bool
-	downloaderApiAddr                string
-	torrentVerbosity                 string
-	downloadLimitStr, uploadLimitStr string
+	datadir                       string
+	seeding                       bool
+	asJson                        bool
+	forceRebuild                  bool
+	downloaderApiAddr             string
+	torrentVerbosity              string
+	downloadRateStr, uploadRteStr string
 )
 
 func init() {
@@ -53,11 +54,13 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Info.LogString(), "DEBUG | INFO | WARN | ERROR")
-	rootCmd.Flags().StringVar(&downloadLimitStr, "download.limit", "1gb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadLimitStr, "upload.limit", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "1gb", "bytes per second, example: 32mb")
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
+	printInfoHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
+
 	rootCmd.AddCommand(printInfoHashes)
 }
 
@@ -106,15 +109,15 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
 	}
 
-	var downloadLimit, uploadLimit datasize.ByteSize
-	if err := downloadLimit.UnmarshalText([]byte(downloadLimitStr)); err != nil {
+	var downloadRate, uploadRate datasize.ByteSize
+	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
 		return err
 	}
-	if err := uploadLimit.UnmarshalText([]byte(uploadLimitStr)); err != nil {
+	if err := uploadRate.UnmarshalText([]byte(uploadRteStr)); err != nil {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding)
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
 		return err
 	}
@@ -127,7 +130,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("get peer id: %w", err)
 		}
 
-		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadLimit, uploadLimit)
+		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate)
 		if err != nil {
 			return err
 		}
@@ -153,24 +156,34 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	var cc *params.ChainConfig
-	{
-		chaindataDir := path.Join(datadir, "chaindata")
-		if err := os.MkdirAll(chaindataDir, 0755); err != nil {
-			return err
-		}
-		chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
-		if err != nil {
-			return fmt.Errorf("%w, path: %s", err, chaindataDir)
-		}
-		cc = tool.ChainConfigFromDB(chaindata)
-		chaindata.Close()
-	}
-
-	snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli, snapshotsCfg)
+	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli)
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
+	}
+
+	if downloader.ASSERT {
+		var cc *params.ChainConfig
+		{
+			chaindataDir := path.Join(datadir, "chaindata")
+			if err := os.MkdirAll(chaindataDir, 0755); err != nil {
+				return err
+			}
+			chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
+			if err != nil {
+				return fmt.Errorf("%w, path: %s", err, chaindataDir)
+			}
+			cc = tool.ChainConfigFromDB(chaindata)
+			chaindata.Close()
+		}
+
+		snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
+		for _, t := range t.Cli.Torrents() {
+			expectHashStr := snapshotsCfg.Preverified[t.Info().Name]
+			expectHash := metainfo.NewHashFromHex(expectHashStr)
+			if t.InfoHash() != expectHash {
+				return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", t.Info().Name, t.InfoHash(), expectHash)
+			}
+		}
 	}
 
 	go downloader.MainLoop(ctx, t.Cli)
@@ -185,10 +198,22 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 }
 
 var printInfoHashes = &cobra.Command{
-	Use:     "print_torrent_files",
-	Example: "go run ./cmd/downloader print_info_hashes --datadir <your_datadir> ",
+	Use:     "info_hashes",
+	Example: "go run ./cmd/downloader info_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		snapshotsDir := path.Join(datadir, "snapshots")
+		ctx := cmd.Context()
+
+		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
+			if err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+				return os.Remove(torrentFilePath)
+			}); err != nil {
+				return err
+			}
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotsDir); err != nil {
+				return err
+			}
+		}
 
 		res := map[string]string{}
 		err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
