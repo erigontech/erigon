@@ -2,10 +2,11 @@ package requests
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -17,15 +18,18 @@ type RequestGenerator struct {
 	client *http.Client
 }
 
-func initialiseRequestGenerator() *RequestGenerator {
+func initialiseRequestGenerator(reqId int) *RequestGenerator {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
 
 	reqGen := RequestGenerator{
 		client: client,
+		reqID:  reqId,
 	}
-	reqGen.reqID++
+	if reqGen.reqID == 0 {
+		reqGen.reqID++
+	}
 
 	return &reqGen
 }

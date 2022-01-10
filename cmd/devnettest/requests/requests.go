@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -18,8 +19,8 @@ func parseResponse(resp interface{}) string {
 	return string(result)
 }
 
-func GetBalance(address common.Address, blockNum string) {
-	reqGen := initialiseRequestGenerator()
+func GetBalance(reqId int, address common.Address, blockNum string) {
+	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
 	res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b)
@@ -31,8 +32,8 @@ func GetBalance(address common.Address, blockNum string) {
 	fmt.Printf("Balance retrieved: %v\n", parseResponse(b))
 }
 
-func SendTx(signedTx *types.Transaction) {
-	reqGen := initialiseRequestGenerator()
+func SendTx(reqId int, signedTx *types.Transaction) {
+	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthSendRawTransaction
 
 	var buf bytes.Buffer
@@ -51,8 +52,8 @@ func SendTx(signedTx *types.Transaction) {
 	fmt.Printf("Submitted transaction successfully: %v\n", parseResponse(b))
 }
 
-func TxpoolContent() {
-	reqGen := initialiseRequestGenerator()
+func TxpoolContent(reqId int) {
+	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthTxPool
 
 	res := reqGen.Erigon("txpool_content", reqGen.txpoolContent(), &b)
