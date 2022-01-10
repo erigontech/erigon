@@ -39,7 +39,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		defer tx.Rollback()
 	}
 
-	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
+	headNumber, err := stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
