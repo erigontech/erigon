@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -98,7 +100,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
-	noOpWriter := state.NewNoopWriter()
+	//noOpWriter := state.NewNoopWriter()
 	interrupt := false
 	block := uint64(0)
 	var rwTx kv.RwTx
@@ -119,8 +121,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
+	if err = w.FinishTx(0); err != nil {
+		return err
+	}
 	var rootHash []byte
-	if rootHash, err = w.Finish(true); err != nil {
+	if rootHash, err = w.FinishBlock(true); err != nil {
 		return err
 	}
 	if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
@@ -135,6 +140,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 			tx.Rollback()
 		}
 	}()
+	var txNum uint64 = 1
 	for !interrupt {
 		block++
 		if block >= blockNum {
@@ -168,7 +174,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		}
 		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if _, err = runBlock(intraBlockState, noOpWriter, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+		if txNum, _, err = runBlock2(txNum, intraBlockState, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
 		if block%1000 == 0 {
@@ -181,7 +187,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		default:
 		}
 		tx.Rollback()
-		if rootHash, err = w.Finish(true /* trace */); err != nil {
+		if err := w.FinishTx(txNum); err != nil {
+			return fmt.Errorf("final finish failed: %w", err)
+		}
+		txNum++
+		if rootHash, err = w.FinishBlock(true /* trace */); err != nil {
 			return err
 		}
 		if !bytes.Equal(rootHash, b.Header().Root[:]) {
@@ -194,6 +204,46 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	return nil
 }
 
+func runBlock2(txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+	header := block.Header()
+	vmConfig.TraceJumpDest = true
+	engine := ethash.NewFullFaker()
+	gp := new(core.GasPool).AddGas(block.GasLimit())
+	usedGas := new(uint64)
+	var receipts types.Receipts
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	rules := chainConfig.Rules(block.NumberU64())
+	txNum := txNumStart
+	ww.endBlock = false
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, contractHasTEVM)
+		if err != nil {
+			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		receipts = append(receipts, receipt)
+		if err = ww.w.FinishTx(txNum); err != nil {
+			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		txNum++
+	}
+
+	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	if _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
+		return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
+	}
+
+	ww.endBlock = true
+	if err := ibs.CommitBlock(rules, ww); err != nil {
+		return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
+	}
+
+	return txNum, receipts, nil
+}
+
 // Implements StateReader and StateWriter
 type ReaderWrapper struct {
 	blockNum uint64
@@ -204,6 +254,7 @@ type ReaderWrapper struct {
 type WriterWrapper struct {
 	blockNum uint64
 	w        *aggregator.Writer
+	endBlock bool
 }
 
 func bytesToUint64(buf []byte) (x uint64) {
@@ -346,6 +397,9 @@ func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64,
 }
 
 func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	if address == common.HexToAddress("b214cbce30676bd117f95a8695d34427295cd6f7") {
+		fmt.Printf("UpdateAccountData [%x] in block %d\n", address, ww.blockNum)
+	}
 	var l int
 	l++
 	if account.Nonce > 0 {
@@ -417,6 +471,9 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 }
 
 func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	if address == common.HexToAddress("b214cbce30676bd117f95a8695d34427295cd6f7") {
+		fmt.Printf("UpdateAccountCode [%x] in block %d\n", address, ww.blockNum)
+	}
 	if err := ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */); err != nil {
 		return err
 	}
@@ -424,8 +481,8 @@ func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation u
 }
 
 func (ww *WriterWrapper) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if original == nil || !original.Initialised {
-		return nil
+	if address == common.HexToAddress("b214cbce30676bd117f95a8695d34427295cd6f7") {
+		fmt.Printf("DeleteAccount [%x] in block %d\n", address, ww.blockNum)
 	}
 	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
 		return err
@@ -434,6 +491,12 @@ func (ww *WriterWrapper) DeleteAccount(address common.Address, original *account
 }
 
 func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	//if ww.endBlock {
+	//	return nil
+	//}
+	if address == common.HexToAddress("b214cbce30676bd117f95a8695d34427295cd6f7") {
+		fmt.Printf("WriteAccountStorage [%x] in block %d\n", address, ww.blockNum)
+	}
 	trace := false
 	if trace {
 		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
