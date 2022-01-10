@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -18,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -62,12 +62,13 @@ type EthBackendServer struct {
 	// Send block number of header we are unwinding to
 	unwindForkChoicePOSCh chan<- uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32       // atomic boolean flag
-	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
-	assemblePayloadPOS    assemblePayloadPOSFunc
-	proposing             bool
-	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	shutdown              bool
+	waitingForBeaconChain   *uint32       // atomic boolean flag
+	skipCycleHack           chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
+	assemblePayloadPOS      assemblePayloadPOSFunc
+	proposing               bool
+	syncCond                *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	finishHeadersUnwindCond *sync.Cond // Engine API needs to know when unwind process has finished and can safely perform further operations
+	shutdown                bool
 }
 
 type EthBackend interface {
@@ -99,7 +100,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, unwindForkChoicePOSCh: unwindForkChoicePOSCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
-		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: finishHeadersUnwindCond,
+		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}), finishHeadersUnwindCond: finishHeadersUnwindCond,
 	}
 }
 
@@ -230,6 +231,8 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
+	s.finishHeadersUnwindCond.L.Lock()
+	defer s.finishHeadersUnwindCond.L.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -282,8 +285,8 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 	parentHeader := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64()-1)
 
-	if parentHeader != nil && *rawdb.ReadCurrentBlockNumber(tx)+1 != header.Number.Uint64() {
-		s.unwindForkChoicePOSCh <- header.Number.Uint64() - 1
+	if parentHeader != nil && rawdb.ReadHeadHeaderHash(tx) != header.ParentHash {
+		s.startUnwindCycle(header.Number.Uint64() - 1)
 	}
 
 	// Send the block over
@@ -342,6 +345,8 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
+	s.finishHeadersUnwindCond.L.Lock()
+	defer s.finishHeadersUnwindCond.L.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -365,20 +370,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// If we result to be on the incorrect fork and have the head, let's unwind to it.
 	if beaconHeadHash != rawdb.ReadHeadHeaderHash(tx) {
-		s.unwindForkChoicePOSCh <- beaconHeadHeader.Number.Uint64()
-		// Discard all payload assembled since new state has been generated
-		s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
-		currentNumber, err := stages.GetStageProgress(tx, stages.Headers)
-		if err != nil {
-			return nil, err
-		}
-		// Wait for the unwind process to end
-		for currentNumber != beaconHeadHeader.Number.Uint64() {
-			currentNumber, err = stages.GetStageProgress(tx, stages.Headers)
-			if err != nil {
-				return nil, err
-			}
-		}
+		s.startUnwindCycle(beaconHeadHeader.Number.Uint64())
 	}
 	// If we are just updating forkchoice, this is enough
 	if req.Prepare == nil {
@@ -390,7 +382,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
 	}
-
 	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
 		Random:    req.Prepare.Random,
 		Timestamp: req.Prepare.Timestamp,
@@ -432,7 +423,6 @@ func (s *EthBackendServer) StartProposer() {
 				timestamp := s.pendingPayloads[id].Timestamp
 				// Tell the stage headers to leave space for the write transaction for mining stages
 				s.skipCycleHack <- struct{}{}
-
 				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
 				if err != nil {
 					log.Warn("Error during block assembling", "err", err.Error())
@@ -495,4 +485,23 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 		return nil, err
 	}
 	return nodesInfo, nil
+}
+
+func (s *EthBackendServer) startUnwindCycle(unwind_point uint64) {
+	// Discard all payload assembled since new state has been generated
+	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
+	s.unwindForkChoicePOSCh <- unwind_point
+	unwindFinished := make(chan struct{})
+	go func() {
+		s.finishHeadersUnwindCond.Wait()
+		unwindFinished <- struct{}{}
+	}()
+	// Set a timeout if unwind is either stuck or finished but brodcast() was sent before wait()
+	timer := time.NewTimer(200 * time.Millisecond)
+	select {
+	case <-unwindFinished:
+	case <-timer.C:
+		s.finishHeadersUnwindCond.Broadcast()
+		<-unwindFinished
+	}
 }
