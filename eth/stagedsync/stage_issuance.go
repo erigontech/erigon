@@ -39,7 +39,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		defer tx.Rollback()
 	}
 
-	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
+	headNumber, err := stages.GetStageProgress(tx, stages.Bodies)
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
@@ -73,7 +73,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	prevProgress := s.BlockNumber
 	currentBlockNumber := s.BlockNumber + 1
 	for ; currentBlockNumber < headNumber && !stopped; currentBlockNumber++ {
-		// read body + transactions
+		// read body without transactions
 		hash, err := rawdb.ReadCanonicalHash(tx, currentBlockNumber)
 		if err != nil {
 			return err
