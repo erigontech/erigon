@@ -548,8 +548,6 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 }
 
 func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, test bool) (err error) {
-	cfg.finishHeadersUnwindCond.L.Lock()
-	defer cfg.finishHeadersUnwindCond.L.Unlock()
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
@@ -659,7 +657,10 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return err
 		}
 	}
-	cfg.finishHeadersUnwindCond.Broadcast()
+	if cfg.finishHeadersUnwindCond != nil {
+		cfg.finishHeadersUnwindCond.Broadcast()
+	}
+
 	return nil
 }
 

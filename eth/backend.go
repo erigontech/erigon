@@ -133,10 +133,10 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the header
-	reverseDownloadCh       chan privateapi.PayloadMessage
-	unwindForkChoicePOSCh   chan uint64
-	waitingForBeaconChain   uint32    // atomic boolean flag
-	finishHeadersUnwindCond sync.Cond // Cond that comunicates to engine API when it is safe to consider unwind finished
+	reverseDownloadCh     chan privateapi.PayloadMessage
+	unwindForkChoicePOSCh chan uint64
+	waitingForBeaconChain uint32    // atomic boolean flag
+	engineCond            sync.Cond // Cond that comunicates to engine API when to unlock if it is waiting
 }
 
 // New creates a new Ethereum object (including the
@@ -393,7 +393,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.unwindForkChoicePOSCh = make(chan uint64)
-	backend.finishHeadersUnwindCond = *sync.NewCond(&sync.Mutex{})
+	backend.engineCond = *sync.NewCond(&sync.Mutex{})
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
@@ -434,7 +434,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.sentryControlServer.Hd.ExecutionStatusCh, backend.unwindForkChoicePOSCh, &backend.waitingForBeaconChain,
-		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS, &backend.finishHeadersUnwindCond)
+		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS, &backend.engineCond)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
 	if config.Miner.EnabledPOS {
@@ -511,7 +511,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.reverseDownloadCh, backend.unwindForkChoicePOSCh, &backend.waitingForBeaconChain,
-		&backend.finishHeadersUnwindCond, backend.downloaderClient)
+		&backend.engineCond, backend.downloaderClient)
 	if err != nil {
 		return nil, err
 	}

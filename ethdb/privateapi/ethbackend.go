@@ -62,13 +62,12 @@ type EthBackendServer struct {
 	// Send block number of header we are unwinding to
 	unwindForkChoicePOSCh chan<- uint64
 	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain   *uint32       // atomic boolean flag
-	skipCycleHack           chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
-	assemblePayloadPOS      assemblePayloadPOSFunc
-	proposing               bool
-	syncCond                *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	finishHeadersUnwindCond *sync.Cond // Engine API needs to know when unwind process has finished and can safely perform further operations
-	shutdown                bool
+	waitingForBeaconChain *uint32       // atomic boolean flag
+	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
+	assemblePayloadPOS    assemblePayloadPOSFunc
+	proposing             bool
+	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	shutdown              bool
 }
 
 type EthBackend interface {
@@ -95,12 +94,12 @@ type PayloadMessage struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- uint64, waitingForBeaconChain *uint32,
-	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool, finishHeadersUnwindCond *sync.Cond,
+	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool, syncCond *sync.Cond,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, unwindForkChoicePOSCh: unwindForkChoicePOSCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
-		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}), finishHeadersUnwindCond: finishHeadersUnwindCond,
+		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: syncCond,
 	}
 }
 
@@ -231,8 +230,6 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	s.finishHeadersUnwindCond.L.Lock()
-	defer s.finishHeadersUnwindCond.L.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -286,7 +283,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	parentHeader := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64()-1)
 
 	if parentHeader != nil && rawdb.ReadHeadHeaderHash(tx) != header.ParentHash {
-		s.startUnwindCycle(header.Number.Uint64() - 1)
+		s.unwindCycle(header.Number.Uint64() - 1)
 	}
 
 	// Send the block over
@@ -345,8 +342,6 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	s.finishHeadersUnwindCond.L.Lock()
-	defer s.finishHeadersUnwindCond.L.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -370,7 +365,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// If we result to be on the incorrect fork and have the head, let's unwind to it.
 	if beaconHeadHash != rawdb.ReadHeadHeaderHash(tx) {
-		s.startUnwindCycle(beaconHeadHeader.Number.Uint64())
+		s.unwindCycle(beaconHeadHeader.Number.Uint64())
 	}
 	// If we are just updating forkchoice, this is enough
 	if req.Prepare == nil {
@@ -487,13 +482,13 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 	return nodesInfo, nil
 }
 
-func (s *EthBackendServer) startUnwindCycle(unwind_point uint64) {
+func (s *EthBackendServer) unwindCycle(unwind_point uint64) {
 	// Discard all payload assembled since new state has been generated
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	s.unwindForkChoicePOSCh <- unwind_point
 	unwindFinished := make(chan struct{})
 	go func() {
-		s.finishHeadersUnwindCond.Wait()
+		s.syncCond.Wait()
 		unwindFinished <- struct{}{}
 	}()
 	// Set a timeout if unwind is either stuck or finished but brodcast() was sent before wait()
@@ -501,7 +496,7 @@ func (s *EthBackendServer) startUnwindCycle(unwind_point uint64) {
 	select {
 	case <-unwindFinished:
 	case <-timer.C:
-		s.finishHeadersUnwindCond.Broadcast()
+		s.syncCond.Broadcast()
 		<-unwindFinished
 	}
 }
