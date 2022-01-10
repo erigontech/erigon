@@ -365,7 +365,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 	// If we result to be on the incorrect fork and have the head, let's unwind to it.
 	if beaconHeadHash != rawdb.ReadHeadHeaderHash(tx) {
-		s.unwindCycle(beaconHeadHeader.Number.Uint64()-1)
+		s.unwindCycle(beaconHeadHeader.Number.Uint64() - 1)
 	}
 	// If we are just updating forkchoice, this is enough
 	if req.Prepare == nil {
