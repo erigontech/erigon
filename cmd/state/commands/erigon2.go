@@ -121,11 +121,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
-	if err = w.FinishTx(0); err != nil {
+	if err = w.FinishTx(0, false); err != nil {
 		return err
 	}
 	var rootHash []byte
-	if rootHash, err = w.FinishBlock(true); err != nil {
+	if rootHash, err = w.FinishBlock(false); err != nil {
 		return err
 	}
 	if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
@@ -141,6 +141,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		}
 	}()
 	var txNum uint64 = 1
+	trace := false
 	for !interrupt {
 		block++
 		if block >= blockNum {
@@ -187,18 +188,25 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		default:
 		}
 		tx.Rollback()
-		if err := w.FinishTx(txNum); err != nil {
+		if err := w.FinishTx(txNum, trace); err != nil {
 			return fmt.Errorf("final finish failed: %w", err)
 		}
 		txNum++
-		if rootHash, err = w.FinishBlock(true /* trace */); err != nil {
+		if rootHash, err = w.FinishBlock(trace /* trace */); err != nil {
 			return err
 		}
-		if !bytes.Equal(rootHash, b.Header().Root[:]) {
-			return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", block, b.Header().Root[:], rootHash)
-		}
-		if err = rwTx.Commit(); err != nil {
-			return err
+		if bytes.Equal(rootHash, b.Header().Root[:]) {
+			if err = rwTx.Commit(); err != nil {
+				return err
+			}
+		} else {
+			if trace {
+				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", block, b.Header().Root[:], rootHash)
+			} else {
+				block--
+				trace = true
+			}
+			rwTx.Rollback()
 		}
 	}
 	return nil
@@ -225,7 +233,7 @@ func runBlock2(txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
-		if err = ww.w.FinishTx(txNum); err != nil {
+		if err = ww.w.FinishTx(txNum, false); err != nil {
 			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		txNum++
