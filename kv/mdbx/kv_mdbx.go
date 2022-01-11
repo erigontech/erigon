@@ -168,10 +168,8 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			}
 		}
 
-		if opts.augumentLimit == 0 {
-			opts.augumentLimit = 128 * 256 * 1024 // mdbx's default 256 * 1024
-		}
-		if err = env.SetOption(mdbx.OptRpAugmentLimit, opts.augumentLimit); err != nil {
+		const MAX_AUGMENT_LIMIT = 0x7fffFFFF
+		if err = env.SetOption(mdbx.OptRpAugmentLimit, MAX_AUGMENT_LIMIT); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
