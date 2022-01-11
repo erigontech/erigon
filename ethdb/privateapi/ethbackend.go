@@ -487,6 +487,6 @@ func (s *EthBackendServer) unwindCycle(unwind_point uint64) {
 	// Discard all payload assembled since new state has been generated
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	s.unwindForkChoicePOSCh <- unwind_point
-	
+
 	<-s.unwindFinished
 }
