@@ -348,7 +348,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if err != nil {
 		return nil, err
 	}
-	config.BodyDownloadTimeoutSeconds = 30
+	config.BodyDownloadTimeoutSeconds = 60
 
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
