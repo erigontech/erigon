@@ -50,7 +50,7 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stSStoreTest/InitCollision.json`)
 	st.skipLoad(`^stEIP1559/typeTwoBerlin.json`)
 
-	// https://github.com/ethereum/tests/issues/1001
+	// value exceeding 256 bit is not supported
 	st.skipLoad(`^stTransactionTest/ValueOverflow.json`)
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
@@ -59,7 +59,7 @@ func TestState(t *testing.T) {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
-				withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
+				withTrace(t, func(vmconfig vm.Config) error {
 					config, ok := Forks[subtest.Fork]
 					if !ok {
 						return UnsupportedForkError{subtest.Fork}
@@ -79,10 +79,7 @@ func TestState(t *testing.T) {
 	})
 }
 
-// Transactions with gasLimit above this value will not get a VM trace on failure.
-const traceErrorLimit = 400000
-
-func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
+func withTrace(t *testing.T, test func(vm.Config) error) {
 	// Use config from command line arguments.
 	config := vm.Config{}
 	err := test(config)
@@ -92,10 +89,6 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 
 	// Test failed, re-run with tracing enabled.
 	t.Error(err)
-	if gasLimit > traceErrorLimit {
-		t.Log("gas limit too high for EVM trace")
-		return
-	}
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
 	tracer := vm.NewJSONLogger(&vm.LogConfig{DisableMemory: true}, w)
