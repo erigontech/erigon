@@ -45,24 +45,31 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	if err != nil {
 		return nil, err
 	}
+	defer c.Close()
 	keys := make([]hexutil.Bytes, 0)
 	var (
 		k []byte
-		e error
 	)
+
 	if offset != nil {
-		k, _, e = c.SeekExact(*offset)
+		k, _, err = c.SeekExact(*offset)
 	} else {
-		k, _, e = c.Seek(account.Bytes())
+		k, _, err = c.Seek(account.Bytes())
 	}
-	for ; k != nil && e == nil && len(keys) != quantity; k, _, e = c.Next() {
-		if e != nil {
-			return nil, e
+	if err != nil {
+		return nil, err
+	}
+	for ; k != nil && err == nil && len(keys) != quantity; k, _, err = c.Next() {
+		if err != nil {
+			return nil, err
 		}
 		if !bytes.HasPrefix(k, account.Bytes()) {
 			break
 		}
-		keys = append(keys, k)
+		if len(k) <= common.AddressLength {
+			continue
+		}
+		keys = append(keys, k[common.AddressLength:])
 	}
 	return keys, nil
 }
