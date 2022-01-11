@@ -17,6 +17,7 @@ var devnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80f
 var (
 	sendAddr  string
 	sendValue uint64
+	nonce     uint64
 )
 
 const (
@@ -27,6 +28,7 @@ func init() {
 	sendTxCmd.Flags().StringVar(&sendAddr, "addr", "", "String address to send to")
 	sendTxCmd.MarkFlagRequired("addr")
 	sendTxCmd.Flags().Uint64Var(&sendValue, "value", 0, "Uint64 Value to send")
+	sendTxCmd.Flags().Uint64Var(&nonce, "nonce", 0, "Uint64 nonce")
 
 	rootCmd.AddCommand(sendTxCmd)
 }
@@ -46,7 +48,7 @@ var sendTxCmd = &cobra.Command{
 		}
 		toAddress := common.HexToAddress(sendAddr)
 		signer := types.LatestSigner(params.AllCliqueProtocolChanges)
-		signedTx, _ := types.SignTx(types.NewTransaction(0, toAddress, uint256.NewInt(sendValue),
+		signedTx, _ := types.SignTx(types.NewTransaction(nonce, toAddress, uint256.NewInt(sendValue),
 			params.TxGas, uint256.NewInt(gasPrice), nil), *signer, devnetSignPrivateKey)
 		requests.SendTx(reqId, &signedTx)
 	},
