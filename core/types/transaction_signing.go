@@ -344,6 +344,6 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 		}
 		return new(uint256.Int).SetUint64((v - 35) / 2)
 	}
-	v = new(uint256.Int).Sub(v, u256.Num35)
-	return v.Div(v, u256.Num2)
+	r := new(uint256.Int).Sub(v, u256.Num35)
+	return r.Div(r, u256.Num2)
 }
