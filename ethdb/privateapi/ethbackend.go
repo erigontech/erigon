@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -61,6 +60,8 @@ type EthBackendServer struct {
 	statusCh <-chan ExecutionStatus
 	// Send block number of header we are unwinding to
 	unwindForkChoicePOSCh chan<- uint64
+	// cheks wether we are done with the unwind or not
+	unwindFinished <-chan bool
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -93,11 +94,11 @@ type PayloadMessage struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- uint64, waitingForBeaconChain *uint32,
+	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, unwindForkChoicePOSCh chan<- uint64, unwindFinished <-chan bool, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool, syncCond *sync.Cond,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, unwindForkChoicePOSCh: unwindForkChoicePOSCh, waitingForBeaconChain: waitingForBeaconChain,
+		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, unwindForkChoicePOSCh: unwindForkChoicePOSCh, unwindFinished: unwindFinished, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: syncCond,
 	}
@@ -486,17 +487,6 @@ func (s *EthBackendServer) unwindCycle(unwind_point uint64) {
 	// Discard all payload assembled since new state has been generated
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	s.unwindForkChoicePOSCh <- unwind_point
-	unwindFinished := make(chan struct{})
-	go func() {
-		s.syncCond.Wait()
-		unwindFinished <- struct{}{}
-	}()
-	// Set a timeout if unwind is either stuck or finished but brodcast() was sent before wait()
-	timer := time.NewTimer(200 * time.Millisecond)
-	select {
-	case <-unwindFinished:
-	case <-timer.C:
-		s.syncCond.Broadcast()
-		<-unwindFinished
-	}
+	
+	<-s.unwindFinished
 }

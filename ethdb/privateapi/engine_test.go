@@ -93,10 +93,11 @@ func TestMockDownloadRequest(t *testing.T) {
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	unwindForkChoicePOSCh := make(chan uint64)
+	unwindFinished := make(chan bool)
 	waitingForHeaders := uint32(1)
-	finishHeadersUnwindCond := sync.NewCond(&sync.Mutex{})
+	syncCond := sync.NewCond(&sync.Mutex{})
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false, finishHeadersUnwindCond)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, unwindFinished, &waitingForHeaders, nil, nil, false, syncCond)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -155,10 +156,11 @@ func TestMockValidExecution(t *testing.T) {
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	unwindForkChoicePOSCh := make(chan uint64)
+	unwindFinished := make(chan bool)
 	waitingForHeaders := uint32(1)
-	finishHeadersUnwindCond := sync.NewCond(&sync.Mutex{})
+	syncCond := sync.NewCond(&sync.Mutex{})
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false, finishHeadersUnwindCond)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, unwindFinished, &waitingForHeaders, nil, nil, false, syncCond)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -193,10 +195,11 @@ func TestMockInvalidExecution(t *testing.T) {
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	unwindForkChoicePOSCh := make(chan uint64)
-	finishHeadersUnwindCond := sync.NewCond(&sync.Mutex{})
+	unwindFinished := make(chan bool)
+	syncCond := sync.NewCond(&sync.Mutex{})
 
 	waitingForHeaders := uint32(1)
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false, finishHeadersUnwindCond)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, unwindFinished, &waitingForHeaders, nil, nil, false, syncCond)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
@@ -231,10 +234,11 @@ func TestNoTTD(t *testing.T) {
 	reverseDownloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	unwindForkChoicePOSCh := make(chan uint64)
+	unwindFinished := make(chan bool)
 	waitingForHeaders := uint32(1)
-	finishHeadersUnwindCond := sync.NewCond(&sync.Mutex{})
+	syncCond := sync.NewCond(&sync.Mutex{})
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, &waitingForHeaders, nil, nil, false, finishHeadersUnwindCond)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, unwindForkChoicePOSCh, unwindFinished, &waitingForHeaders, nil, nil, false, syncCond)
 
 	var err error
 

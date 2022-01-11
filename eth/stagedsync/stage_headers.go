@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -45,8 +44,9 @@ type HeadersCfg struct {
 	tmpdir                  string
 	reverseDownloadCh       chan privateapi.PayloadMessage
 	unwindForkChoicePOSCh   chan uint64
+	isForkChoiceUpdate      bool
+	unwindFinished          chan bool
 	waitingPosHeaders       *uint32 // atomic boolean flag
-	finishHeadersUnwindCond *sync.Cond
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -64,11 +64,11 @@ func StageHeadersCfg(
 	noP2PDiscovery bool,
 	reverseDownloadCh chan privateapi.PayloadMessage,
 	unwindForkChoicePOSCh chan uint64,
+	unwindFinished chan bool,
 	waitingPosHeaders *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
-	finishHeadersUnwindCond *sync.Cond,
 	tmpdir string,
 ) HeadersCfg {
 	return HeadersCfg{
@@ -83,11 +83,12 @@ func StageHeadersCfg(
 		noP2PDiscovery:          noP2PDiscovery,
 		reverseDownloadCh:       reverseDownloadCh,
 		unwindForkChoicePOSCh:   unwindForkChoicePOSCh,
+		isForkChoiceUpdate:      false,
+		unwindFinished:          unwindFinished,
 		waitingPosHeaders:       waitingPosHeaders,
 		snapshots:               snapshots,
 		snapshotDownloader:      snapshotDownloader,
 		blockReader:             blockReader,
-		finishHeadersUnwindCond: finishHeadersUnwindCond,
 	}
 }
 
@@ -149,6 +150,8 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 	case forkChoiceUpdateNumber := <-cfg.unwindForkChoicePOSCh:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+		cfg.isForkChoiceUpdate = true
+		fmt.Println(cfg.isForkChoiceUpdate)
 		u.UnwindTo(forkChoiceUpdateNumber, common.Hash{})
 		return nil
 	case <-cfg.hd.SkipCycleHack:
@@ -657,8 +660,10 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return err
 		}
 	}
-	if cfg.finishHeadersUnwindCond != nil {
-		cfg.finishHeadersUnwindCond.Broadcast()
+
+	if cfg.isForkChoiceUpdate {
+		cfg.isForkChoiceUpdate = false
+		cfg.unwindFinished <- true
 	}
 
 	return nil
@@ -954,3 +959,4 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	}
 	return nil
 }
+

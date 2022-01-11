@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -253,8 +252,8 @@ func NewStagedSync(
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan privateapi.PayloadMessage,
 	unwindForkChoicePOSCh chan uint64,
+	unwindFinished chan bool,
 	waitingForPOSHeaders *uint32,
-	finishHeadersUnwindCond *sync.Cond,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
@@ -278,11 +277,11 @@ func NewStagedSync(
 			p2pCfg.NoDiscovery,
 			reverseDownloadCh,
 			unwindForkChoicePOSCh,
+			unwindFinished,
 			waitingForPOSHeaders,
 			allSnapshots,
 			snapshotDownloader,
 			blockReader,
-			finishHeadersUnwindCond,
 			tmpdir,
 		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
