@@ -52,6 +52,7 @@ require (
 	github.com/urfave/cli v1.22.5
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart/v2 v2.1.0
+	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
@@ -65,3 +66,5 @@ require (
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
 	pgregory.net/rapid v0.4.7
 )
+
+replace github.com/ledgerwatch/erigon-lib => github.com/maticnetwork/turbo-bor-lib v0.0.0-20220107124126-fb565bdadda3

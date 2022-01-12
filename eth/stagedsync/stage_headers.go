@@ -166,7 +166,7 @@ Loop:
 		// Load headers into the database
 		var inSync bool
 
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, tx); err != nil {
 			return err
 		}
 

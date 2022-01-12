@@ -513,7 +513,7 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
-func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
+func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool, _ consensus.SystemCall) error {
 	return nil
 }
 
@@ -727,7 +727,7 @@ func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Heade
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, syscall consensus.SystemCall) error {
 	return nil
 	/// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	//header.Coinbase = common.Address{}

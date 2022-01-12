@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
@@ -98,7 +99,7 @@ func ExecuteBlockEphemerally(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
-) (types.Receipts, error) {
+) (types.Receipts, *types.ReceiptForStorage, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
@@ -110,7 +111,7 @@ func ExecuteBlockEphemerally(
 
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -144,7 +145,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
+			return nil, nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		}
 		if !vmConfig.NoReceipts {
 			receipts = append(receipts, receipt)
@@ -154,31 +155,54 @@ func ExecuteBlockEphemerally(
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.Header().ReceiptHash {
-			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
 	if *usedGas != header.GasUsed {
-		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
+		return nil, nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
 		bloom := types.CreateBloom(receipts)
 		if bloom != header.Bloom {
-			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
+			return nil, nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
 	if !vmConfig.ReadOnly {
+		ibs.Prepare(common.Hash{}, block.Hash(), len(block.Transactions()))
 		if err := FinalizeBlockExecution(engine, stateReader, block.Header(), block.Transactions(), block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
-	return receipts, nil
+	var logs []*types.Log
+	for _, receipt := range receipts {
+		logs = append(logs, receipt.Logs...)
+	}
+
+	blockLogs := ibs.Logs()
+	var stateSyncReceipt *types.ReceiptForStorage
+	if len(blockLogs) > 0 {
+		var stateSyncLogs []*types.Log
+		sort.SliceStable(blockLogs, func(i, j int) bool {
+			return blockLogs[i].Index < blockLogs[j].Index
+		})
+
+		if len(blockLogs) > len(logs) {
+			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+
+			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
+
+			stateSyncReceipt = &types.ReceiptForStorage{
+				Status: types.ReceiptStatusSuccessful, // make receipt status successful
+				Logs:   stateSyncLogs,
+			}
+		}
+	}
+	return receipts, stateSyncReceipt, nil
 }
 
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
-	gp := new(GasPool).AddGas(50_000_000)
-
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -191,15 +215,23 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		nil, nil,
 		data, nil, false,
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
-	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	blockContext := NewEVMBlockContext(header, nil, engine, &header.Coinbase, nil)
+	evm := vm.NewEVM(blockContext, vm.TxContext{}, ibs, &chainConfig, vm.Config{})
+	res, _, err := evm.Call(
+		vm.AccountRef(msg.From()),
+		*msg.To(),
+		msg.Data(),
+		msg.Gas(),
+		msg.Value(),
+		false,
+	)
+	// res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
-	return res.ReturnData, nil
+
+	return res, nil
 }
 
 // from the null sender, with 50M gas.

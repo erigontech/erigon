@@ -129,6 +129,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		// Set the receipt logs and create a bloom for filtering
 		receipt.Logs = statedb.GetLogs(tx.Hash())
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+		receipt.BlockHash = header.Hash()
 		receipt.BlockNumber = header.Number
 		receipt.TransactionIndex = uint(statedb.TxIndex())
 	}

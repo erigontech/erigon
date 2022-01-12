@@ -123,6 +123,10 @@ func makeP2PServer(
 		urls = params.KovanBootnodes
 	case params.FermionGenesisHash:
 		urls = params.FermionBootnodes
+	case params.MumbaiGenesisHash:
+		urls = params.MumbaiBootnodes
+	case params.BorMainnetGenesisHash:
+		urls = params.BorMainnetBootnodes
 	}
 	p2pConfig.BootstrapNodes, _ = utils.GetUrlListNodes(urls, utils.BootnodesFlag.Name, log.Crit)
 	p2pConfig.BootstrapNodesV5 = p2pConfig.BootstrapNodes

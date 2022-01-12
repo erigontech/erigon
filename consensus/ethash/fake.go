@@ -70,8 +70,8 @@ func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 	return nil
 }
 
-func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-	err := f.Ethash.VerifyHeader(chain, header, false)
+func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool, sysCall consensus.SystemCall) error {
+	err := f.Ethash.VerifyHeader(chain, header, false, sysCall)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func NewFullFaker() *FullFakeEthash {
 }
 
 // If we're running a full engine faking, accept any input as valid
-func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
+func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool, sysCall consensus.SystemCall) error {
 	return nil
 }
 
