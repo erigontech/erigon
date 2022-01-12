@@ -299,9 +299,10 @@ const (
 
 	Issuance = "Issuance" // block_num_u64->RLP(issuance+burnt[0 if < london])
 
-	StateAccounts = "StateAccounts"
-	StateStorage  = "StateStorage"
-	StateCode     = "StateCode"
+	StateAccounts   = "StateAccounts"
+	StateStorage    = "StateStorage"
+	StateCode       = "StateCode"
+	StateCommitment = "StateCommitment"
 )
 
 // Keys
@@ -385,6 +386,7 @@ var ChaindataTables = []string{
 	StateAccounts,
 	StateStorage,
 	StateCode,
+	StateCommitment,
 }
 
 const (
