@@ -71,6 +71,7 @@ func StageHeadersCfg(
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
 ) HeadersCfg {
+	isForkChoiceUpdate := false
 	return HeadersCfg{
 		db:                    db,
 		hd:                    headerDownload,
@@ -83,7 +84,7 @@ func StageHeadersCfg(
 		noP2PDiscovery:        noP2PDiscovery,
 		reverseDownloadCh:     reverseDownloadCh,
 		unwindForkChoicePOSCh: unwindForkChoicePOSCh,
-		isForkChoiceUpdate:    nil,
+		isForkChoiceUpdate:    &isForkChoiceUpdate,
 		unwindFinished:        unwindFinished,
 		waitingPosHeaders:     waitingPosHeaders,
 		snapshots:             snapshots,
@@ -150,8 +151,7 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 	case forkChoiceUpdateNumber := <-cfg.unwindForkChoicePOSCh:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
-		isForkChoiceUpdate := true
-		cfg.isForkChoiceUpdate = &isForkChoiceUpdate
+		*cfg.isForkChoiceUpdate = true
 		u.UnwindTo(forkChoiceUpdateNumber, common.Hash{})
 		return nil
 	case <-cfg.hd.SkipCycleHack:
@@ -661,9 +661,8 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		}
 	}
 
-	if cfg.isForkChoiceUpdate != nil && *cfg.isForkChoiceUpdate {
-		isNotForkChoiceUpdate := !(*cfg.isForkChoiceUpdate)
-		cfg.isForkChoiceUpdate = &isNotForkChoiceUpdate
+	if *cfg.isForkChoiceUpdate {
+		*cfg.isForkChoiceUpdate = false
 		cfg.unwindFinished <- true
 	}
 
