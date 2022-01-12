@@ -404,7 +404,7 @@ func snapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, header *types.Header) (*Snaps
 
 // loadSnapshot loads an existing snapshot from the database.
 func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snapshot, error) {
-	blob, err := borDb.GetOne(kv.CliqueSeparate, append([]byte("bor-"), hash[:]...))
+	blob, err := borDb.GetOne(kv.BorSeparate, append([]byte("bor-"), hash[:]...))
 	if err != nil {
 		return nil, err
 	}
