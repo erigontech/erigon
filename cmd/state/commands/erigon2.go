@@ -175,7 +175,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		}
 		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if txNum, _, err = runBlock2(txNum, intraBlockState, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
 		if block%1000 == 0 {
@@ -190,6 +190,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		tx.Rollback()
 		if err := w.FinishTx(txNum, trace); err != nil {
 			return fmt.Errorf("final finish failed: %w", err)
+		}
+		if trace {
+			fmt.Printf("FinishTx called for %d block %d\n", txNum, block)
 		}
 		txNum++
 		if rootHash, err = w.FinishBlock(trace /* trace */); err != nil {
@@ -212,7 +215,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	return nil
 }
 
-func runBlock2(txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
+func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
 	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
@@ -233,8 +236,11 @@ func runBlock2(txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
-		if err = ww.w.FinishTx(txNum, false); err != nil {
+		if err = ww.w.FinishTx(txNum, trace); err != nil {
 			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		if trace {
+			fmt.Printf("FinishTx called for %d [%x]\n", txNum, tx.Hash())
 		}
 		txNum++
 	}
