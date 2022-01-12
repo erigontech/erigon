@@ -3,8 +3,8 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
-	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -35,9 +35,9 @@ func NewParityAPIImpl(db kv.RoDB) *ParityAPIImpl {
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
 func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes) ([]hexutil.Bytes, error) {
-	tx, txErr := api.db.BeginRo(ctx)
-	if txErr != nil {
-		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", txErr)
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
 	a, err := state.NewPlainStateReader(tx).ReadAccountData(account)
@@ -46,7 +46,10 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	} else if a == nil {
 		return nil, fmt.Errorf("acc not found")
 	}
-	seekBytes := strconv.AppendUint(account.Bytes(), a.Incarnation, 16)
+
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint64(b, a.GetIncarnation())
+	seekBytes := append(account.Bytes(), b...)
 
 	c, err := tx.CursorDupSort(kv.PlainState)
 	if err != nil {
@@ -57,15 +60,16 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	var k []byte
 
 	if offset != nil {
-		k, err = c.SeekBothRange(seekBytes, *offset)
+		s := append(seekBytes, *offset...)
+		k, _, err = c.Seek(s)
 	} else {
 		k, _, err = c.Seek(seekBytes)
 	}
 	if err != nil {
 		return nil, err
 	}
-
-	for k != nil && len(keys) != quantity {
+	maxCount, err := c.CountDuplicates()
+	for i := uint64(0); i < maxCount && k != nil && len(keys) != quantity; i++ {
 		if !bytes.HasPrefix(k, seekBytes) {
 			break
 		}
@@ -78,6 +82,33 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		if err != nil {
 			return nil, err
 		}
+	}
+	return keys, nil
+}
+
+// listAll is here for debug purposes
+func (api *ParityAPIImpl) listAll(ctx context.Context) ([]hexutil.Bytes, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
+	}
+	defer tx.Rollback()
+	c, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	keys := make([]hexutil.Bytes, 0)
+	var k []byte
+	k, _, err = c.First()
+	for k != nil {
+		keys = append(keys, k)
+
+		k, _, err = c.Next()
+		if err != nil {
+			return nil, err
+		}
+		fmt.Printf("0x%x\n", k)
 	}
 	return keys, nil
 }
