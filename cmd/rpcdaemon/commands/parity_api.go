@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
+)
+
+const (
+	keyLength = common.AddressLength + common.IncarnationLength
 )
 
 // ParityAPI the interface for the parity_ RPC commands
@@ -41,35 +46,38 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	} else if a == nil {
 		return nil, fmt.Errorf("acc not found")
 	}
-	c, err := tx.Cursor(kv.PlainState)
+	seekBytes := strconv.AppendUint(account.Bytes(), a.Incarnation, 16)
+
+	c, err := tx.CursorDupSort(kv.PlainState)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
 	keys := make([]hexutil.Bytes, 0)
-	var (
-		k []byte
-	)
+	var k []byte
 
 	if offset != nil {
-		k, _, err = c.SeekExact(*offset)
+		k, err = c.SeekBothRange(seekBytes, *offset)
 	} else {
-		k, _, err = c.Seek(account.Bytes())
+		k, _, err = c.Seek(seekBytes)
 	}
 	if err != nil {
 		return nil, err
 	}
-	for ; k != nil && err == nil && len(keys) != quantity; k, _, err = c.Next() {
+
+	for k != nil && len(keys) != quantity {
+		if !bytes.HasPrefix(k, seekBytes) {
+			break
+		}
+		if len(k) <= keyLength {
+			continue
+		}
+		keys = append(keys, k[keyLength:])
+
+		k, _, err = c.Next()
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.HasPrefix(k, account.Bytes()) {
-			break
-		}
-		if len(k) <= common.AddressLength {
-			continue
-		}
-		keys = append(keys, k[common.AddressLength:])
 	}
 	return keys, nil
 }
