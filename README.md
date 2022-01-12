@@ -17,13 +17,13 @@ Disclaimer: **This software is currently a tech preview. We will do our best to 
 changes but we don't guarantee anything. Things can and will break.**
 
 
-### System Requirements
+## System Requirements
 
 Recommend 2Tb storage space on a single partition: 1.3Tb state, 200GB temp files.
 
 RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install)
 
-### Building the source
+## Building the source
 
 Turbor is only available on Testnet(Mumbai) right now! (Mainnet work is in process)
 
@@ -39,7 +39,7 @@ If you want to store TurboBor files in a non-default location
 turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datadir=<your_data_dir>
 ```
 
-### JSON-RPC daemon
+## JSON-RPC daemon
 
 In TurboBor unlike Bor the RPC calls are extracted out of the main binary into a separate daemon. This daemon can use both local or
 remote DBs. That means, that this RPC daemon doesn't have to be running on the same machine as the main TurboBor binary or
@@ -71,7 +71,7 @@ make rpcdaemon
 ```
 
 
-### Faster Initial Sync
+## Faster Initial Sync
 
 TurbBor uses a rearchitected full sync algorithm from
 [Bor](https://github.com/maticnetwork/bor) that is split into
