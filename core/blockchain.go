@@ -164,8 +164,6 @@ func ExecuteBlockEphemerallyForBSC(
 
 	var newBlock *types.Block
 	if !vmConfig.ReadOnly {
-		txs := block.Transactions()
-
 		// We're doing this hack for BSC to avoid changing consensus interfaces a lot. BSC modifies txs and receipts by appending
 		// system transactions, and they increase used gas and write cumulative gas to system receipts, that's why we need
 		// to deduct system gas before. This line is equal to "blockGas-systemGas", but since we don't know how much gas is
@@ -176,14 +174,15 @@ func ExecuteBlockEphemerallyForBSC(
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
 			return SysCallContract(contract, data, *chainConfig, ibs, header, engine)
 		}
-		if err := engine.Finalize(chainConfig, header, ibs, &txs, block.Uncles(), &receipts, epochReader, chainReader, syscall); err != nil {
+		outTxs, outReceipts, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, epochReader, chainReader, syscall)
+		if err != nil {
 			return nil, err
 		}
 		*usedGas = header.GasUsed
 
 		// We need repack this block because transactions and receipts might be changed by consensus, and
 		// it won't pass receipts hash or bloom verification
-		newBlock = types.NewBlock(block.Header(), txs, block.Uncles(), receipts)
+		newBlock = types.NewBlock(block.Header(), outTxs, block.Uncles(), outReceipts)
 	} else {
 		newBlock = block
 	}
@@ -295,7 +294,7 @@ func ExecuteBlockEphemerally(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), &txs, block.Uncles(), stateWriter, chainConfig, ibs, &receipts, epochReader, chainReader, false); err != nil {
+		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
 			return nil, err
 		}
 	}
@@ -365,14 +364,17 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 	return tx.FakeSign(from)
 }
 
-func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header, txs *types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState, receipts *types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool) (newBlock *types.Block, err error) {
+func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header,
+	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState,
+	receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool,
+) (newBlock *types.Block, err error) {
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
 		return SysCallContract(contract, data, *cc, ibs, header, engine)
 	}
 	if isMining {
-		newBlock, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, nil)
+		newBlock, _, _, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, nil)
 	} else {
-		err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
+		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
 	}
 	if err != nil {
 		return
