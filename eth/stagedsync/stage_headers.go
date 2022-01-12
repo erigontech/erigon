@@ -44,7 +44,7 @@ type HeadersCfg struct {
 	tmpdir                string
 	reverseDownloadCh     chan privateapi.PayloadMessage
 	unwindForkChoicePOSCh chan uint64
-	isForkChoiceUpdate    bool
+	isForkChoiceUpdate    *bool
 	unwindFinished        chan bool
 	waitingPosHeaders     *uint32 // atomic boolean flag
 
@@ -83,7 +83,7 @@ func StageHeadersCfg(
 		noP2PDiscovery:        noP2PDiscovery,
 		reverseDownloadCh:     reverseDownloadCh,
 		unwindForkChoicePOSCh: unwindForkChoicePOSCh,
-		isForkChoiceUpdate:    false,
+		isForkChoiceUpdate:    nil,
 		unwindFinished:        unwindFinished,
 		waitingPosHeaders:     waitingPosHeaders,
 		snapshots:             snapshots,
@@ -150,8 +150,8 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 	case forkChoiceUpdateNumber := <-cfg.unwindForkChoicePOSCh:
 		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
-		cfg.isForkChoiceUpdate = true
-		fmt.Println(cfg.isForkChoiceUpdate)
+		isForkChoiceUpdate := true
+		cfg.isForkChoiceUpdate = &isForkChoiceUpdate
 		u.UnwindTo(forkChoiceUpdateNumber, common.Hash{})
 		return nil
 	case <-cfg.hd.SkipCycleHack:
@@ -661,8 +661,9 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		}
 	}
 
-	if cfg.isForkChoiceUpdate {
-		cfg.isForkChoiceUpdate = false
+	if cfg.isForkChoiceUpdate != nil && *cfg.isForkChoiceUpdate {
+		isNotForkChoiceUpdate := !(*cfg.isForkChoiceUpdate)
+		cfg.isForkChoiceUpdate = &isNotForkChoiceUpdate
 		cfg.unwindFinished <- true
 	}
 
