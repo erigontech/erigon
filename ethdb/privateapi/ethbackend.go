@@ -274,19 +274,6 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
 	}
 
-	tx, err := s.db.BeginRo(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	parentHeader := rawdb.ReadHeader(tx, header.ParentHash, header.Number.Uint64()-1)
-
-	if parentHeader != nil && rawdb.ReadHeadHeaderHash(tx) != header.ParentHash {
-		s.unwindCycle(header.Number.Uint64() - 1)
-	}
-
 	// Send the block over
 	s.reverseDownloadCh <- PayloadMessage{
 		Header: &header,
