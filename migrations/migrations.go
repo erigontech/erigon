@@ -145,11 +145,6 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 				if minor > kv.DBSchemaVersion.Minor {
 					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
 				}
-			} else {
-				// major < kv.DBSchemaVersion.Major
-				if kv.DBSchemaVersion.Major-major > 1 {
-					return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
-				}
 			}
 		}
 		return nil
