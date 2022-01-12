@@ -1084,14 +1084,14 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	genesis, chainConfig := byChain()
 	var engine consensus.Engine
+	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
 		c.DBPath = path.Join(datadir, "clique/db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, nil, false)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify)
 	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, nil, false)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify)
 	} else if chainConfig.Parlia != nil {
-		config := &ethconfig.Defaults
 		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 	} else { //ethash
