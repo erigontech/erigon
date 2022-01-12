@@ -43,6 +43,10 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 				}
 			}
 
+			if k == nil {
+				stop = true
+			}
+
 			from = common.Copy(k) // next transaction will start from this key
 
 			return nil

@@ -832,17 +832,19 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 						lastK = k
 					}
 				}
-				score := uint64(repeats * int(l-4))
-				if score > minPatternScore {
-					dictKey := make([]byte, l)
-					for s := 0; s < l; s++ {
-						dictKey[s] = superstring[(filtered[i]+s)*2+1]
-					}
-					var dictVal [8]byte
-					binary.BigEndian.PutUint64(dictVal[:], score)
-					if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
-						log.Error("processSuperstring", "collect", err)
-					}
+				score := uint64(repeats * l)
+				if score < minPatternScore {
+					continue
+				}
+
+				dictKey := make([]byte, l)
+				for s := 0; s < l; s++ {
+					dictKey[s] = superstring[(filtered[i]+s)*2+1]
+				}
+				var dictVal [8]byte
+				binary.BigEndian.PutUint64(dictVal[:], score)
+				if err = dictCollector.Collect(dictKey, dictVal[:]); err != nil {
+					log.Error("processSuperstring", "collect", err)
 				}
 			}
 		}
