@@ -69,6 +69,9 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, err
 	}
 	maxCount, err := c.CountDuplicates()
+	if err != nil {
+		return nil, err
+	}
 	for i := uint64(0); i < maxCount && k != nil && len(keys) != quantity; i++ {
 		if !bytes.HasPrefix(k, seekBytes) {
 			break
@@ -82,33 +85,6 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		if err != nil {
 			return nil, err
 		}
-	}
-	return keys, nil
-}
-
-// listAll is here for debug purposes
-func (api *ParityAPIImpl) listAll(ctx context.Context) ([]hexutil.Bytes, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
-	}
-	defer tx.Rollback()
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-	keys := make([]hexutil.Bytes, 0)
-	var k []byte
-	k, _, err = c.First()
-	for k != nil {
-		keys = append(keys, k)
-
-		k, _, err = c.Next()
-		if err != nil {
-			return nil, err
-		}
-		fmt.Printf("0x%x\n", k)
 	}
 	return keys, nil
 }
