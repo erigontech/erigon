@@ -136,8 +136,7 @@ type Ethereum struct {
 	reverseDownloadCh     chan privateapi.PayloadMessage
 	unwindForkChoicePOSCh chan uint64
 	unwindFinished        chan bool
-	waitingForBeaconChain uint32    // atomic boolean flag
-	engineCond            sync.Cond // Cond that comunicates to engine API when to unlock if it is waiting
+	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
 // New creates a new Ethereum object (including the
@@ -395,7 +394,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 	backend.unwindForkChoicePOSCh = make(chan uint64)
 	backend.unwindFinished = make(chan bool)
-	backend.engineCond = *sync.NewCond(&sync.Mutex{})
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
@@ -436,7 +434,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
 		blockReader, chainConfig, backend.reverseDownloadCh, backend.sentryControlServer.Hd.ExecutionStatusCh, backend.unwindForkChoicePOSCh, backend.unwindFinished, &backend.waitingForBeaconChain,
-		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS, &backend.engineCond)
+		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
 	if config.Miner.EnabledPOS {
