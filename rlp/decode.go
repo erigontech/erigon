@@ -60,7 +60,7 @@ var (
 	}
 )
 
-func IsDecodeError(err error) bool {
+func IsInvalidRLPError(err error) bool {
 	return errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
@@ -70,7 +70,17 @@ func IsDecodeError(err error) bool {
 		errors.Is(err, ErrValueTooLarge) ||
 		errors.Is(err, ErrMoreThanOneValue) ||
 		errors.Is(err, ErrWrongTxTypePrefix) ||
-		errors.Is(err, ErrUnknownTxTypePrefix)
+		errors.Is(err, ErrUnknownTxTypePrefix) ||
+		// internal errors
+		errors.Is(err, errNotInList) ||
+		errors.Is(err, errNotAtEOL) ||
+		errors.Is(err, errUintOverflow) ||
+		// stream errors
+		strings.Contains(err.Error(), "rlp: input list has too many elements") ||
+		strings.Contains(err.Error(), "rlp: expected input string or byte") ||
+		strings.Contains(err.Error(), "rlp: expected input list") ||
+		strings.Contains(err.Error(), "rlp: non-canonical size information") ||
+		strings.Contains(err.Error(), "rlp: non-canonical integer (leading zero bytes)")
 }
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode
