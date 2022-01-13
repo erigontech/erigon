@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -10,10 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
-)
-
-const (
-	keyLength = common.AddressLength + common.IncarnationLength
 )
 
 // ParityAPI the interface for the parity_ RPC commands
@@ -57,34 +52,21 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	}
 	defer c.Close()
 	keys := make([]hexutil.Bytes, 0)
-	var k []byte
-
+	var v []byte
+	var seekVal []byte
 	if offset != nil {
-		s := append(seekBytes, *offset...)
-		k, _, err = c.Seek(s)
-	} else {
-		k, _, err = c.Seek(seekBytes)
+		seekVal = *offset
 	}
-	if err != nil {
-		return nil, err
-	}
-	maxCount, err := c.CountDuplicates()
-	if err != nil {
-		return nil, err
-	}
-	for i := uint64(0); i < maxCount && k != nil && len(keys) != quantity; i++ {
-		if !bytes.HasPrefix(k, seekBytes) {
-			break
-		}
-		if len(k) <= keyLength {
-			continue
-		}
-		keys = append(keys, k[keyLength:])
 
-		k, _, err = c.Next()
-		if err != nil {
-			return nil, err
+	for v, err = c.SeekBothRange(seekBytes, seekVal); v != nil && len(keys) != quantity && err == nil; _, v, err = c.NextDup() {
+		if len(v) > common.HashLength {
+			keys = append(keys, v[:common.HashLength])
+		} else {
+			keys = append(keys, v)
 		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	return keys, nil
 }

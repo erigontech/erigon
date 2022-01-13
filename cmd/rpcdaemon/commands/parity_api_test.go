@@ -36,7 +36,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	}
 }
 
-func TestParityAPIImpl_ListStorageKeys_WithOffset(t *testing.T) {
+func TestParityAPIImpl_ListStorageKeys_WithOffset_GetResults(t *testing.T) {
 	assert := assert.New(t)
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewParityAPIImpl(db)
@@ -49,9 +49,32 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset(t *testing.T) {
 		"4974416255391052161ba8184fe652f3bf8c915592c65f7de127af8e637dce5d",
 	}
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
-	offset := common.Hex2Bytes("29d")
+	offset := common.Hex2Bytes("29")
 	b := hexutil.Bytes(offset)
 	result, err := api.ListStorageKeys(context.Background(), addr, 5, &b)
+	if err != nil {
+		t.Errorf("calling ListStorageKeys: %v", err)
+	}
+
+	assert.Equal(len(answers), len(result))
+	for k, v := range result {
+		assert.Equal(answers[k], common.Bytes2Hex(v))
+	}
+}
+
+func TestParityAPIImpl_ListStorageKeys_WithOffset_NoResults(t *testing.T) {
+	assert := assert.New(t)
+	db := rpcdaemontest.CreateTestKV(t)
+	api := NewParityAPIImpl(db)
+
+	answers := []string{
+		"4644be453c81744b6842ddf615d7fca0e14a23b09734be63d44c23452de95631",
+		"4974416255391052161ba8184fe652f3bf8c915592c65f7de127af8e637dce5d",
+	}
+	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+	offset := common.Hex2Bytes("30")
+	b := hexutil.Bytes(offset)
+	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
