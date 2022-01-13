@@ -60,7 +60,7 @@ var (
 	}
 )
 
-func IsDecodeError(err error) bool {
+func IsInvalidRLPError(err error) bool {
 	return errors.Is(err, ErrExpectedString) ||
 		errors.Is(err, ErrExpectedList) ||
 		errors.Is(err, ErrCanonInt) ||
@@ -70,7 +70,10 @@ func IsDecodeError(err error) bool {
 		errors.Is(err, ErrValueTooLarge) ||
 		errors.Is(err, ErrMoreThanOneValue) ||
 		errors.Is(err, ErrWrongTxTypePrefix) ||
-		errors.Is(err, ErrUnknownTxTypePrefix)
+		errors.Is(err, ErrUnknownTxTypePrefix) ||
+		errors.Is(err, errNotInList) ||
+		errors.Is(err, errNotAtEOL) ||
+		errors.Is(err, errUintOverflow)
 }
 
 // Decoder is implemented by types that require custom RLP decoding rules or need to decode

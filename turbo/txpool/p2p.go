@@ -332,7 +332,7 @@ func RecvTxMessage(ctx context.Context,
 			s, ok := status.FromError(err)
 			doLog := !((ok && s.Code() == codes.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, context.Canceled))
 			if doLog {
-				if rlp.IsDecodeError(err) {
+				if rlp.IsInvalidRLPError(err) {
 					log.Debug("[RecvTxMessage] Handling incoming message", "error", err)
 				} else {
 					log.Warn("[RecvTxMessage] Handling incoming message", "error", err)
