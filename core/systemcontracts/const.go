@@ -4,14 +4,14 @@ import "github.com/ledgerwatch/erigon/common"
 
 var (
 	// genesis contracts
-	ValidatorContract          = common.Address{0x10, 0x0}
-	SlashContract              = common.Address{0x10, 0x1}
-	SystemRewardContract       = common.Address{0x10, 0x2}
-	LightClientContract        = common.Address{0x10, 0x3}
-	TokenHubContract           = common.Address{0x10, 0x4}
-	RelayerIncentivizeContract = common.Address{0x10, 0x5}
-	RelayerHubContract         = common.Address{0x10, 0x6}
-	GovHubContract             = common.Address{0x10, 0x7}
-	TokenManagerContract       = common.Address{0x10, 0x8}
-	CrossChainContract         = common.Address{0x20, 0x0}
+	ValidatorContract          = common.HexToAddress("0x0000000000000000000000000000000000001000")
+	SlashContract              = common.HexToAddress("0x0000000000000000000000000000000000001001")
+	SystemRewardContract       = common.HexToAddress("0x0000000000000000000000000000000000001002")
+	LightClientContract        = common.HexToAddress("0x0000000000000000000000000000000000001003")
+	TokenHubContract           = common.HexToAddress("0x0000000000000000000000000000000000001004")
+	RelayerIncentivizeContract = common.HexToAddress("0x0000000000000000000000000000000000001005")
+	RelayerHubContract         = common.HexToAddress("0x0000000000000000000000000000000000001006")
+	GovHubContract             = common.HexToAddress("0x0000000000000000000000000000000000001007")
+	TokenManagerContract       = common.HexToAddress("0x0000000000000000000000000000000000001008")
+	CrossChainContract         = common.HexToAddress("0x0000000000000000000000000000000000002000")
 )

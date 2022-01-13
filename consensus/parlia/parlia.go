@@ -65,15 +65,15 @@ var (
 	maxSystemBalance = new(uint256.Int).Mul(uint256.NewInt(100), uint256.NewInt(params.Ether))
 
 	systemContracts = map[common.Address]struct{}{
-		systemcontracts.ValidatorContract:          struct{}{},
-		systemcontracts.SlashContract:              struct{}{},
-		systemcontracts.SystemRewardContract:       struct{}{},
-		systemcontracts.LightClientContract:        struct{}{},
-		systemcontracts.RelayerHubContract:         struct{}{},
-		systemcontracts.GovHubContract:             struct{}{},
-		systemcontracts.TokenHubContract:           struct{}{},
-		systemcontracts.RelayerIncentivizeContract: struct{}{},
-		systemcontracts.CrossChainContract:         struct{}{},
+		systemcontracts.ValidatorContract:          {},
+		systemcontracts.SlashContract:              {},
+		systemcontracts.SystemRewardContract:       {},
+		systemcontracts.LightClientContract:        {},
+		systemcontracts.RelayerHubContract:         {},
+		systemcontracts.GovHubContract:             {},
+		systemcontracts.TokenHubContract:           {},
+		systemcontracts.RelayerIncentivizeContract: {},
+		systemcontracts.CrossChainContract:         {},
 	}
 )
 
