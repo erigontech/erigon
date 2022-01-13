@@ -36,6 +36,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	dbImpl := NewDBAPIImpl() /* deprecated */
 	engineImpl := NewEngineAPI(base, db, eth)
 	adminImpl := NewAdminAPI(eth)
+	parityImpl := NewParityAPIImpl(db)
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -114,6 +115,13 @@ func APIList(ctx context.Context, db kv.RoDB,
 				Namespace: "admin",
 				Public:    false,
 				Service:   AdminAPI(adminImpl),
+				Version:   "1.0",
+			})
+		case "parity":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "parity",
+				Public:    false,
+				Service:   ParityAPI(parityImpl),
 				Version:   "1.0",
 			})
 		}
