@@ -126,7 +126,11 @@ curl localhost:8545 -X POST --data '{"jsonrpc":"2.0","method":"bor_getSnapshot",
 ## Maintenance
 
 ### Rewinding Chain
+In case of any bad block or header the chain will rewind itself to the last known good state and will start syncing from there.
+Still if you want to rewind a specific stage  of the chain, You can use the [Integration](https://github.com/maticnetwork/turbo-bor/tree/master/cmd/integration) tool.
 
+Example:
+To
 ### Checking Sync Status
 
 ## Report Issues

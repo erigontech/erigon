@@ -1,4 +1,4 @@
-Integration - tool to run Erigon stages in custom way: run/reset single stage, run all stages but reorg every X blocks,
+Integration - tool to run Turbo-bor stages in custom way: run/reset single stage, run all stages but reorg every X blocks,
 etc...
 
 ## Examples
@@ -68,5 +68,5 @@ For example:
 make all
 ./build/bin/integration stage_hash_state --datadir=<datadir> --reset
 ./build/bin/integration stage_trie --datadir=<datadir> --reset
-# Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
+# Then run Turbo-bor as usually. It will take 2-3 hours to re-calculate dropped db tables
 ```
