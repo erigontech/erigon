@@ -77,6 +77,8 @@ In TurboBor unlike Bor the RPC calls are extracted out of the main binary into a
 remote DBs. That means, that this RPC daemon doesn't have to be running on the same machine as the main TurboBor binary or
 it can run from a snapshot of a database for read-only calls.
 
+See [RPC-Daemon docs](./cmd/rpcdaemon/README.md) for more details.
+
 ### Build
 To build RPC daemon, run
 
