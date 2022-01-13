@@ -11,7 +11,7 @@
 [![Discord](https://img.shields.io/discord/714888181740339261?color=1C1CE1&label=Polygon%20%7C%20Discord%20%F0%9F%91%8B%20&style=flat-square)](https://discord.gg/zdwkdvMNY2)
 [![Twitter Follow](https://img.shields.io/twitter/follow/0xPolygon.svg?style=social)](https://twitter.com/0xPolygon)
 
-TurboBor is the Official Golang implementation of the Matic protocol. It is a fork of [Erigon](https://github.com/ledgerwatch/erigon/) and EVM compabile.
+TurboBor is an Golang implementation of the Matic protocol. It is a fork of [Erigon](https://github.com/ledgerwatch/erigon/) and EVM compabile.
 
 Disclaimer: **This software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
@@ -25,19 +25,28 @@ RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/
 
 ## Building the source
 
-Turbor is only available on Testnet(Mumbai) right now! (Mainnet work is in process)
+TurboBor is only available on Testnet(Mumbai) right now! (Mainnet work is in process)
 
 ```sh
 git clone https://github.com/maticnetwork/turbo-bor
 cd turbo-bor/
 make turbo
-turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today
+turbo-bor --chain=mumbai 
 ```
+- Use `chain=mumbai` for Mumbai testnet (Working)
+- Use `chain=bor-mainnet` for Mainnet (Not properly tested yet)
 
 If you want to store TurboBor files in a non-default location 
+
 ```sh
-turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datadir=<your_data_dir>
+turbo-bor --chain=mumbai --datadir=<your_data_dir>
 ```
+If you are not using local hiemdall use `--bor.heimdall=<your heimdall url>` (else by default it will try to connect to localhost:1317) 
+
+```sh
+turbo-bor --chain=mumbai --bor.heimdall=<your heimdall url> --datadir=<your_data_dir>
+```
+
 
 ## JSON-RPC daemon
 
@@ -55,7 +64,7 @@ Provide both `--datadir` and `--private.api.addr` options:
 make turbo
 turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datadir=<your_data_dir> --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,bor
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 #### **For remote DB**
@@ -67,7 +76,17 @@ socket connection to pass data between them. To use this mode, run TurboBor tmin
 make turbo
 turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datadir=<your_data_dir> --private.api.addr=<private_ip>:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<public_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,bor
+./build/bin/rpcdaemon --private.api.addr=<turbo_bor_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+```
+
+The daemon should respond with something like:
+
+`INFO [date-time] HTTP endpoint opened url=localhost:8545...`
+
+You can now make RPC request using the following curl command:
+
+```sh
+curl localhost:8545 -X POST --data '{"jsonrpc":"2.0","method":"bor_getSnapshot","params":["0x400"],"id":1}' -H "Content-Type: application/json"
 ```
 
 
