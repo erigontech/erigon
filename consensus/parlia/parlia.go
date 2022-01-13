@@ -232,7 +232,8 @@ type Parlia struct {
 	slashABI        abi.ABI
 
 	// The fields below are for testing only
-	fakeDiff bool // Skip difficulty verifications
+	fakeDiff bool     // Skip difficulty verifications
+	forks    []uint64 // Forks extracted from the chainConfig
 }
 
 // New creates a Parlia consensus engine.
@@ -273,7 +274,8 @@ func New(
 		signatures:      signatures,
 		validatorSetABI: vABI,
 		slashABI:        sABI,
-		signer:          types.NewEIP155Signer(chainConfig.ChainID),
+		signer:          types.LatestSigner(chainConfig),
+		forks:           forkid.GatherForks(chainConfig),
 	}
 
 	return c
@@ -596,7 +598,7 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-nextForkHashSize-len(header.Extra))...)
 	}
 	header.Extra = header.Extra[:extraVanity-nextForkHashSize]
-	nextForkHash := forkid.NextForkHash(p.chainConfig, p.genesisHash, number)
+	nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
 	header.Extra = append(header.Extra, nextForkHash[:]...)
 
 	parent := chain.GetHeader(header.ParentHash, number-1)
@@ -682,14 +684,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if err != nil {
 		return nil, nil, err
 	}
-	nextForkHash := forkid.NextForkHash(p.chainConfig, p.genesisHash, number)
+	nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
 	if !snap.isMajorityFork(hex.EncodeToString(nextForkHash[:])) {
 		log.Debug("there is a possible fork, and your client is not the majority. Please check...", "nextForkHash", hex.EncodeToString(nextForkHash[:]))
 	}
 	// If the block is an epoch end block, verify the validator list
 	// The verification can only be done when the state is ready, it can't be done in VerifyHeader.
-	if header.Number.Uint64()%p.config.Epoch == 0 {
-		parentHeader := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	if number%p.config.Epoch == 0 {
+		parentHeader := chain.GetHeader(header.ParentHash, number-1)
 		newValidators, err := p.getCurrentValidators(parentHeader, state)
 		if err != nil {
 			return nil, nil, err
@@ -707,7 +709,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 	}
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	if header.Number.Cmp(common.Big1) == 0 {
+	if number == 1 {
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
 			log.Error("init contract failed: %+v", err)
@@ -736,8 +738,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			}
 		}
 	}
-	val := header.Coinbase
-	if txs, systemTxs, receipts, err = p.distributeIncoming(val, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
+	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
 		return nil, nil, err
 	}
 	if len(systemTxs) > 0 {

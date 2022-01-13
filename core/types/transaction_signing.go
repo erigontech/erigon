@@ -105,16 +105,6 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 	return &signer
 }
 
-func NewEIP155Signer(chainId *big.Int) *Signer {
-	var signer Signer
-	signer.unprotected = true
-	signer.protected = true
-	chainInt := uint256.NewInt(chainId.Uint64())
-	signer.chainID.Set(chainInt)
-	signer.chainIDMul.Set(chainInt.Mul(chainInt, u256.Num2))
-	return &signer
-}
-
 // LatestSignerForChainID returns the 'most permissive' Signer available. Specifically,
 // this marks support for EIP-155 replay protection, EIP-2718 typed transactions and EIP-1559 dynamic fee
 // transaction types if chainID is non-nil.
