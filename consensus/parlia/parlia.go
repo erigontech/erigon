@@ -64,16 +64,16 @@ var (
 	// 100 native token
 	maxSystemBalance = new(uint256.Int).Mul(uint256.NewInt(100), uint256.NewInt(params.Ether))
 
-	systemContracts = map[common.Address]bool{
-		common.HexToAddress(systemcontracts.ValidatorContract):          true,
-		common.HexToAddress(systemcontracts.SlashContract):              true,
-		common.HexToAddress(systemcontracts.SystemRewardContract):       true,
-		common.HexToAddress(systemcontracts.LightClientContract):        true,
-		common.HexToAddress(systemcontracts.RelayerHubContract):         true,
-		common.HexToAddress(systemcontracts.GovHubContract):             true,
-		common.HexToAddress(systemcontracts.TokenHubContract):           true,
-		common.HexToAddress(systemcontracts.RelayerIncentivizeContract): true,
-		common.HexToAddress(systemcontracts.CrossChainContract):         true,
+	systemContracts = map[common.Address]struct{}{
+		systemcontracts.ValidatorContract:          struct{}{},
+		systemcontracts.SlashContract:              struct{}{},
+		systemcontracts.SystemRewardContract:       struct{}{},
+		systemcontracts.LightClientContract:        struct{}{},
+		systemcontracts.RelayerHubContract:         struct{}{},
+		systemcontracts.GovHubContract:             struct{}{},
+		systemcontracts.TokenHubContract:           struct{}{},
+		systemcontracts.RelayerIncentivizeContract: struct{}{},
+		systemcontracts.CrossChainContract:         struct{}{},
 	}
 )
 
@@ -725,9 +725,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 		if !signedRecently {
 			log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
-			if txs, systemTxs, receipts, err = p.slash(spoiledVal, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
+			var tx types.Transaction
+			var receipt *types.Receipt
+			if systemTxs, tx, receipt, err = p.slash(spoiledVal, state, header, len(txs), systemTxs, &header.GasUsed, mining); err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
 				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+			} else {
+				txs = append(txs, tx)
+				receipts = append(receipts, receipt)
 			}
 		}
 	}
@@ -907,7 +912,8 @@ func (p *Parlia) IsSystemTransaction(tx types.Transaction, header *types.Header)
 }
 
 func isToSystemContract(to common.Address) bool {
-	return systemContracts[to]
+	_, ok := systemContracts[to]
+	return ok
 }
 
 func (p *Parlia) IsSystemContract(to *common.Address) bool {
@@ -974,8 +980,7 @@ func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBloc
 	}
 	// call
 	msgData := (hexutil.Bytes)(data)
-	toAddress := common.HexToAddress(systemcontracts.ValidatorContract)
-	_, returnData, err := p.systemCall(header.Coinbase, toAddress, msgData[:], ibs, header, u256.Num0)
+	_, returnData, err := p.systemCall(header.Coinbase, systemcontracts.ValidatorContract, msgData[:], ibs, header, u256.Num0)
 	if err != nil {
 		return nil, err
 	}
@@ -993,38 +998,50 @@ func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBloc
 
 // slash spoiled validators
 func (p *Parlia) distributeIncoming(val common.Address, state *state.IntraBlockState, header *types.Header,
-	txs types.Transactions, receipts types.Receipts, receivedTxs types.Transactions,
+	txs types.Transactions, receipts types.Receipts, systemTxs types.Transactions,
 	usedGas *uint64, mining bool,
 ) (types.Transactions, types.Transactions, types.Receipts, error) {
 	coinbase := header.Coinbase
 	balance := state.GetBalance(consensus.SystemAddress).Clone()
 	if balance.Cmp(u256.Num0) <= 0 {
-		return txs, receivedTxs, receipts, nil
+		return txs, systemTxs, receipts, nil
 	}
 	state.SetBalance(consensus.SystemAddress, u256.Num0)
 	state.AddBalance(coinbase, balance)
 
-	doDistributeSysReward := state.GetBalance(common.HexToAddress(systemcontracts.SystemRewardContract)).Cmp(maxSystemBalance) < 0
+	doDistributeSysReward := state.GetBalance(systemcontracts.SystemRewardContract).Cmp(maxSystemBalance) < 0
 	if doDistributeSysReward {
 		var rewards = new(uint256.Int)
 		rewards = rewards.Rsh(balance, systemRewardPercent)
 		if rewards.Cmp(u256.Num0) > 0 {
 			var err error
-			if txs, receivedTxs, receipts, err = p.distributeToSystem(rewards, state, header, txs, receipts, receivedTxs, usedGas, mining); err != nil {
+			var tx types.Transaction
+			var receipt *types.Receipt
+			if systemTxs, tx, receipt, err = p.distributeToSystem(rewards, state, header, len(txs), systemTxs, usedGas, mining); err != nil {
 				return nil, nil, nil, err
 			}
+			txs = append(txs, tx)
+			receipts = append(receipts, receipt)
 			log.Debug("distribute to system reward pool", "block hash", header.Hash(), "amount", rewards)
 			balance = balance.Sub(balance, rewards)
 		}
 	}
 	log.Debug("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
-	return p.distributeToValidator(balance, val, state, header, txs, receipts, receivedTxs, usedGas, mining)
+	var err error
+	var tx types.Transaction
+	var receipt *types.Receipt
+	if systemTxs, tx, receipt, err = p.distributeToValidator(balance, val, state, header, len(txs), systemTxs, usedGas, mining); err != nil {
+		return nil, nil, nil, err
+	}
+	txs = append(txs, tx)
+	receipts = append(receipts, receipt)
+	return txs, systemTxs, receipts, nil
 }
 
 // slash spoiled validators
 func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, header *types.Header,
-	txs types.Transactions, receipts types.Receipts, receivedTxs types.Transactions, usedGas *uint64, mining bool,
-) (types.Transactions, types.Transactions, types.Receipts, error) {
+	txIndex int, systemTxs types.Transactions, usedGas *uint64, mining bool,
+) (types.Transactions, types.Transaction, *types.Receipt, error) {
 	// method
 	method := "slash"
 
@@ -1037,18 +1054,18 @@ func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, 
 		return nil, nil, nil, err
 	}
 	// apply message
-	return p.applyTransaction(header.Coinbase, common.HexToAddress(systemcontracts.SlashContract), u256.Num0, data, state, header, txs, receipts, receivedTxs, usedGas, mining)
+	return p.applyTransaction(header.Coinbase, systemcontracts.SlashContract, u256.Num0, data, state, header, txIndex, systemTxs, usedGas, mining)
 }
 
 // init contract
 func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header,
-	txs types.Transactions, receipts types.Receipts, receivedTxs types.Transactions,
+	txs types.Transactions, receipts types.Receipts, systemTxs types.Transactions,
 	usedGas *uint64, mining bool,
 ) (types.Transactions, types.Transactions, types.Receipts, error) {
 	// method
 	method := "init"
 	// contracts
-	contracts := []string{
+	contracts := []common.Address{
 		systemcontracts.ValidatorContract,
 		systemcontracts.SlashContract,
 		systemcontracts.LightClientContract,
@@ -1065,27 +1082,30 @@ func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header
 	}
 	for _, c := range contracts {
 		log.Info("init contract", "block hash", header.Hash(), "contract", c)
-		txs, receivedTxs, receipts, err = p.applyTransaction(header.Coinbase, common.HexToAddress(c), u256.Num0, data, state, header, txs, receipts, receivedTxs, usedGas, mining)
-		if err != nil {
+		var tx types.Transaction
+		var receipt *types.Receipt
+		if systemTxs, tx, receipt, err = p.applyTransaction(header.Coinbase, c, u256.Num0, data, state, header, len(txs), systemTxs, usedGas, mining); err != nil {
 			return nil, nil, nil, err
 		}
+		txs = append(txs, tx)
+		receipts = append(receipts, receipt)
 	}
-	return txs, receivedTxs, receipts, nil
+	return txs, systemTxs, receipts, nil
 }
 
 func (p *Parlia) distributeToSystem(amount *uint256.Int, state *state.IntraBlockState, header *types.Header,
-	txs types.Transactions, receipts types.Receipts, receivedTxs types.Transactions,
+	txIndex int, systemTxs types.Transactions,
 	usedGas *uint64, mining bool,
-) (types.Transactions, types.Transactions, types.Receipts, error) {
-	// apply message
-	return p.applyTransaction(header.Coinbase, common.HexToAddress(systemcontracts.SystemRewardContract), amount, nil, state, header, txs, receipts, receivedTxs, usedGas, mining)
+) (types.Transactions, types.Transaction, *types.Receipt, error) {
+	return p.applyTransaction(header.Coinbase, systemcontracts.SystemRewardContract, amount, nil, state, header,
+		txIndex, systemTxs, usedGas, mining)
 }
 
 // slash spoiled validators
 func (p *Parlia) distributeToValidator(amount *uint256.Int, validator common.Address, state *state.IntraBlockState, header *types.Header,
-	txs types.Transactions, receipts types.Receipts, receivedTxs types.Transactions,
+	txIndex int, systemTxs types.Transactions,
 	usedGas *uint64, mining bool,
-) (types.Transactions, types.Transactions, types.Receipts, error) {
+) (types.Transactions, types.Transaction, *types.Receipt, error) {
 	// method
 	method := "deposit"
 
@@ -1098,12 +1118,12 @@ func (p *Parlia) distributeToValidator(amount *uint256.Int, validator common.Add
 		return nil, nil, nil, err
 	}
 	// apply message
-	return p.applyTransaction(header.Coinbase, common.HexToAddress(systemcontracts.ValidatorContract), amount, data, state, header, txs, receipts, receivedTxs, usedGas, mining)
+	return p.applyTransaction(header.Coinbase, systemcontracts.ValidatorContract, amount, data, state, header, txIndex, systemTxs, usedGas, mining)
 }
 
 func (p *Parlia) applyTransaction(from common.Address, to common.Address, value *uint256.Int, data []byte, ibs *state.IntraBlockState, header *types.Header,
-	txs types.Transactions, receipts types.Receipts, receivedTxs types.Transactions, usedGas *uint64, mining bool,
-) (types.Transactions, types.Transactions, types.Receipts, error) {
+	txIndex int, systemTxs types.Transactions, usedGas *uint64, mining bool,
+) (types.Transactions, types.Transaction, *types.Receipt, error) {
 	nonce := ibs.GetNonce(from)
 	expectedTx := types.Transaction(types.NewTransaction(nonce, to, value, math.MaxUint64/2, u256.Num0, data))
 	expectedHash := expectedTx.SigningHash(p.chainConfig.ChainID)
@@ -1118,10 +1138,10 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 			return nil, nil, nil, err
 		}
 	} else {
-		if receivedTxs == nil || len(receivedTxs) == 0 || (receivedTxs)[0] == nil {
+		if systemTxs == nil || len(systemTxs) == 0 || systemTxs[0] == nil {
 			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get none")
 		}
-		actualTx := receivedTxs[0]
+		actualTx := systemTxs[0]
 		actualHash := actualTx.SigningHash(p.chainConfig.ChainID)
 		if !bytes.Equal(actualHash.Bytes(), expectedHash.Bytes()) {
 			return nil, nil, nil, fmt.Errorf("expected system tx (hash %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s), actual tx (hash %v, nonce %d, to %s, value %s, gas %d, gasPrice %s, data %s)",
@@ -1143,14 +1163,13 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 		}
 		expectedTx = actualTx
 		// move to next
-		receivedTxs = receivedTxs[1:]
+		systemTxs = systemTxs[1:]
 	}
-	ibs.Prepare(expectedTx.Hash(), common.Hash{}, len(txs))
+	ibs.Prepare(expectedTx.Hash(), common.Hash{}, txIndex)
 	gasUsed, _, err := p.systemCall(from, to, data, ibs, header, value)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	txs = append(txs, expectedTx)
 	*usedGas += gasUsed
 	receipt := types.NewReceipt(false, *usedGas)
 	receipt.TxHash = expectedTx.Hash()
@@ -1163,10 +1182,9 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	receipt.BlockHash = header.Hash()
 	receipt.BlockNumber = header.Number
-	receipt.TransactionIndex = uint(ibs.TxIndex())
-	receipts = append(receipts, receipt)
+	receipt.TransactionIndex = uint(txIndex)
 	ibs.SetNonce(from, nonce+1)
-	return txs, receivedTxs, receipts, nil
+	return systemTxs, expectedTx, receipt, nil
 }
 
 func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, value *uint256.Int) (gasUsed uint64, returnData []byte, err error) {
