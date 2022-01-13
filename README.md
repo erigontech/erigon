@@ -126,8 +126,57 @@ curl localhost:8545 -X POST --data '{"jsonrpc":"2.0","method":"bor_getSnapshot",
 ## Maintenance
 
 ### Rewinding Chain
+- In case of any bad block or header the chain will rewind itself to the last known good state and will start syncing from there.
+- Still if you want to rewind a specific stage  of the chain, You can use the [Integration](https://github.com/maticnetwork/turbo-bor/tree/master/cmd/integration) tool.
+
+Build Integration tool using:
+```sh
+make integration
+```
+
+To check current state of the chain
+```sh
+./build/bin/integration print_stages --datadir=<your_datadir>
+```
+
+To rewind state stages N block backwards
+```sh
+/build/bin/integration state_stages --datadir=<your_datadir> --unwind=N
+```
+
+To rewind block bodies by N block backwards
+```sh
+./build/bin/integration stage_bodies --datadir=<your_datadir> --unwind=N 
+```
+
+To rewind block headers by N block backwards
+```sh
+./build/bin/integration stage_headers --datadir=<your_datadir> --unwind=N
+```
+
+You can find more examples in the [Integration](https://github.com/maticnetwork/turbo-bor/tree/master/cmd/integration) tool.
 
 ### Checking Sync Status
+
+To check sync status you must have an RPC Daemon up and running, Then use the below command:
+
+```sh
+curl localhost:8545 -X POST --data '{"jsonrpc":"2.0","method":"eth_syncing","id":1}' -H "Content-Type: application/json"
+```
+
+If you get
+```
+{"jsonrpc":"2.0","id":1,"result":false}
+```
+It means that the chain is synced.
+
+OR
+
+It will give you something like this
+```
+{"jsonrpc":"2.0","id":1,"result":{"currentBlock":"0x0","highestBlock":"0x165b6ad","stages":[{"stage_name":"Headers","block_number":"0x165b6ad"},{"stage_name":"BlockHashes","block_number":"0x165b6ad"},{"stage_name":"Bodies","block_number":"0x165b6ad"},{"stage_name":"Senders","block_number":"0x165b6ad"},{"stage_name":"Execution","block_number":"0x112bc2c"},{"stage_name":"Translation","block_number":"0x0"},{"stage_name":"HashState","block_number":"0x0"},{"stage_name":"IntermediateHashes","block_number":"0x0"},{"stage_name":"AccountHistoryIndex","block_number":"0x0"},{"stage_name":"StorageHistoryIndex","block_number":"0x0"},{"stage_name":"LogIndex","block_number":"0x0"},{"stage_name":"CallTraces","block_number":"0x0"},{"stage_name":"TxLookup","block_number":"0x0"},{"stage_name":"TxPool","block_number":"0x0"},{"stage_name":"Finish","block_number":"0x0"}]}
+```
+where detail of each stage is given with the block number at which it is at.
 
 ## Report Issues
 - Feel free to Report any issues, Create an issue on [GitHub](https://github.com/maticnetwork/turbo-bor/issues/new/choose)
