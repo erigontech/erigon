@@ -36,7 +36,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 	}
 }
 
-func TestParityAPIImpl_ListStorageKeys_WithOffset_GetResults(t *testing.T) {
+func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	assert := assert.New(t)
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewParityAPIImpl(db)
@@ -62,7 +62,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_GetResults(t *testing.T) {
 	}
 }
 
-func TestParityAPIImpl_ListStorageKeys_WithOffset_NoResults(t *testing.T) {
+func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T) {
 	assert := assert.New(t)
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewParityAPIImpl(db)
