@@ -295,6 +295,7 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
 	heap.Remove(hd.anchorQueue, anchor.idx)
+	anchor.idx = -1
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
@@ -588,6 +589,10 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	if req.Anchor.idx == -1 {
+		// Anchor has already been deleted
+		return
+	}
 	req.Anchor.timeouts++
 	req.Anchor.nextRetryTime = currentTime + timeout
 	heap.Fix(hd.anchorQueue, req.Anchor.idx)
