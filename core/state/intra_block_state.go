@@ -483,7 +483,6 @@ func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, valu
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (sdb *IntraBlockState) SetStorage(addr common.Address, storage Storage) {
-	fmt.Printf("SetStorage: %x, %s\n ", addr, storage.String())
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetStorage(storage)
@@ -512,9 +511,6 @@ func (sdb *IntraBlockState) GetIncarnation(addr common.Address) uint64 {
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
-	if addr == common.HexToAddress("b214cbce30676bd117f95a8695d34427295cd6f7") {
-		fmt.Printf("Suicide [%x] in block [%x]\n", addr, sdb.bhash)
-	}
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -621,9 +617,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
-	if addr == common.HexToAddress("b214cbce30676bd117f95a8695d34427295cd6f7") {
-		fmt.Printf("CreateAccount [%x], %t in block [%x]\n", addr, contractCreation, sdb.bhash)
-	}
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace && err != nil {
