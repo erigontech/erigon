@@ -138,7 +138,7 @@ var (
 	ErrNoStatusMsg             = errors.New("no status message")
 	errMsgTooLarge             = errors.New("message too long")
 	errDecode                  = errors.New("invalid message")
-	errInvalidMsgCode          = errors.New("invalid message code")
+	errInvalidMsgCode          = errors.New("invalid message code") //nolint
 	ErrProtocolVersionMismatch = errors.New("protocol version mismatch")
 	ErrNetworkIDMismatch       = errors.New("network ID mismatch")
 	ErrGenesisMismatch         = errors.New("genesis mismatch")
@@ -383,8 +383,8 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 	return nil
 }
 
-// sanityCheck verifies that the values are reasonable, as a DoS protection
-func (request *NewBlockPacket) sanityCheck() error {
+// SanityCheck verifies that the values are reasonable, as a DoS protection
+func (request *NewBlockPacket) SanityCheck() error {
 	if err := request.Block.SanityCheck(); err != nil {
 		return err
 	}

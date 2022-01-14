@@ -35,40 +35,50 @@ type MiningBlock struct {
 }
 
 type MiningState struct {
-	MiningConfig    *params.MiningConfig
-	PendingResultCh chan *types.Block
-	MiningResultCh  chan *types.Block
-	MiningBlock     *MiningBlock
+	MiningConfig      *params.MiningConfig
+	PendingResultCh   chan *types.Block
+	MiningResultCh    chan *types.Block
+	MiningResultPOSCh chan *types.Block
+	MiningBlock       *MiningBlock
 }
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
-		MiningConfig:    cfg,
-		PendingResultCh: make(chan *types.Block, 1),
-		MiningResultCh:  make(chan *types.Block, 1),
-		MiningBlock:     &MiningBlock{},
+		MiningConfig:      cfg,
+		PendingResultCh:   make(chan *types.Block, 1),
+		MiningResultCh:    make(chan *types.Block, 1),
+		MiningResultPOSCh: make(chan *types.Block, 1),
+		MiningBlock:       &MiningBlock{},
 	}
 }
 
-type MiningCreateBlockCfg struct {
-	db          kv.RwDB
-	miner       MiningState
-	chainConfig params.ChainConfig
-	engine      consensus.Engine
-	txPool2     *txpool.TxPool
-	txPool2DB   kv.RoDB
-	tmpdir      string
+type BlockProposerParametersPOS struct {
+	Random                common.Hash
+	SuggestedFeeRecipient common.Address // For now, we apply a suggested recipient only if etherbase is unset
+	Timestamp             uint64
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, tmpdir string) MiningCreateBlockCfg {
+type MiningCreateBlockCfg struct {
+	db                      kv.RwDB
+	miner                   MiningState
+	chainConfig             params.ChainConfig
+	engine                  consensus.Engine
+	txPool2                 *txpool.TxPool
+	txPool2DB               kv.RoDB
+	tmpdir                  string
+	blockProposerParameters *BlockProposerParametersPOS
+}
+
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockProposerParameters *BlockProposerParametersPOS, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:          db,
-		miner:       miner,
-		chainConfig: chainConfig,
-		engine:      engine,
-		txPool2:     txPool2,
-		txPool2DB:   txPool2DB,
-		tmpdir:      tmpdir,
+		db:                      db,
+		miner:                   miner,
+		chainConfig:             chainConfig,
+		engine:                  engine,
+		txPool2:                 txPool2,
+		txPool2DB:               txPool2DB,
+		tmpdir:                  tmpdir,
+		blockProposerParameters: blockProposerParameters,
 	}
 }
 
@@ -85,10 +95,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		staleThreshold = 7
 	)
 
-	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
-		return fmt.Errorf("refusing to mine without etherbase")
-	}
-
 	logPrefix := s.LogPrefix()
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {
@@ -97,6 +103,19 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+	}
+
+	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
+
+	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
+		if !isTrans {
+			return fmt.Errorf("refusing to mine without etherbase")
+		}
+		// If we do not have an etherbase, let's use the suggested one
+		coinbase = cfg.blockProposerParameters.SuggestedFeeRecipient
 	}
 
 	blockNum := executionAt + 1
@@ -161,15 +180,20 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	// re-written miner/worker.go:commitNewWork
-	timestamp := time.Now().Unix()
-	if parent.Time >= uint64(timestamp) {
-		timestamp = int64(parent.Time + 1)
+	var timestamp int64
+	// If we are on proof-of-stake timestamp should be already set for us
+	if !isTrans {
+		timestamp = time.Now().Unix()
+		if parent.Time >= uint64(timestamp) {
+			timestamp = int64(parent.Time + 1)
+		}
 	}
+
 	num := parent.Number
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasUsed, parent.GasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil),
+		GasLimit:   core.CalcGasLimit(parent.GasLimit, cfg.miner.MiningConfig.GasLimit),
 		Extra:      cfg.miner.MiningConfig.ExtraData,
 		Time:       uint64(timestamp),
 	}
@@ -180,7 +204,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
 		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
 			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
-			header.GasLimit = core.CalcGasLimit(parent.GasUsed, parentGasLimit, cfg.miner.MiningConfig.GasFloor, cfg.miner.MiningConfig.GasCeil)
+			header.GasLimit = core.CalcGasLimit(parentGasLimit, cfg.miner.MiningConfig.GasLimit)
 		}
 	}
 	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
@@ -200,6 +224,16 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			"parentHash", parent.Hash().String(),
 			"callers", debug.Callers(10))
 		return err
+	}
+
+	if isTrans {
+		// We apply pre-made fields
+		header.MixDigest = cfg.blockProposerParameters.Random
+		header.Time = cfg.blockProposerParameters.Timestamp
+
+		current.Header = header
+		current.Uncles = nil
+		return nil
 	}
 
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not

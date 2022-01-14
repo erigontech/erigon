@@ -2,16 +2,19 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -28,21 +31,28 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 		return nil, err
 	}
 
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
-	if blockNumber == nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+	if !ok {
+		return nil, nil
+	}
+	block, err := api.blockByNumberWithSenders(tx, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
+	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
 	if bErr != nil {
 		return nil, bErr
 	}
 	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
+		return nil, fmt.Errorf("could not find block  %d", blockNumber)
 	}
 	var txIndex int
 	for idx, txn := range block.Transactions() {
@@ -51,7 +61,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 			break
 		}
 	}
-	bn := hexutil.Uint64(*blockNumber)
+	bn := hexutil.Uint64(blockNumber)
 
 	parentNr := bn
 	if parentNr > 0 {
@@ -60,7 +70,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, *blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -230,28 +240,85 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
 	var allBlocks roaring64.Bitmap
-	for _, addr := range req.FromAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
-				stream.WriteNil()
-				return err
+	switch req.Mode {
+	case TraceFilterModeIntersection:
+		if len(req.FromAddress) == 0 || len(req.ToAddress) == 0 {
+			return fmt.Errorf("invalid parameters: for intersection mode both fromAddress and toAddress should be not empty")
+		}
+
+		addrIntersection := make(map[common.Address]struct{})
+		for _, addr := range req.FromAddress {
+			if addr == nil {
+				continue
 			}
-			allBlocks.Or(b)
+			addrIntersection[*addr] = struct{}{}
+		}
+
+		for _, addr := range req.ToAddress {
+			if addr == nil {
+				continue
+			}
+
+			if _, exist := addrIntersection[*addr]; !exist {
+				continue
+			}
+
 			fromAddresses[*addr] = struct{}{}
-		}
-	}
-	for _, addr := range req.ToAddress {
-		if addr != nil {
+			toAddresses[*addr] = struct{}{}
+
 			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
 				stream.WriteNil()
 				return err
 			}
-			allBlocks.Or(b)
-			toAddresses[*addr] = struct{}{}
+
+			if b != nil {
+				allBlocks.Or(b)
+			}
+
+			b, err = bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
+			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
+				stream.WriteNil()
+				return err
+			}
+
+			if b != nil {
+				allBlocks.Or(b)
+			}
+		}
+	case TraceFilterModeUnion:
+		fallthrough
+	default:
+		for _, addr := range req.FromAddress {
+			if addr != nil {
+				b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
+				if err != nil {
+					if errors.Is(err, ethdb.ErrKeyNotFound) {
+						continue
+					}
+					stream.WriteNil()
+					return err
+				}
+				allBlocks.Or(b)
+				fromAddresses[*addr] = struct{}{}
+			}
+		}
+		for _, addr := range req.ToAddress {
+			if addr != nil {
+				b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
+				if err != nil {
+					if errors.Is(err, ethdb.ErrKeyNotFound) {
+						continue
+					}
+					stream.WriteNil()
+					return err
+				}
+				allBlocks.Or(b)
+				toAddresses[*addr] = struct{}{}
+			}
 		}
 	}
+
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
 		allBlocks.AddRange(fromBlock, toBlock+1)
@@ -473,6 +540,16 @@ type TraceFilterRequest struct {
 	ToBlock     *hexutil.Uint64   `json:"toBlock"`
 	FromAddress []*common.Address `json:"fromAddress"`
 	ToAddress   []*common.Address `json:"toAddress"`
+	Mode        TraceFilterMode   `json:"mode"`
 	After       *uint64           `json:"after"`
 	Count       *uint64           `json:"count"`
 }
+
+type TraceFilterMode string
+
+const (
+	// Default mode for TraceFilter. Unions results referred to addresses from FromAddress or ToAddress
+	TraceFilterModeUnion = "union"
+	// IntersectionMode retrives results referred to addresses provided both in FromAddress and ToAddress
+	TraceFilterModeIntersection = "intersection"
+)

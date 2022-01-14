@@ -21,79 +21,7 @@ import (
 	"path/filepath"
 
 	"github.com/ledgerwatch/erigon/params"
-
 	"github.com/urfave/cli"
-)
-
-var (
-	CommandHelpTemplate = `{{.cmd.Name}}{{if .cmd.Subcommands}} command{{end}}{{if .cmd.Flags}} [command options]{{end}} {{.cmd.ArgsUsage}}
-{{if .cmd.Description}}{{.cmd.Description}}
-{{end}}{{if .cmd.Subcommands}}
-SUBCOMMANDS:
-  {{range .cmd.Subcommands}}{{.Name}}{{with .ShortName}}, {{.}}{{end}}{{ "\t" }}{{.Usage}}
-  {{end}}{{end}}{{if .categorizedFlags}}
-{{range $idx, $categorized := .categorizedFlags}}{{$categorized.Name}} OPTIONS:
-{{range $categorized.Flags}}{{"\t"}}{{.}}
-{{end}}
-{{end}}{{end}}`
-
-	OriginCommandHelpTemplate = `{{.Name}}{{if .Subcommands}} command{{end}}{{if .Flags}} [command options]{{end}} {{.ArgsUsage}}
-{{if .Description}}{{.Description}}
-{{end}}{{if .Subcommands}}
-SUBCOMMANDS:
-  {{range .Subcommands}}{{.Name}}{{with .ShortName}}, {{.}}{{end}}{{ "\t" }}{{.Usage}}
-  {{end}}{{end}}{{if .Flags}}
-OPTIONS:
-{{range $.Flags}}   {{.}}
-{{end}}
-{{end}}`
-
-	// AppHelpTemplate is the test template for the default, global app help topic.
-	AppHelpTemplate = `NAME:
-   {{.App.Name}} - {{.App.Usage}}
-
-   Copyright 2013-2021 The go-ethereum Authors
-
-USAGE:
-   {{.App.HelpName}} [options]{{if .App.Commands}} [command] [command options]{{end}} {{if .App.ArgsUsage}}{{.App.ArgsUsage}}{{else}}[arguments...]{{end}}
-   {{if .App.Version}}
-VERSION:
-   {{.App.Version}}
-   {{end}}{{if len .App.Authors}}
-AUTHOR(S):
-   {{range .App.Authors}}{{ . }}{{end}}
-   {{end}}{{if .App.Commands}}
-COMMANDS:
-   {{range .App.Commands}}{{join .Names ", "}}{{ "\t" }}{{.Usage}}
-   {{end}}{{end}}{{if .FlagGroups}}
-{{range .FlagGroups}}{{.Name}} OPTIONS:
-  {{range .Flags}}{{.}}
-  {{end}}
-{{end}}{{end}}{{if .App.Copyright }}
-COPYRIGHT:
-   {{.App.Copyright}}
-   {{end}}
-`
-	// ClefAppHelpTemplate is the template for the default, global app help topic.
-	ClefAppHelpTemplate = `NAME:
-   {{.App.Name}} - {{.App.Usage}}
-
-   Copyright 2013-2021 The go-ethereum Authors
-
-USAGE:
-   {{.App.HelpName}} [options]{{if .App.Commands}} command [command options]{{end}} {{if .App.ArgsUsage}}{{.App.ArgsUsage}}{{else}}[arguments...]{{end}}
-   {{if .App.Version}}
-COMMANDS:
-   {{range .App.Commands}}{{join .Names ", "}}{{ "\t" }}{{.Usage}}
-   {{end}}{{end}}{{if .FlagGroups}}
-{{range .FlagGroups}}{{.Name}} OPTIONS:
-  {{range .Flags}}{{.}}
-  {{end}}
-{{end}}{{end}}{{if .App.Copyright }}
-COPYRIGHT:
-   {{.App.Copyright}}
-   {{end}}
-`
 )
 
 // HelpData is a one shot struct to pass to the usage template

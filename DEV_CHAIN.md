@@ -28,7 +28,7 @@ On the terminal you can type the following command to start node1.
  
  Argument notes:
  * datadir : Tells where the data is stored, default level is dev folder.
- * datadir : Tells that we want to run Erigon in the dev chain.
+ * chain : Tells that we want to run Erigon in the dev chain.
  * private.api.addr=localhost:9090 : Tells where Eigon is going to listen for connections.
  * mine : Add this if you want the node to mine.
  * dev.period <number-of-seconds>: Add this to specify the timing interval amongst blocks. Number of seconds MUST be > 0 (if you want empty blocks) otherwise the default value 0 does not allow mining of empty blocks.
@@ -65,12 +65,12 @@ Open terminal 3 and navigate to erigon/build/bin folder. Paste in the following 
 ```bash  
 ./erigon --datadir=dev2  --chain dev --private.api.addr=localhost:9091 \
     --staticpeers "enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b468726ba0be63b9dc925a019f433177eb6b45c23bb78892f786d8f7a@127.0.0.1:53171" \
-    --port 30305 --p2p.eth65.port 30306 --nodiscover
+    --nodiscover
 ```
     
 To check if the nodes are connected, you can go to the log of both the nodes and look for the line
     
-  ```  [p2p] GoodPeers    eth66=0 eth65=1 ```
+  ```  [p2p] GoodPeers    eth66=1 ```
     
 Note: this might take a while it is not istantaneus, also if you see a 1 on either one of the two the node is fine.
     

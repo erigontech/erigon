@@ -18,6 +18,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -305,8 +306,15 @@ func RecvMessage(
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsDecodeError(err) {
-				log.Debug("[RecvMessage] Handling incoming message", "error", err)
+			if rlp.IsInvalidRLPError(err) {
+				log.Debug("[RecvMessage] Kick peer for invalid RLP", "error", err)
+				outreq := proto_sentry.PenalizePeerRequest{
+					PeerId:  req.PeerId,
+					Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				}
+				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+					log.Error("Could not send penalty", "err", err1)
+				}
 			} else {
 				log.Warn("[RecvMessage] Handling incoming message", "error", err)
 			}
@@ -338,9 +346,10 @@ type ControlServerImpl struct {
 	networkId   uint64
 	db          kv.RwDB
 	Engine      consensus.Engine
+	blockReader interfaces.HeaderAndCanonicalReader
 }
 
-func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient, window int) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient, window int, blockReader interfaces.HeaderAndCanonicalReader) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -356,12 +365,13 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */, engine)
 
 	cs := &ControlServerImpl{
-		nodeName: nodeName,
-		Hd:       hd,
-		Bd:       bd,
-		sentries: sentries,
-		db:       db,
-		Engine:   engine,
+		nodeName:    nodeName,
+		Hd:          hd,
+		Bd:          bd,
+		sentries:    sentries,
+		db:          db,
+		Engine:      engine,
+		blockReader: blockReader,
 	}
 	cs.ChainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.ChainConfig)
@@ -540,10 +550,14 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 		return fmt.Errorf("decode 3 NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
-	var request eth.NewBlockPacket
+	request := &eth.NewBlockPacket{}
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode 4 NewBlockMsg: %w", err)
 	}
+	if err := request.SanityCheck(); err != nil {
+		return fmt.Errorf("newBlock66: %w", err)
+	}
+
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH256ToPeerID(inreq.PeerId)) // There is only one segment in this case
@@ -598,7 +612,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 
 	var headers []*types.Header
 	if err := cs.db.View(ctx, func(tx kv.Tx) (err error) {
-		headers, err = eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket)
+		headers, err = eth.AnswerGetBlockHeadersQuery(tx, query.GetBlockHeadersPacket, cs.blockReader)
 		if err != nil {
 			return err
 		}

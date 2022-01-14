@@ -45,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
-	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -69,7 +68,6 @@ GLOBAL OPTIONS:
    {{range .Flags}}{{.}}
    {{end}}{{end}}
 `
-	cli.CommandHelpTemplate = flags.CommandHelpTemplate
 	cli.HelpPrinter = printHelp
 }
 
@@ -77,8 +75,7 @@ func printHelp(out io.Writer, templ string, data interface{}) {
 	funcMap := template.FuncMap{"join": strings.Join}
 	t := template.Must(template.New("help").Funcs(funcMap).Parse(templ))
 	w := tabwriter.NewWriter(out, 38, 8, 2, ' ', 0)
-	err := t.Execute(w, data)
-	if err != nil {
+	if err := t.Execute(w, data); err != nil {
 		panic(err)
 	}
 	w.Flush()
@@ -225,19 +222,18 @@ var (
 		Name:  "mine",
 		Usage: "Enable mining",
 	}
+	ProposingEnabledFlag = cli.BoolFlag{
+		Name:  "proposer",
+		Usage: "Enable PoS proposer",
+	}
 	MinerNotifyFlag = cli.StringFlag{
 		Name:  "miner.notify",
 		Usage: "Comma separated HTTP URL list to notify of new work packages",
 	}
-	MinerGasTargetFlag = cli.Uint64Flag{
-		Name:  "miner.gastarget",
-		Usage: "Target gas floor for mined blocks",
-		Value: ethconfig.Defaults.Miner.GasFloor,
-	}
 	MinerGasLimitFlag = cli.Uint64Flag{
 		Name:  "miner.gaslimit",
-		Usage: "Target gas ceiling for mined blocks",
-		Value: ethconfig.Defaults.Miner.GasCeil,
+		Usage: "Target gas limit for mined blocks",
+		Value: ethconfig.Defaults.Miner.GasLimit,
 	}
 	MinerGasPriceFlag = BigFlag{
 		Name:  "miner.gasprice",
@@ -1094,11 +1090,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 		panic(err)
 	}
 	cfg.ExtraData = []byte(extraDataStr)
-	cfg.GasFloor, err = flags.GetUint64(MinerGasTargetFlag.Name)
-	if err != nil {
-		panic(err)
-	}
-	cfg.GasCeil, err = flags.GetUint64(MinerGasLimitFlag.Name)
+	cfg.GasLimit, err = flags.GetUint64(MinerGasLimitFlag.Name)
 	if err != nil {
 		panic(err)
 	}
@@ -1150,9 +1142,9 @@ func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
-	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
-		cfg.Enabled = true
-	}
+	cfg.Enabled = ctx.GlobalIsSet(MiningEnabledFlag.Name)
+	cfg.EnabledPOS = ctx.GlobalIsSet(ProposingEnabledFlag.Name)
+
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
 	}
@@ -1162,11 +1154,8 @@ func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	if ctx.GlobalIsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.GlobalString(MinerExtraDataFlag.Name))
 	}
-	if ctx.GlobalIsSet(MinerGasTargetFlag.Name) {
-		cfg.GasFloor = ctx.GlobalUint64(MinerGasTargetFlag.Name)
-	}
 	if ctx.GlobalIsSet(MinerGasLimitFlag.Name) {
-		cfg.GasCeil = ctx.GlobalUint64(MinerGasLimitFlag.Name)
+		cfg.GasLimit = ctx.GlobalUint64(MinerGasLimitFlag.Name)
 	}
 	if ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = GlobalBig(ctx, MinerGasPriceFlag.Name)

@@ -6,7 +6,8 @@ Historical data - is immutable, files have .seg extension.
 
 ## Architecture
 
-Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files can be created 4 ways:
+Downloader works based on <your_datadir>/snapshots/*.torrent files (`etl-tmp` and `snapshots` directories MUST be on
+same drive). Such files can be created 4 ways:
 
 - Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger creation of .torrent files
 - Erigon can create new .seg file, Downloader will scan .seg file and create .torrent
@@ -41,10 +42,18 @@ erigon --downloader.api.addr=127.0.0.1:9093 --experimental.snapshot
 downloader --download.limit=10mb --upload.limit=10mb
 ```
 
-### Add hashes to https://github.com/ledgerwatch/erigon-snapshot
+### Print info_hashes in format compatible with https://github.com/ledgerwatch/erigon-snapshot
 
 ```
-downloader print_torrent_files --datadir=<your_datadir>
+downloader info_hashes --datadir=<your_datadir>
+```
+
+### Force re-calculate info_hashes and print in format compatible with https://github.com/ledgerwatch/erigon-snapshot
+
+```
+// will re-read all .seg files (high disk IO)
+// also does remove and create .torrent files
+downloader info_hashes --datadir=<your_datadir> --rebuild
 ```
 
 ### Create new snapshots
@@ -61,3 +70,13 @@ rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshot
 // re-start downloader 
 ```
 
+### Re-create all .idx files (by re-read all .seg files)
+
+```
+// Disk-read-intense
+erigon snapshots index --datadir=<your_datadir> --rebuild
+```
+
+## Known Issues
+
+- RPCDaemon with --datadir option need restart to make new segments available

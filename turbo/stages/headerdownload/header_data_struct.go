@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -217,15 +218,18 @@ type HeaderDownload struct {
 	persistedLinkLimit int    // Maximum allowed number of persisted links
 	anchorLimit        int    // Maximum allowed number of anchors
 	highestInDb        uint64 // Height of the highest block header in the database
-	topSeenHeight      uint64
-	requestChaining    bool // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
-	fetching           bool // Set when the stage that is actively fetching the headers is in progress
+	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
+	fetching           bool   // Set when the stage that is actively fetching the headers is in progress
+	topSeenHeightPoW   uint64
 	// proof-of-stake
-	lastProcessedPayload uint64         // The last header number inserted when processing the chain backwards
-	expectedHash         common.Hash    // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
-	synced               bool           // if we found a canonical hash during backward sync, in this case our sync process is done
-	posSync              bool           // True if the chain is syncing backwards or not
-	headersCollector     *etl.Collector // ETL collector for headers
+	topSeenHeightPoS       uint64
+	lastProcessedPayload   uint64                          // The last header number inserted when processing the chain backwards
+	expectedHash           common.Hash                     // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	synced                 bool                            // if we found a canonical hash during backward sync, in this case our sync process is done
+	posSync                bool                            // True if the chain is syncing backwards or not
+	headersCollector       *etl.Collector                  // ETL collector for headers
+	ExecutionStatusCh      chan privateapi.ExecutionStatus // Channel to report payload execution status (engine_executePayloadV1 response)
+	pendingExecutionStatus common.Hash                     // Header whose status we still should send to the ExecutionStatusCh
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -255,6 +259,7 @@ func NewHeaderDownload(
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
+		ExecutionStatusCh:  make(chan privateapi.ExecutionStatus, 1),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)

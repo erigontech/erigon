@@ -184,11 +184,11 @@ func Setup(ctx *cli.Context) error {
 	RaiseFdLimit()
 	//var ostream log.Handler
 	//output := io.Writer(os.Stderr)
-	if ctx.GlobalBool(logjsonFlag.Name) {
-		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)), log.StreamHandler(os.Stderr, log.JsonFormat())))
+	if ctx.Bool(logjsonFlag.Name) {
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(verbosityFlag.Name)), log.StreamHandler(os.Stderr, log.JsonFormat())))
 		//ostream = log.StreamHandler(output, log.JsonFormat())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.GlobalInt(verbosityFlag.Name)), log.StderrHandler))
+		log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(ctx.Int(verbosityFlag.Name)), log.StderrHandler))
 	}
 	//log.Root().SetHandler(ostream)
 
@@ -203,30 +203,30 @@ func Setup(ctx *cli.Context) error {
 		)
 	*/
 
-	if traceFile := ctx.GlobalString(traceFlag.Name); traceFile != "" {
+	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {
 			return err
 		}
 	}
 
-	if cpuFile := ctx.GlobalString(cpuprofileFlag.Name); cpuFile != "" {
+	if cpuFile := ctx.String(cpuprofileFlag.Name); cpuFile != "" {
 		if err := Handler.StartCPUProfile(cpuFile); err != nil {
 			return err
 		}
 	}
-	pprofEnabled := ctx.GlobalBool(pprofFlag.Name)
-	metricsAddr := ctx.GlobalString(metricsAddrFlag.Name)
+	pprofEnabled := ctx.Bool(pprofFlag.Name)
+	metricsAddr := ctx.String(metricsAddrFlag.Name)
 
 	if metrics.Enabled && (!pprofEnabled || metricsAddr != "") {
-		metricsPort := ctx.GlobalInt(metricsPortFlag.Name)
+		metricsPort := ctx.Int(metricsPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
 	}
 
 	// pprof server
 	if pprofEnabled {
-		pprofHost := ctx.GlobalString(pprofAddrFlag.Name)
-		pprofPort := ctx.GlobalInt(pprofPortFlag.Name)
+		pprofHost := ctx.String(pprofAddrFlag.Name)
+		pprofPort := ctx.Int(pprofPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", pprofHost, pprofPort)
 		// This context value ("metrics.addr") represents the utils.MetricsHTTPFlag.Name.
 		// It cannot be imported because it will cause a cyclical dependency.

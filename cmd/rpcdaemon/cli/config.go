@@ -231,7 +231,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, stateCache kvcache.Cache, blockReader interfaces.BlockReader, err error) {
+func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
@@ -279,7 +279,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			}
 
 			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, snapshothashes.KnownConfig(cc.ChainName))
-			if err != nil {
+			if err := allSnapshots.ReopenSegments(); err != nil {
+				return nil, nil, nil, nil, nil, nil, err
+			}
+			if err := allSnapshots.ReopenIndices(); err != nil {
 				return nil, nil, nil, nil, nil, nil, err
 			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)

@@ -17,7 +17,7 @@ import (
 func APIList(ctx context.Context, db kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
-	blockReader interfaces.BlockReader,
+	blockReader interfaces.BlockAndTxnReader,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
@@ -36,6 +36,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	dbImpl := NewDBAPIImpl() /* deprecated */
 	engineImpl := NewEngineAPI(base, db, eth)
 	adminImpl := NewAdminAPI(eth)
+	parityImpl := NewParityAPIImpl(db)
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -114,6 +115,13 @@ func APIList(ctx context.Context, db kv.RoDB,
 				Namespace: "admin",
 				Public:    false,
 				Service:   AdminAPI(adminImpl),
+				Version:   "1.0",
+			})
+		case "parity":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "parity",
+				Public:    false,
+				Service:   ParityAPI(parityImpl),
 				Version:   "1.0",
 			})
 		}

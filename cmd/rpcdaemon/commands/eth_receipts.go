@@ -248,32 +248,30 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	blockNumber, err := rawdb.ReadTxLookupEntry(tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if blockNumber == nil {
+	if !ok {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
-
-	// Extract transactions from block
-	block, bErr := api.blockByNumberWithSenders(tx, *blockNumber)
-	if bErr != nil {
-		return nil, bErr
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("could not find block  %d", *blockNumber)
+		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
-	var txIndex uint64
-	var found bool
-	for idx, txn := range block.Transactions() {
-		if txn.Hash() == hash {
-			txIndex = uint64(idx)
-			found = true
+	var txnIndex uint64
+	var txn types.Transaction
+	for i, transaction := range block.Transactions() {
+		if transaction.Hash() == hash {
+			txn = transaction
+			txnIndex = uint64(i)
 			break
 		}
 	}
-	if !found {
+	if txn == nil {
 		return nil, nil
 	}
 
@@ -285,10 +283,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
-	if len(receipts) <= int(txIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txIndex), blockNumber)
+	if len(receipts) <= int(txnIndex) {
+		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
-	return marshalReceipt(receipts[txIndex], block.Transactions()[txIndex], cc, block), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block), nil
 }
 
 // GetBlockReceipts - receipts for individual block
