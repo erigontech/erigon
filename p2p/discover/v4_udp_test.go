@@ -32,11 +32,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // shared test variables
@@ -102,7 +103,7 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr *
 
 	enc, _, err := v4wire.Encode(key, data)
 	if err != nil {
-		test.t.Errorf("%s encode error: %w", data.Name(), err)
+		test.t.Errorf("%s encode error: %v", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
 	if err = test.udp.handlePacket(addr, enc); err != wantError {
@@ -124,7 +125,7 @@ func (test *udpTest) waitPacketOut(validate interface{}) (closed bool) {
 	}
 	p, _, hash, err := v4wire.Decode(dgram.data)
 	if err != nil {
-		test.t.Errorf("sent packet decode error: %w", err)
+		test.t.Errorf("sent packet decode error: %v", err)
 		return false
 	}
 	fn := reflect.ValueOf(validate)

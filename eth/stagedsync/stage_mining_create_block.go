@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/core/state"
 	"math/big"
 	"time"
 
@@ -27,7 +28,7 @@ import (
 type MiningBlock struct {
 	Header   *types.Header
 	Uncles   []*types.Header
-	Txs      []types.Transaction
+	Txs      types.Transactions
 	Receipts types.Receipts
 
 	LocalTxs  types.TransactionsStream
@@ -214,7 +215,10 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Coinbase = coinbase
 	//}
 
-	if err = cfg.engine.Prepare(chain, header); err != nil {
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
+
+	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),

@@ -17,6 +17,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -27,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -294,6 +295,7 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
 	heap.Remove(hd.anchorQueue, anchor.idx)
+	anchor.idx = -1
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
@@ -587,6 +589,10 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	if req.Anchor.idx == -1 {
+		// Anchor has already been deleted
+		return
+	}
 	req.Anchor.timeouts++
 	req.Anchor.nextRetryTime = currentTime + timeout
 	heap.Fix(hd.anchorQueue, req.Anchor.idx)

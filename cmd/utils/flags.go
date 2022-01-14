@@ -32,11 +32,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
+
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/params/networkname"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -52,7 +55,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func init() {
@@ -602,18 +604,26 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	var urls []string
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case networkname.MainnetChainName:
+			urls = params.MainnetBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
 			urls = params.RinkebyBootnodes
 		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
+		case networkname.BSCChainName:
+			urls = params.BscBootnodes
+		case networkname.ChapelChainName:
+			urls = params.ChapelBootnodes
+		case networkname.RialtoChainName:
+			urls = params.RialtoBootnodes
 		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
@@ -622,8 +632,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
-		case networkname.BSCMainnetChainName:
-			urls = params.BSCMainnetBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -637,19 +645,26 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 // setBootstrapNodesV5 creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	var urls []string
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
-
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case networkname.MainnetChainName:
+			urls = params.MainnetBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
 			urls = params.RinkebyBootnodes
 		case networkname.GoerliChainName:
 			urls = params.GoerliBootnodes
+		case networkname.BSCChainName:
+			urls = params.BscBootnodes
+		case networkname.ChapelChainName:
+			urls = params.ChapelBootnodes
+		case networkname.RialtoChainName:
+			urls = params.RialtoBootnodes
 		case networkname.ErigonMineName:
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
@@ -658,8 +673,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
-		case networkname.BSCMainnetChainName:
-			urls = params.BSCMainnetBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -671,7 +684,21 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 }
 
 func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
-	cfg.StaticNodes, _ = appendCfgUrlListNodes(cfg.StaticNodes, ctx, StaticPeersFlag.Name, log.Error)
+	var urls []string
+	if ctx.GlobalIsSet(StaticPeersFlag.Name) {
+		urls = SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
+	} else {
+		chain := ctx.GlobalString(ChainFlag.Name)
+		switch chain {
+		case networkname.BSCChainName:
+			urls = params.BscStaticPeers
+		case networkname.ChapelChainName:
+			urls = params.ChapelStaticPeers
+		case networkname.RialtoChainName:
+			urls = params.RialtoStaticPeers
+		}
+	}
+	cfg.StaticNodes, _ = GetUrlListNodes(urls, StaticPeersFlag.Name, log.Error)
 }
 
 func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
@@ -840,9 +867,15 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		setSigKey(ctx, cfg)
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == networkname.FermionChainName {
+	chainsWithValidatorMode := map[string]bool{
+		networkname.FermionChainName: true,
+		networkname.BSCChainName:     true,
+		networkname.RialtoChainName:  true,
+		networkname.ChapelChainName:  true,
+	}
+	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
-			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, networkname.FermionChainName, MiningEnabledFlag.Name))
+			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
 		}
 		setSigKey(ctx, cfg)
 		if cfg.Miner.SigKey != nil {
@@ -889,7 +922,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 
 	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
 		// --dev mode can't use p2p networking.
-		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		cfg.ListenAddr = ":0"
 		cfg.NoDiscovery = true
 		cfg.DiscoveryV5 = false
@@ -1308,6 +1341,24 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGoerliGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
+	case networkname.BSCChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 56
+		}
+		cfg.Genesis = core.DefaultBSCGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
+	case networkname.ChapelChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 97
+		}
+		cfg.Genesis = core.DefaultChapelGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.ChapelGenesisHash)
+	case networkname.RialtoChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 97
+		}
+		cfg.Genesis = core.DefaultRialtoGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.RialtoGenesisHash)
 	case networkname.ErigonMineName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
@@ -1328,11 +1379,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 1212120
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
-	case networkname.BSCMainnetChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 56
-		}
-		cfg.Genesis = core.DefaultBSCMainnetGenesisBlock()
 	case networkname.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1403,6 +1449,12 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultRinkebyGenesisBlock()
 	case networkname.GoerliChainName:
 		genesis = core.DefaultGoerliGenesisBlock()
+	case networkname.BSCChainName:
+		genesis = core.DefaultBSCGenesisBlock()
+	case networkname.ChapelChainName:
+		genesis = core.DefaultChapelGenesisBlock()
+	case networkname.RialtoChainName:
+		genesis = core.DefaultRialtoGenesisBlock()
 	case networkname.ErigonMineName:
 		genesis = core.DefaultErigonGenesisBlock()
 	case networkname.SokolChainName:
@@ -1411,8 +1463,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
-	case networkname.BSCMainnetChainName:
-		genesis = core.DefaultBSCMainnetGenesisBlock()
 	case networkname.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}
