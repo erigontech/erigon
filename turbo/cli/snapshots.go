@@ -189,30 +189,31 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	}
 
 	for i := fromBlock; i < last; i += blocksPerFile {
+
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
 		tmpFilePath := path.Join(tmpDir, fileName) + ".dat"
 		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName)
 
-		if err := snapshotsync.DumpBodies(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Bodies", tmpFilePath, segmentFile, workers); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(tmpFilePath)
+		//if err := snapshotsync.DumpBodies(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
+		//	panic(err)
+		//}
+		//if err := compress.Compress(ctx, "Bodies", tmpFilePath, segmentFile, workers); err != nil {
+		//	panic(err)
+		//}
+		//_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
 		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
 		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
 		log.Info("Creating", "file", fileName)
-		if err := snapshotsync.DumpHeaders(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Headers", tmpFilePath, segmentFile, workers); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(tmpFilePath)
+		//if err := snapshotsync.DumpHeaders(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
+		//	panic(err)
+		//}
+		//if err := compress.Compress(ctx, "Headers", tmpFilePath, segmentFile, workers); err != nil {
+		//	panic(err)
+		//}
+		//_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
 		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
@@ -224,12 +225,19 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		if err := compress.Compress(ctx, "Transactions", tmpFilePath, segmentFile, workers); err != nil {
 			panic(err)
 		}
+		fmt.Printf("ratio: %.2f\n", ratio(tmpFilePath, segmentFile))
 		_ = os.Remove(tmpFilePath)
 
 		//nolint
 		//break // TODO: remove me - useful for tests
 	}
 	return nil
+}
+
+func ratio(f1, f2 string) float64 {
+	s1, _ := os.Stat(f1)
+	s2, _ := os.Stat(f2)
+	return float64(s1.Size()) / float64(s2.Size())
 }
 
 //nolint
