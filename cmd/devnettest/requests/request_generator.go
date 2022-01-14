@@ -2,10 +2,11 @@ package requests
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -17,15 +18,18 @@ type RequestGenerator struct {
 	client *http.Client
 }
 
-func initialiseRequestGenerator() *RequestGenerator {
+func initialiseRequestGenerator(reqId int) *RequestGenerator {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
 
 	reqGen := RequestGenerator{
 		client: client,
+		reqID:  reqId,
 	}
-	reqGen.reqID++
+	if reqGen.reqID == 0 {
+		reqGen.reqID++
+	}
 
 	return &reqGen
 }
@@ -60,4 +64,15 @@ func (req *RequestGenerator) sendRawTransaction(signedTx []byte) string {
 func (req *RequestGenerator) txpoolContent() string {
 	const template = `{"jsonrpc":"2.0","method":"txpool_content","params":[],"id":%d}`
 	return fmt.Sprintf(template, req.reqID)
+}
+
+func (req *RequestGenerator) parityStorageKeyListContent(address common.Address, quantity int, offset []byte) string {
+	const template = `{"jsonrpc":"2.0","method":"parity_listStorageKeys","params":["0x%x", %d, %v],"id":%d}`
+	var offsetString string
+	if len(offset) != 0 {
+		offsetString = fmt.Sprintf(`"0x%x"`, offset)
+	} else {
+		offsetString = "null"
+	}
+	return fmt.Sprintf(template, address, quantity, offsetString, req.reqID)
 }

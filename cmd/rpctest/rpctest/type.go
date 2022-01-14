@@ -254,3 +254,8 @@ type StorageResult struct {
 	Value *hexutil.Big `json:"value"`
 	Proof []string     `json:"proof"`
 }
+
+type ParityListStorageKeysResult struct {
+	Result []hexutil.Bytes `json:"result"`
+	Error  string          `json:"error"`
+}
