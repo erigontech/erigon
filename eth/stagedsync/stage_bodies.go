@@ -58,6 +58,7 @@ func BodiesForward(
 	tx kv.RwTx,
 	cfg BodiesCfg,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+	firstCycle bool,
 ) error {
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
@@ -207,7 +208,7 @@ Loop:
 			stopped = true
 			break
 		}
-		if s.BlockNumber > 0 && noProgressCount >= 5 {
+		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 5 {
 			break
 		}
 		timer.Stop()

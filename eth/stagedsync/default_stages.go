@@ -43,7 +43,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, block
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return BodiesForward(s, u, ctx, tx, bodies, test)
+				return BodiesForward(s, u, ctx, tx, bodies, test, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindBodiesStage(u, tx, bodies, ctx)
