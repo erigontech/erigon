@@ -463,7 +463,6 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 	}
 	if account.Incarnation == 0 {
 		value[pos] = 0
-		pos++
 	} else {
 		incBytes := (bits.Len64(account.Incarnation) + 7) / 8
 		value[pos] = byte(incBytes)
