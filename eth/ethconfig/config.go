@@ -87,7 +87,7 @@ var Defaults = Config{
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
 
-	BodyDownloadTimeoutSeconds: 60,
+	BodyDownloadTimeoutSeconds: 30,
 }
 
 func init() {
