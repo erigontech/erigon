@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"os"
 	"os/signal"
 	"path"
@@ -15,6 +16,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -27,13 +30,15 @@ import (
 )
 
 var (
-	check bool
+	check      bool
+	changesets bool
 )
 
 func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&check, "check", false, "set to true to compare state reads with with historical state (for debugging)")
+	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -55,9 +60,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Readonly().Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
 	defer historyDb.Close()
 	ctx := context.Background()
@@ -94,37 +99,51 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
+	agg.GenerateChangesets(changesets)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
-	noOpWriter := state.NewNoopWriter()
 	interrupt := false
 	block := uint64(0)
 	var rwTx kv.RwTx
 	defer func() {
 		rwTx.Rollback()
 	}()
-	var tx kv.Tx
-	defer func() {
-		tx.Rollback()
-	}()
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	_, genesisIbs, err4 := genesis.ToBlock()
+	genBlock, genesisIbs, err4 := genesis.ToBlock()
 	if err4 != nil {
 		return err4
 	}
-	genesisW, err5 := agg.MakeStateWriter(rwTx, 0)
-	if err5 != nil {
-		return err5
+	w := agg.MakeStateWriter()
+	if err = w.Reset(rwTx, 0); err != nil {
+		return err
 	}
-	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: genesisW}); err != nil {
+	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
+	}
+	if err = w.FinishTx(0, false); err != nil {
+		return err
+	}
+	var rootHash []byte
+	if rootHash, err = w.FinishBlock(false); err != nil {
+		return err
+	}
+	if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
+		return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 	}
 	if err = rwTx.Commit(); err != nil {
 		return err
 	}
+	var tx kv.Tx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+	var txNum uint64 = 1
+	trace := false
 	for !interrupt {
 		block++
 		if block >= blockNum {
@@ -153,13 +172,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		if check {
 			checkR = state.NewPlainState(historyTx, block-1)
 		}
-		var w *aggregator.Writer
-		if w, err = agg.MakeStateWriter(rwTx, block); err != nil {
+		if err = w.Reset(rwTx, block); err != nil {
 			return err
 		}
 		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if _, err = runBlock(intraBlockState, noOpWriter, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
 		if block%1000 == 0 {
@@ -168,18 +186,76 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
+			fmt.Printf("interrupted on block %d, please wait for cleanup...\n", block)
 		default:
 		}
 		tx.Rollback()
-		if err = w.Finish(); err != nil {
+		if err := w.FinishTx(txNum, trace); err != nil {
+			return fmt.Errorf("final finish failed: %w", err)
+		}
+		if trace {
+			fmt.Printf("FinishTx called for %d block %d\n", txNum, block)
+		}
+		txNum++
+		if rootHash, err = w.FinishBlock(trace /* trace */); err != nil {
 			return err
 		}
-		if err = rwTx.Commit(); err != nil {
-			return err
+		if bytes.Equal(rootHash, b.Header().Root[:]) {
+			if err = rwTx.Commit(); err != nil {
+				return err
+			}
+		} else {
+			if trace {
+				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", block, b.Header().Root[:], rootHash)
+			} else {
+				block--
+				trace = true
+			}
+			rwTx.Rollback()
 		}
 	}
 	return nil
+}
+
+func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+	header := block.Header()
+	vmConfig.TraceJumpDest = true
+	engine := ethash.NewFullFaker()
+	gp := new(core.GasPool).AddGas(block.GasLimit())
+	usedGas := new(uint64)
+	var receipts types.Receipts
+	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+		misc.ApplyDAOHardFork(ibs)
+	}
+	rules := chainConfig.Rules(block.NumberU64())
+	txNum := txNumStart
+	for i, tx := range block.Transactions() {
+		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, contractHasTEVM)
+		if err != nil {
+			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		receipts = append(receipts, receipt)
+		if err = ww.w.FinishTx(txNum, trace); err != nil {
+			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		if trace {
+			fmt.Printf("FinishTx called for %d [%x]\n", txNum, tx.Hash())
+		}
+		txNum++
+	}
+
+	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+	if _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
+		return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
+	}
+
+	if err := ibs.CommitBlock(rules, ww); err != nil {
+		return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
+	}
+
+	return txNum, receipts, nil
 }
 
 // Implements StateReader and StateWriter
@@ -192,6 +268,16 @@ type ReaderWrapper struct {
 type WriterWrapper struct {
 	blockNum uint64
 	w        *aggregator.Writer
+}
+
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
 }
 
 func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -214,9 +300,32 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 		}
 		return nil, nil
 	}
+
 	var a accounts.Account
-	if err = a.DecodeForStorage(enc); err != nil {
-		return nil, err
+	a.Reset()
+	pos := 0
+	nonceBytes := int(enc[pos])
+	pos++
+	if nonceBytes > 0 {
+		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
+		pos += nonceBytes
+	}
+	balanceBytes := int(enc[pos])
+	pos++
+	if balanceBytes > 0 {
+		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	codeHashBytes := int(enc[pos])
+	pos++
+	if codeHashBytes > 0 {
+		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
+		pos += codeHashBytes
+	}
+	incBytes := int(enc[pos])
+	pos++
+	if incBytes > 0 {
+		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
 	if rw.checkR != nil {
 		if !a.Equals(checkA) {
@@ -300,8 +409,68 @@ func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64,
 }
 
 func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	value := make([]byte, account.EncodingLengthForStorage())
-	account.EncodeForStorage(value)
+	var l int
+	l++
+	if account.Nonce > 0 {
+		l += (bits.Len64(account.Nonce) + 7) / 8
+	}
+	l++
+	if !account.Balance.IsZero() {
+		l += account.Balance.ByteLen()
+	}
+	l++
+	if !account.IsEmptyCodeHash() {
+		l += 32
+	}
+	l++
+	if account.Incarnation > 0 {
+		l += (bits.Len64(account.Incarnation) + 7) / 8
+	}
+	value := make([]byte, l)
+	pos := 0
+	if account.Nonce == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		nonceBytes := (bits.Len64(account.Nonce) + 7) / 8
+		value[pos] = byte(nonceBytes)
+		var nonce = account.Nonce
+		for i := nonceBytes; i > 0; i-- {
+			value[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+	if account.Balance.IsZero() {
+		value[pos] = 0
+		pos++
+	} else {
+		balanceBytes := account.Balance.ByteLen()
+		value[pos] = byte(balanceBytes)
+		pos++
+		account.Balance.WriteToSlice(value[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	if account.IsEmptyCodeHash() {
+		value[pos] = 0
+		pos++
+	} else {
+		value[pos] = 32
+		pos++
+		copy(value[pos:pos+32], account.CodeHash[:])
+		pos += 32
+	}
+	if account.Incarnation == 0 {
+		value[pos] = 0
+	} else {
+		incBytes := (bits.Len64(account.Incarnation) + 7) / 8
+		value[pos] = byte(incBytes)
+		var inc = account.Incarnation
+		for i := incBytes; i > 0; i-- {
+			value[pos+i] = byte(inc)
+			inc >>= 8
+		}
+	}
 	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
 		return err
 	}
@@ -316,9 +485,6 @@ func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation u
 }
 
 func (ww *WriterWrapper) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if original == nil || !original.Initialised {
-		return nil
-	}
 	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
 		return err
 	}
