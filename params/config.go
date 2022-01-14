@@ -44,10 +44,10 @@ var (
 	ErigonGenesisHash  = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash   = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	KovanGenesisHash   = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
+	FermionGenesisHash = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 	BSCGenesisHash     = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash  = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
-	RialtoGenesisHash  = common.HexToHash("0x005dc005bddd1967de6187c1c23be801eb7abdd80cebcc24f341b727b70311d6")
-	FermionGenesisHash = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
+	RialtoGenesisHash  = common.HexToHash("0xaabe549bfa85c84f7aee9da7010b97453ad686f2c2d8ce00503d1a00c72cad54")
 )
 
 var (
@@ -78,9 +78,6 @@ var (
 		PetersburgBlock:     big.NewInt(7_280_000),
 		IstanbulBlock:       big.NewInt(9_069_000),
 		MuirGlacierBlock:    big.NewInt(9_200_000),
-		RamanujanBlock:      big.NewInt(0),
-		NielsBlock:          big.NewInt(0),
-		MirrorSyncBlock:     big.NewInt(0),
 		BerlinBlock:         big.NewInt(12_244_000),
 		LondonBlock:         big.NewInt(12_965_000),
 		ArrowGlacierBlock:   big.NewInt(13_773_000),
@@ -104,9 +101,6 @@ var (
 		PetersburgBlock:     big.NewInt(4_939_394),
 		IstanbulBlock:       big.NewInt(6_485_846),
 		MuirGlacierBlock:    big.NewInt(7_117_117),
-		RamanujanBlock:      big.NewInt(0),
-		NielsBlock:          big.NewInt(0),
-		MirrorSyncBlock:     big.NewInt(0),
 		BerlinBlock:         big.NewInt(9_812_189),
 		LondonBlock:         big.NewInt(10_499_401),
 		Ethash:              new(EthashConfig),
@@ -127,9 +121,6 @@ var (
 		ByzantiumBlock:      big.NewInt(1_035_301),
 		ConstantinopleBlock: big.NewInt(3_660_663),
 		PetersburgBlock:     big.NewInt(4_321_234),
-		RamanujanBlock:      big.NewInt(0),
-		NielsBlock:          big.NewInt(0),
-		MirrorSyncBlock:     big.NewInt(0),
 		IstanbulBlock:       big.NewInt(5_435_345),
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(8_290_928),
@@ -154,9 +145,6 @@ var (
 		ByzantiumBlock:      big.NewInt(0),
 		ConstantinopleBlock: big.NewInt(0),
 		PetersburgBlock:     big.NewInt(0),
-		RamanujanBlock:      big.NewInt(0),
-		NielsBlock:          big.NewInt(0),
-		MirrorSyncBlock:     big.NewInt(0),
 		IstanbulBlock:       big.NewInt(1_561_651),
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(4_460_644),
@@ -164,6 +152,75 @@ var (
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
+		},
+	}
+
+	BSCChainConfig = &ChainConfig{
+		ChainName:           networkname.BSCChainName,
+		ChainID:             big.NewInt(56),
+		Consensus:           ParliaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		RamanujanBlock:      big.NewInt(0),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(5184000),
+		BrunoBlock:          big.NewInt(13082000),
+		Parlia: &ParliaConfig{
+			Period: 3,
+			Epoch:  200,
+		},
+	}
+
+	ChapelChainConfig = &ChainConfig{
+		ChainName:           networkname.ChapelChainName,
+		ChainID:             big.NewInt(97),
+		Consensus:           ParliaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		RamanujanBlock:      big.NewInt(1010000),
+		NielsBlock:          big.NewInt(1014369),
+		MirrorSyncBlock:     big.NewInt(5582500),
+		BrunoBlock:          big.NewInt(13837000),
+		Parlia: &ParliaConfig{
+			Period: 3,
+			Epoch:  200,
+		},
+	}
+
+	RialtoChainConfig = &ChainConfig{
+		ChainName:           networkname.RialtoChainName,
+		ChainID:             big.NewInt(1417),
+		Consensus:           ParliaConsensus,
+		HomesteadBlock:      big.NewInt(0),
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    big.NewInt(0),
+		RamanujanBlock:      big.NewInt(400),
+		NielsBlock:          big.NewInt(0),
+		MirrorSyncBlock:     big.NewInt(400),
+		BrunoBlock:          big.NewInt(400),
+		Parlia: &ParliaConfig{
+			Period: 3,
+			Epoch:  200,
 		},
 	}
 
@@ -298,70 +355,6 @@ var (
 		},
 	}
 
-	BSCMainnetChainConfig = &ChainConfig{
-		ChainName:           networkname.BSCMainnetChainName,
-		ChainID:             big.NewInt(56),
-		Consensus:           ParliaConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		RamanujanBlock:      big.NewInt(0),
-		NielsBlock:          big.NewInt(0),
-		MirrorSyncBlock:     big.NewInt(5184000),
-		Parlia: &ParliaConfig{
-			Period: 3,
-			Epoch:  200,
-		},
-	}
-
-	ChapelChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(97),
-		Consensus:           ParliaConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		RamanujanBlock:      big.NewInt(1010000),
-		NielsBlock:          big.NewInt(1014369),
-		MirrorSyncBlock:     big.NewInt(5582500),
-		Parlia: &ParliaConfig{
-			Period: 3,
-			Epoch:  200,
-		},
-	}
-
-	RialtoChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(1417),
-		Consensus:           ParliaConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		RamanujanBlock:      big.NewInt(400),
-		NielsBlock:          big.NewInt(0),
-		MirrorSyncBlock:     big.NewInt(400),
-		Parlia: &ParliaConfig{
-			Period: 3,
-			Epoch:  200,
-		},
-	}
-
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Ethash consensus.
 	AllEthashProtocolChanges = &ChainConfig{
@@ -467,7 +460,7 @@ type ChainConfig struct {
 	ChainName string
 	ChainID   *big.Int `json:"chainId"` // chainId identifies the current chain and is used for replay protection
 
-	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash, clique, or parlia
+	Consensus ConsensusType `json:"consensus,omitempty"` // aura, ethash or clique
 
 	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
 
@@ -490,9 +483,10 @@ type ChainConfig struct {
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 
-	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
-	NielsBlock      *big.Int `json:"nielsBlock,omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
-	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
+	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
+	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
+	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
+	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
 	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
@@ -500,7 +494,7 @@ type ChainConfig struct {
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
-	Parlia *ParliaConfig `json:"parlia,omitempty"`
+	Parlia *ParliaConfig `json:"parlia,omitempty" toml:",omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -558,16 +552,17 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
 			c.MirrorSyncBlock,
+			c.BrunoBlock,
 			engine,
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v , Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -641,19 +636,9 @@ func (c *ChainConfig) IsEIP158(num uint64) bool {
 	return isForked(c.EIP158Block, num)
 }
 
-// IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
-func (c *ChainConfig) IsEIP158BigInt(num *big.Int) bool {
-	return configNumEqual(c.EIP158Block, num)
-}
-
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
 func (c *ChainConfig) IsByzantium(num uint64) bool {
 	return isForked(c.ByzantiumBlock, num)
-}
-
-// IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
-func (c *ChainConfig) IsByzantiumBigInt(num *big.Int) bool {
-	return configNumEqual(c.ByzantiumBlock, num)
 }
 
 // IsConstantinople returns whether num is either equal to the Constantinople fork block or greater.
@@ -664,11 +649,6 @@ func (c *ChainConfig) IsConstantinople(num uint64) bool {
 // IsRamanujan returns whether num is either equal to the IsRamanujan fork block or greater.
 func (c *ChainConfig) IsRamanujan(num uint64) bool {
 	return isForked(c.RamanujanBlock, num)
-}
-
-// IsRamanujan returns whether num is either equal to the IsRamanujan fork block or greater.
-func (c *ChainConfig) IsRamanujanBigInt(num *big.Int) bool {
-	return configNumEqual(c.RamanujanBlock, num)
 }
 
 // IsOnRamanujan returns whether num is equal to the Ramanujan fork block
@@ -694,6 +674,16 @@ func (c *ChainConfig) IsMirrorSync(num uint64) bool {
 // IsOnMirrorSync returns whether num is equal to the MirrorSync fork block
 func (c *ChainConfig) IsOnMirrorSync(num *big.Int) bool {
 	return configNumEqual(c.MirrorSyncBlock, num)
+}
+
+// IsBruno returns whether num is either equal to the Burn fork block or greater.
+func (c *ChainConfig) IsBruno(num uint64) bool {
+	return isForked(c.BrunoBlock, num)
+}
+
+// IsOnBruno returns whether num is equal to the Burn fork block
+func (c *ChainConfig) IsOnBruno(num *big.Int) bool {
+	return configNumEqual(c.BrunoBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
@@ -835,12 +825,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.MuirGlacierBlock, newcfg.MuirGlacierBlock, head) {
 		return newCompatError("Muir Glacier fork block", c.MuirGlacierBlock, newcfg.MuirGlacierBlock)
 	}
-	if isForkIncompatible(c.RamanujanBlock, newcfg.RamanujanBlock, head) {
-		return newCompatError("ramanujan fork block", c.RamanujanBlock, newcfg.RamanujanBlock)
-	}
-	if isForkIncompatible(c.MirrorSyncBlock, newcfg.MirrorSyncBlock, head) {
-		return newCompatError("mirrorSync fork block", c.MirrorSyncBlock, newcfg.MirrorSyncBlock)
-	}
 	if isForkIncompatible(c.BerlinBlock, newcfg.BerlinBlock, head) {
 		return newCompatError("Berlin fork block", c.BerlinBlock, newcfg.BerlinBlock)
 	}
@@ -917,7 +901,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon                                      bool
+	IsBerlin, IsLondon, IsParlia                            bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -938,5 +922,6 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
+		IsParlia:         c.Parlia != nil,
 	}
 }

@@ -13,10 +13,13 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -37,9 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
 )
 
 var cmdStageHeaders = &cobra.Command{
@@ -1007,6 +1007,15 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.GoerliChainName:
 		chainConfig = params.GoerliChainConfig
 		genesis = core.DefaultGoerliGenesisBlock()
+	case networkname.BSCChainName:
+		chainConfig = params.BSCChainConfig
+		genesis = core.DefaultBSCGenesisBlock()
+	case networkname.ChapelChainName:
+		chainConfig = params.ChapelChainConfig
+		genesis = core.DefaultChapelGenesisBlock()
+	case networkname.RialtoChainName:
+		chainConfig = params.RialtoChainConfig
+		genesis = core.DefaultChapelGenesisBlock()
 	case networkname.RinkebyChainName:
 		chainConfig = params.RinkebyChainConfig
 		genesis = core.DefaultRinkebyGenesisBlock()
@@ -1019,9 +1028,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
-	case networkname.BSCMainnetChainName:
-		chainConfig = params.BSCMainnetChainConfig
-		genesis = core.DefaultBSCMainnetGenesisBlock()
 	}
 	return genesis, chainConfig
 }
@@ -1079,14 +1085,15 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	genesis, chainConfig := byChain()
 	var engine consensus.Engine
 	config := &ethconfig.Defaults
-	var consensusConfig interface{}
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
 		c.DBPath = path.Join(datadir, "clique/db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, common.Hash{})
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify)
 	} else if chainConfig.Aura != nil {
-		consensusConfig = &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, common.Hash{})
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify)
+	} else if chainConfig.Parlia != nil {
+		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}
@@ -1098,6 +1105,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(genesisErr)
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
+
+	// Apply special hacks for BSC params
+	if chainConfig.Parlia != nil {
+		params.ApplyBinanceSmartChainParams()
+		vm.ApplyBinanceSmartChainEIPs()
+	}
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))

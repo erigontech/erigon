@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus"
 	"math/bits"
 
 	"github.com/holiman/uint256"
@@ -402,7 +403,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if st.evm.ChainRules().IsLondon {
 		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context().BaseFee))
 	}
-	st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
+	// consensus engine is parlia
+	if st.evm.ChainConfig().Parlia != nil {
+		st.state.AddBalance(consensus.SystemAddress, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
+	} else {
+		st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
+	}
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
