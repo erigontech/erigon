@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -19,14 +18,12 @@ import (
 type IssuanceCfg struct {
 	db          kv.RwDB
 	chainConfig *params.ChainConfig
-	blockReader interfaces.FullBlockReader
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig) IssuanceCfg {
 	return IssuanceCfg{
 		db:          db,
 		chainConfig: chainConfig,
-		blockReader: blockReader,
 	}
 }
 
@@ -81,14 +78,11 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		if err != nil {
 			return err
 		}
-		body, err := cfg.blockReader.Body(ctx, tx, hash, currentBlockNumber)
-		if err != nil {
-			return err
+		body, _, _ := rawdb.ReadBody(tx, hash, currentBlockNumber)
+		if body == nil {
+			return fmt.Errorf("could not find block body for number: %d", currentBlockNumber)
 		}
-		header, err := cfg.blockReader.Header(ctx, tx, hash, currentBlockNumber)
-		if err != nil {
-			return err
-		}
+		header := rawdb.ReadHeader(tx, hash, currentBlockNumber)
 
 		if header == nil {
 			return fmt.Errorf("could not find block header for number: %d", currentBlockNumber)
