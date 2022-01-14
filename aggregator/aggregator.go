@@ -74,6 +74,7 @@ type Aggregator struct {
 	tracedKeys      map[string]struct{} // Set of keys being traced during aggregations
 	hph             *commitment.HexPatriciaHashed
 	keccak          hash.Hash
+	changesets      bool // Whether to generate changesets (off by default)
 }
 
 type ChangeFile struct {
@@ -89,6 +90,7 @@ type ChangeFile struct {
 	txPos       int64 // Position of the last block iterated upon
 	txNum       uint64
 	txSize      uint64
+	txRemaining uint64 // Remaining number of bytes to read in the current transaction
 	words       []byte // Words pending for the next block record, in the same slice
 	wordOffsets []int  // Offsets of words in the `words` slice
 }
@@ -137,6 +139,15 @@ func (cf *ChangeFile) openFile(blockNum uint64, write bool) error {
 		}
 		cf.r = bufio.NewReader(cf.file)
 	}
+	return nil
+}
+
+func (cf *ChangeFile) rewind() error {
+	var err error
+	if cf.txPos, err = cf.file.Seek(0, 2 /* relative to the end of the file */); err != nil {
+		return err
+	}
+	cf.r = bufio.NewReader(cf.file)
 	return nil
 }
 
@@ -197,6 +208,7 @@ func (cf *ChangeFile) prevTx() (bool, error) {
 		return false, err
 	}
 	cf.txSize = binary.BigEndian.Uint64(cf.numBuf[:])
+	cf.txRemaining = cf.txSize
 	cf.txPos, err = cf.file.Seek(pos-int64(cf.txSize), 0)
 	if err != nil {
 		return false, err
@@ -206,7 +218,7 @@ func (cf *ChangeFile) prevTx() (bool, error) {
 }
 
 func (cf *ChangeFile) nextWord(wordBuf []byte) ([]byte, bool, error) {
-	if cf.txSize == 0 {
+	if cf.txRemaining == 0 {
 		return wordBuf, false, nil
 	}
 	ws, err := binary.ReadUvarint(cf.r)
@@ -224,7 +236,7 @@ func (cf *ChangeFile) nextWord(wordBuf []byte) ([]byte, bool, error) {
 		return wordBuf, false, fmt.Errorf("read word (%d %d): %w", ws, len(buf[len(wordBuf):]), err)
 	}
 	n := binary.PutUvarint(cf.numBuf[:], ws)
-	cf.txSize -= uint64(n) + ws
+	cf.txRemaining -= uint64(n) + ws
 	return buf, true, nil
 }
 
@@ -313,22 +325,42 @@ func (c *Changes) finish(txNum uint64) error {
 	return nil
 }
 
-func (c *Changes) prevTx() (bool, error) {
+func (c *Changes) prevTx() (bool, uint64, error) {
 	bkeys, err := c.keys.prevTx()
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 	var bbefore, bafter bool
 	if bbefore, err = c.before.prevTx(); err != nil {
-		return false, err
+		return false, 0, err
 	}
 	if bafter, err = c.after.prevTx(); err != nil {
-		return false, err
+		return false, 0, err
 	}
 	if bkeys != bbefore || bkeys != bafter {
-		return false, fmt.Errorf("inconsistent block iteration")
+		return false, 0, fmt.Errorf("inconsistent tx iteration")
 	}
-	return bkeys, nil
+	txNum := c.keys.txNum
+	if txNum != c.before.txNum {
+		return false, 0, fmt.Errorf("inconsistent txNum, keys: %d, before: %d", txNum, c.before.txNum)
+	}
+	if txNum != c.after.txNum {
+		return false, 0, fmt.Errorf("inconsistent txNum, keys: %d, after: %d", txNum, c.before.txNum)
+	}
+	return bkeys, txNum, nil
+}
+
+func (c *Changes) rewind() error {
+	if err := c.keys.rewind(); err != nil {
+		return err
+	}
+	if err := c.before.rewind(); err != nil {
+		return err
+	}
+	if err := c.after.rewind(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Changes) nextTriple(keyBuf, beforeBuf []byte, afterBuf []byte) ([]byte, []byte, []byte, bool, error) {
@@ -412,15 +444,23 @@ func buildIndex(datPath, idxPath, tmpDir string, count int) (*compress.Decompres
 	return d, idx, nil
 }
 
-func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx, table string) (*compress.Decompressor, *recsplit.Index, error) {
+func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx, table string, changesets bool) (*compress.Decompressor, *recsplit.Index, error) {
 	if err := c.openFiles(blockTo, false /* write */); err != nil {
 		return nil, nil, fmt.Errorf("open files: %w", err)
 	}
 	bt := btree.New(32)
-	if err := c.aggregateToBtree(bt, prefixLen); err != nil {
+	err := c.aggregateToBtree(bt, prefixLen)
+	if err != nil {
 		return nil, nil, fmt.Errorf("aggregateToBtree: %w", err)
 	}
-	if err := c.closeFiles(); err != nil {
+	if changesets && bt.Len() > 0 { // No need to produce changeset files if there were no changes
+		chsetDatPath := path.Join(c.dir, fmt.Sprintf("chsets.%s.%d-%d.dat", c.namebase, blockFrom, blockTo))
+		chsetIdxPath := path.Join(c.dir, fmt.Sprintf("chsets.%s.%d-%d.idx", c.namebase, blockFrom, blockTo))
+		if err = c.produceChangeSets(chsetDatPath, chsetIdxPath); err != nil {
+			return nil, nil, fmt.Errorf("produceChangeSets: %w", err)
+		}
+	}
+	if err = c.closeFiles(); err != nil {
 		return nil, nil, fmt.Errorf("close files: %w", err)
 	}
 	// Clean up the DB table
@@ -467,7 +507,6 @@ func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx
 	datPath := path.Join(c.dir, fmt.Sprintf("%s.%d-%d.dat", c.namebase, blockFrom, blockTo))
 	idxPath := path.Join(c.dir, fmt.Sprintf("%s.%d-%d.idx", c.namebase, blockFrom, blockTo))
 	var count int
-	var err error
 	if count, err = btreeToFile(bt, datPath, c.dir); err != nil {
 		return nil, nil, fmt.Errorf("btreeToFile: %w", err)
 	}
@@ -483,13 +522,109 @@ func (i *AggregateItem) Less(than btree.Item) bool {
 	return bytes.Compare(i.k, than.(*AggregateItem).k) < 0
 }
 
+func (c *Changes) produceChangeSets(datPath, idxPath string) error {
+	comp, err := compress.NewCompressor(AggregatorPrefix, datPath, c.dir, 1024 /* minPatterScore */)
+	if err != nil {
+		return fmt.Errorf("produceChangeSets NewCompressor: %w", err)
+	}
+	var totalRecords int
+	var b bool
+	var e error
+	var key, before, after []byte
+	if err = c.rewind(); err != nil {
+		return fmt.Errorf("produceChangeSets rewind: %w", err)
+	}
+	for b, _, e = c.prevTx(); b && e == nil; b, _, e = c.prevTx() {
+		for key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]); b && e == nil; key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]) {
+			totalRecords++
+			if err = comp.AddWord(before); err != nil {
+				return fmt.Errorf("produceChangeSets AddWord: %w", err)
+			}
+		}
+		if e != nil {
+			return fmt.Errorf("produceChangeSets nextTriple: %w", e)
+		}
+	}
+	if e != nil {
+		return fmt.Errorf("produceChangeSets prevTx: %w", e)
+	}
+	if err = comp.Compress(); err != nil {
+		return fmt.Errorf("produceChangeSets Compress: %w", err)
+	}
+	var d *compress.Decompressor
+	if d, err = compress.NewDecompressor(datPath); err != nil {
+		return fmt.Errorf("produceChangeSets NewDecompressor: %w", err)
+	}
+	defer d.Close()
+	var rs *recsplit.RecSplit
+	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   totalRecords,
+		Enums:      true,
+		BucketSize: 2000,
+		Salt:       0,
+		LeafSize:   8,
+		TmpDir:     c.dir,
+		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+		IndexFile: idxPath,
+	}); err != nil {
+		return fmt.Errorf("produceChangeSets NewRecSplit: %w", err)
+	}
+	for {
+		if err = c.rewind(); err != nil {
+			return fmt.Errorf("produceChangeSets rewind2: %w", err)
+		}
+		word := make([]byte, 0, 256)
+		var txKey = make([]byte, 8, 60)
+		var pos, prevPos uint64
+		var txNum uint64
+		g := d.MakeGetter()
+		for b, txNum, e = c.prevTx(); b && e == nil; b, txNum, e = c.prevTx() {
+			binary.BigEndian.PutUint64(txKey[:8], txNum)
+			for key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]); b && e == nil; key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]) {
+				txKey = append(txKey[:8], key...)
+				_, pos = g.Next(word[:0])
+				if err = rs.AddKey(txKey, prevPos); err != nil {
+					return fmt.Errorf("produceChangeSets AddKey: %w", e)
+				}
+				prevPos = pos
+			}
+			if e != nil {
+				return fmt.Errorf("produceChangeSets nextTriple2: %w", e)
+			}
+		}
+		if e != nil {
+			return fmt.Errorf("produceChangeSets prevTx2: %w", e)
+		}
+		if err = rs.Build(); err != nil {
+			return fmt.Errorf("produceChangeSets Build: %w", err)
+		}
+		if rs.Collision() {
+			log.Info("Building produceChangeSets. Collision happened. It's ok. Restarting...")
+			rs.ResetNextSalt()
+		} else {
+			break
+		}
+	}
+	return nil
+}
+
+// aggregateToBtree iterates over all available changes in the change files covered by this instance `c`
+// (there are 3 of them, one for "keys", one for values "before" every change, and one for values "after" every change)
+// and create a B-tree where each key is only represented once, with the value corresponding to the "after" value
+// of the latest change. Also, the first byte of value in the B-tree indicates whether the change has occurred from
+// non-existent (zero) value. In such cases, the fist byte is set to 1 (insertion), otherwise it is 0 (update).
 func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int) error {
 	var b bool
 	var e error
 	var key, before, after []byte
 	var ai AggregateItem
 	var prefix []byte
-	for b, e = c.prevTx(); b && e == nil; b, e = c.prevTx() {
+	// Note that the following loop iterates over transactions backwards, therefore it does not replace entries in the B-tree,
+	// but instead just updates their "change count" and the first byte of the value (insertion vs update flag)
+	for b, _, e = c.prevTx(); b && e == nil; b, _, e = c.prevTx() {
+		// Within each transaction, keys are unique, but they can appear in any order
 		for key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]); b && e == nil; key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]) {
 			if prefixLen > 0 && !bytes.Equal(prefix, key[:prefixLen]) {
 				prefix = common.Copy(key[:prefixLen])
@@ -522,11 +657,11 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int) error {
 			}
 		}
 		if e != nil {
-			return fmt.Errorf("nextTriple: %w", e)
+			return fmt.Errorf("aggregateToBtree nextTriple: %w", e)
 		}
 	}
 	if e != nil {
-		return fmt.Errorf("prevTx: %w", e)
+		return fmt.Errorf("aggregateToBtree prevTx: %w", e)
 	}
 	return nil
 }
@@ -784,6 +919,10 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		}
 	}
 	return a, nil
+}
+
+func (a *Aggregator) GenerateChangesets(on bool) {
+	a.changesets = on
 }
 
 func closeFiles(byEndBlock *btree.BTree) {
@@ -1552,7 +1691,6 @@ func (w *Writer) deleteAccount(addr []byte, trace bool) (bool, error) {
 	if prevV == nil {
 		original = w.a.readAccount(w.blockNum, addr, trace)
 		if original == nil {
-			log.Warn("deleteAccount without prev", "addr", fmt.Sprintf("[%x]", addr))
 			return false, nil
 		}
 	} else {
@@ -1751,17 +1889,17 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	commChanges.Init("commitment", w.a.aggregationStep, w.a.diffDir)
 	var err error
 	var item1 *byEndBlockItem = &byEndBlockItem{fileCount: 8, startBlock: blockFrom, endBlock: blockTo}
-	if item1.accountsD, item1.accountsIdx, err = accountChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateAccounts); err != nil {
+	if item1.accountsD, item1.accountsIdx, err = accountChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateAccounts, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate accountsChanges: %w", err)
 	}
-	if item1.codeD, item1.codeIdx, err = codeChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCode); err != nil {
+	if item1.codeD, item1.codeIdx, err = codeChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCode, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate codeChanges: %w", err)
 	}
-	if item1.storageD, item1.storageIdx, err = storageChanges.aggregate(blockFrom, blockTo, 20, w.tx, kv.StateStorage); err != nil {
+	if item1.storageD, item1.storageIdx, err = storageChanges.aggregate(blockFrom, blockTo, 20, w.tx, kv.StateStorage, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate storageChanges: %w", err)
 	}
-	if item1.commitmentD, item1.commitmentIdx, err = commChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCommitment); err != nil {
-		return fmt.Errorf("aggregate storageChanges: %w", err)
+	if item1.commitmentD, item1.commitmentIdx, err = commChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCommitment, false /* changesets */); err != nil {
+		return fmt.Errorf("aggregate commitmentChanges: %w", err)
 	}
 	if err = accountChanges.closeFiles(); err != nil {
 		return err
