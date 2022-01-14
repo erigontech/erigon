@@ -326,7 +326,6 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	pos++
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
-		pos += incBytes
 	}
 	if rw.checkR != nil {
 		if !a.Equals(checkA) {
