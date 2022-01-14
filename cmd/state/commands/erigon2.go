@@ -103,7 +103,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
-	//noOpWriter := state.NewNoopWriter()
 	interrupt := false
 	block := uint64(0)
 	var rwTx kv.RwTx
@@ -187,7 +186,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
+			fmt.Printf("interrupted on block %d, please wait for cleanup...\n", block)
 		default:
 		}
 		tx.Rollback()
@@ -473,7 +472,6 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 			value[pos+i] = byte(inc)
 			inc >>= 8
 		}
-		pos += incBytes + 1
 	}
 	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
 		return err
