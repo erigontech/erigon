@@ -426,7 +426,7 @@ func set(bits []uint64, pos uint64) {
 	bits[pos/64] |= uint64(1) << (pos % 64)
 }
 
-func (ef DoubleEliasFano) jumpSizeWords() int {
+func (ef *DoubleEliasFano) jumpSizeWords() int {
 	size := ((ef.numBuckets + 1) / superQ) * superQSize * 2 // Whole blocks
 	if (ef.numBuckets+1)%superQ != 0 {
 		size += (1 + (((ef.numBuckets+1)%superQ+q-1)/q+3)/4) * 2 // Partial block
@@ -435,11 +435,11 @@ func (ef DoubleEliasFano) jumpSizeWords() int {
 }
 
 // Data returns binary representation of double Ellias-Fano index that has been built
-func (ef DoubleEliasFano) Data() []uint64 {
+func (ef *DoubleEliasFano) Data() []uint64 {
 	return ef.data
 }
 
-func (ef DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
+func (ef *DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
 	windowCumKeys uint64, selectCumKeys int, currWordCumKeys uint64, lower uint64, cumDelta uint64) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
 	idx64 := posLower / 64
@@ -498,12 +498,12 @@ func (ef DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
 	return
 }
 
-func (ef DoubleEliasFano) Get2(i uint64) (cumKeys uint64, position uint64) {
+func (ef *DoubleEliasFano) Get2(i uint64) (cumKeys uint64, position uint64) {
 	cumKeys, position, _, _, _, _, _ = ef.get2(i)
 	return
 }
 
-func (ef DoubleEliasFano) Get3(i uint64) (cumKeys uint64, cumKeysNext uint64, position uint64) {
+func (ef *DoubleEliasFano) Get3(i uint64) (cumKeys uint64, cumKeysNext uint64, position uint64) {
 	var windowCumKeys uint64
 	var selectCumKeys int
 	var currWordCumKeys uint64

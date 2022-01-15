@@ -128,14 +128,16 @@ func (cf *ChangeFile) openFile(blockNum uint64, write bool) error {
 			if cf.file, err = os.OpenFile(cf.path, os.O_RDWR|os.O_CREATE, 0755); err != nil {
 				return err
 			}
-			cf.w = bufio.NewWriter(cf.file)
 		} else {
 			if cf.file, err = os.Open(cf.path); err != nil {
 				return err
 			}
-			if cf.txPos, err = cf.file.Seek(0, 2 /* relative to the end of the file */); err != nil {
-				return err
-			}
+		}
+		if cf.txPos, err = cf.file.Seek(0, 2 /* relative to the end of the file */); err != nil {
+			return err
+		}
+		if write {
+			cf.w = bufio.NewWriter(cf.file)
 		}
 		cf.r = bufio.NewReader(cf.file)
 	}
@@ -756,7 +758,9 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 5 {
-			log.Warn("File ignored by aggregator, more than 4 submatches", "name", name)
+			if len(subs) != 0 {
+				log.Warn("File ignored by aggregator, more than 4 submatches", "name", name, "submatches", len(subs))
+			}
 			continue
 		}
 		var startBlock, endBlock uint64
@@ -852,7 +856,9 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		name := f.Name()
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 5 {
-			log.Warn("File ignored by changes scan, more than 4 submatches", "name", name)
+			if len(subs) != 0 {
+				log.Warn("File ignored by changes scan, more than 4 submatches", "name", name, "submatches", len(subs))
+			}
 			continue
 		}
 		var startBlock, endBlock uint64
@@ -918,6 +924,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 			return nil, fmt.Errorf("hole or overlap between state files and change files [%d-%d]", item.endBlock, minStart)
 		}
 	}
+	closeBtree = false
 	return a, nil
 }
 
@@ -1209,7 +1216,9 @@ func (w *Writer) Reset(tx kv.RwTx, blockNum uint64) error {
 		if err := w.commChanges.closeFiles(); err != nil {
 			return err
 		}
-		w.a.changesBtree.ReplaceOrInsert(&ChangesItem{startBlock: w.changeFileNum + 1 - w.a.aggregationStep, endBlock: w.changeFileNum, fileCount: 12})
+		if w.changeFileNum != 0 {
+			w.a.changesBtree.ReplaceOrInsert(&ChangesItem{startBlock: w.changeFileNum + 1 - w.a.aggregationStep, endBlock: w.changeFileNum, fileCount: 12})
+		}
 	}
 	if w.changeFileNum == 0 || blockNum > w.changeFileNum {
 		if err := w.accountChanges.openFiles(blockNum, true /* write */); err != nil {
