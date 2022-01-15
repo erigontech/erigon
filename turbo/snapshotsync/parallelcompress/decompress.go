@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func Decompress(logPrefix, fileName string) error {
-	d, err := compress.NewDecompressor(fileName + ".seg")
+func Decompress(logPrefix, segFilePath, datFilePath string) error {
+	d, err := compress.NewDecompressor(segFilePath)
 	if err != nil {
 		return err
 	}
@@ -21,7 +21,7 @@ func Decompress(logPrefix, fileName string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	var df *os.File
-	if df, err = os.Create(fileName + ".decompressed.dat"); err != nil {
+	if df, err = os.Create(datFilePath); err != nil {
 		return err
 	}
 	dw := bufio.NewWriterSize(df, etl.BufIOSize)

@@ -1418,7 +1418,7 @@ func compress1(fileName, segmentFileName string) error {
 	return compress.Compress(context.Background(), "hack", fileName, segmentFileName, runtime.GOMAXPROCS(-1))
 }
 func decompress(name string) error {
-	return parallelcompress.Decompress("hack", name)
+	return parallelcompress.Decompress("hack", name+".seg", name+".decompressed.dat")
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
