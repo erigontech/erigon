@@ -47,6 +47,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
+	"github.com/ledgerwatch/erigon/consensus/parlia"
+
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -75,9 +81,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -175,7 +178,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
-	log.Info("Initialised chain configuration", "config", chainConfig)
+	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+
+	// Apply special hacks for BSC params
+	if chainConfig.Parlia != nil {
+		params.ApplyBinanceSmartChainParams()
+		vm.ApplyBinanceSmartChainEIPs()
+	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
@@ -204,16 +213,16 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	if chainConfig.Clique != nil {
 		consensusConfig = &config.Clique
-	} else if chainConfig.Parlia != nil {
-		consensusConfig = &config.Parlia
 	} else if chainConfig.Aura != nil {
 		config.Aura.Etherbase = config.Miner.Etherbase
 		consensusConfig = &config.Aura
+	} else if chainConfig.Parlia != nil {
+		consensusConfig = &config.Parlia
 	} else {
 		consensusConfig = &config.Ethash
 	}
 
-	backend.engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, backend.genesisHash)
+	backend.engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
@@ -348,7 +357,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if err != nil {
 		return nil, err
 	}
-	config.BodyDownloadTimeoutSeconds = 60
+	config.BodyDownloadTimeoutSeconds = 30
 
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
@@ -610,14 +619,24 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		log.Error("Cannot start mining without etherbase", "err", err)
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
-	if clique, ok := s.engine.(*clique.Clique); ok {
+	if c, ok := s.engine.(*clique.Clique); ok {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		clique.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+		c.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+		})
+	}
+	if p, ok := s.engine.(*parlia.Parlia); ok {
+		if cfg.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %w", err)
+		}
+
+		p.Authorize(eb, func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error) {
+			return crypto.Sign(payload, cfg.SigKey)
 		})
 	}
 

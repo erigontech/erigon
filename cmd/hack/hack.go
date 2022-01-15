@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -36,20 +37,16 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/parallelcompress"
@@ -1421,7 +1418,7 @@ func compress1(fileName, segmentFileName string) error {
 	return compress.Compress(context.Background(), "hack", fileName, segmentFileName, runtime.GOMAXPROCS(-1))
 }
 func decompress(name string) error {
-	return parallelcompress.Decompress("hack", name)
+	return parallelcompress.Decompress("hack", name+".seg", name+".decompressed.dat")
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
@@ -2297,42 +2294,6 @@ func scanReceipts2(chaindata string) error {
 	return nil
 }
 
-func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
-	header := block.Header()
-	vmConfig.TraceJumpDest = true
-	engine := ethash.NewFullFaker()
-	gp := new(core.GasPool).AddGas(block.GasLimit())
-	usedGas := new(uint64)
-	var receipts types.Receipts
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
-	rules := chainConfig.Rules(block.NumberU64())
-	for i, tx := range block.Transactions() {
-		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, contractHasTEVM)
-		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
-		}
-		receipts = append(receipts, receipt)
-		//fmt.Printf("%d, cumulative gas: %d\n", i, receipt.CumulativeGasUsed)
-	}
-
-	if !vmConfig.ReadOnly {
-		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
-			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
-		}
-
-		if err := ibs.CommitBlock(rules, blockWriter); err != nil {
-			return nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
-		}
-	}
-
-	return receipts, nil
-}
-
 func devTx(chaindata string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -2349,6 +2310,15 @@ func devTx(chaindata string) error {
 	err = signedTx.MarshalBinary(buf)
 	tool.Check(err)
 	fmt.Printf("%x\n", buf.Bytes())
+	return nil
+}
+
+func mainnetGenesis() error {
+	g := core.DefaultGenesisBlock()
+	_, _, err := g.ToBlock()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2521,6 +2491,8 @@ func main() {
 		err = decompress(*name)
 	case "genstate":
 		err = genstate()
+	case "mainnetGenesis":
+		err = mainnetGenesis()
 	}
 
 	if err != nil {
