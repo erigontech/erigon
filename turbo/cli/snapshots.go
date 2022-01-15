@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 
 	"github.com/holiman/uint256"
@@ -190,8 +191,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 
 	for i := fromBlock; i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
-		tmpFilePath := path.Join(tmpDir, fileName) + ".dat"
-		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
+		tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
 
 		if err := snapshotsync.DumpBodies(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
@@ -203,8 +203,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
-		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
 		if err := snapshotsync.DumpHeaders(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
@@ -215,8 +214,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
-		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
 		if _, err := snapshotsync.DumpTxs(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
 			panic(err)
