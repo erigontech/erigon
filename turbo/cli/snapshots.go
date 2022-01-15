@@ -216,17 +216,9 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
 		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
-		if _, err := snapshotsync.DumpTxs(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
+		if _, err := snapshotsync.DumpTxs(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
 			panic(err)
 		}
-		if err := compress.Compress(ctx, "Transactions", tmpFilePath, segmentFile, workers); err != nil {
-			panic(err)
-		}
-		ratio, err := compress.Ratio(tmpFilePath, segmentFile)
-		if err != nil {
-			panic(err)
-		}
-		log.Info("[Transactions] Compression", "ratio", fmt.Sprintf("%.2f\n", ratio))
 		_ = os.Remove(tmpFilePath)
 
 		//nolint

@@ -505,14 +505,14 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBlock uint64, blocksAmount, workers int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := NewSimpleFile(tmpFilePath)
+	f, err := compress.NewCompressor2(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return 0, err
 	}
@@ -578,7 +578,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 			valueBuf = append(valueBuf, slot.IdHash[:1]...)
 			valueBuf = append(valueBuf, sender[:]...)
 			valueBuf = append(valueBuf, tv...)
-			if err := f.Append(valueBuf); err != nil {
+			if err := f.AddWord(valueBuf); err != nil {
 				return err
 			}
 			count++
@@ -607,6 +607,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 		fmt.Printf("prevTxID: %d\n", prevTxID)
 		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
 	}
+	if err := f.Compress(); err != nil {
+		return 0, err
+	}
+	log.Info("[Transactions] Compression", "ratio", f.Ratio.String())
 	return firstTxID, nil
 }
 
