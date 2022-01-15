@@ -610,7 +610,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 	if err := f.Compress(); err != nil {
 		return 0, err
 	}
-	log.Info("[Transactions] Compression", "ratio", f.Ratio.String())
+
+	_, fileName := filepath.Split(segmentFile)
+	log.Info("[Transactions] Compression", "ratio", f.Ratio.String(), "file", fileName)
 	return firstTxID, nil
 }
 
