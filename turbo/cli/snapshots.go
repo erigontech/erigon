@@ -11,7 +11,6 @@ import (
 	"runtime"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -194,10 +193,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
 
-		if err := snapshotsync.DumpBodies(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Bodies", tmpFilePath, segmentFile, workers); err != nil {
+		if err := snapshotsync.DumpBodies(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)
@@ -205,10 +201,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
 		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
-		if err := snapshotsync.DumpHeaders(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Headers", tmpFilePath, segmentFile, workers); err != nil {
+		if err := snapshotsync.DumpHeaders(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)

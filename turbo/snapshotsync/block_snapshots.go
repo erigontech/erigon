@@ -614,11 +614,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 	return firstTxID, nil
 }
 
-func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) error {
+func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := NewSimpleFile(tmpFilePath)
+	f, err := compress.NewCompressor2(ctx, "Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
 	}
@@ -648,7 +648,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock 
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
 		copy(value[1:], dataRLP)
-		if err := f.Append(value); err != nil {
+		if err := f.AddWord(value); err != nil {
 			return false, err
 		}
 
@@ -671,17 +671,15 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock 
 	return nil
 }
 
-func DumpBodies(ctx context.Context, db kv.RoDB, filePath string, fromBlock uint64, blocksAmount int) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	f, err := os.Create(filePath)
+
+	f, err := compress.NewCompressor2(ctx, "Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
 	}
-	defer f.Sync()
 	defer f.Close()
-	w := bufio.NewWriterSize(f, etl.BufIOSize)
-	defer w.Flush()
 
 	key := make([]byte, 8+32)
 	from := dbutils.EncodeBlockNumber(fromBlock)
@@ -701,15 +699,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, filePath string, fromBlock uint
 			return true, nil
 		}
 
-		numBuf := make([]byte, binary.MaxVarintLen64)
-		n := binary.PutUvarint(numBuf, uint64(len(dataRLP)))
-		if _, e := w.Write(numBuf[:n]); e != nil {
-			return false, e
-		}
-		if len(dataRLP) > 0 {
-			if _, e := w.Write(dataRLP); e != nil {
-				return false, e
-			}
+		if err := f.AddWord(dataRLP); err != nil {
+			return false, err
 		}
 
 		select {
