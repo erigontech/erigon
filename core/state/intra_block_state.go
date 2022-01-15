@@ -183,23 +183,18 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.accessList = newAccessList()
 }
 
-func (sdb *IntraBlockState) AddLog(log *types.Log) {
+func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	sdb.journal.append(addLogChange{txhash: sdb.thash})
-
-	log.TxHash = sdb.thash
-	log.BlockHash = sdb.bhash
-	log.TxIndex = uint(sdb.txIndex)
-	log.Index = sdb.logSize
-	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log)
+	log2.TxHash = sdb.thash
+	log2.BlockHash = sdb.bhash
+	log2.TxIndex = uint(sdb.txIndex)
+	log2.Index = sdb.logSize
+	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
 	sdb.logSize++
 }
 
 func (sdb *IntraBlockState) GetLogs(hash common.Hash) []*types.Log {
 	return sdb.logs[hash]
-}
-
-func (sdb *IntraBlockState) BlockHash() common.Hash {
-	return sdb.bhash
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
@@ -483,7 +478,6 @@ func (sdb *IntraBlockState) SetState(addr common.Address, key *common.Hash, valu
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (sdb *IntraBlockState) SetStorage(addr common.Address, storage Storage) {
-	fmt.Printf("SetStorage: %x, %s\n ", addr, storage.String())
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetStorage(storage)

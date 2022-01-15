@@ -30,12 +30,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
@@ -755,7 +756,7 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr *net.UDPAddr, pa
 	codec := &testCodec{test: test, id: ln.ID()}
 	enc, _, err := codec.Encode(test.udp.Self().ID(), addr.String(), packet, nil)
 	if err != nil {
-		test.t.Errorf("%s encode error: %w", packet.Name(), err)
+		test.t.Errorf("%s encode error: %v", packet.Name(), err)
 	}
 	if test.udp.dispatchReadPacket(addr, enc) {
 		<-test.udp.readNextCh // unblock UDPv5.dispatch
@@ -807,7 +808,7 @@ func (test *udpV5Test) waitPacketOut(validate interface{}) (closed bool) {
 	codec := &testCodec{test: test, id: ln.ID()}
 	frame, p, err := codec.decodeFrame(dgram.data)
 	if err != nil {
-		test.t.Errorf("sent packet decode error: %w", err)
+		test.t.Errorf("sent packet decode error: %v", err)
 		return false
 	}
 	if !reflect.TypeOf(p).AssignableTo(exptype) {

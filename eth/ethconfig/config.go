@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"math/big"
 	"os"
 	"os/user"
@@ -38,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/params"
@@ -87,7 +87,7 @@ var Defaults = Config{
 	GPO:         FullNodeGPO,
 	RPCTxFeeCap: 1, // 1 ether
 
-	BodyDownloadTimeoutSeconds: 60,
+	BodyDownloadTimeoutSeconds: 30,
 }
 
 func init() {
@@ -183,7 +183,7 @@ type Config struct {
 	SyncLoopThrottle time.Duration
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, genesisHash common.Hash) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -212,10 +212,6 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		if chainConfig.Clique != nil {
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
 		}
-	case *params.ParliaConfig:
-		if chainConfig.Parlia != nil {
-			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), genesisHash)
-		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
 			var err error
@@ -223,6 +219,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			if err != nil {
 				panic(err)
 			}
+		}
+	case *params.ParliaConfig:
+		if chainConfig.Parlia != nil {
+			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
 		}
 	}
 

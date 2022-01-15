@@ -19,14 +19,16 @@ package parlia
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"sort"
 
-	"github.com/goccy/go-json"
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
+	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -78,27 +80,37 @@ func (s validatorsAscending) Len() int           { return len(s) }
 func (s validatorsAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
 func (s validatorsAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-const parliaSnapshot = "ParliaSnapshot"
+const NumberLength = 8
 
-// // loadSnapshot loads an existing snapshot from the database.
+// EncodeBlockNumber encodes a block number as big endian uint64
+func EncodeBlockNumber(number uint64) []byte {
+	enc := make([]byte, NumberLength)
+	binary.BigEndian.PutUint64(enc, number)
+	return enc
+}
+
+// SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
+func SnapshotFullKey(number uint64, hash common.Hash) []byte {
+	return append(EncodeBlockNumber(number), hash.Bytes()...)
+}
+
+// loadSnapshot loads an existing snapshot from the database.
 func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blob, err := tx.GetOne(parliaSnapshot, SnapshotFullKey(num, hash))
+	blob, err := tx.GetOne(kv.ParliaSnapshot, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
-
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
 	snap.config = config
 	snap.sigCache = sigCache
-
 	return snap, nil
 }
 
@@ -108,9 +120,8 @@ func (s *Snapshot) store(db kv.RwDB) error {
 	if err != nil {
 		return err
 	}
-
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(parliaSnapshot, SnapshotFullKey(s.Number, s.Hash), blob)
+		return tx.Put(kv.ParliaSnapshot, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
 
@@ -263,7 +274,7 @@ func (s *Snapshot) enoughDistance(validator common.Address, header *types.Header
 	if validator == header.Coinbase {
 		return false
 	}
-	offset := (int64(s.Number) + 1) % int64(validatorNum)
+	offset := (int64(s.Number) + 1) % validatorNum
 	if int64(idx) >= offset {
 		return int64(idx)-offset >= validatorNum-2
 	} else {

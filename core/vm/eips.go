@@ -34,6 +34,11 @@ var activators = map[int]func(*JumpTable){
 	1344: enable1344,
 }
 
+func ApplyBinanceSmartChainEIPs() {
+	delete(activators, 3529)
+	delete(activators, 3198)
+}
+
 // EnableEIP enables the given EIP on the config.
 // This operation writes in-place, and callers need to ensure that the globally
 // defined jump tables are not polluted.
