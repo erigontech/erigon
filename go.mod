@@ -21,8 +21,8 @@ require (
 	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.13.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
-	github.com/fortytw2/leaktest v1.3.0 // indirect
 	github.com/flanglet/kanzi-go v1.9.1-0.20211212184056-72dda96261ee // indirect
+	github.com/fortytw2/leaktest v1.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/goccy/go-json v0.7.4
 	github.com/gofrs/flock v0.8.1
@@ -39,7 +39,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220114141010-c08ed12256c9
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220115042135-0d4f2fe55251
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
