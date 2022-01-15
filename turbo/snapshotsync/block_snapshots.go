@@ -558,7 +558,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 			firstTxID = body.BaseTxId
 		}
 		j := 0
-
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if prevTxID != 0 && id != prevTxID+1 {
