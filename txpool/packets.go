@@ -106,23 +106,6 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 	return requestID, hashes, pos, nil
 }
 
-func ParseGetPooledTransactions65(payload []byte, pos int, hashbuf []byte) (hashes []byte, newPos int, err error) {
-	var hashesCount int
-	hashesCount, pos, err = ParseHashesCount(payload, pos)
-	if err != nil {
-		return hashes, 0, err
-	}
-	hashes = common.EnsureEnoughSize(hashbuf, length.Hash*hashesCount)
-
-	for i := 0; i < hashesCount; i++ {
-		pos, err = rlp.ParseHash(payload, pos, hashes[i*length.Hash:])
-		if err != nil {
-			return hashes, 0, err
-		}
-	}
-	return hashes, pos, nil
-}
-
 // == Pooled transactions ==
 
 func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []byte) []byte {
@@ -223,13 +206,6 @@ func ParsePooledTransactions66(payload []byte, pos int, ctx *TxParseContext, txS
 	for i := 0; p < len(payload); i++ {
 		txSlots.Resize(uint(i + 1))
 		txSlots.txs[i] = &TxSlot{}
-		if payload[p] > 0xb7 && payload[p] < 0xF8 {
-			dataPos, _, err := rlp.String(payload, p)
-			if err != nil {
-				return 0, 0, err
-			}
-			p = dataPos
-		}
 		p, err = ctx.ParseTransaction(payload, p, txSlots.txs[i], txSlots.senders.At(i))
 		if err != nil {
 			if errors.Is(err, ErrRejected) {

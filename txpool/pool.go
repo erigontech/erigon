@@ -1372,13 +1372,16 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 						if err != nil {
 							return err
 						}
-						slotsRlp = append(slotsRlp, slotRlp)
-						if p.IsLocal(h.At(i)) {
-							localTxHashes = append(localTxHashes, hash...)
-							localTxRlps = append(localTxRlps, slotRlp)
-						} else {
-							remoteTxHashes = append(localTxHashes, hash...)
-							remoteTxRlps = append(remoteTxRlps, slotRlp)
+						if len(slotRlp) > 0 {
+							// Empty rlp can happen if a transaction we want to broadcase has just been mined, for example
+							slotsRlp = append(slotsRlp, slotRlp)
+							if p.IsLocal(h.At(i)) {
+								localTxHashes = append(localTxHashes, hash...)
+								localTxRlps = append(localTxRlps, slotRlp)
+							} else {
+								remoteTxHashes = append(localTxHashes, hash...)
+								remoteTxRlps = append(remoteTxRlps, slotRlp)
+							}
 						}
 					}
 					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})

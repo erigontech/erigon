@@ -135,11 +135,12 @@ var ptp66EncodeTests = []struct {
 }
 
 func TestPooledTransactionsPacket(t *testing.T) {
-	b := decodeHex("e1a084a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680")
-	out, pos, err := ParseGetPooledTransactions65(b, 0, nil)
+	b := decodeHex("e317e1a084a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680")
+	requestId, out, pos, err := ParseGetPooledTransactions66(b, 0, nil)
 	require.NoError(t, err)
+	require.Equal(t, uint64(23), requestId)
 	require.Equal(t, decodeHex("84a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680"), out)
-	require.Equal(t, 34, pos)
+	require.Equal(t, 36, pos)
 }
 
 func TestPooledTransactionsPacket66(t *testing.T) {
@@ -179,5 +180,62 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			require.Equal(0, len(slots.isLocal))
 		})
 	}
+}
 
+var tpEncodeTests = []struct {
+	txs         [][]byte
+	encoded     string
+	chainID     uint64
+	expectedErr bool
+}{
+	{
+		txs: [][]byte{
+			decodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
+		},
+		encoded: "f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", expectedErr: false, chainID: 5,
+	},
+	{
+		txs: [][]byte{
+			decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
+			decodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
+		},
+		encoded: "f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", expectedErr: false, chainID: 1,
+	},
+}
+
+func TestTransactionsPacket(t *testing.T) {
+	for i, tt := range tpEncodeTests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var encodeBuf []byte
+			encodeBuf = EncodeTransactions(tt.txs, encodeBuf)
+			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
+
+			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
+			slots := &TxSlots{}
+			_, err := ParseTransactions(encodeBuf, 0, ctx, slots)
+			require.NoError(err)
+			require.Equal(len(tt.txs), len(slots.txs))
+			for i, txn := range tt.txs {
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.txs[i].rlp))
+			}
+		})
+	}
+	for i, tt := range tpEncodeTests {
+		t.Run("reject_all_"+strconv.Itoa(i), func(t *testing.T) {
+			require := require.New(t)
+			var encodeBuf []byte
+			encodeBuf = EncodeTransactions(tt.txs, encodeBuf)
+			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
+
+			ctx := NewTxParseContext(*u256.N1)
+			ctx.validateHash = func(bytes []byte) error { return ErrRejected }
+			slots := &TxSlots{}
+			_, err := ParseTransactions(encodeBuf, 0, ctx, slots)
+			require.NoError(err)
+			require.Equal(0, len(slots.txs))
+			require.Equal(0, slots.senders.Len())
+			require.Equal(0, len(slots.isLocal))
+		})
+	}
 }
