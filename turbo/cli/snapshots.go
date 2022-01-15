@@ -131,7 +131,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir st
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	idxFilesList, err := snapshotsync.IdxFilesList(snapshotDir)
+	idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
 	if err != nil {
 		return err
 	}

@@ -198,7 +198,7 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 
 func (s *AllSnapshots) ReopenSegments() error {
 	dir := s.dir
-	files, err := segments(dir, Headers)
+	files, err := segmentsOfType(dir, Headers)
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 }
 
 func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
-	files, err := segments(dir, ofType)
+	files, err := segmentsOfType(dir, ofType)
 	if err != nil {
 		return 0, err
 	}
@@ -380,7 +380,7 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 	return maxBlock - 1, nil
 }
 func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
-	files, err := idxFiles(dir, ofType)
+	files, err := idxFilesOfType(dir, ofType)
 	if err != nil {
 		return 0, err
 	}
@@ -408,7 +408,40 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 	return maxBlock - 1, nil
 }
 
-func segments(dir string, ofType SnapshotType) ([]string, error) {
+func IdxFiles(dir string) ([]string, error) { return filesWithExt(dir, ".idx") }
+func Segments(dir string) ([]string, error) { return filesWithExt(dir, ".seg") }
+
+func segmentsOfType(dir string, ofType SnapshotType) ([]string, error) {
+	list, err := Segments(dir)
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range list {
+		if !strings.Contains(f, string(ofType)) {
+			continue
+		}
+		res = append(res, f)
+	}
+	return res, nil
+}
+
+func idxFilesOfType(dir string, ofType SnapshotType) ([]string, error) {
+	files, err := IdxFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range files {
+		if !strings.Contains(f, string(ofType)) {
+			continue
+		}
+		res = append(res, f)
+	}
+	return res, nil
+}
+
+func filesWithExt(dir, ext string) ([]string, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -421,46 +454,7 @@ func segments(dir string, ofType SnapshotType) ([]string, error) {
 		if f.Size() == 0 {
 			continue
 		}
-		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files
-			continue
-		}
-		if !strings.Contains(f.Name(), string(ofType)) {
-			continue
-		}
-		res = append(res, f.Name())
-	}
-	sort.Strings(res)
-	return res, nil
-}
-
-func IdxFilesList(dir string) (res []string, err error) {
-	for _, t := range AllIdxTypes {
-		files, err := idxFiles(dir, t)
-		if err != nil {
-			return nil, err
-		}
-		res = append(res, files...)
-	}
-	return res, nil
-}
-
-func idxFiles(dir string, ofType SnapshotType) ([]string, error) {
-	files, err := ioutil.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	var res []string
-	for _, f := range files {
-		if !IsCorrectFileName(f.Name()) {
-			continue
-		}
-		if f.Size() == 0 {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ".idx" { // filter out only compressed files
-			continue
-		}
-		if !strings.Contains(f.Name(), string(ofType)) {
+		if filepath.Ext(f.Name()) != ext { // filter out only compressed files
 			continue
 		}
 		res = append(res, f.Name())
