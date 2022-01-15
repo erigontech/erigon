@@ -191,7 +191,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			fmt.Printf("interrupted on block %d, please wait for cleanup...\n", blockNum)
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
 		tx.Rollback()
@@ -218,6 +218,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			}
 			rwTx.Rollback()
 		}
+	}
+	if w != nil {
+		w.Close()
 	}
 	return nil
 }
