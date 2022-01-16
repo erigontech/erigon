@@ -278,13 +278,11 @@ func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, rw *Re
 // Implements StateReader and StateWriter
 type ReaderWrapper struct {
 	blockNum uint64
-	txNum    uint64
 	r        *aggregator.Reader
 }
 
 type WriterWrapper struct {
 	blockNum uint64
-	txNum    uint64
 	w        *aggregator.Writer
 }
 
