@@ -308,20 +308,18 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
 			return err
 		}
-	}
-	for _, sn := range s.blocks {
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+
+		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
 		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
 			return err
 		}
-	}
 
-	// hack to read first block body - to get baseTxId from there
-	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
-		return err
-	}
+		// hack to read first block body - to get baseTxId from there
+		if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
+			return err
+		}
 
-	for _, sn := range s.blocks {
+		// build txs idx
 		gg := sn.Bodies.MakeGetter()
 		buf, _ := gg.Next(nil)
 		firstBody := &types.BodyForStorage{}
@@ -342,7 +340,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			}
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
 		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, f, expectedTxsAmount, tmpDir); err != nil {
 			return err
 		}
