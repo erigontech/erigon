@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2022 Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ func TestSimpleAggregator(t *testing.T) {
 	}
 	defer rwTx.Rollback()
 
-	w := a.MakeStateWriter()
+	w := a.MakeStateWriter(true /* beforeOn */)
 	if err = w.Reset(rwTx, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestSimpleAggregator(t *testing.T) {
 	if err = w.FinishTx(0, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = w.FinishBlock(false /* trace */); err != nil {
+	if err = w.Aggregate(false /* trace */); err != nil {
 		t.Fatal(err)
 	}
 	if err = rwTx.Commit(); err != nil {
@@ -135,7 +135,7 @@ func TestLoopAggregator(t *testing.T) {
 	defer func() {
 		tx.Rollback()
 	}()
-	w := a.MakeStateWriter()
+	w := a.MakeStateWriter(true /* beforeOn */)
 	defer w.Close()
 	ctx := context.Background()
 	for blockNum := uint64(0); blockNum < 1000; blockNum++ {
@@ -153,7 +153,7 @@ func TestLoopAggregator(t *testing.T) {
 		if err = w.FinishTx(blockNum, false /* trace */); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = w.FinishBlock(false /* trace */); err != nil {
+		if err = w.Aggregate(false /* trace */); err != nil {
 			t.Fatal(err)
 		}
 		if err = rwTx.Commit(); err != nil {
@@ -216,7 +216,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 	defer func() {
 		tx.Rollback()
 	}()
-	w := a.MakeStateWriter()
+	w := a.MakeStateWriter(true /* beforeOn */)
 	defer w.Close()
 	ctx := context.Background()
 	for blockNum := uint64(0); blockNum < 100; blockNum++ {
@@ -253,7 +253,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 		if err = w.FinishTx(blockNum, false /* trace */); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = w.FinishBlock(false /* trace */); err != nil {
+		if err = w.Aggregate(false /* trace */); err != nil {
 			t.Fatal(err)
 		}
 		if err = rwTx.Commit(); err != nil {
@@ -347,7 +347,7 @@ func TestChangeCode(t *testing.T) {
 			tx.Rollback()
 		}
 	}()
-	w := a.MakeStateWriter()
+	w := a.MakeStateWriter(true /* beforeOn */)
 	defer w.Close()
 	for blockNum := uint64(0); blockNum < 100; blockNum++ {
 		if rwTx, err = db.BeginRw(context.Background()); err != nil {
@@ -372,7 +372,7 @@ func TestChangeCode(t *testing.T) {
 		if err = w.FinishTx(blockNum, false /* trace */); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = w.FinishBlock(false /* trace */); err != nil {
+		if err = w.Aggregate(false /* trace */); err != nil {
 			t.Fatal(err)
 		}
 		if err = rwTx.Commit(); err != nil {

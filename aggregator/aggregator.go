@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2022 Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -158,6 +158,16 @@ func (cf *ChangeFile) add(word []byte) {
 	cf.wordOffsets = append(cf.wordOffsets, len(cf.words))
 }
 
+func (cf *ChangeFile) update(word []byte) {
+	cf.words = append(cf.words, 0)
+	cf.add(word)
+}
+
+func (cf *ChangeFile) insert(word []byte) {
+	cf.words = append(cf.words, 1)
+	cf.add(word)
+}
+
 func (cf *ChangeFile) finish(txNum uint64) error {
 	// Write out words
 	lastOffset := 0
@@ -253,9 +263,10 @@ type Changes struct {
 	after    ChangeFile
 	step     uint64
 	dir      string
+	beforeOn bool
 }
 
-func (c *Changes) Init(namebase string, step uint64, dir string) {
+func (c *Changes) Init(namebase string, step uint64, dir string, beforeOn bool) {
 	c.namebase = namebase
 	c.step = step
 	c.dir = dir
@@ -268,14 +279,17 @@ func (c *Changes) Init(namebase string, step uint64, dir string) {
 	c.after.namebase = namebase + ".after"
 	c.after.dir = dir
 	c.after.step = step
+	c.beforeOn = beforeOn
 }
 
 func (c *Changes) closeFiles() error {
 	if err := c.keys.closeFile(); err != nil {
 		return err
 	}
-	if err := c.before.closeFile(); err != nil {
-		return err
+	if c.beforeOn {
+		if err := c.before.closeFile(); err != nil {
+			return err
+		}
 	}
 	if err := c.after.closeFile(); err != nil {
 		return err
@@ -287,8 +301,10 @@ func (c *Changes) openFiles(blockNum uint64, write bool) error {
 	if err := c.keys.openFile(blockNum, write); err != nil {
 		return err
 	}
-	if err := c.before.openFile(blockNum, write); err != nil {
-		return err
+	if c.beforeOn {
+		if err := c.before.openFile(blockNum, write); err != nil {
+			return err
+		}
 	}
 	if err := c.after.openFile(blockNum, write); err != nil {
 		return err
@@ -298,19 +314,25 @@ func (c *Changes) openFiles(blockNum uint64, write bool) error {
 
 func (c *Changes) insert(key, after []byte) {
 	c.keys.add(key)
-	c.before.add(nil)
-	c.after.add(after)
+	if c.beforeOn {
+		c.before.add(nil)
+	}
+	c.after.insert(after)
 }
 
 func (c *Changes) update(key, before, after []byte) {
 	c.keys.add(key)
-	c.before.add(before)
-	c.after.add(after)
+	if c.beforeOn {
+		c.before.add(before)
+	}
+	c.after.update(after)
 }
 
 func (c *Changes) delete(key, before []byte) {
 	c.keys.add(key)
-	c.before.add(before)
+	if c.beforeOn {
+		c.before.add(before)
+	}
 	c.after.add(nil)
 }
 
@@ -318,8 +340,10 @@ func (c *Changes) finish(txNum uint64) error {
 	if err := c.keys.finish(txNum); err != nil {
 		return err
 	}
-	if err := c.before.finish(txNum); err != nil {
-		return err
+	if c.beforeOn {
+		if err := c.before.finish(txNum); err != nil {
+			return err
+		}
 	}
 	if err := c.after.finish(txNum); err != nil {
 		return err
@@ -333,21 +357,28 @@ func (c *Changes) prevTx() (bool, uint64, error) {
 		return false, 0, err
 	}
 	var bbefore, bafter bool
-	if bbefore, err = c.before.prevTx(); err != nil {
-		return false, 0, err
+	if c.beforeOn {
+		if bbefore, err = c.before.prevTx(); err != nil {
+			return false, 0, err
+		}
 	}
 	if bafter, err = c.after.prevTx(); err != nil {
 		return false, 0, err
 	}
-	if bkeys != bbefore || bkeys != bafter {
+	if c.beforeOn && bkeys != bbefore {
+		return false, 0, fmt.Errorf("inconsistent tx iteration")
+	}
+	if bkeys != bafter {
 		return false, 0, fmt.Errorf("inconsistent tx iteration")
 	}
 	txNum := c.keys.txNum
-	if txNum != c.before.txNum {
-		return false, 0, fmt.Errorf("inconsistent txNum, keys: %d, before: %d", txNum, c.before.txNum)
+	if c.beforeOn {
+		if txNum != c.before.txNum {
+			return false, 0, fmt.Errorf("inconsistent txNum, keys: %d, before: %d", txNum, c.before.txNum)
+		}
 	}
 	if txNum != c.after.txNum {
-		return false, 0, fmt.Errorf("inconsistent txNum, keys: %d, after: %d", txNum, c.before.txNum)
+		return false, 0, fmt.Errorf("inconsistent txNum, keys: %d, after: %d", txNum, c.after.txNum)
 	}
 	return bkeys, txNum, nil
 }
@@ -356,8 +387,10 @@ func (c *Changes) rewind() error {
 	if err := c.keys.rewind(); err != nil {
 		return err
 	}
-	if err := c.before.rewind(); err != nil {
-		return err
+	if c.beforeOn {
+		if err := c.before.rewind(); err != nil {
+			return err
+		}
 	}
 	if err := c.after.rewind(); err != nil {
 		return err
@@ -372,13 +405,18 @@ func (c *Changes) nextTriple(keyBuf, beforeBuf []byte, afterBuf []byte) ([]byte,
 	}
 	var before, after []byte
 	var bbefore, bafter bool
-	if before, bbefore, err = c.before.nextWord(beforeBuf); err != nil {
-		return keyBuf, beforeBuf, afterBuf, false, fmt.Errorf("next before: %w", err)
+	if c.beforeOn {
+		if before, bbefore, err = c.before.nextWord(beforeBuf); err != nil {
+			return keyBuf, beforeBuf, afterBuf, false, fmt.Errorf("next before: %w", err)
+		}
+	}
+	if c.beforeOn && bkeys != bbefore {
+		return keyBuf, beforeBuf, afterBuf, false, fmt.Errorf("inconsistent word iteration")
 	}
 	if after, bafter, err = c.after.nextWord(afterBuf); err != nil {
 		return keyBuf, beforeBuf, afterBuf, false, fmt.Errorf("next after: %w", err)
 	}
-	if bkeys != bbefore || bkeys != bafter {
+	if bkeys != bafter {
 		return keyBuf, beforeBuf, afterBuf, false, fmt.Errorf("inconsistent word iteration")
 	}
 	return key, before, after, bkeys, nil
@@ -388,8 +426,10 @@ func (c *Changes) deleteFiles() error {
 	if err := c.keys.deleteFile(); err != nil {
 		return err
 	}
-	if err := c.before.deleteFile(); err != nil {
-		return err
+	if c.beforeOn {
+		if err := c.before.deleteFile(); err != nil {
+			return err
+		}
 	}
 	if err := c.after.deleteFile(); err != nil {
 		return err
@@ -634,26 +674,14 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int) error {
 				bt.ReplaceOrInsert(item)
 			}
 			ai.k = key
-			ai.v = after
 			i := bt.Get(&ai)
 			if i == nil {
-				item := &AggregateItem{k: common.Copy(key), count: 1}
-				if len(after) > 0 {
-					item.v = make([]byte, 1+len(after))
-					if len(before) == 0 {
-						item.v[0] = 1
-					}
-					copy(item.v[1:], after)
-				}
+				item := &AggregateItem{k: common.Copy(key), count: 1, v: common.Copy(after)}
 				bt.ReplaceOrInsert(item)
 			} else {
 				item := i.(*AggregateItem)
-				if len(item.v) > 0 {
-					if len(before) == 0 {
-						item.v[0] = 1
-					} else {
-						item.v[0] = 0
-					}
+				if len(item.v) > 0 && len(after) > 0 {
+					item.v[0] = after[0]
 				}
 				item.count++
 			}
@@ -904,7 +932,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 				err = fmt.Errorf("whole in change files [%d-%d]", item.endBlock, minStart)
 				return false
 			}
-			if item.fileCount != 12 {
+			if item.fileCount != 12 && item.fileCount != 8 {
 				err = fmt.Errorf("missing change files for interval [%d-%d]", item.startBlock, item.endBlock)
 				return false
 			}
@@ -1181,15 +1209,15 @@ type Writer struct {
 	commTree       *btree.BTree // BTree used for gathering commitment data
 }
 
-func (a *Aggregator) MakeStateWriter() *Writer {
+func (a *Aggregator) MakeStateWriter(beforeOn bool) *Writer {
 	w := &Writer{
 		a:        a,
 		commTree: btree.New(32),
 	}
-	w.accountChanges.Init("accounts", a.aggregationStep, a.diffDir)
-	w.codeChanges.Init("code", a.aggregationStep, a.diffDir)
-	w.storageChanges.Init("storage", a.aggregationStep, a.diffDir)
-	w.commChanges.Init("commitment", a.aggregationStep, a.diffDir)
+	w.accountChanges.Init("accounts", a.aggregationStep, a.diffDir, beforeOn)
+	w.codeChanges.Init("code", a.aggregationStep, a.diffDir, beforeOn)
+	w.storageChanges.Init("storage", a.aggregationStep, a.diffDir, beforeOn)
+	w.commChanges.Init("commitment", a.aggregationStep, a.diffDir, false /* we do not unwind commitment */)
 	return w
 }
 
@@ -1358,6 +1386,9 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		offsetVal := w.codeChanges.after.wordOffsets[i]
 		key := w.codeChanges.keys.words[lastOffsetKey:offsetKey]
 		val := w.codeChanges.after.words[lastOffsetVal:offsetVal]
+		if len(val) > 0 {
+			val = val[1:]
+		}
 		if trace {
 			fmt.Printf("captureCommitmentData cod [%x]=>[%x]\n", key, val)
 		}
@@ -1403,6 +1434,9 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		offsetVal := w.accountChanges.after.wordOffsets[i]
 		key := w.accountChanges.keys.words[lastOffsetKey:offsetKey]
 		val := w.accountChanges.after.words[lastOffsetVal:offsetVal]
+		if len(val) > 0 {
+			val = val[1:]
+		}
 		if trace {
 			fmt.Printf("captureCommitmentData acc [%x]=>[%x]\n", key, val)
 		}
@@ -1438,6 +1472,9 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		offsetVal := w.storageChanges.after.wordOffsets[i]
 		key := w.storageChanges.keys.words[lastOffsetKey:offsetKey]
 		val := w.storageChanges.after.words[lastOffsetVal:offsetVal]
+		if len(val) > 0 {
+			val = val[1:]
+		}
 		if trace {
 			fmt.Printf("captureCommitmentData str [%x]=>[%x]\n", key, val)
 		}
@@ -1558,27 +1595,32 @@ func (w *Writer) FinishTx(txNum uint64, trace bool) error {
 	return nil
 }
 
-func (w *Writer) FinishBlock(trace bool) ([]byte, error) {
-	var comm []byte
-	var err error
-	if comm, err = w.computeCommitment(trace); err != nil {
+func (w *Writer) ComputeCommitment(trace bool) ([]byte, error) {
+	comm, err := w.computeCommitment(trace)
+	if err != nil {
 		return nil, fmt.Errorf("compute commitment: %w", err)
 	}
 	w.commTree.Clear(true)
 	if err = w.commChanges.finish(w.blockNum); err != nil {
 		return nil, fmt.Errorf("finish commChanges: %w", err)
 	}
+	return comm, nil
+}
+
+// Aggegate should be called to check if the aggregation is required, and
+// if it is required, perform it
+func (w *Writer) Aggregate(trace bool) error {
 	if w.blockNum < w.a.unwindLimit+w.a.aggregationStep-1 {
-		return comm, nil
+		return nil
 	}
 	diff := w.blockNum - w.a.unwindLimit
 	if (diff+1)%w.a.aggregationStep != 0 {
-		return comm, nil
+		return nil
 	}
 	if err := w.aggregateUpto(diff+1-w.a.aggregationStep, diff); err != nil {
-		return nil, fmt.Errorf("aggregateUpto(%d, %d): %w", diff+1-w.a.aggregationStep, diff, err)
+		return fmt.Errorf("aggregateUpto(%d, %d): %w", diff+1-w.a.aggregationStep, diff, err)
 	}
-	return comm, nil
+	return nil
 }
 
 func (w *Writer) UpdateAccountData(addr []byte, account []byte, trace bool) error {
@@ -1892,10 +1934,10 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		return fmt.Errorf("expected change files[%d-%d], got [%d-%d]", blockFrom, blockTo, item.startBlock, item.endBlock)
 	}
 	var accountChanges, codeChanges, storageChanges, commChanges Changes
-	accountChanges.Init("accounts", w.a.aggregationStep, w.a.diffDir)
-	codeChanges.Init("code", w.a.aggregationStep, w.a.diffDir)
-	storageChanges.Init("storage", w.a.aggregationStep, w.a.diffDir)
-	commChanges.Init("commitment", w.a.aggregationStep, w.a.diffDir)
+	accountChanges.Init("accounts", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
+	codeChanges.Init("code", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
+	storageChanges.Init("storage", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
+	commChanges.Init("commitment", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
 	var err error
 	var item1 *byEndBlockItem = &byEndBlockItem{fileCount: 8, startBlock: blockFrom, endBlock: blockTo}
 	if item1.accountsD, item1.accountsIdx, err = accountChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateAccounts, w.a.changesets); err != nil {
