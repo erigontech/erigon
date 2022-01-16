@@ -22,7 +22,7 @@ func must(err error) {
 }
 
 func withBlock(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&block, "block", 1, "specifies a block number for operation")
+	cmd.Flags().Uint64Var(&block, "block", 0, "specifies a block number for operation")
 }
 
 func withDatadir(cmd *cobra.Command) {

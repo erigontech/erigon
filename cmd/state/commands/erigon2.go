@@ -47,11 +47,11 @@ var erigon2Cmd = &cobra.Command{
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return Erigon2(genesis, logger, block, datadir)
+		return Erigon2(genesis, logger)
 	},
 }
 
-func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir string) error {
+func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -72,12 +72,14 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	}
 	defer historyTx.Rollback()
 	stateDbPath := path.Join(datadir, "statedb")
-	if _, err = os.Stat(stateDbPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	if block == 0 {
+		if _, err = os.Stat(stateDbPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(stateDbPath); err != nil {
 			return err
 		}
-	} else if err = os.RemoveAll(stateDbPath); err != nil {
-		return err
 	}
 	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open()
 	if err2 != nil {
@@ -85,15 +87,17 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	}
 	defer db.Close()
 	aggPath := path.Join(datadir, "aggregator")
-	if _, err = os.Stat(aggPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	if block == 0 {
+		if _, err = os.Stat(aggPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(aggPath); err != nil {
 			return err
 		}
-	} else if err = os.RemoveAll(aggPath); err != nil {
-		return err
-	}
-	if err = os.Mkdir(aggPath, os.ModePerm); err != nil {
-		return err
+		if err = os.Mkdir(aggPath, os.ModePerm); err != nil {
+			return err
+		}
 	}
 	agg, err3 := aggregator.NewAggregator(aggPath, 90000, 4096)
 	if err3 != nil {
@@ -104,37 +108,41 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	vmConfig := vm.Config{}
 
 	interrupt := false
-	block := uint64(0)
+	blockNum := block
+	w := agg.MakeStateWriter()
 	var rwTx kv.RwTx
 	defer func() {
-		rwTx.Rollback()
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
 	}()
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
-	genBlock, genesisIbs, err4 := genesis.ToBlock()
-	if err4 != nil {
-		return err4
-	}
-	w := agg.MakeStateWriter()
-	if err = w.Reset(rwTx, 0); err != nil {
-		return err
-	}
-	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
-		return fmt.Errorf("cannot write state: %w", err)
-	}
-	if err = w.FinishTx(0, false); err != nil {
-		return err
-	}
 	var rootHash []byte
-	if rootHash, err = w.FinishBlock(false); err != nil {
-		return err
-	}
-	if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
-		return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
+	if block == 0 {
+		if rwTx, err = db.BeginRw(ctx); err != nil {
+			return err
+		}
+		genBlock, genesisIbs, err4 := genesis.ToBlock()
+		if err4 != nil {
+			return err4
+		}
+		if err = w.Reset(rwTx, 0); err != nil {
+			return err
+		}
+		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
+			return fmt.Errorf("cannot write state: %w", err)
+		}
+		if err = w.FinishTx(0, false); err != nil {
+			return err
+		}
+		if rootHash, err = w.FinishBlock(false); err != nil {
+			return err
+		}
+		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
+			return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
+		}
+		if err = rwTx.Commit(); err != nil {
+			return err
+		}
 	}
 	var tx kv.Tx
 	defer func() {
@@ -145,16 +153,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	var txNum uint64 = 1
 	trace := false
 	for !interrupt {
-		block++
-		if block >= blockNum {
-			break
-		}
-		blockHash, err := rawdb.ReadCanonicalHash(historyTx, block)
+		blockNum++
+		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
 			return err
 		}
 		var b *types.Block
-		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, block)
+		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -167,26 +172,26 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		if rwTx, err = db.BeginRw(ctx); err != nil {
 			return err
 		}
-		r := agg.MakeStateReader(tx, block)
+		r := agg.MakeStateReader(tx, blockNum)
 		var checkR state.StateReader
 		if check {
-			checkR = state.NewPlainState(historyTx, block-1)
+			checkR = state.NewPlainState(historyTx, blockNum-1)
 		}
-		if err = w.Reset(rwTx, block); err != nil {
+		if err = w.Reset(rwTx, blockNum); err != nil {
 			return err
 		}
-		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
+		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: blockNum})
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
-			return fmt.Errorf("block %d: %w", block, err)
+		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, &WriterWrapper{w: w, blockNum: blockNum}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
-		if block%1000 == 0 {
-			log.Info("Processed", "blocks", block)
+		if blockNum%1000 == 0 {
+			log.Info("Processed", "blocks", blockNum)
 		}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			fmt.Printf("interrupted on block %d, please wait for cleanup...\n", block)
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
 		tx.Rollback()
@@ -194,7 +199,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 			return fmt.Errorf("final finish failed: %w", err)
 		}
 		if trace {
-			fmt.Printf("FinishTx called for %d block %d\n", txNum, block)
+			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
 		txNum++
 		if rootHash, err = w.FinishBlock(trace /* trace */); err != nil {
@@ -206,13 +211,16 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 			}
 		} else {
 			if trace {
-				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", block, b.Header().Root[:], rootHash)
+				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
 			} else {
-				block--
+				blockNum--
 				trace = true
 			}
 			rwTx.Rollback()
 		}
+	}
+	if w != nil {
+		w.Close()
 	}
 	return nil
 }
