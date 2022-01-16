@@ -30,14 +30,12 @@ import (
 )
 
 var (
-	check      bool
 	changesets bool
 )
 
 func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
-	erigon2Cmd.Flags().BoolVar(&check, "check", false, "set to true to compare state reads with with historical state (for debugging)")
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	rootCmd.AddCommand(erigon2Cmd)
 }
@@ -134,7 +132,10 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if err = w.FinishTx(0, false); err != nil {
 			return err
 		}
-		if rootHash, err = w.FinishBlock(false); err != nil {
+		if rootHash, err = w.ComputeCommitment(false); err != nil {
+			return err
+		}
+		if err = w.Aggregate(false); err != nil {
 			return err
 		}
 		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
@@ -173,16 +174,14 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 		r := agg.MakeStateReader(tx, blockNum)
-		var checkR state.StateReader
-		if check {
-			checkR = state.NewPlainState(historyTx, blockNum-1)
-		}
 		if err = w.Reset(rwTx, blockNum); err != nil {
 			return err
 		}
-		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: blockNum})
+		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
+		writeWrapper := &WriterWrapper{w: w, blockNum: blockNum}
+		intraBlockState := state.New(readWrapper)
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, &WriterWrapper{w: w, blockNum: blockNum}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, readWrapper, writeWrapper, chainConfig, getHeader, nil, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
 		if blockNum%1000 == 0 {
@@ -202,7 +201,10 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
 		txNum++
-		if rootHash, err = w.FinishBlock(trace /* trace */); err != nil {
+		if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
+			return err
+		}
+		if err = w.Aggregate(trace); err != nil {
 			return err
 		}
 		if bytes.Equal(rootHash, b.Header().Root[:]) {
@@ -225,7 +227,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
+func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, rw *ReaderWrapper, ww *WriterWrapper,
 	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
@@ -269,12 +271,13 @@ func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, ww *Wr
 // Implements StateReader and StateWriter
 type ReaderWrapper struct {
 	blockNum uint64
+	txNum    uint64
 	r        *aggregator.Reader
-	checkR   state.StateReader
 }
 
 type WriterWrapper struct {
 	blockNum uint64
+	txNum    uint64
 	w        *aggregator.Writer
 }
 
@@ -293,19 +296,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil {
 		return nil, err
 	}
-	var checkA *accounts.Account
-	var checkErr error
-	if rw.checkR != nil {
-		if checkA, checkErr = rw.checkR.ReadAccountData(address); checkErr != nil {
-			fmt.Printf("readAccountData %x checkR: %v\n", address, checkErr)
-			return nil, fmt.Errorf("readAccountData %x checkR: %w", address, checkErr)
-		}
-	}
 	if len(enc) == 0 {
-		if checkA != nil {
-			fmt.Printf("readAccountData %x enc [%x], checkEnc [%+v]\n", address, enc, checkA)
-			return nil, fmt.Errorf("readAccountData %x enc [%x], checkEnc [%+v]", address, enc, checkA)
-		}
 		return nil, nil
 	}
 
@@ -335,12 +326,6 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
-	if rw.checkR != nil {
-		if !a.Equals(checkA) {
-			fmt.Printf("readAccountData %x enc [%+v], checkEnc [%+v]\n", address, a, checkA)
-			return nil, fmt.Errorf("readAccountData %x enc [%+v], checkEnc [%+v]", address, a, checkA)
-		}
-	}
 	return &a, nil
 }
 
@@ -350,26 +335,8 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 	if err != nil {
 		return nil, err
 	}
-	var checkEnc []byte
-	var checkErr error
-	if rw.checkR != nil {
-		if checkEnc, checkErr = rw.checkR.ReadAccountStorage(address, incarnation, key); checkErr != nil {
-			fmt.Printf("block %d ReadAccountStorage %x %x checkR: %v\n", rw.blockNum, address, *key, checkErr)
-			return nil, fmt.Errorf("readAccountStorage %x %x checkR: %w", address, *key, checkErr)
-		}
-	}
 	if enc == nil {
-		if len(checkEnc) != 0 {
-			fmt.Printf("block %d ReadAccountStorage %x %x enc [%x], checkEnc [%x]\n", rw.blockNum, address, *key, enc, checkEnc)
-			return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
-		}
 		return nil, nil
-	}
-	if rw.checkR != nil {
-		if !bytes.Equal(enc.Bytes(), checkEnc) {
-			fmt.Printf("block %d ReadAccountStorage %x %x enc [%x], checkEnc [%x]\n", rw.blockNum, address, *key, enc, checkEnc)
-			return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
-		}
 	}
 	return enc.Bytes(), nil
 }
@@ -379,17 +346,6 @@ func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uin
 	if err != nil {
 		return nil, err
 	}
-	if rw.checkR != nil {
-		checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
-		if checkErr != nil {
-			fmt.Printf("readAccountCode %x checkR: %v\n", address, checkErr)
-			return nil, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
-		}
-		if !bytes.Equal(enc, checkEnc) {
-			fmt.Printf("readAccountCode %x enc [%x], checkEnc [%x]\n", address, enc, checkEnc)
-			return nil, fmt.Errorf("readAccountCode %x enc [%x], checkEnc [%x]", address, enc, checkEnc)
-		}
-	}
 	return enc, nil
 }
 
@@ -398,17 +354,6 @@ func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation
 	if err != nil {
 		return 0, err
 	}
-	/*
-		checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
-		if checkErr != nil {
-			fmt.Printf("readAccountCode %x checkR: %v\n", address, checkErr)
-			return 0, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
-		}
-		if !bytes.Equal(enc, checkEnc) {
-			fmt.Printf("readAccountCode %x enc [%x], checkEnc [%x]\n", address, enc, checkEnc)
-			return 0, fmt.Errorf("readAccountCode %x enc [%x], checkEnc [%x]", address, enc, checkEnc)
-		}
-	*/
 	return len(enc), nil
 }
 
