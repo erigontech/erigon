@@ -30,13 +30,15 @@ import (
 )
 
 var (
-	changesets bool
+	commitmentFrequency int // How many blocks to skip between calculating commitment
+	changesets          bool
 )
 
 func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
+	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 256, "how many blocks to skip between calculating commitment")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -44,6 +46,9 @@ var erigon2Cmd = &cobra.Command{
 	Use:   "erigon2",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if commitmentFrequency < 1 || commitmentFrequency > 4096 {
+			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than 4096: %d", commitmentFrequency)
+		}
 		logger := log.New()
 		return Erigon2(genesis, logger)
 	},
@@ -107,7 +112,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 
 	interrupt := false
 	blockNum := block
-	w := agg.MakeStateWriter()
+	w := agg.MakeStateWriter(false /* beforeOn */)
 	var rwTx kv.RwTx
 	defer func() {
 		if rwTx != nil {
@@ -201,24 +206,26 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
 		txNum++
-		if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
-			return err
+		if interrupt || blockNum%uint64(commitmentFrequency) == 0 {
+			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
+				return err
+			}
+			if !bytes.Equal(rootHash, b.Header().Root[:]) {
+				if trace || interrupt {
+					return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
+				} else {
+					blockNum--
+					trace = true
+				}
+				rwTx.Rollback()
+				continue
+			}
 		}
 		if err = w.Aggregate(trace); err != nil {
 			return err
 		}
-		if bytes.Equal(rootHash, b.Header().Root[:]) {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-		} else {
-			if trace {
-				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
-			} else {
-				blockNum--
-				trace = true
-			}
-			rwTx.Rollback()
+		if err = rwTx.Commit(); err != nil {
+			return err
 		}
 	}
 	if w != nil {
