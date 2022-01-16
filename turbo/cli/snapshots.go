@@ -183,7 +183,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
 
 	log.Info("Last body number", "last", last)
-	workers := runtime.NumCPU() - 1
+	workers := runtime.NumCPU() / 2
 	//workers := 1
 	if workers < 1 {
 		workers = 1
