@@ -1415,7 +1415,16 @@ func genstate() error {
 }
 
 func compress1(fileName, segmentFileName string) error {
-	return compress.Compress(context.Background(), "hack", fileName, segmentFileName, runtime.GOMAXPROCS(-1))
+	compressor, err := compress.NewCompressor2(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1))
+	if err != nil {
+		return err
+	}
+	if err := compress.ReadSimpleFile(fileName, func(v []byte) error {
+		return compressor.AddWord(v)
+	}); err != nil {
+		return err
+	}
+	return compressor.Compress()
 }
 func decompress(name string) error {
 	return parallelcompress.Decompress("hack", name+".seg", name+".decompressed.dat")
