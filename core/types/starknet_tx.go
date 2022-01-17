@@ -3,12 +3,13 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rlp"
 	"io"
 	"math/big"
 	"math/bits"
+
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type StarknetTransaction struct {
@@ -154,7 +155,20 @@ func (tx StarknetTransaction) Hash() common.Hash {
 }
 
 func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
-	panic("implement me")
+	return prefixedRlpHash(
+		StarknetType,
+		[]interface{}{
+			chainID,
+			tx.Nonce,
+			tx.Tip,
+			tx.FeeCap,
+			tx.Gas,
+			tx.To,
+			tx.Value,
+			tx.Data,
+			tx.Salt,
+			tx.AccessList,
+		})
 }
 
 func (tx StarknetTransaction) Size() common.StorageSize {
