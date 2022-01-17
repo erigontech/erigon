@@ -3,9 +3,10 @@ package services
 import (
 	"bytes"
 	"encoding/hex"
-	"github.com/ledgerwatch/erigon/crypto"
 	"testing"
 	"testing/fstest"
+
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func TestCreate(t *testing.T) {
@@ -22,7 +23,7 @@ func TestCreate(t *testing.T) {
 	}{
 		{name: "invalid private key", privateKey: "abc", fileName: "not_exist.json", error: ErrInvalidPrivateKey},
 		{name: "contract file not found", privateKey: generatePrivateKey(t), fileName: "not_exist.json", error: ErrReadContract},
-		{name: "success", privateKey: privateKey, fileName: "contract_test.json", salt: "contract_address_salt", gas: 1, want: "03f87b83127ed8018080018001963762323236313632363932323361323035623564376495636f6e74726163745f616464726573735f73616c74c080a0ceb955e6039bf37dbf77e4452a10b4a47906bbbd2f6dcf0c15bccb052d3bbb60a03de24d584a0a20523f55a137ebc651e2b092fbc3728d67c9fda09da9f0edd154"},
+		{name: "success", privateKey: privateKey, fileName: "contract_test.json", salt: "contract_address_salt", gas: 1, want: "03f88183127ed802830186a0830186a0018001963762323236313632363932323361323035623564376495636f6e74726163745f616464726573735f73616c74c001a0d76aefa12efeb7602858aba7889b5aa89eaca8e530979a9638e8b15b6c818a9aa07737ddf3e01ca1dfac1562eac7b1117a26ad3322621ddb6c4bee71352821698c"},
 	}
 
 	fs := fstest.MapFS{
