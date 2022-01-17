@@ -253,7 +253,6 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		if err != nil {
 			return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err)
 		}
-		slot.dataLen = dataLen
 		p = dataPos + dataLen
 	}
 
