@@ -7,9 +7,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 )
 
-// BigChunks - read `table` by big chunks - restart read transaction after each 5 minutes
+// BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes
 func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byte) (bool, error)) error {
-	rollbackEvery := time.NewTicker(5 * time.Minute)
+	rollbackEvery := time.NewTicker(1 * time.Minute)
 
 	var stop bool
 	for !stop {
@@ -27,6 +27,14 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 					return err
 				}
 
+				// break loop before walker() call, to make sure all keys are received by walker() exactly once
+				select {
+				case <-rollbackEvery.C:
+
+					break Loop
+				default:
+				}
+
 				ok, err := walker(tx, k, v)
 				if err != nil {
 					return err
@@ -34,12 +42,6 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 				if !ok {
 					stop = true
 					break
-				}
-
-				select {
-				case <-rollbackEvery.C:
-					break Loop
-				default:
 				}
 			}
 
