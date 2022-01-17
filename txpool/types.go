@@ -103,6 +103,7 @@ const (
 	LegacyTxType     int = 0
 	AccessListTxType int = 1
 	DynamicFeeTxType int = 2
+	StarknetTxType   int = 3
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -245,6 +246,16 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 
 	p = dataPos + dataLen
+
+	// Next goes starknet tx salt, but we are only interesting in its length
+	if txType == StarknetTxType {
+		dataPos, dataLen, err = rlp.String(payload, p)
+		if err != nil {
+			return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err)
+		}
+		slot.dataLen = dataLen
+		p = dataPos + dataLen
+	}
 
 	// Next follows access list for non-legacy transactions, we are only interesting in number of addresses and storage keys
 	if !legacy {

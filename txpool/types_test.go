@@ -75,6 +75,10 @@ var txParseDevNetTests = []parseTxTest{
 		senderStr:   "67b1d87101671b127f5f8714789c7192f7ad340e", nonce: 1},
 }
 
+var txStarknetTests = []parseTxTest{
+	{payloadStr: "03f86f83127ed801808001800196376232323631363236393232336132303562356437648973616c745f74657374c080a0b44c2f4e18ca27e621171da5cf3a0c875c0749c7b998ec2759974280d987143aa04f01823122d972baa1a03b113535d9f9057fd9366fd8770e766b91f835b88ea6", nonce: 1},
+}
+
 var allNetsTestCases = []struct {
 	chainID uint256.Int
 	tests   []parseTxTest
@@ -90,6 +94,10 @@ var allNetsTestCases = []struct {
 	{
 		chainID: *uint256.NewInt(1337),
 		tests:   txParseDevNetTests,
+	},
+	{
+		chainID: *uint256.NewInt(1337),
+		tests:   txStarknetTests,
 	},
 }
 
