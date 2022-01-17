@@ -32,7 +32,7 @@ database of TurboBor, which has better performance than accessing via TPC socket
 Provide both `--datadir` and `--private.api.addr` options:
 
 ```sh
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,bor
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,web3,net,debug,trace,txpool,bor
 ```
 
 ### Running remotely
@@ -50,7 +50,7 @@ turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datad
 On other Terminal, run
 
 ```sh
-./build/bin/rpcdaemon --private.api.addr=<turbo_bor_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,bor
+./build/bin/rpcdaemon --private.api.addr=<turbo_bor_ip>:9090 --http.api=eth,web3,net,debug,trace,txpool,bor
 ```
 
 The daemon should respond with something like:
@@ -79,9 +79,44 @@ This should return something along the lines of this (depending on how far your 
 }
 ```
 
-You can also use similar command to test the `bor` namespace methods. For example:
+You can also use similar command to test the `bor` namespace methods. Methods in this namespace provides bor consensus specific info like snapshot, signers, validator info, etc. For example:
 ```[bash]
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "bor_getSnapshot", "params": ["0x400"], "id":1}' localhost:8545
+```
+This should return something like this:
+```[bash]
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "number": 1024,
+    "hash": "0xb976c3964fc461faa40745cb0a2d560bd8db5793e22fd1b63dc7e32c7455c21d",
+    "validatorSet": {
+      "validators": [
+        {
+          "ID": 0,
+          "signer": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
+          "power": 10000,
+          "accum": -30000
+        },
+        ...
+      ],
+      "proposer": {
+        "ID": 0,
+        "signer": "0xbe188d6641e8b680743a4815dfa0f6208038960f",
+        "power": 10000,
+        "accum": -30000
+      }
+    },
+    "recents": {
+      "961": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
+      "962": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
+      ...
+      "1023": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
+      "1024": "0xbe188d6641e8b680743a4815dfa0f6208038960f"
+    }
+  }
+}
 ```
 
 ## FAQ
@@ -108,11 +143,14 @@ The following table shows the current implementation status of TurboBor's RPC da
 | eth_gasPrice                               | Yes     |                                            |
 | eth_maxPriorityFeePerGas                   | Yes     |                                            |
 | eth_feeHistory                             | Yes     |                                            |
+| eth_forks                                  | Yes     |                                            |
 |                                            |         |                                            |
 | eth_getBlockByHash                         | Yes     |                                            |
 | eth_getBlockByNumber                       | Yes     |                                            |
 | eth_getBlockTransactionCountByHash         | Yes     |                                            |
 | eth_getBlockTransactionCountByNumber       | Yes     |                                            |
+| eth_getHeaderByHash                        | Yes     |                                            |
+| eth_getHeaderByNumber                      | Yes     |                                            |
 | eth_getUncleByBlockHashAndIndex            | Yes     |                                            |
 | eth_getUncleByBlockNumberAndIndex          | Yes     |                                            |
 | eth_getUncleCountByBlockHash               | Yes     |                                            |
@@ -158,6 +196,8 @@ The following table shows the current implementation status of TurboBor's RPC da
 | eth_getWork                                | Yes     |                                            |
 | eth_submitWork                             | Yes     |                                            |
 |                                            |         |                                            |
+| eth_issuance                               | Yes     |                                            |
+|                                            |         |                                            |
 | eth_subscribe                              | Limited | Websock Only - newHeads,                   |
 |                                            |         | newPendingTransaction                      |
 | eth_unsubscribe                            | Yes     | Websock Only                               |
@@ -193,11 +233,7 @@ The following table shows the current implementation status of TurboBor's RPC da
 | db_putHex                                  | No      | deprecated                                 |
 | db_getHex                                  | No      | deprecated                                 |
 |                                            |         |                                            |
-| erigon_getHeaderByHash                     | Yes     | Erigon only                                |
-| erigon_getHeaderByNumber                   | Yes     | Erigon only                                |
-| erigon_getLogsByHash                       | Yes     | Erigon only                                |
-| erigon_forks                               | Yes     | Erigon only                                |
-| erigon_issuance                            | Yes     | Erigon only                                |
+| erigon_getLogsByHash                       | No      | Subset of `eth_getLogs`                    |
 |                                            |         |                                            |
 | bor_getSnapshot                            | Yes     | Bor only                                   |
 | bor_getAuthor                              | Yes     | Bor only                                   |
