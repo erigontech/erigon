@@ -7,7 +7,14 @@
 
 2. Generate payload for `starknet_sendRawTransaction` PRC method
 
-    `go run ./cmd/starknet/main.go generateRawTx -c ./cairo/contract.json -o /cairo/send_raw_transaction -k b9a8b19ff082a7f4b943fcbe0da6cce6ce2c860090f05d031f463412ab534e95`
+    ```
+   go run ./cmd/starknet/main.go generateRawTx 
+       -c ./cairo/contract.json 
+       -o /cairo/send_raw_transaction 
+       -s salt_test 
+       -g 11452296 
+       -k b9a8b19ff082a7f4b943fcbe0da6cce6ce2c860090f05d031f463412ab534e95
+   ```
 
     Command syntax: `go run main.go generateRawTx --help`   
 
