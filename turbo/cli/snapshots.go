@@ -7,10 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -190,38 +190,26 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 
 	for i := fromBlock; i < last; i += blocksPerFile {
 		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
-		tmpFilePath := path.Join(tmpDir, fileName) + ".dat"
-		segmentFile := path.Join(snapshotDir, fileName) + ".seg"
+		tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
 
-		if err := snapshotsync.DumpBodies(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Bodies", tmpFilePath, segmentFile, workers); err != nil {
+		if err := snapshotsync.DumpBodies(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
-		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
-		if err := snapshotsync.DumpHeaders(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Headers", tmpFilePath, segmentFile, workers); err != nil {
+		if err := snapshotsync.DumpHeaders(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)
 
 		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
-		tmpFilePath = path.Join(tmpDir, fileName) + ".dat"
-		segmentFile = path.Join(snapshotDir, fileName) + ".seg"
+		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 		log.Info("Creating", "file", fileName)
-		if _, err := snapshotsync.DumpTxs(ctx, chainDB, tmpFilePath, i, int(blocksPerFile)); err != nil {
-			panic(err)
-		}
-		if err := compress.Compress(ctx, "Transactions", tmpFilePath, segmentFile, workers); err != nil {
+		if _, err := snapshotsync.DumpTxs(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
 			panic(err)
 		}
 		_ = os.Remove(tmpFilePath)
