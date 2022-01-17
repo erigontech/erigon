@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/mmap"
 )
 
-// Decompressor provides access to the words in a file produced by a compressor
+// Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	compressedFile string
 	f              *os.File
@@ -33,7 +33,7 @@ type Decompressor struct {
 	data           []byte                 // slice of correct size for the decompressor to work with
 	dict           Dictionary
 	posDict        Dictionary
-	wordsStart     uint64 // Offset of whether the words actually start
+	wordsStart     uint64 // Offset of whether the superstrings actually start
 	count          uint64
 }
 
@@ -191,7 +191,7 @@ func (g *Getter) nextPattern() []byte {
 
 func (d *Decompressor) Count() int { return int(d.count) }
 
-// MakeGetter creates an object that can be used to access words in the decompressor's file
+// MakeGetter creates an object that can be used to access superstrings in the decompressor's file
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concrently
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
@@ -226,6 +226,9 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		intPos := lastPos + int(pos) - 1
 		lastPos = intPos
 		pattern := g.nextPattern()
+		if len(g.word) < intPos {
+			panic("likely .idx is invalid")
+		}
 		copy(g.word[intPos:], pattern)
 		if intPos > lastUncovered {
 			g.uncovered = append(g.uncovered, lastUncovered, intPos)

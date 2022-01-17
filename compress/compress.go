@@ -20,46 +20,184 @@ import (
 	"bufio"
 	"bytes"
 	"container/heap"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"sort"
+	"sync"
+	"time"
 
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/patricia"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const ASSERT = false
 
 // Compressor is the main operating type for performing per-word compression
-// After creating a compression, one needs to add words to it, using `AddWord` function
+// After creating a compression, one needs to add superstrings to it, using `AddWord` function
 // After that, `Compress` function needs to be called to perform the compression
 // and eventually create output file
+type Compressor2 struct {
+	datFile                    *DecompressedFile
+	outputFile, tmpOutFilePath string // File where to output the dictionary and compressed data
+	tmpDir                     string // temporary directory to use for ETL when building dictionary
+	minPatternScore            uint64 //minimum score (per superstring) required to consider including pattern into the dictionary
+	workers                    int
+
+	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
+	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
+	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
+	// sorting algorithm
+	superstring []byte
+	wordsCount  uint64
+
+	ctx       context.Context
+	logPrefix string
+	Ratio     CompressionRatio
+}
+
+func NewCompressor2(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int) (*Compressor2, error) {
+	dir, fileName := filepath.Split(outputFile)
+	ext := filepath.Ext(outputFile)
+	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
+	datFilePath := filepath.Join(tmpDir, fileName[:len(ext)]) + ".dat"
+
+	datFile, err := NewUncompressedFile(datFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Compressor2{
+		datFile:         datFile,
+		tmpOutFilePath:  tmpOutFilePath,
+		outputFile:      outputFile,
+		tmpDir:          tmpDir,
+		logPrefix:       logPrefix,
+		minPatternScore: minPatternScore,
+		workers:         workers,
+		ctx:             ctx,
+	}, nil
+}
+
+func (c *Compressor2) Close() {
+	c.datFile.Close()
+}
+
+func (c *Compressor2) AddWord(word []byte) error {
+	c.wordsCount++
+	return c.datFile.Append(word)
+}
+
+func (c *Compressor2) Compress() error {
+	c.datFile.w.Flush()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	// Collector for dictionary superstrings (sorted by their score)
+	superstrings := make(chan []byte, c.workers)
+	wg := &sync.WaitGroup{}
+	wg.Add(c.workers)
+	suffixCollectors := make([]*etl.Collector, c.workers)
+	defer func() {
+		for _, collector := range suffixCollectors {
+			collector.Close()
+		}
+	}()
+	for i := 0; i < c.workers; i++ {
+		//nolint
+		collector := etl.NewCollector(compressLogPrefix, c.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		suffixCollectors[i] = collector
+		go processSuperstring(superstrings, collector, c.minPatternScore, wg)
+	}
+	i := 0
+	c.superstring = make([]byte, 0, superstringLimit)
+	if err := c.datFile.ForEach(func(word []byte) error {
+		if len(c.superstring)+2*len(word)+2 > superstringLimit {
+			superstrings <- c.superstring
+			c.superstring = make([]byte, 0, superstringLimit)
+		}
+		for _, a := range word {
+			c.superstring = append(c.superstring, 1, a)
+		}
+		c.superstring = append(c.superstring, 0, 0)
+		i++
+
+		select {
+		default:
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Dictionary preprocessing", c.logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(c.datFile.count)))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if len(c.superstring) > 0 {
+		superstrings <- c.superstring
+	}
+	close(superstrings)
+	wg.Wait()
+
+	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, suffixCollectors)
+	if err != nil {
+
+		return err
+	}
+	_, fileName := filepath.Split(c.outputFile)
+
+	dictPath := filepath.Join(c.tmpDir, fileName) + ".dictionary.txt"
+	defer os.Remove(dictPath)
+
+	if err := PersistDictrionary(dictPath, db); err != nil {
+		return err
+	}
+
+	defer os.Remove(c.tmpOutFilePath)
+
+	if err := reducedict(c.logPrefix, dictPath, c.tmpOutFilePath, c.tmpDir, c.datFile, c.workers); err != nil {
+		return err
+	}
+	if err := os.Rename(c.tmpOutFilePath, c.outputFile); err != nil {
+		return err
+	}
+
+	c.Ratio, err = Ratio(c.datFile.filePath, c.outputFile)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type Compressor struct {
 	outputFile      string // File where to output the dictionary and compressed data
 	tmpDir          string // temporary directory to use for ETL when building dictionary
 	minPatternScore uint64 //minimum score (per superstring) required to consider including pattern into the dictionary
-	// Buffer for "superstring" - transformation of words where each byte of a word, say b,
+	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
-	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many words) suffix
+	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
 	superstring []byte
 	divsufsort  *transform.DivSufSort       // Instance of DivSufSort - algorithm for building suffix array for the superstring
 	suffixarray []int32                     // Suffix array - output for divsufsort algorithm
 	lcp         []int32                     // LCP array (Longest Common Prefix)
-	collector   *etl.Collector              // Collector used to handle very large sets of words
+	collector   *etl.Collector              // Collector used to handle very large sets of superstrings
 	numBuf      [binary.MaxVarintLen64]byte // Buffer for producing var int serialisation
 	collectBuf  []byte                      // Buffer for forming key to call collector
 	dictBuilder DictionaryBuilder           // Priority queue that selects dictionary patterns with highest scores, and then sorts them by scores
 	pt          patricia.PatriciaTree       // Patricia tree of dictionary patterns
 	mf          patricia.MatchFinder        // Match finder to use together with patricia tree (it stores search context and buffers matches)
 	ring        *Ring                       // Cycling ring for dynamic programming algorithm determining optimal coverage of word by dictionary patterns
-	wordFile    *os.File                    // Temporary file to keep words in for the second pass
+	wordFile    *os.File                    // Temporary file to keep superstrings in for the second pass
 	wordW       *bufio.Writer               // Bufferred writer for temporary file
 	interFile   *os.File                    // File to write intermediate compression to
 	interW      *bufio.Writer               // Buffered writer associate to interFile
@@ -77,11 +215,11 @@ const superstringLimit = 16 * 1024 * 1024
 
 // minPatternLen is minimum length of pattern we consider to be included into the dictionary
 const minPatternLen = 5
-const maxPatternLen = 64
+const maxPatternLen = 4096
 
 // maxDictPatterns is the maximum number of patterns allowed in the initial (not reduced dictionary)
 // Large values increase memory consumption of dictionary reduction phase
-const maxDictPatterns = 2 * 1024 * 1024
+const maxDictPatterns = 512 * 1024
 
 //nolint
 const compressLogPrefix = "compress"
@@ -159,7 +297,7 @@ func (db *DictionaryBuilder) ForEach(f func(score uint64, word []byte)) {
 	}
 }
 
-// Pattern is representation of a pattern that is searched in the words to compress them
+// Pattern is representation of a pattern that is searched in the superstrings to compress them
 // patterns are stored in a patricia tree and contain pattern score (calculated during
 // the initial dictionary building), frequency of usage, and code
 type Pattern struct {
@@ -504,7 +642,7 @@ func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore 
 	if c.divsufsort, err = transform.NewDivSufSort(); err != nil {
 		return nil, err
 	}
-	if c.wordFile, err = ioutil.TempFile(c.tmpDir, "words-"); err != nil {
+	if c.wordFile, err = ioutil.TempFile(c.tmpDir, "superstrings-"); err != nil {
 		return nil, err
 	}
 	c.wordW = bufio.NewWriterSize(c.wordFile, etl.BufIOSize)
@@ -512,7 +650,7 @@ func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore 
 	return c, nil
 }
 
-// AddWord needs to be called repeatedly to provide all the words to compress
+// AddWord needs to be called repeatedly to provide all the superstrings to compress
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
 	if len(c.superstring)+2*len(word)+2 > superstringLimit {
@@ -562,7 +700,7 @@ func (c *Compressor) Close() {
 }
 
 func (c *Compressor) findMatches() error {
-	// Build patricia tree out of the patterns in the dictionary, for further matching in individual words
+	// Build patricia tree out of the patterns in the dictionary, for further matching in individual superstrings
 	// Allocate temporary initial codes to the patterns so that patterns with higher scores get smaller code
 	// This helps reduce the size of intermediate compression
 	for i, p := range c.dictBuilder.items {
@@ -807,7 +945,7 @@ func (c *Compressor) optimiseCodes() error {
 	defer cf.Sync()
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
 	defer cw.Flush()
-	// 1-st, output amount of words in file
+	// 1-st, output amount of superstrings in file
 	binary.BigEndian.PutUint64(c.numBuf[:], c.wordsCount)
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
@@ -1055,7 +1193,7 @@ func (c *Compressor) optimiseCodes() error {
 
 func (c *Compressor) buildDictionary() error {
 	if len(c.superstring) > 0 {
-		// Process any residual words
+		// Process any residual superstrings
 		if err := c.processSuperstring(); err != nil {
 			return fmt.Errorf("buildDictionary: error processing superstring: %w", err)
 		}
@@ -1175,6 +1313,8 @@ type DictAggregator struct {
 	lastWord      []byte
 	lastWordScore uint64
 	collector     *etl.Collector
+
+	dist map[int]int
 }
 
 func (da *DictAggregator) processWord(word []byte, score uint64) error {
@@ -1189,6 +1329,11 @@ func (da *DictAggregator) Load(loadFunc etl.LoadFunc, args etl.TransformArgs) er
 }
 
 func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if _, ok := da.dist[len(k)]; !ok {
+		da.dist[len(k)] = 0
+	}
+	da.dist[len(k)]++
+
 	score := binary.BigEndian.Uint64(v)
 	if bytes.Equal(k, da.lastWord) {
 		da.lastWordScore += score
@@ -1207,6 +1352,85 @@ func (da *DictAggregator) aggLoadFunc(k, v []byte, table etl.CurrentTableReader,
 func (da *DictAggregator) finish() error {
 	if da.lastWord != nil {
 		return da.processWord(da.lastWord, da.lastWordScore)
+	}
+	return nil
+}
+
+type CompressionRatio float64
+
+func (r CompressionRatio) String() string { return fmt.Sprintf("%.2f", r) }
+
+func Ratio(f1, f2 string) (CompressionRatio, error) {
+	s1, err := os.Stat(f1)
+	if err != nil {
+		return 0, err
+	}
+	s2, err := os.Stat(f2)
+	if err != nil {
+		return 0, err
+	}
+	return CompressionRatio(float64(s1.Size()) / float64(s2.Size())), nil
+}
+
+// DecompressedFile - .dat file format - simple format for temporary data store
+type DecompressedFile struct {
+	filePath string
+	f        *os.File
+	w        *bufio.Writer
+	count    uint64
+	buf      []byte
+}
+
+func NewUncompressedFile(filePath string) (*DecompressedFile, error) {
+	f, err := os.Create(filePath)
+	if err != nil {
+		return nil, err
+	}
+	w := bufio.NewWriterSize(f, etl.BufIOSize)
+	return &DecompressedFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+}
+func (f *DecompressedFile) Close() {
+	f.w.Flush()
+	//f.f.Sync()
+	f.f.Close()
+}
+func (f *DecompressedFile) Append(v []byte) error {
+	f.count++
+	n := binary.PutUvarint(f.buf, uint64(len(v)))
+	if _, e := f.w.Write(f.buf[:n]); e != nil {
+		return e
+	}
+	if len(v) > 0 {
+		if _, e := f.w.Write(v); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// ForEach - Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
+// We only consider values with length > 2, because smaller values are not compressible without going into bits
+func (f *DecompressedFile) ForEach(walker func(v []byte) error) error {
+	_, err := f.f.Seek(0, 0)
+	if err != nil {
+		return err
+	}
+	r := bufio.NewReaderSize(f.f, etl.BufIOSize)
+	buf := make([]byte, 4096)
+	l, e := binary.ReadUvarint(r)
+	for ; e == nil; l, e = binary.ReadUvarint(r) {
+		if len(buf) < int(l) {
+			buf = make([]byte, l)
+		}
+		if _, e = io.ReadFull(r, buf[:l]); e != nil {
+			return e
+		}
+		if err := walker(buf[:l]); err != nil {
+			return err
+		}
+	}
+	if e != nil && !errors.Is(e, io.EOF) {
+		return e
 	}
 	return nil
 }
