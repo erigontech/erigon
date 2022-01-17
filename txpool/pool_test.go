@@ -285,16 +285,36 @@ func TestReplaceWithHigherFee(t *testing.T) {
 		assert.True(ok)
 		assert.Equal(uint64(3), nonce)
 	}
-	// Bumped only tip and feeCap by 10%, tx accepted
+	// Bumped only tip, transaction not accepted
 	{
 		txSlots := TxSlots{}
 		txSlot := &TxSlot{
-			tip:    330001,
-			feeCap: 330001,
+			tip:    3000000,
+			feeCap: 300000,
 			gas:    100000,
 			nonce:  3,
 		}
 		txSlot.IdHash[0] = 3
+		txSlots.Append(txSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(NotReplaced, reason, reason.String())
+		}
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(3), nonce)
+	}
+	// Bumped both tip and feeCap by 10%, tx accepted
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    330000,
+			feeCap: 330000,
+			gas:    100000,
+			nonce:  3,
+		}
+		txSlot.IdHash[0] = 4
 		txSlots.Append(txSlot, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)

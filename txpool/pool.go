@@ -968,7 +968,7 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 	if found != nil {
 		tipThreshold := found.Tx.tip * (100 + p.cfg.PriceBump) / 100
 		feecapThreshold := found.Tx.feeCap * (100 + p.cfg.PriceBump) / 100
-		if mt.Tx.tip <= tipThreshold || mt.Tx.feeCap <= feecapThreshold {
+		if mt.Tx.tip < tipThreshold || mt.Tx.feeCap < feecapThreshold {
 			// Both tip and feecap need to be larger than previously to replace the transaction
 			return NotReplaced
 		}
