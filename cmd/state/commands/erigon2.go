@@ -30,15 +30,15 @@ import (
 )
 
 var (
-	check      bool
-	changesets bool
+	commitmentFrequency int // How many blocks to skip between calculating commitment
+	changesets          bool
 )
 
 func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
-	erigon2Cmd.Flags().BoolVar(&check, "check", false, "set to true to compare state reads with with historical state (for debugging)")
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
+	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 256, "how many blocks to skip between calculating commitment")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -46,12 +46,15 @@ var erigon2Cmd = &cobra.Command{
 	Use:   "erigon2",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if commitmentFrequency < 1 || commitmentFrequency > 4096 {
+			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than 4096: %d", commitmentFrequency)
+		}
 		logger := log.New()
-		return Erigon2(genesis, logger, block, datadir)
+		return Erigon2(genesis, logger)
 	},
 }
 
-func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir string) error {
+func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -72,12 +75,14 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	}
 	defer historyTx.Rollback()
 	stateDbPath := path.Join(datadir, "statedb")
-	if _, err = os.Stat(stateDbPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	if block == 0 {
+		if _, err = os.Stat(stateDbPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(stateDbPath); err != nil {
 			return err
 		}
-	} else if err = os.RemoveAll(stateDbPath); err != nil {
-		return err
 	}
 	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open()
 	if err2 != nil {
@@ -85,15 +90,17 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	}
 	defer db.Close()
 	aggPath := path.Join(datadir, "aggregator")
-	if _, err = os.Stat(aggPath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+	if block == 0 {
+		if _, err = os.Stat(aggPath); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		} else if err = os.RemoveAll(aggPath); err != nil {
 			return err
 		}
-	} else if err = os.RemoveAll(aggPath); err != nil {
-		return err
-	}
-	if err = os.Mkdir(aggPath, os.ModePerm); err != nil {
-		return err
+		if err = os.Mkdir(aggPath, os.ModePerm); err != nil {
+			return err
+		}
 	}
 	agg, err3 := aggregator.NewAggregator(aggPath, 90000, 4096)
 	if err3 != nil {
@@ -104,37 +111,44 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	vmConfig := vm.Config{}
 
 	interrupt := false
-	block := uint64(0)
+	blockNum := block
+	w := agg.MakeStateWriter(false /* beforeOn */)
 	var rwTx kv.RwTx
 	defer func() {
-		rwTx.Rollback()
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
 	}()
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
-	}
-	genBlock, genesisIbs, err4 := genesis.ToBlock()
-	if err4 != nil {
-		return err4
-	}
-	w := agg.MakeStateWriter()
-	if err = w.Reset(rwTx, 0); err != nil {
-		return err
-	}
-	if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
-		return fmt.Errorf("cannot write state: %w", err)
-	}
-	if err = w.FinishTx(0, false); err != nil {
-		return err
-	}
 	var rootHash []byte
-	if rootHash, err = w.FinishBlock(false); err != nil {
-		return err
-	}
-	if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
-		return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
-	}
-	if err = rwTx.Commit(); err != nil {
-		return err
+	if block == 0 {
+		if rwTx, err = db.BeginRw(ctx); err != nil {
+			return err
+		}
+		genBlock, genesisIbs, err4 := genesis.ToBlock()
+		if err4 != nil {
+			return err4
+		}
+		if err = w.Reset(rwTx, 0); err != nil {
+			return err
+		}
+		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
+			return fmt.Errorf("cannot write state: %w", err)
+		}
+		if err = w.FinishTx(0, false); err != nil {
+			return err
+		}
+		if rootHash, err = w.ComputeCommitment(false); err != nil {
+			return err
+		}
+		if err = w.Aggregate(false); err != nil {
+			return err
+		}
+		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
+			return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
+		}
+		if err = rwTx.Commit(); err != nil {
+			return err
+		}
 	}
 	var tx kv.Tx
 	defer func() {
@@ -145,16 +159,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 	var txNum uint64 = 1
 	trace := false
 	for !interrupt {
-		block++
-		if block >= blockNum {
-			break
-		}
-		blockHash, err := rawdb.ReadCanonicalHash(historyTx, block)
+		blockNum++
+		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
 			return err
 		}
 		var b *types.Block
-		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, block)
+		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -167,26 +178,24 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 		if rwTx, err = db.BeginRw(ctx); err != nil {
 			return err
 		}
-		r := agg.MakeStateReader(tx, block)
-		var checkR state.StateReader
-		if check {
-			checkR = state.NewPlainState(historyTx, block-1)
-		}
-		if err = w.Reset(rwTx, block); err != nil {
+		r := agg.MakeStateReader(tx, blockNum)
+		if err = w.Reset(rwTx, blockNum); err != nil {
 			return err
 		}
-		intraBlockState := state.New(&ReaderWrapper{r: r, checkR: checkR, blockNum: block})
+		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
+		writeWrapper := &WriterWrapper{w: w, blockNum: blockNum}
+		intraBlockState := state.New(readWrapper)
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, &WriterWrapper{w: w, blockNum: block}, chainConfig, getHeader, nil, b, vmConfig); err != nil {
-			return fmt.Errorf("block %d: %w", block, err)
+		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, readWrapper, writeWrapper, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
-		if block%1000 == 0 {
-			log.Info("Processed", "blocks", block)
+		if blockNum%1000 == 0 {
+			log.Info("Processed", "blocks", blockNum)
 		}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			fmt.Printf("interrupted on block %d, please wait for cleanup...\n", block)
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
 		tx.Rollback()
@@ -194,30 +203,38 @@ func Erigon2(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir 
 			return fmt.Errorf("final finish failed: %w", err)
 		}
 		if trace {
-			fmt.Printf("FinishTx called for %d block %d\n", txNum, block)
+			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
 		txNum++
-		if rootHash, err = w.FinishBlock(trace /* trace */); err != nil {
-			return err
-		}
-		if bytes.Equal(rootHash, b.Header().Root[:]) {
-			if err = rwTx.Commit(); err != nil {
+		if interrupt || blockNum%uint64(commitmentFrequency) == 0 {
+			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
 			}
-		} else {
-			if trace {
-				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", block, b.Header().Root[:], rootHash)
-			} else {
-				block--
-				trace = true
+			if !bytes.Equal(rootHash, b.Header().Root[:]) {
+				if trace || interrupt {
+					return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
+				} else {
+					blockNum--
+					trace = true
+				}
+				rwTx.Rollback()
+				continue
 			}
-			rwTx.Rollback()
 		}
+		if err = w.Aggregate(trace); err != nil {
+			return err
+		}
+		if err = rwTx.Commit(); err != nil {
+			return err
+		}
+	}
+	if w != nil {
+		w.Close()
 	}
 	return nil
 }
 
-func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, ww *WriterWrapper,
+func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, rw *ReaderWrapper, ww *WriterWrapper,
 	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
@@ -262,7 +279,6 @@ func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, ww *Wr
 type ReaderWrapper struct {
 	blockNum uint64
 	r        *aggregator.Reader
-	checkR   state.StateReader
 }
 
 type WriterWrapper struct {
@@ -285,19 +301,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil {
 		return nil, err
 	}
-	var checkA *accounts.Account
-	var checkErr error
-	if rw.checkR != nil {
-		if checkA, checkErr = rw.checkR.ReadAccountData(address); checkErr != nil {
-			fmt.Printf("readAccountData %x checkR: %v\n", address, checkErr)
-			return nil, fmt.Errorf("readAccountData %x checkR: %w", address, checkErr)
-		}
-	}
 	if len(enc) == 0 {
-		if checkA != nil {
-			fmt.Printf("readAccountData %x enc [%x], checkEnc [%+v]\n", address, enc, checkA)
-			return nil, fmt.Errorf("readAccountData %x enc [%x], checkEnc [%+v]", address, enc, checkA)
-		}
 		return nil, nil
 	}
 
@@ -327,12 +331,6 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
 	}
-	if rw.checkR != nil {
-		if !a.Equals(checkA) {
-			fmt.Printf("readAccountData %x enc [%+v], checkEnc [%+v]\n", address, a, checkA)
-			return nil, fmt.Errorf("readAccountData %x enc [%+v], checkEnc [%+v]", address, a, checkA)
-		}
-	}
 	return &a, nil
 }
 
@@ -342,26 +340,8 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 	if err != nil {
 		return nil, err
 	}
-	var checkEnc []byte
-	var checkErr error
-	if rw.checkR != nil {
-		if checkEnc, checkErr = rw.checkR.ReadAccountStorage(address, incarnation, key); checkErr != nil {
-			fmt.Printf("block %d ReadAccountStorage %x %x checkR: %v\n", rw.blockNum, address, *key, checkErr)
-			return nil, fmt.Errorf("readAccountStorage %x %x checkR: %w", address, *key, checkErr)
-		}
-	}
 	if enc == nil {
-		if len(checkEnc) != 0 {
-			fmt.Printf("block %d ReadAccountStorage %x %x enc [%x], checkEnc [%x]\n", rw.blockNum, address, *key, enc, checkEnc)
-			return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
-		}
 		return nil, nil
-	}
-	if rw.checkR != nil {
-		if !bytes.Equal(enc.Bytes(), checkEnc) {
-			fmt.Printf("block %d ReadAccountStorage %x %x enc [%x], checkEnc [%x]\n", rw.blockNum, address, *key, enc, checkEnc)
-			return nil, fmt.Errorf("readAccountStorage %x %x enc [%x], checkEnc [%x]", address, *key, enc, checkEnc)
-		}
 	}
 	return enc.Bytes(), nil
 }
@@ -371,17 +351,6 @@ func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uin
 	if err != nil {
 		return nil, err
 	}
-	if rw.checkR != nil {
-		checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
-		if checkErr != nil {
-			fmt.Printf("readAccountCode %x checkR: %v\n", address, checkErr)
-			return nil, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
-		}
-		if !bytes.Equal(enc, checkEnc) {
-			fmt.Printf("readAccountCode %x enc [%x], checkEnc [%x]\n", address, enc, checkEnc)
-			return nil, fmt.Errorf("readAccountCode %x enc [%x], checkEnc [%x]", address, enc, checkEnc)
-		}
-	}
 	return enc, nil
 }
 
@@ -390,17 +359,6 @@ func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation
 	if err != nil {
 		return 0, err
 	}
-	/*
-		checkEnc, checkErr := rw.checkR.ReadAccountCode(address, incarnation, codeHash)
-		if checkErr != nil {
-			fmt.Printf("readAccountCode %x checkR: %v\n", address, checkErr)
-			return 0, fmt.Errorf("readAccountCode %x checkR: %w", address, checkErr)
-		}
-		if !bytes.Equal(enc, checkEnc) {
-			fmt.Printf("readAccountCode %x enc [%x], checkEnc [%x]\n", address, enc, checkEnc)
-			return 0, fmt.Errorf("readAccountCode %x enc [%x], checkEnc [%x]", address, enc, checkEnc)
-		}
-	*/
 	return len(enc), nil
 }
 
