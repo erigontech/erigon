@@ -33,7 +33,6 @@ func APIList(
 		base.EnableTevmExperiment()
 	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
-	erigonImpl := NewErigonAPI(base, db)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)
@@ -92,13 +91,6 @@ func APIList(
 				Namespace: "db",
 				Public:    true,
 				Service:   DBAPI(dbImpl),
-				Version:   "1.0",
-			})
-		case "erigon":
-			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "erigon",
-				Public:    true,
-				Service:   ErigonAPI(erigonImpl),
 				Version:   "1.0",
 			})
 		case "engine":
