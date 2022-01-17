@@ -77,6 +77,8 @@ In TurboBor unlike Bor the RPC calls are extracted out of the main binary into a
 remote DBs. That means, that this RPC daemon doesn't have to be running on the same machine as the main TurboBor binary or
 it can run from a snapshot of a database for read-only calls.
 
+See [RPC-Daemon docs](./cmd/rpcdaemon/README.md) for more details.
+
 ### Build
 To build RPC daemon, run
 
@@ -90,7 +92,7 @@ database of TurboBor, which has better performance than accessing via TPC socket
 Provide both `--datadir` and `--private.api.addr` options:
 
 ```sh
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,bor
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,web3,net,debug,trace,txpool,bor
 ```
 
 ### **For remote DB**
@@ -108,7 +110,7 @@ turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datad
 On other Terminal, run
 
 ```sh
-./build/bin/rpcdaemon --private.api.addr=<turbo_bor_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,bor
+./build/bin/rpcdaemon --private.api.addr=<turbo_bor_ip>:9090 --http.api=eth,web3,net,debug,trace,txpool,bor
 ```
 
 The daemon should respond with something like:
