@@ -118,11 +118,11 @@ func (c *Compressor2) Compress() error {
 		go processSuperstring(superstrings, collector, c.minPatternScore, wg)
 	}
 	i := 0
-	c.superstring = make([]byte, 0, superstringLimit)
+	c.superstring = nil
 	if err := c.datFile.ForEach(func(word []byte) error {
 		if len(c.superstring)+2*len(word)+2 > superstringLimit {
 			superstrings <- c.superstring
-			c.superstring = make([]byte, 0, superstringLimit)
+			c.superstring = nil
 		}
 		for _, a := range word {
 			c.superstring = append(c.superstring, 1, a)
