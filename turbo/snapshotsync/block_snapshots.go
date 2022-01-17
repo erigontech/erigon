@@ -308,20 +308,18 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
 			return err
 		}
-	}
-	for _, sn := range s.blocks {
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+
+		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
 		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
 			return err
 		}
-	}
 
-	// hack to read first block body - to get baseTxId from there
-	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
-		return err
-	}
+		// hack to read first block body - to get baseTxId from there
+		if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
+			return err
+		}
 
-	for _, sn := range s.blocks {
+		// build txs idx
 		gg := sn.Bodies.MakeGetter()
 		buf, _ := gg.Next(nil)
 		firstBody := &types.BodyForStorage{}
@@ -342,7 +340,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			}
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
 		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, f, expectedTxsAmount, tmpDir); err != nil {
 			return err
 		}
@@ -505,14 +503,14 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) (firstTxID uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBlock uint64, blocksAmount, workers int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := NewSimpleFile(tmpFilePath)
+	f, err := compress.NewCompressor2(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return 0, err
 	}
@@ -529,6 +527,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 
 	from := dbutils.EncodeBlockNumber(fromBlock)
 	var lastBody types.BodyForStorage
+	var sender [20]byte
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= fromBlock+uint64(blocksAmount) {
@@ -563,22 +562,21 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, nil); err != nil {
+			if len(senders) > 0 {
+				parseCtx.WithSender(true)
+			}
+			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:]); err != nil {
 				return err
 			}
-			var sender []byte
 			if len(senders) > 0 {
-				sender = senders[j][:]
-			} else {
-				//sender = make([]byte, 20) // TODO: return error here
-				panic("not implemented")
+				sender = senders[j]
 			}
 			_ = sender
 			valueBuf = valueBuf[:0]
 			valueBuf = append(valueBuf, slot.IdHash[:1]...)
-			valueBuf = append(valueBuf, sender...)
+			valueBuf = append(valueBuf, sender[:]...)
 			valueBuf = append(valueBuf, tv...)
-			if err := f.Append(valueBuf); err != nil {
+			if err := f.AddWord(valueBuf); err != nil {
 				return err
 			}
 			count++
@@ -591,7 +589,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Info("Dumping txs", "processed", count/1_000_000, "block num", blockNum,
+				log.Info("Dumping txs", "block num", blockNum,
 					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 				)
 			}
@@ -607,14 +605,20 @@ func DumpTxs(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint
 		fmt.Printf("prevTxID: %d\n", prevTxID)
 		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
 	}
+	if err := f.Compress(); err != nil {
+		return 0, err
+	}
+
+	_, fileName := filepath.Split(segmentFile)
+	log.Info("[Transactions] Compression", "ratio", f.Ratio.String(), "file", fileName)
 	return firstTxID, nil
 }
 
-func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock uint64, blocksAmount int) error {
+func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := NewSimpleFile(tmpFilePath)
+	f, err := compress.NewCompressor2(ctx, "Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
 	}
@@ -644,7 +648,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock 
 		value := make([]byte, len(dataRLP)+1) // first_byte_of_header_hash + header_rlp
 		value[0] = h.Hash()[0]
 		copy(value[1:], dataRLP)
-		if err := f.Append(value); err != nil {
+		if err := f.AddWord(value); err != nil {
 			return false, err
 		}
 
@@ -667,17 +671,15 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, tmpFilePath string, fromBlock 
 	return nil
 }
 
-func DumpBodies(ctx context.Context, db kv.RoDB, filePath string, fromBlock uint64, blocksAmount int) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	f, err := os.Create(filePath)
+
+	f, err := compress.NewCompressor2(ctx, "Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
 	}
-	defer f.Sync()
 	defer f.Close()
-	w := bufio.NewWriterSize(f, etl.BufIOSize)
-	defer w.Flush()
 
 	key := make([]byte, 8+32)
 	from := dbutils.EncodeBlockNumber(fromBlock)
@@ -697,15 +699,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, filePath string, fromBlock uint
 			return true, nil
 		}
 
-		numBuf := make([]byte, binary.MaxVarintLen64)
-		n := binary.PutUvarint(numBuf, uint64(len(dataRLP)))
-		if _, e := w.Write(numBuf[:n]); e != nil {
-			return false, e
-		}
-		if len(dataRLP) > 0 {
-			if _, e := w.Write(dataRLP); e != nil {
-				return false, e
-			}
+		if err := f.AddWord(dataRLP); err != nil {
+			return false, err
 		}
 
 		select {
