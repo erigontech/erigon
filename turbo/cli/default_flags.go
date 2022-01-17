@@ -77,7 +77,6 @@ var DefaultFlags = []cli.Flag{
 	utils.CliqueDataDirFlag,
 	utils.MiningEnabledFlag,
 	utils.MinerNotifyFlag,
-	utils.MinerGasTargetFlag,
 	utils.MinerGasLimitFlag,
 	utils.MinerEtherbaseFlag,
 	utils.MinerExtraDataFlag,
