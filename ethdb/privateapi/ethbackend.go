@@ -294,6 +294,8 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
+	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
+
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 
