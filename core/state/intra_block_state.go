@@ -702,13 +702,20 @@ func printAccount(EIP158Enabled bool, addr common.Address, stateObject *stateObj
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
+		var so *stateObject
+		var exist bool
 		if b, ok := sdb.balanceInc[addr]; ok {
-			stateObject := sdb.GetOrNewStateObject(addr)
-			stateObject.data.Balance.Add(&stateObject.data.Balance, b)
+			so = sdb.getStateObject(addr)
+			if so == nil || so.deleted {
+				so = sdb.createObject(addr, nil /* previous */)
+			}
+			exist = true
+			so.data.Balance.Add(&so.data.Balance, b)
 			delete(sdb.balanceInc, addr)
-
 		}
-		stateObject, exist := sdb.stateObjects[addr]
+		if !exist {
+			so, exist = sdb.stateObjects[addr]
+		}
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
 			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
@@ -719,7 +726,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, so, true); err != nil {
 			return err
 		}
 
@@ -735,6 +742,14 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
+	}
+	for addr, b := range sdb.balanceInc {
+		so := sdb.getStateObject(addr)
+		if so == nil || so.deleted {
+			so = sdb.createObject(addr, nil /* previous */)
+		}
+		so.data.Balance.Add(&so.data.Balance, b)
+		delete(sdb.balanceInc, addr)
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
