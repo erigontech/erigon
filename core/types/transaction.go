@@ -68,7 +68,6 @@ type Transaction interface {
 	SigningHash(chainID *big.Int) common.Hash
 	Size() common.StorageSize
 	GetData() []byte
-	GetSalt() []byte
 	GetAccessList() AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
