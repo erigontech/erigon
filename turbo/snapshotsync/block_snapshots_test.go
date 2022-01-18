@@ -1,6 +1,7 @@
 package snapshotsync
 
 import (
+	"context"
 	"path"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	cfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
 	cfg.ExpectBlocks = math.MaxUint64
 	createFile := func(from, to uint64, name SnapshotType) {
-		c, err := compress.NewCompressor("test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100)
+		c, err := compress.NewCompressor(context.Background(), "test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 		require.NoError(err)
 		defer c.Close()
 		err = c.AddWord([]byte{1})

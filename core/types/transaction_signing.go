@@ -239,6 +239,21 @@ func (sg Signer) SenderWithContext(context *secp256k1.Context, tx Transaction) (
 		// id, add 27 to become equivalent to unprotected Homestead signatures.
 		V.Add(&t.V, u256.Num27)
 		R, S = &t.R, &t.S
+	case *StarknetTransaction:
+		if !sg.dynamicfee {
+			return common.Address{}, fmt.Errorf("dynamicfee tx is not supported by signer %s", sg)
+		}
+		if t.ChainID == nil {
+			if !sg.chainID.IsZero() {
+				return common.Address{}, ErrInvalidChainId
+			}
+		} else if !t.ChainID.Eq(&sg.chainID) {
+			return common.Address{}, ErrInvalidChainId
+		}
+		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
+		// id, add 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(&t.V, u256.Num27)
+		R, S = &t.R, &t.S
 	default:
 		return common.Address{}, ErrTxTypeNotSupported
 	}

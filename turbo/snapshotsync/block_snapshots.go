@@ -510,7 +510,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := compress.NewCompressor2(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
+	f, err := compress.NewCompressor(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return 0, err
 	}
@@ -618,7 +618,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor2(ctx, "Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
+	f, err := compress.NewCompressor(ctx, "Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
 	}
@@ -675,7 +675,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor2(ctx, "Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
+	f, err := compress.NewCompressor(ctx, "Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
 	}

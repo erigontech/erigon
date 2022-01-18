@@ -7,12 +7,14 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 	"github.com/spf13/cobra"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type Flags struct {
 	Contract   string
 	Salt       string
+	Gas        string
 	PrivateKey string
 	Datadir    string
 	Output     string
@@ -32,6 +34,9 @@ func init() {
 	generateRawTxCmd.Flags().StringVarP(&flags.Salt, "salt", "s", "", "Cairo contract address salt")
 	generateRawTxCmd.MarkFlagRequired("salt")
 
+	generateRawTxCmd.Flags().StringVarP(&flags.Gas, "gas", "g", "", "Gas")
+	generateRawTxCmd.MarkFlagRequired("gas")
+
 	generateRawTxCmd.Flags().StringVarP(&flags.PrivateKey, "private_key", "k", "", "Private key")
 	generateRawTxCmd.MarkFlagRequired("private_key")
 
@@ -40,11 +45,16 @@ func init() {
 	generateRawTxCmd.Flags().StringVarP(&flags.Output, "output", "o", "", "Path to file where sign transaction will be saved. Print to stdout if empty.")
 
 	generateRawTxCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		gas, err := strconv.ParseUint(flags.Gas, 10, 64)
+		if err != nil {
+			return err
+		}
+
 		rawTxGenerator := services.NewRawTxGenerator(flags.PrivateKey)
 
 		fs := os.DirFS("/")
 		buf := bytes.NewBuffer(nil)
-		err := rawTxGenerator.CreateFromFS(fs, strings.Trim(flags.Contract, "/"), []byte(flags.Salt), buf)
+		err = rawTxGenerator.CreateFromFS(fs, strings.Trim(flags.Contract, "/"), []byte(flags.Salt), gas, buf)
 		if err != nil {
 			return err
 		}

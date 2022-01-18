@@ -1415,10 +1415,11 @@ func genstate() error {
 }
 
 func compress1(fileName, segmentFileName string) error {
-	compressor, err := compress.NewCompressor2(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1))
+	compressor, err := compress.NewCompressor(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1))
 	if err != nil {
 		return err
 	}
+	defer compressor.Close()
 	if err := compress.ReadSimpleFile(fileName, func(v []byte) error {
 		return compressor.AddWord(v)
 	}); err != nil {
@@ -2331,6 +2332,45 @@ func mainnetGenesis() error {
 	return nil
 }
 
+func junkdb() error {
+	dir, err := ioutil.TempDir(".", "junk")
+	if err != nil {
+		return fmt.Errorf("creating temp dir for db size test: %w", err)
+	}
+	//defer os.RemoveAll(dir)
+	oneBucketCfg := make(kv.TableCfg)
+	oneBucketCfg["t"] = kv.TableCfgItem{}
+	var db kv.RwDB
+	db, err = mdbx.NewMDBX(log.New()).Path(dir).WithTablessCfg(func(kv.TableCfg) kv.TableCfg {
+		return oneBucketCfg
+	}).Open()
+	if err != nil {
+		return fmt.Errorf("opening database: %w", err)
+	}
+	defer db.Close()
+	for i := 0; i < 1_000_000; i++ {
+		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			c, e := tx.RwCursor("t")
+			if e != nil {
+				return e
+			}
+			defer c.Close()
+			for j := 0; j < 1_000_000_000; j++ {
+				var b [8]byte
+				binary.BigEndian.PutUint64(b[:], uint64(i*1_000_000_000+j))
+				if e = c.Append(b[:], b[:]); e != nil {
+					return e
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		log.Info("Appended records", "bln", i+1)
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -2502,6 +2542,8 @@ func main() {
 		err = genstate()
 	case "mainnetGenesis":
 		err = mainnetGenesis()
+	case "junkdb":
+		err = junkdb()
 	}
 
 	if err != nil {
