@@ -133,16 +133,18 @@ func HeadersPOS(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	// Waiting for the beacon chain
-	log.Info("Waiting for payloads...")
-	var payloadMessage privateapi.PayloadMessage
+	log.Info("Waiting for beacon chain payloads...")
+
 	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
-	// Decide what kind of action we need to take place
+	defer atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+
+	var payloadMessage privateapi.PayloadMessage
 	select {
-	case payloadMessage = <-cfg.reverseDownloadCh:
-	case <-cfg.hd.SkipCycleHack:
-		atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+	case <-ctx.Done():
 		return nil
+	case <-cfg.hd.SkipCycleHack:
+		return nil
+	case payloadMessage = <-cfg.reverseDownloadCh:
 	}
 
 	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
