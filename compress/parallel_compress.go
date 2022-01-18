@@ -219,7 +219,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	}); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
+	log.Debug(fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	ch := make(chan []byte, 10_000)
 	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var wg sync.WaitGroup
@@ -251,7 +251,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Replacement preprocessing", logPrefix),
+			log.Debug(fmt.Sprintf("[%s] Replacement preprocessing", logPrefix),
 				"processed", fmt.Sprintf("%.2f%%", 100*float64(wordsCount)/float64(datFile.count)),
 				//"input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
@@ -291,7 +291,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	}
 	patternCutoff := offset // All offsets below this will be considered patterns
 	i := 0
-	log.Info(fmt.Sprintf("[%s] Effective dictionary", logPrefix), "size", patternList.Len())
+	log.Debug(fmt.Sprintf("[%s] Effective dictionary", logPrefix), "size", patternList.Len())
 	// Build Huffman tree for codes
 	var codeHeap PatternHeap
 	heap.Init(&codeHeap)
@@ -401,7 +401,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Dictionary", logPrefix), "size", common.ByteCount(offset), "pattern cutoff", patternCutoff)
+	log.Debug(fmt.Sprintf("[%s] Dictionary", logPrefix), "size", common.ByteCount(offset), "pattern cutoff", patternCutoff)
 
 	var positionList PositionList
 	pos2code := make(map[uint64]*Position)
@@ -420,7 +420,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	}
 	positionCutoff := offset // All offsets below this will be considered positions
 	i = 0
-	log.Info(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", positionList.Len())
+	log.Debug(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", positionList.Len())
 	// Build Huffman tree for codes
 	var posHeap PositionHeap
 	heap.Init(&posHeap)
@@ -520,7 +520,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 			return err
 		}
 	}
-	log.Info(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", common.ByteCount(offset), "position cutoff", positionCutoff)
+	log.Debug(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", common.ByteCount(offset), "position cutoff", positionCutoff)
 	huffmanFile := filepath.Join(tmpDir, "huffman_codes.txt")
 	defer os.Remove(huffmanFile)
 	df, err := os.Create(huffmanFile)
