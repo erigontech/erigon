@@ -123,8 +123,8 @@ func starknetTransaction(chainId *big.Int, address common.Address) *StarknetTran
 			Gas:     1,
 			To:      &address,
 			Data:    []byte("{\"abi\": []}"),
-			Salt:    []byte("contract_salt"),
 		},
+		Salt:   []byte("contract_salt"),
 		Tip:    uint256.NewInt(1),
 		FeeCap: uint256.NewInt(1),
 	}
