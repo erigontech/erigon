@@ -96,7 +96,6 @@ evm:
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
 downloader:
-	git submodule update --init --recursive --force
 	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
