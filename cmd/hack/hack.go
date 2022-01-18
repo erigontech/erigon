@@ -1419,6 +1419,7 @@ func compress1(fileName, segmentFileName string) error {
 	if err != nil {
 		return err
 	}
+	defer compressor.Close()
 	if err := compress.ReadSimpleFile(fileName, func(v []byte) error {
 		return compressor.AddWord(v)
 	}); err != nil {
