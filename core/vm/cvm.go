@@ -1,7 +1,10 @@
 package vm
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func NewCVM(state IntraBlockState) *CVM {
@@ -17,9 +20,10 @@ type CVM struct {
 	intraBlockState IntraBlockState
 }
 
-func (cvm *CVM) Create(code []byte) ([]byte, common.Address, error) {
-	address := common.Address{}
+func (cvm *CVM) Create(caller ContractRef, code []byte) ([]byte, common.Address, error) {
+	address := crypto.CreateAddress(caller.Address(), cvm.intraBlockState.GetNonce(caller.Address()))
 	cvm.intraBlockState.SetCode(address, code)
+	fmt.Println(">>>> Create Starknet Contract", address.Hex())
 	return code, common.Address{}, nil
 
 	//TODO:: execute cairo construct

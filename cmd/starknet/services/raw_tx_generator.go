@@ -3,13 +3,13 @@ package services
 import (
 	"encoding/hex"
 	"errors"
+	"io"
+	"io/fs"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"golang.org/x/crypto/sha3"
-	"io"
-	"io/fs"
 )
 
 var (
@@ -43,15 +43,19 @@ func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, 
 
 	tx := types.StarknetTransaction{
 		CommonTx: types.CommonTx{
-			Nonce: 1,
+			Nonce: 0,
 			Value: uint256.NewInt(1),
 			Gas:   gas,
 			Data:  enc,
 			Salt:  salt,
 		},
+		FeeCap: uint256.NewInt(875000000),
+		Tip:    uint256.NewInt(100000),
 	}
 
-	signature, _ := crypto.Sign(sha3.New256().Sum(nil), privateKey)
+	sighash := tx.SigningHash(params.FermionChainConfig.ChainID)
+
+	signature, _ := crypto.Sign(sighash[:], privateKey)
 	signer := types.MakeSigner(params.FermionChainConfig, 1)
 
 	signedTx, err := tx.WithSignature(*signer, signature)

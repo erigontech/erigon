@@ -81,6 +81,12 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		if err != nil {
 			return nil, err
 		}
+
+		// if no transactiion was found in the txpool then we return nil and an error warning that we didn't find the transaction by the hash
+		if txn == nil {
+			return nil, nil
+		}
+
 		return newRPCPendingTransaction(txn, curHeader, chainConfig), nil
 	}
 
