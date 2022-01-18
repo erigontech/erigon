@@ -3,12 +3,13 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rlp"
 	"io"
 	"math/big"
 	"math/bits"
+
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type StarknetTransaction struct {
@@ -113,7 +114,31 @@ func (tx StarknetTransaction) Cost() *uint256.Int {
 }
 
 func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
-	panic("implement me")
+	msg := Message{
+		nonce:      tx.Nonce,
+		gasLimit:   tx.Gas,
+		tip:        *tx.Tip,
+		feeCap:     *tx.FeeCap,
+		to:         tx.To,
+		amount:     *tx.Value,
+		data:       tx.Data,
+		accessList: tx.AccessList,
+		checkNonce: true,
+	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, tx.Tip)
+	if msg.gasPrice.Gt(tx.FeeCap) {
+		msg.gasPrice.Set(tx.FeeCap)
+	}
+
+	var err error
+	msg.from, err = tx.Sender(s)
+	return msg, err
 }
 
 func (tx *StarknetTransaction) WithSignature(signer Signer, sig []byte) (Transaction, error) {
@@ -154,7 +179,20 @@ func (tx StarknetTransaction) Hash() common.Hash {
 }
 
 func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
-	panic("implement me")
+	return prefixedRlpHash(
+		StarknetType,
+		[]interface{}{
+			chainID,
+			tx.Nonce,
+			tx.Tip,
+			tx.FeeCap,
+			tx.Gas,
+			tx.To,
+			tx.Value,
+			tx.Data,
+			tx.Salt,
+			tx.AccessList,
+		})
 }
 
 func (tx StarknetTransaction) Size() common.StorageSize {
@@ -182,8 +220,40 @@ func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx StarknetTransaction) Sender(signer Signer) (common.Address, error) {
-	panic("implement me")
+func (tx *StarknetTransaction) Sender(signer Signer) (common.Address, error) {
+	if sc := tx.from.Load(); sc != nil {
+		return sc.(common.Address), nil
+	}
+	addr, err := signer.Sender(tx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	tx.from.Store(addr)
+	return addr, nil
+}
+
+func (tx StarknetTransaction) EncodeRLP(w io.Writer) error {
+	payloadSize, nonceLen, gasLen, accessListLen := tx.payloadSize()
+	envelopeSize := payloadSize
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	// size of struct prefix and TxType
+	envelopeSize += 2
+	var b [33]byte
+	// envelope
+	if err := EncodeStringSizePrefix(envelopeSize, w, b[:]); err != nil {
+		return err
+	}
+	// encode TxType
+	b[0] = StarknetType
+	if _, err := w.Write(b[:1]); err != nil {
+		return err
+	}
+	if err := tx.encodePayload(w, b[:], payloadSize, nonceLen, gasLen, accessListLen); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (tx StarknetTransaction) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, gasLen, accessListLen int) error {
