@@ -15,6 +15,7 @@ import (
 type StarknetTransaction struct {
 	CommonTx
 
+	Salt       []byte // cairo contract address salt
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
 	AccessList AccessList
@@ -22,6 +23,10 @@ type StarknetTransaction struct {
 
 func (tx StarknetTransaction) Type() byte {
 	return StarknetType
+}
+
+func (tx StarknetTransaction) GetSalt() []byte {
+	return tx.Salt
 }
 
 func (tx StarknetTransaction) IsStarkNet() bool {
@@ -466,10 +471,10 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 			Nonce:   tx.Nonce,
 			To:      tx.To,
 			Data:    common.CopyBytes(tx.Data),
-			Salt:    common.CopyBytes(tx.Salt),
 			Gas:     tx.Gas,
 			Value:   new(uint256.Int),
 		},
+		Salt:       common.CopyBytes(tx.Salt),
 		AccessList: make(AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
@@ -491,4 +496,15 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 	cpy.R.Set(&tx.R)
 	cpy.S.Set(&tx.S)
 	return cpy
+}
+
+func (tx StarknetTransaction) EncodingSize() int {
+	payloadSize, _, _, _ := tx.payloadSize()
+	envelopeSize := payloadSize
+	// Add envelope size and type size
+	if payloadSize >= 56 {
+		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
+	}
+	envelopeSize += 2
+	return envelopeSize
 }

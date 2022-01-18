@@ -38,7 +38,6 @@ type CommonTx struct {
 	To      *common.Address `rlp:"nil"` // nil means contract creation
 	Value   *uint256.Int    // wei amount
 	Data    []byte          // contract invocation input data
-	Salt    []byte          // cairo contract address salt
 	V, R, S uint256.Int     // signature values
 }
 
@@ -64,10 +63,6 @@ func (ct CommonTx) GetValue() *uint256.Int {
 
 func (ct CommonTx) GetData() []byte {
 	return ct.Data
-}
-
-func (ct CommonTx) GetSalt() []byte {
-	return ct.Salt
 }
 
 func (ct CommonTx) GetSender() (common.Address, bool) {
