@@ -1415,10 +1415,11 @@ func genstate() error {
 }
 
 func compress1(fileName, segmentFileName string) error {
-	compressor, err := compress.NewCompressor2(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1))
+	compressor, err := compress.NewCompressor(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1))
 	if err != nil {
 		return err
 	}
+	defer compressor.Close()
 	if err := compress.ReadSimpleFile(fileName, func(v []byte) error {
 		return compressor.AddWord(v)
 	}); err != nil {
