@@ -12,6 +12,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
@@ -193,34 +194,40 @@ func HeadersPOS(
 			return nil
 		}
 
-		headBlockHash := rawdb.ReadHeadBlockHash(tx)
+		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+			return err
+		}
 
-		if headBlockHash != header.ParentHash {
+		// Note an inconsistency here:
+		// We insert raw bodies immediately and skip stage 3. (Stage 2 will not be skipped.)
+		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB
+		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
+			return err
+		}
+
+		headBlockHash := rawdb.ReadHeadBlockHash(tx)
+		if headBlockHash == header.ParentHash {
+			// OK, we're on the canonical chain
+			cfg.hd.SetPendingExecutionStatus(headerHash)
+
+			if err := stages.SaveStageProgress(tx, stages.Headers, headerNumber); err != nil {
+				return err
+			}
+
+			if err := stages.SaveStageProgress(tx, stages.Bodies, headerNumber); err != nil {
+				return err
+			}
+
+			if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+				return fmt.Errorf("fix canonical chain: %w", err)
+			}
+		} else {
 			// Side chain or something weird
-			// TODO(yperbasis): save payload as non-canonical, other proper logic
+			// TODO(yperbasis): proper logic
 			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 			return nil
 		}
 
-		// OK, we're on the canonical chain
-
-		cfg.hd.SetPendingExecutionStatus(headerHash)
-
-		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-			return err
-		}
-		// We can insert raw bodies immediately and skip stage 3. (stage 2 will not be skipped)
-		// TODO(Giulio2002): Fix inconsistency
-		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.Bodies, headerNumber); err != nil {
-			return err
-		}
-
-		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
-			return fmt.Errorf("fix canonical chain: %w", err)
-		}
 		if !useExternalTx {
 			if err := tx.Commit(); err != nil {
 				return err
@@ -233,108 +240,102 @@ func HeadersPOS(
 	// If we don't have the right parent, download the missing ancestors
 	cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
 
-	// TODO(yperbasis): save payload as non-canonical, restore the sync
-	return nil
+	cfg.hd.SetPOSSync(true)
+	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
+		return err
+	}
+	cfg.hd.SetProcessed(headerNumber)
+	cfg.hd.SetExpectedHash(header.ParentHash)
+	cfg.hd.SetFetching(true)
 
-	/*
-		cfg.hd.SetPOSSync(true)
-		if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
-			return err
+	log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
+
+	stopped := false
+	prevProgress := headerNumber
+
+	headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer headerCollector.Close()
+	cfg.hd.SetHeadersCollector(headerCollector)
+	// Cleanup after we finish backward sync
+	defer func() {
+		cfg.hd.SetHeadersCollector(nil)
+		cfg.hd.Unsync()
+		cfg.hd.SetFetching(false)
+	}()
+
+	var req headerdownload.HeaderRequest
+	for !stopped {
+		sentToPeer := false
+		maxRequests := 4096
+		for !sentToPeer && !stopped && maxRequests != 0 {
+			// TODO(yperbasis): double check that we don't download 1) headers & 2) bodies that are already in the DB
+			// TODO(yperbasis): handle the case when are not able to sync a chain
+			req = cfg.hd.RequestMoreHeadersForPOS()
+			_, sentToPeer = cfg.headerReqSend(ctx, &req)
+			maxRequests--
 		}
-		cfg.hd.SetProcessed(headerNumber)
-		cfg.hd.SetExpectedHash(header.ParentHash)
-		cfg.hd.SetFetching(true)
 
-		log.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerNumber)
-
-		stopped := false
-		prevProgress := headerNumber
-
-		headerCollector := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		defer headerCollector.Close()
-		cfg.hd.SetHeadersCollector(headerCollector)
-		// Cleanup after we finish backward sync
-		defer func() {
-			cfg.hd.SetHeadersCollector(nil)
-			cfg.hd.Unsync()
-			cfg.hd.SetFetching(false)
-		}()
-
-		var req headerdownload.HeaderRequest
-		for !stopped {
-			sentToPeer := false
-			maxRequests := 4096
-			for !sentToPeer && !stopped && maxRequests != 0 {
-				req = cfg.hd.RequestMoreHeadersForPOS()
-				_, sentToPeer = cfg.headerReqSend(ctx, &req)
-				maxRequests--
+		if cfg.hd.Synced() {
+			stopped = true
+		}
+		// Sleep and check for logs
+		timer := time.NewTimer(2 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			stopped = true
+		case <-logEvery.C:
+			diff := prevProgress - cfg.hd.Progress()
+			if cfg.hd.Progress() <= prevProgress {
+				log.Info("Wrote Block Headers backwards", "from", headerNumber,
+					"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
+				prevProgress = cfg.hd.Progress()
 			}
-
-			if cfg.hd.Synced() { // We do not break unless there best header changed
-				stopped = true
-			}
-			// Sleep and check for logs
-			timer := time.NewTimer(2 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				stopped = true
-			case <-logEvery.C:
-				diff := prevProgress - cfg.hd.Progress()
-				if cfg.hd.Progress() <= prevProgress {
-					log.Info("Wrote Block Headers backwards", "from", headerNumber,
-						"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
-					prevProgress = cfg.hd.Progress()
-				}
-			case <-timer.C:
-				log.Trace("RequestQueueTime (header) ticked")
-			}
-			// Cleanup timer
-			timer.Stop()
+		case <-timer.C:
+			log.Trace("RequestQueueTime (header) ticked")
 		}
-		// If the user stopped it, we don't update anything
-		if !cfg.hd.Synced() {
-			return nil
-		}
-
-		headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			var h types.Header
-			if err := rlp.DecodeBytes(value, &h); err != nil {
-				return err
-			}
-			if err := cfg.hd.VerifyHeader(&h); err != nil {
-				log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
-				return err
-			}
-			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
-		}
-
-		if err := headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
-			},
-		}); err != nil {
-			return err
-		}
-
-		if err := cfg.hd.VerifyHeader(header); err != nil {
-			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
-			return nil
-		}
-		if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-			return err
-		}
-		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
-			return fmt.Errorf("fix canonical chain: %w", err)
-		}
-
-		if !useExternalTx {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-		}
-
+		// Cleanup timer
+		timer.Stop()
+	}
+	// If the user stopped it, we don't update anything
+	if !cfg.hd.Synced() {
 		return nil
-	*/
+	}
+
+	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		var h types.Header
+		if err := rlp.DecodeBytes(value, &h); err != nil {
+			return err
+		}
+		if err := cfg.hd.VerifyHeader(&h); err != nil {
+			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
+			return err
+		}
+		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
+	}
+
+	if err := headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
+		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
+			return []interface{}{"block", binary.BigEndian.Uint64(k)}
+		},
+	}); err != nil {
+		return err
+	}
+
+	if err := cfg.hd.VerifyHeader(header); err != nil {
+		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
+		return nil
+	}
+	if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // HeadersForward progresses Headers stage in the forward direction

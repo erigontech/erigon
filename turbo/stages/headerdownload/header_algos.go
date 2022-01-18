@@ -938,9 +938,6 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 	if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
 		return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
 	}
-	if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-		return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
-	}
 
 	hi.highest = blockHeight
 	hi.highestHash = hash
