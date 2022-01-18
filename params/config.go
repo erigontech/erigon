@@ -405,14 +405,18 @@ var (
 		IstanbulBlock:       big.NewInt(3395000),
 		MuirGlacierBlock:    big.NewInt(3395000),
 		BerlinBlock:         big.NewInt(14750000),
+		LondonBlock:         big.NewInt(23850000),
 		Bor: &BorConfig{
+			JaipurBlock: 23850000,
 			Period: map[string]uint64{
 				"0": 2,
-			}, ProducerDelay: 6,
-			Sprint: 64,
+			},
+			ProducerDelay: 6,
+			Sprint:        64,
 			BackupMultiplier: map[string]uint64{
 				"0": 2,
-			}, ValidatorContract: "0x0000000000000000000000000000000000001000",
+			},
+			ValidatorContract:     "0x0000000000000000000000000000000000001000",
 			StateReceiverContract: "0x0000000000000000000000000000000000001001",
 			OverrideStateSyncRecords: map[string]int{
 				"14949120": 8,
@@ -426,7 +430,7 @@ var (
 				"14953856": 0,
 			},
 			BurntContract: map[string]string{
-				"0": "0x0000000000000000000000000000000000000000",
+				"23850000": "0x70bca57f4579f58670ab2d18ef16e02c17553c38",
 			},
 			BlockAlloc: map[string]interface{}{
 				// write as interface since that is how it is decoded in genesis
