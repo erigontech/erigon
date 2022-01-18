@@ -343,6 +343,10 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 	}
 	// If this account has not been read, add to the balance increment map
 	if _, ok := sdb.stateObjects[addr]; !ok {
+		sdb.journal.append(balanceIncrease{
+			account:  &addr,
+			increase: *amount,
+		})
 		var b *uint256.Int
 		if b, ok = sdb.balanceInc[addr]; !ok {
 			b = &uint256.Int{}
@@ -698,6 +702,12 @@ func printAccount(EIP158Enabled bool, addr common.Address, stateObject *stateObj
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
+		if b, ok := sdb.balanceInc[addr]; ok {
+			stateObject := sdb.GetOrNewStateObject(addr)
+			stateObject.data.Balance.Add(&stateObject.data.Balance, b)
+			delete(sdb.balanceInc, addr)
+
+		}
 		stateObject, exist := sdb.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2

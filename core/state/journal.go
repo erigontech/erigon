@@ -115,6 +115,10 @@ type (
 		account *common.Address
 		prev    uint256.Int
 	}
+	balanceIncrease struct {
+		account  *common.Address
+		increase uint256.Int
+	}
 	nonceChange struct {
 		account *common.Address
 		prev    uint64
@@ -193,6 +197,23 @@ func (ch balanceChange) revert(s *IntraBlockState) {
 }
 
 func (ch balanceChange) dirtied() *common.Address {
+	return ch.account
+}
+
+func (ch balanceIncrease) revert(s *IntraBlockState) {
+	if b, ok := s.balanceInc[*ch.account]; ok {
+		if b.Sub(b, &ch.increase).IsZero() {
+			delete(s.balanceInc, *ch.account)
+		}
+	} else {
+		so := s.getStateObject(*ch.account)
+		if so != nil {
+			so.data.Balance.Sub(&so.data.Balance, &ch.increase)
+		}
+	}
+}
+
+func (ch balanceIncrease) dirtied() *common.Address {
 	return ch.account
 }
 
