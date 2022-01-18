@@ -21,7 +21,7 @@ type CVM struct {
 }
 
 func (cvm *CVM) Create(caller ContractRef, code []byte) ([]byte, common.Address, error) {
-	address = crypto.CreateAddress(caller.Address(), cvm.intraBlockState.GetNonce(caller.Address()))
+	address := crypto.CreateAddress(caller.Address(), cvm.intraBlockState.GetNonce(caller.Address()))
 	cvm.intraBlockState.SetCode(address, code)
 	fmt.Println(">>>> Create Starknet Contract", address.Hex())
 	return code, common.Address{}, nil
