@@ -43,13 +43,13 @@ func (g RawTxGenerator) CreateFromFS(fileSystem fs.FS, contractFileName string, 
 
 	tx := types.StarknetTransaction{
 		CommonTx: types.CommonTx{
-			Nonce: 2,
+			Nonce: 0,
 			Value: uint256.NewInt(1),
 			Gas:   gas,
 			Data:  enc,
 			Salt:  salt,
 		},
-		FeeCap: uint256.NewInt(100000),
+		FeeCap: uint256.NewInt(875000000),
 		Tip:    uint256.NewInt(100000),
 	}
 
