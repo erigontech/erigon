@@ -565,10 +565,12 @@ func (i *AggregateItem) Less(than btree.Item) bool {
 }
 
 func (c *Changes) produceChangeSets(datPath, idxPath string) error {
-	comp, err := compress.NewCompressor(AggregatorPrefix, datPath, c.dir, 1024 /* minPatterScore */)
+	comp, err := compress.NewCompressorSequential(AggregatorPrefix, datPath, c.dir, compress.MinPatternScore)
+	//comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, c.dir, compress.MinPatternScore, 1)
 	if err != nil {
-		return fmt.Errorf("produceChangeSets NewCompressor: %w", err)
+		return fmt.Errorf("produceChangeSets NewCompressorSequential: %w", err)
 	}
+	defer comp.Close()
 	var totalRecords int
 	var b bool
 	var e error
@@ -699,10 +701,12 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int) error {
 const AggregatorPrefix = "aggregator"
 
 func btreeToFile(bt *btree.BTree, datPath string, tmpdir string) (int, error) {
-	comp, err := compress.NewCompressor(AggregatorPrefix, datPath, tmpdir, 1024 /* minPatterScore */)
+	comp, err := compress.NewCompressorSequential(AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore)
+	//comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, 1)
 	if err != nil {
 		return 0, err
 	}
+	defer comp.Close()
 	count := 0
 	bt.Ascend(func(i btree.Item) bool {
 		item := i.(*AggregateItem)
@@ -769,7 +773,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		hph:             commitment.NewHexPatriciaHashed(length.Addr, nil, nil, nil),
 	}
 	byEndBlock := btree.New(32)
-	var closeBtree bool = true // It will be set to false in case of success at the end of the function
+	var closeBtree = true // It will be set to false in case of success at the end of the function
 	defer func() {
 		// Clean up all decompressor and indices upon error
 		if closeBtree {
@@ -804,7 +808,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 			log.Warn("File ignored by aggregator, startBlock > endBlock", "name", name)
 			continue
 		}
-		var item *byEndBlockItem = &byEndBlockItem{fileCount: 1, startBlock: startBlock, endBlock: endBlock}
+		var item = &byEndBlockItem{fileCount: 1, startBlock: startBlock, endBlock: endBlock}
 		var foundI *byEndBlockItem
 		byEndBlock.AscendGreaterOrEqual(&byEndBlockItem{startBlock: endBlock, endBlock: endBlock}, func(i btree.Item) bool {
 			it := i.(*byEndBlockItem)
@@ -906,7 +910,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 			log.Warn("File ignored by changes scan, endBlock != startBlock+aggregationStep-1", "name", name)
 			continue
 		}
-		var item *ChangesItem = &ChangesItem{fileCount: 1, startBlock: startBlock, endBlock: endBlock}
+		var item = &ChangesItem{fileCount: 1, startBlock: startBlock, endBlock: endBlock}
 		i := a.changesBtree.Get(item)
 		if i == nil {
 			a.changesBtree.ReplaceOrInsert(item)
@@ -1939,7 +1943,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	storageChanges.Init("storage", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
 	commChanges.Init("commitment", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
 	var err error
-	var item1 *byEndBlockItem = &byEndBlockItem{fileCount: 8, startBlock: blockFrom, endBlock: blockTo}
+	var item1 = &byEndBlockItem{fileCount: 8, startBlock: blockFrom, endBlock: blockTo}
 	if item1.accountsD, item1.accountsIdx, err = accountChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateAccounts, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate accountsChanges: %w", err)
 	}
@@ -2014,7 +2018,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		// Nothing to aggregate yet
 		return nil
 	}
-	var item2 *byEndBlockItem = &byEndBlockItem{fileCount: 6, startBlock: lastStart, endBlock: blockTo}
+	var item2 = &byEndBlockItem{fileCount: 6, startBlock: lastStart, endBlock: blockTo}
 	var cp CursorHeap
 	heap.Init(&cp)
 	for _, ag := range toAggregate {
@@ -2134,11 +2138,12 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlock, endBlock uint64, dir string) (*compress.Decompressor, *recsplit.Index, error) {
 	datPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
 	idxPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.idx", basename, startBlock, endBlock))
-	var comp *compress.Compressor
-	var err error
-	if comp, err = compress.NewCompressor(AggregatorPrefix, datPath, dir, 1024 /* minPatterScore */); err != nil {
+	comp, err := compress.NewCompressorSequential(AggregatorPrefix, datPath, dir, compress.MinPatternScore)
+	//comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
+	if err != nil {
 		return nil, nil, fmt.Errorf("compressor %s: %w", datPath, err)
 	}
+	defer comp.Close()
 	count := 0
 	var keyBuf, valBuf []byte
 	for cp.Len() > 0 {

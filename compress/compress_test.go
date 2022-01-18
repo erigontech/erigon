@@ -17,18 +17,22 @@
 package compress
 
 import (
+	"context"
 	"fmt"
 	"path"
+	"path/filepath"
 	"testing"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
 	tmpDir := t.TempDir()
-	file := path.Join(tmpDir, "compressed")
-	c, err := NewCompressor(t.Name(), file, tmpDir, 100)
+	file := filepath.Join(tmpDir, "compressed")
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 100, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer c.Close()
+
 	if err = c.AddWord([]byte("word")); err != nil {
 		t.Fatal(err)
 	}
@@ -39,6 +43,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
+	defer d.Close()
 	g := d.MakeGetter()
 	if !g.HasNext() {
 		t.Fatalf("expected a word")
@@ -50,17 +55,17 @@ func TestCompressEmptyDict(t *testing.T) {
 	if g.HasNext() {
 		t.Fatalf("not expecting anything else")
 	}
-	defer d.Close()
 }
 
 func TestCompressDict1(t *testing.T) {
 	tmpDir := t.TempDir()
 	file := path.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(t.Name(), file, tmpDir, 1)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer c.Close()
 	for i := 0; i < 100; i++ {
 		if err = c.AddWord([]byte(fmt.Sprintf("longlongword %d", i))); err != nil {
 			t.Fatal(err)
@@ -73,15 +78,15 @@ func TestCompressDict1(t *testing.T) {
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
+	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
 	for g.HasNext() {
 		word, _ := g.Next(nil)
 		expected := fmt.Sprintf("longlongword %d", i)
 		if string(word) != expected {
-			t.Errorf("expected %s, got (hex) %x", expected, word)
+			t.Errorf("expected %s, got (hex) %s", expected, word)
 		}
 		i++
 	}
-	defer d.Close()
 }

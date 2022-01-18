@@ -45,7 +45,7 @@ const ASSERT = false
 // After creating a compression, one needs to add superstrings to it, using `AddWord` function
 // After that, `Compress` function needs to be called to perform the compression
 // and eventually create output file
-type Compressor2 struct {
+type Compressor struct {
 	datFile                    *DecompressedFile
 	outputFile, tmpOutFilePath string // File where to output the dictionary and compressed data
 	tmpDir                     string // temporary directory to use for ETL when building dictionary
@@ -64,7 +64,7 @@ type Compressor2 struct {
 	Ratio     CompressionRatio
 }
 
-func NewCompressor2(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int) (*Compressor2, error) {
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int) (*Compressor, error) {
 	dir, fileName := filepath.Split(outputFile)
 	ext := filepath.Ext(outputFile)
 	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
@@ -75,7 +75,7 @@ func NewCompressor2(ctx context.Context, logPrefix, outputFile, tmpDir string, m
 		return nil, err
 	}
 
-	return &Compressor2{
+	return &Compressor{
 		datFile:         datFile,
 		tmpOutFilePath:  tmpOutFilePath,
 		outputFile:      outputFile,
@@ -87,16 +87,16 @@ func NewCompressor2(ctx context.Context, logPrefix, outputFile, tmpDir string, m
 	}, nil
 }
 
-func (c *Compressor2) Close() {
+func (c *Compressor) Close() {
 	c.datFile.Close()
 }
 
-func (c *Compressor2) AddWord(word []byte) error {
+func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
 	return c.datFile.Append(word)
 }
 
-func (c *Compressor2) Compress() error {
+func (c *Compressor) Compress() error {
 	c.datFile.w.Flush()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -178,7 +178,7 @@ func (c *Compressor2) Compress() error {
 	return nil
 }
 
-type Compressor struct {
+type CompressorSequential struct {
 	outputFile      string // File where to output the dictionary and compressed data
 	tmpDir          string // temporary directory to use for ETL when building dictionary
 	minPatternScore uint64 //minimum score (per superstring) required to consider including pattern into the dictionary
@@ -209,7 +209,7 @@ type Compressor struct {
 }
 
 // superstringLimit limits how large can one "superstring" get before it is processed
-// Compressor allocates 7 bytes for each uint of superstringLimit. For example,
+// CompressorSequential allocates 7 bytes for each uint of superstringLimit. For example,
 // superstingLimit 16m will result in 112Mb being allocated for various arrays
 const superstringLimit = 16 * 1024 * 1024
 
@@ -624,8 +624,8 @@ func (r *Ring) Truncate(i int) {
 	r.tail = (r.head + i) & (len(r.cells) - 1)
 }
 
-func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore uint64) (*Compressor, error) {
-	c := &Compressor{
+func NewCompressorSequential(logPrefix, outputFile string, tmpDir string, minPatternScore uint64) (*CompressorSequential, error) {
+	c := &CompressorSequential{
 		minPatternScore: minPatternScore,
 		outputFile:      outputFile,
 		tmpDir:          tmpDir,
@@ -651,7 +651,7 @@ func NewCompressor(logPrefix, outputFile string, tmpDir string, minPatternScore 
 }
 
 // AddWord needs to be called repeatedly to provide all the superstrings to compress
-func (c *Compressor) AddWord(word []byte) error {
+func (c *CompressorSequential) AddWord(word []byte) error {
 	c.wordsCount++
 	if len(c.superstring)+2*len(word)+2 > superstringLimit {
 		// Adding this word would make superstring go over the limit
@@ -675,7 +675,7 @@ func (c *Compressor) AddWord(word []byte) error {
 	return nil
 }
 
-func (c *Compressor) Compress() error {
+func (c *CompressorSequential) Compress() error {
 	if c.wordW != nil {
 		if err := c.wordW.Flush(); err != nil {
 			return err
@@ -693,13 +693,13 @@ func (c *Compressor) Compress() error {
 	return nil
 }
 
-func (c *Compressor) Close() {
+func (c *CompressorSequential) Close() {
 	c.collector.Close()
 	c.wordFile.Close()
 	c.interFile.Close()
 }
 
-func (c *Compressor) findMatches() error {
+func (c *CompressorSequential) findMatches() error {
 	// Build patricia tree out of the patterns in the dictionary, for further matching in individual superstrings
 	// Allocate temporary initial codes to the patterns so that patterns with higher scores get smaller code
 	// This helps reduce the size of intermediate compression
@@ -859,7 +859,7 @@ func (c *Compressor) findMatches() error {
 }
 
 // optimises coding for patterns and positions
-func (c *Compressor) optimiseCodes() error {
+func (c *CompressorSequential) optimiseCodes() error {
 	if _, err := c.interFile.Seek(0, 0); err != nil {
 		return err
 	}
@@ -873,6 +873,7 @@ func (c *Compressor) optimiseCodes() error {
 		}
 	}
 	sort.Sort(&patternList)
+
 	// Calculate offsets of the dictionary patterns and total size
 	var offset uint64
 	for _, p := range patternList {
@@ -1191,7 +1192,7 @@ func (c *Compressor) optimiseCodes() error {
 	return nil
 }
 
-func (c *Compressor) buildDictionary() error {
+func (c *CompressorSequential) buildDictionary() error {
 	if len(c.superstring) > 0 {
 		// Process any residual superstrings
 		if err := c.processSuperstring(); err != nil {
@@ -1209,7 +1210,7 @@ func (c *Compressor) buildDictionary() error {
 	return nil
 }
 
-func (c *Compressor) processSuperstring() error {
+func (c *CompressorSequential) processSuperstring() error {
 	c.divsufsort.ComputeSuffixArray(c.superstring, c.suffixarray[:len(c.superstring)])
 	// filter out suffixes that start with odd positions - we reuse the first half of sa.suffixarray for that
 	// because it won't be used after filtration

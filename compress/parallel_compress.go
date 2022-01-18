@@ -183,18 +183,18 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	for input := range inputCh {
 		// First 8 bytes are idx
-		n := binary.PutUvarint(numBuf, uint64(len(input)))
+		n := binary.PutUvarint(numBuf, uint64(len(input)-8))
 		output = append(output[:0], numBuf[:n]...)
-		if len(input) > 0 {
-			output, patterns, uncovered = optimiseCluster(false, numBuf, input, trie, &mf, output, uncovered, patterns, cellRing, posMap)
-			if err := collector.Collect(output, nil); err != nil {
+		if len(input) > 8 {
+			output, patterns, uncovered = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, uncovered, patterns, cellRing, posMap)
+			if err := collector.Collect(input[:8], output); err != nil {
 				log.Error("Could not collect", "error", err)
 				return
 			}
 		}
-		inputSize.Add(1 + uint64(len(input)))
+		inputSize.Add(1 + uint64(len(input)-8))
 		outputSize.Add(uint64(len(output)))
-		posMap[uint64(len(input)+1)]++
+		posMap[uint64(len(input)-8+1)]++
 		posMap[0]++
 	}
 }
@@ -207,12 +207,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
 	var pt patricia.PatriciaTree
 	code2pattern := make([]*Pattern, 0, 256)
-	mm := map[int]int{}
 	if err := ReadDictrionary(dictPath, func(score uint64, word []byte) error {
-		if _, ok := mm[len(word)]; !ok {
-			mm[len(word)] = 0
-		}
-		mm[len(word)]++
 		p := &Pattern{
 			score:    score,
 			uses:     0,
@@ -248,7 +243,10 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	}
 	var wordsCount uint64
 	if err := datFile.ForEach(func(v []byte) error {
-		ch <- common.Copy(v)
+		input := make([]byte, 8+int(len(v)))
+		binary.BigEndian.PutUint64(input, wordsCount)
+		copy(input[8:], v)
+		ch <- input
 		wordsCount++
 		select {
 		default:
@@ -285,12 +283,6 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 		}
 	}
 	sort.Sort(&patternList)
-	if len(patternList) == 0 {
-		log.Warn("dictionary is empty")
-		//err := fmt.Errorf("dictionary is empty")
-		//panic(err)
-		//return err
-	}
 	// Calculate offsets of the dictionary patterns and total size
 	var offset uint64
 	numBuf := make([]byte, binary.MaxVarintLen64)
@@ -480,14 +472,21 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 		heap.Push(&posHeap, h)
 		posHuffs = append(posHuffs, h)
 	}
-	posRoot := heap.Pop(&posHeap).(*PositionHuff)
+	var posRoot *PositionHuff
+	if posHeap.Len() > 0 {
+		posRoot = heap.Pop(&posHeap).(*PositionHuff)
+	}
 	// First, output dictionary
 	binary.BigEndian.PutUint64(numBuf, offset) // Dictionary size
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
 	// Secondly, output directory root
-	binary.BigEndian.PutUint64(numBuf, posRoot.offset)
+	if posRoot == nil {
+		binary.BigEndian.PutUint64(numBuf, 0)
+	} else {
+		binary.BigEndian.PutUint64(numBuf, posRoot.offset)
+	}
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
@@ -544,8 +543,8 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	aggregator := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer aggregator.Close()
 	for _, collector := range collectors {
-		if err = collector.Load(nil, "", func(k, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			return aggregator.Collect(k, nil)
+		if err = collector.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+			return aggregator.Collect(k, v)
 		}, etl.TransformArgs{}); err != nil {
 			return err
 		}
@@ -556,7 +555,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 	var hc HuffmanCoder
 	hc.w = cw
 	r := bytes.NewReader(nil)
-	if err = aggregator.Load(nil, "", func(v, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err = aggregator.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		// Re-encode it
 		r.Reset(v)
 		var l uint64
@@ -565,8 +564,10 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 			return err
 		}
 		posCode := pos2code[l+1]
-		if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
-			return e
+		if posCode != nil {
+			if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+				return e
+			}
 		}
 		if l > 0 {
 			var pNum uint64 // Number of patterns
@@ -584,8 +585,10 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 				}
 				posCode = pos2code[pos-lastPos+1]
 				lastPos = pos
-				if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
-					return e
+				if posCode != nil {
+					if e = hc.encode(posCode.code, posCode.codeBits); e != nil {
+						return e
+					}
 				}
 				var code uint64 // Code of the pattern
 				if code, e = binary.ReadUvarint(r); e != nil {
@@ -596,8 +599,10 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 					uncoveredCount += int(pos) - lastUncovered
 				}
 				lastUncovered = int(pos) + len(patternCode.word)
-				if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
-					return e
+				if patternCode != nil {
+					if e = hc.encode(patternCode.code, patternCode.codeBits); e != nil {
+						return e
+					}
 				}
 			}
 			if int(l) > lastUncovered {
@@ -665,8 +670,13 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				j++
 			}
 		}
-		//log.Info("Suffix array filtered")
-		// invert suffixes
+		// Now create an inverted array - we reuse the second half of suffix array for that
+		/*
+			inv := sa[:n]
+			for i := 0; i < n; i++ {
+				inv[filtered[i]] = int32(i)
+			}
+		*/
 		inv := make([]int32, n)
 		for i := 0; i < n; i++ {
 			inv[filtered[i]] = int32(i)
@@ -752,9 +762,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					new = true
 				}
 
-				//if !new {
 				if !new && !prevSkipped {
-					//prevSkipped = true
 					break
 				}
 
@@ -770,13 +778,6 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 					}
 				}
 
-				//if (l <= 8 && repeats < 500) ||
-				//	(l > 8 && l <= 32 && repeats < 20) ||
-				//	(l == 64 && repeats < 10) ||
-				//	(l > 64 && repeats < 30) {
-				//	prevSkipped = true
-				//	continue
-				//}
 				if (l < 8 && repeats < int(minPatternScore)) ||
 					(l > 64 && repeats < 200) {
 					prevSkipped = true
@@ -878,8 +879,13 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 	defer f.Close()
 	r := bufio.NewReaderSize(f, etl.BufIOSize)
 	buf := make([]byte, 4096)
-	l, e := binary.ReadUvarint(r)
-	for ; e == nil; l, e = binary.ReadUvarint(r) {
+	for l, e := binary.ReadUvarint(r); ; l, e = binary.ReadUvarint(r) {
+		if e != nil {
+			if errors.Is(e, io.EOF) {
+				break
+			}
+			return e
+		}
 		if len(buf) < int(l) {
 			buf = make([]byte, l)
 		}
@@ -889,9 +895,6 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 		if err := walker(buf[:l]); err != nil {
 			return err
 		}
-	}
-	if e != nil && !errors.Is(e, io.EOF) {
-		return e
 	}
 	return nil
 }
