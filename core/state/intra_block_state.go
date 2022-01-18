@@ -80,74 +80,21 @@ type IntraBlockState struct {
 	tracer         StateTracer
 	trace          bool
 	accessList     *accessList
+	balanceInc     map[common.Address]*uint256.Int // Map of balance increases (without first reading the account)
 }
 
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{
 		stateReader:       stateReader,
-		stateObjects:      make(map[common.Address]*stateObject),
-		stateObjectsDirty: make(map[common.Address]struct{}),
-		nilAccounts:       make(map[common.Address]struct{}),
-		logs:              make(map[common.Hash][]*types.Log),
+		stateObjects:      map[common.Address]*stateObject{},
+		stateObjectsDirty: map[common.Address]struct{}{},
+		nilAccounts:       map[common.Address]struct{}{},
+		logs:              map[common.Hash][]*types.Log{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
+		balanceInc:        map[common.Address]*uint256.Int{},
 	}
-}
-
-// Copy creates a deep, independent copy of the state.
-// Snapshots of the copied state cannot be applied to the copy.
-func (sdb *IntraBlockState) Copy() *IntraBlockState {
-	// Copy all the basic fields, initialize the memory ones
-	ibs := &IntraBlockState{
-		stateReader:       sdb.stateReader,
-		stateObjects:      make(map[common.Address]*stateObject, len(sdb.journal.dirties)),
-		stateObjectsDirty: make(map[common.Address]struct{}, len(sdb.journal.dirties)),
-		nilAccounts:       make(map[common.Address]struct{}),
-		refund:            sdb.refund,
-		logs:              make(map[common.Hash][]*types.Log, len(sdb.logs)),
-		logSize:           sdb.logSize,
-		journal:           newJournal(),
-	}
-	// Copy the dirty states, logs, and preimages
-	for addr := range sdb.journal.dirties {
-		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
-		// and in the Finalise-method, there is a case where an object is in the journal but not
-		// in the stateObjects: OOG after touch on ripeMD prior to Byzantium. Thus, we need to check for
-		// nil
-		if object, exist := sdb.stateObjects[addr]; exist {
-			// Even though the original object is dirty, we are not copying the journal,
-			// so we need to make sure that anyside effect the journal would have caused
-			// during a commit (or similar op) is already applied to the copy.
-			ibs.stateObjects[addr] = object.deepCopy(ibs)
-			ibs.stateObjectsDirty[addr] = struct{}{} // Mark the copy dirty to force internal (code/state) commits
-		}
-	}
-	// Above, we don't copy the actual journal. This means that if the copy is copied, the
-	// loop above will be a no-op, since the copy's journal is empty.
-	// Thus, here we iterate over stateObjects, to enable copies of copies
-	for addr := range sdb.stateObjectsDirty {
-		if _, exist := ibs.stateObjects[addr]; !exist {
-			ibs.stateObjects[addr] = sdb.stateObjects[addr].deepCopy(ibs)
-		}
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	for hash, logs := range sdb.logs {
-		cpy := make([]*types.Log, len(logs))
-		for i, l := range logs {
-			cpy[i] = new(types.Log)
-			*cpy[i] = *l
-		}
-		ibs.logs[hash] = cpy
-	}
-	// comment from https://github.com/ethereum/go-ethereum/commit/6487c002f6b47e08cb9814f16712c6789b313a97#diff-c3757dc9e9d868f63bc84a0cc67159c1d5c22cc5d8c9468757098f0492e0658cR705
-	// Do we need to copy the access list? In practice: No. At the start of a
-	// transaction, the access list is empty. In practice, we only ever copy state
-	// _between_ transactions/blocks, never in the middle of a transaction.
-	// However, it doesn't cost us much to copy an empty list, so we do it anyway
-	// to not blow up if we ever decide copy it in the middle of a transaction
-	ibs.accessList = sdb.accessList.Copy()
-	return ibs
 }
 
 func (sdb *IntraBlockState) SetTracer(tracer StateTracer) {
@@ -394,6 +341,16 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
+	// If this account has not been read, add to the balance increment map
+	if _, ok := sdb.stateObjects[addr]; !ok {
+		var b *uint256.Int
+		if b, ok = sdb.balanceInc[addr]; !ok {
+			b = &uint256.Int{}
+			sdb.balanceInc[addr] = b
+		}
+		b.Add(b, amount)
+		return
+	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -568,6 +525,11 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
 		stateObject = sdb.createObject(addr, nil /* previous */)
+	}
+	// If there were balance increases earlier, merged them into the object and remove
+	if b, ok := sdb.balanceInc[addr]; ok {
+		stateObject.AddBalance(b)
+		delete(sdb.balanceInc, addr)
 	}
 	return stateObject
 }
