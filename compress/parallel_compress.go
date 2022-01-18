@@ -185,12 +185,10 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 		// First 8 bytes are idx
 		n := binary.PutUvarint(numBuf, uint64(len(input)-8))
 		output = append(output[:0], numBuf[:n]...)
-		if len(input) > 8 {
-			output, patterns, uncovered = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, uncovered, patterns, cellRing, posMap)
-			if err := collector.Collect(input[:8], output); err != nil {
-				log.Error("Could not collect", "error", err)
-				return
-			}
+		output, patterns, uncovered = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, uncovered, patterns, cellRing, posMap)
+		if err := collector.Collect(input[:8], output); err != nil {
+			log.Error("Could not collect", "error", err)
+			return
 		}
 		inputSize.Add(1 + uint64(len(input)-8))
 		outputSize.Add(uint64(len(output)))
@@ -344,7 +342,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 		huffs = append(huffs, h)
 	}
 	root := &PatternHuff{}
-	if len(patternList) > 0 {
+	if codeHeap.Len() > 0 {
 		root = heap.Pop(&codeHeap).(*PatternHuff)
 	}
 	var cf *os.File
@@ -569,7 +567,11 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 				return e
 			}
 		}
-		if l > 0 {
+		if l == 0 {
+			if e = hc.flush(); e != nil {
+				return e
+			}
+		} else {
 			var pNum uint64 // Number of patterns
 			if pNum, e = binary.ReadUvarint(r); e != nil {
 				return e
