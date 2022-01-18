@@ -252,7 +252,7 @@ In this case: increase default rate-limit - amount of requests server handle sim
 will wait. Increase it - if your 'hot data' is small or have much RAM or see "request timeout" while server load is low.
 
 ```
-./build/bin/turbo --private.api.addr=localhost:9090 --private.api.ratelimit=1024
+turbo-bor --private.api.addr=localhost:9090 --private.api.ratelimit=1024
 ```
 
 ### Server load too high
