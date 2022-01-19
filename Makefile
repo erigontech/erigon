@@ -129,7 +129,6 @@ clean:
 
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
-	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
@@ -153,4 +152,5 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
-	@git submodule update --init --recursive --force || true # Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule update --init --recursive --force || true
