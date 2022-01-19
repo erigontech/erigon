@@ -42,8 +42,7 @@ type BlocksSnapshot struct {
 	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
 	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
 
-	From uint64 // included
-	To   uint64 // excluded
+	From, To uint64 // [from,to)
 }
 
 type SnapshotType string
@@ -503,34 +502,34 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
 	for i := blockFrom; i < blockTo; i += blocksPerFile {
-		if err := dumpBlocksRange(ctx, i, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+		if err := dumpBlocksRange(ctx, i+blocksPerFile, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
 			return err
 		}
 	}
 	return nil
 }
-func dumpBlocksRange(ctx context.Context, blockFrom, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
-	fileName := FileName(blockFrom, blockFrom+blocksPerFile, Bodies)
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
+	fileName := FileName(blockFrom, blockTo, Bodies)
 	tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 	log.Info("Creating", "file", fileName)
 
-	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, int(blocksPerFile), workers); err != nil {
+	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
 	_ = os.Remove(tmpFilePath)
 
-	fileName = FileName(blockFrom, blockFrom+blocksPerFile, Headers)
+	fileName = FileName(blockFrom, blockTo, Headers)
 	tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 	log.Info("Creating", "file", fileName)
-	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, int(blocksPerFile), workers); err != nil {
+	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
 	_ = os.Remove(tmpFilePath)
 
-	fileName = FileName(blockFrom, blockFrom+blocksPerFile, Transactions)
+	fileName = FileName(blockFrom, blockTo, Transactions)
 	tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
 	log.Info("Creating", "file", fileName)
-	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, int(blocksPerFile), workers); err != nil {
+	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
 	_ = os.Remove(tmpFilePath)
@@ -539,7 +538,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blocksPerFile uint64, tmpDi
 
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBlock uint64, blocksAmount, workers int) (firstTxID uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockFrom, blockTo uint64, workers int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -561,12 +560,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 
 	firstIDSaved := false
 
-	from := dbutils.EncodeBlockNumber(fromBlock)
+	from := dbutils.EncodeBlockNumber(blockFrom)
 	var lastBody types.BodyForStorage
 	var sender [20]byte
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= fromBlock+uint64(blocksAmount) {
+		if blockNum >= blockTo {
 			return false, nil
 		}
 
@@ -650,7 +649,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 	return firstTxID, nil
 }
 
-func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
+func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -661,10 +660,10 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	defer f.Close()
 
 	key := make([]byte, 8+32)
-	from := dbutils.EncodeBlockNumber(fromBlock)
+	from := dbutils.EncodeBlockNumber(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= fromBlock+uint64(blocksAmount) {
+		if blockNum >= blockTo {
 			return false, nil
 		}
 		copy(key, k)
@@ -707,7 +706,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	return nil
 }
 
-func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -718,10 +717,10 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	defer f.Close()
 
 	key := make([]byte, 8+32)
-	from := dbutils.EncodeBlockNumber(fromBlock)
+	from := dbutils.EncodeBlockNumber(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= fromBlock+uint64(blocksAmount) {
+		if blockNum >= blockTo {
 			return false, nil
 		}
 		copy(key, k)
