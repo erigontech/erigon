@@ -483,15 +483,6 @@ if ($BuildTarget -eq "clean") {
     $binaries = @()
 
     if ($BuildTarget -eq "all" -or $BuildTarget -eq "erigon") {
-        if(-not $Erigon.Submodules) {
-            Write-Host " Updating git submodules ..."
-            $success = Invoke-Expression -Command "git.exe submodule update --init --recursive --force"
-            if(-not $success) {
-                Write-Host " ERROR : Update submodules failed"
-                exit 1
-            }
-            $Erigon.Submodules = $true
-        }
         $binary = New-Object -TypeName psobject -Property @{
             Executable="erigon.exe" 
             Source="./cmd/erigon"
@@ -548,15 +539,6 @@ if ($BuildTarget -eq "clean") {
     }
 
     if ($BuildTarget -eq "all" -or $BuildTarget -eq "downloader") {
-        if(-not $Erigon.Submodules) {
-            Write-Host " Updating git submodules ..."
-            $success = Invoke-Expression -Command "git.exe submodule update --init --recursive --force"
-            if(-not $success) {
-                Write-Host " ERROR : Update submodules failed"
-                exit 1
-            }
-            $Erigon.Submodules = $true
-        }
         $binary = New-Object -TypeName psobject -Property @{
             Executable="downloader.exe" 
             Source="./cmd/downloader"
@@ -566,6 +548,17 @@ if ($BuildTarget -eq "clean") {
 
     if ($binaries.Count -gt 0) {
         $binaries | ForEach-Object {
+            if($_.Executable -ieq "erigon.exe" -or $_.Executable -ieq "downloader.exe") {
+                if(-not $Erigon.Submodules) {
+                    Write-Host " Updating git submodules ..."
+                    Invoke-Expression -Command "git.exe submodule update --init --recursive --force" | Out-Host
+                    if($LASTEXITCODE) {
+                        Write-Host " ERROR : Update submodules failed"
+                        exit 1
+                    }
+                    $Erigon.Submodules = $true
+                }
+            }
             Write-Host "`n Building $($_.Executable)"
             $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
             $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
