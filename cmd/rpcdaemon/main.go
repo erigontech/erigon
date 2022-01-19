@@ -3,17 +3,17 @@ package main
 import (
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
 func main() {
 	cmd, cfg := cli.RootCommand()
-	rootCtx, rootCancel := utils.RootContext()
+	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
 		db, backend, txPool, mining, stateCache, blockReader, err := cli.RemoteServices(cmd.Context(), *cfg, logger, rootCancel)

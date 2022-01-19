@@ -7,10 +7,10 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"path/filepath"
 	"runtime"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -79,7 +79,7 @@ var (
 )
 
 func doIndicesCommand(cliCtx *cli.Context) error {
-	ctx, cancel := utils.RootContext()
+	ctx, cancel := common.RootContext()
 	defer cancel()
 
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
@@ -98,7 +98,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 func doSnapshotCommand(cliCtx *cli.Context) error {
-	ctx, cancel := utils.RootContext()
+	ctx, cancel := common.RootContext()
 	defer cancel()
 
 	fromBlock := cliCtx.Uint64(SnapshotFromFlag.Name)
@@ -187,35 +187,8 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	if workers < 1 {
 		workers = 1
 	}
-
-	for i := fromBlock; i < last; i += blocksPerFile {
-		fileName := snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Bodies)
-		tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
-		log.Info("Creating", "file", fileName)
-
-		if err := snapshotsync.DumpBodies(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(tmpFilePath)
-
-		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Headers)
-		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
-		log.Info("Creating", "file", fileName)
-		if err := snapshotsync.DumpHeaders(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(tmpFilePath)
-
-		fileName = snapshotsync.FileName(i, i+blocksPerFile, snapshotsync.Transactions)
-		tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
-		log.Info("Creating", "file", fileName)
-		if _, err := snapshotsync.DumpTxs(ctx, chainDB, segmentFile, tmpDir, i, int(blocksPerFile), workers); err != nil {
-			panic(err)
-		}
-		_ = os.Remove(tmpFilePath)
-
-		//nolint
-		//break // TODO: remove me - useful for tests
+	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+		panic(err)
 	}
 	return nil
 }

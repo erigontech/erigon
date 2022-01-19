@@ -183,7 +183,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// Apply special hacks for BSC params
 	if chainConfig.Parlia != nil {
 		params.ApplyBinanceSmartChainParams()
-		vm.ApplyBinanceSmartChainEIPs()
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())

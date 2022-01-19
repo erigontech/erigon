@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -86,7 +87,7 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	ctx, cancel := utils.RootContext()
+	ctx, cancel := common.RootContext()
 	defer cancel()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
