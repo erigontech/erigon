@@ -95,6 +95,10 @@ devnettest:
 db-tools: git-submodules
 	@echo "Building db-tools"
 
+	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	rm -rf libmdbx
+	git submodule update libmdbx --init --recursive --force
+
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
