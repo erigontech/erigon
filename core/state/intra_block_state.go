@@ -739,6 +739,9 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
+	for addr := range sdb.balanceInc {
+		sdb.getStateObject(addr)
+	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, isDirty); err != nil {
