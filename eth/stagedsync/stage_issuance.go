@@ -1,18 +1,24 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -47,6 +53,9 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
+	if headNumber == s.BlockNumber {
+		return nil
+	}
 	if cfg.chainConfig.Consensus != params.EtHashConsensus {
 		if err = s.Update(tx, headNumber); err != nil {
 			return err
@@ -75,23 +84,36 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	stopped := false
 	prevProgress := s.BlockNumber
 	currentBlockNumber := s.BlockNumber + 1
-	for ; currentBlockNumber < headNumber && !stopped; currentBlockNumber++ {
+	headerC, err := tx.Cursor(kv.Headers)
+	if err != nil {
+		return err
+	}
+	for k, v, err := headerC.Seek(dbutils.EncodeBlockNumber(currentBlockNumber)); k != nil && !stopped; k, v, err = headerC.Next() {
+		if err != nil {
+			return err
+		}
+
+		if len(k) != 40 {
+			continue
+		}
+
+		currentBlockNumber, err := dbutils.DecodeBlockNumber(k[:8])
+		if err != nil {
+			return err
+		}
 		// read body without transactions
 		hash, err := rawdb.ReadCanonicalHash(tx, currentBlockNumber)
 		if err != nil {
 			return err
 		}
-		body, err := cfg.blockReader.Body(ctx, tx, hash, currentBlockNumber)
-		if err != nil {
-			return err
-		}
-		header, err := cfg.blockReader.Header(ctx, tx, hash, currentBlockNumber)
-		if err != nil {
-			return err
-		}
 
-		if header == nil {
-			return fmt.Errorf("could not find block header for number: %d", currentBlockNumber)
+		if hash != common.BytesToHash(k[8:]) {
+			continue
+		}
+		var header types.Header
+		if err := rlp.Decode(bytes.NewReader(v), &header); err != nil {
+			log.Error("Invalid block header RLP", "hash", hash, "err", err)
+			return nil
 		}
 
 		burnt := big.NewInt(0)
@@ -105,7 +127,17 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			// Proof-of-stake is 0.3 ether per block
 			totalIssued.Add(totalIssued, serenity.RewardSerenity)
 		} else {
-			blockReward, uncleRewards := ethash.AccumulateRewards(cfg.chainConfig, header, body.Uncles)
+			var blockReward uint256.Int
+			var uncleRewards []uint256.Int
+			if header.UncleHash == types.EmptyUncleHash {
+				blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, nil)
+			} else {
+				body, err := cfg.blockReader.Body(ctx, tx, hash, currentBlockNumber)
+				if err != nil {
+					return err
+				}
+				blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, body.Uncles)
+			}
 			// Set BlockReward
 			totalIssued.Add(totalIssued, blockReward.ToBig())
 			// Compute uncleRewards
