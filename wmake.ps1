@@ -563,8 +563,8 @@ if ($BuildTarget -eq "clean") {
             $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
             $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
             $BuildCommand += ';$?'
-            $success = Invoke-Expression -Command $BuildCommand
-            if (-not $success) {
+            Invoke-Expression -Command $BuildCommand | Out-Null
+            if ($LASTEXITCODE) {
                 Write-Host " ERROR : Could not build $($_.Executable)"
                 exit 1
             } else {
