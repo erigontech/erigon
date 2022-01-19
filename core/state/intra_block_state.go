@@ -128,6 +128,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.logSize = 0
 	sdb.clearJournalAndRefund()
 	sdb.accessList = newAccessList()
+	sdb.balanceInc = make(map[common.Address]*uint256.Int)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
