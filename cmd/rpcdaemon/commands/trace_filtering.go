@@ -232,84 +232,48 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
-	var allBlocks roaring64.Bitmap
+	var (
+		allBlocks roaring64.Bitmap
+		blocksTo  roaring64.Bitmap
+	)
+
+	for _, addr := range req.FromAddress {
+		if addr != nil {
+			b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
+			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
+				stream.WriteNil()
+				return err
+			}
+			allBlocks.Or(b)
+			fromAddresses[*addr] = struct{}{}
+		}
+	}
+
+	for _, addr := range req.ToAddress {
+		if addr != nil {
+			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
+			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
+				stream.WriteNil()
+				return err
+			}
+			blocksTo.Or(b)
+			toAddresses[*addr] = struct{}{}
+		}
+	}
+
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		if len(req.FromAddress) == 0 || len(req.ToAddress) == 0 {
-			return fmt.Errorf("invalid parameters: for intersection mode both fromAddress and toAddress should be not empty")
-		}
-
-		addrIntersection := make(map[common.Address]struct{})
-		for _, addr := range req.FromAddress {
-			if addr == nil {
-				continue
-			}
-			addrIntersection[*addr] = struct{}{}
-		}
-
-		for _, addr := range req.ToAddress {
-			if addr == nil {
-				continue
-			}
-
-			if _, exist := addrIntersection[*addr]; !exist {
-				continue
-			}
-
-			fromAddresses[*addr] = struct{}{}
-			toAddresses[*addr] = struct{}{}
-
-			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				stream.WriteNil()
-				return err
-			}
-
-			if b != nil {
-				allBlocks.Or(b)
-			}
-
-			b, err = bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil && !errors.Is(err, ethdb.ErrKeyNotFound) {
-				stream.WriteNil()
-				return err
-			}
-
-			if b != nil {
-				allBlocks.Or(b)
-			}
-		}
+		allBlocks.And(&blocksTo)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		for _, addr := range req.FromAddress {
-			if addr != nil {
-				b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-				if err != nil {
-					if errors.Is(err, ethdb.ErrKeyNotFound) {
-						continue
-					}
-					stream.WriteNil()
-					return err
-				}
-				allBlocks.Or(b)
-				fromAddresses[*addr] = struct{}{}
-			}
-		}
-		for _, addr := range req.ToAddress {
-			if addr != nil {
-				b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-				if err != nil {
-					if errors.Is(err, ethdb.ErrKeyNotFound) {
-						continue
-					}
-					stream.WriteNil()
-					return err
-				}
-				allBlocks.Or(b)
-				toAddresses[*addr] = struct{}{}
-			}
-		}
+		allBlocks.Or(&blocksTo)
 	}
 
 	// Special case - if no addresses specified, take all traces
