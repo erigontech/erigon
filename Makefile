@@ -92,7 +92,7 @@ devnettest:
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
 	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
 
-db-tools: git-submodules
+db-tools:
 	@echo "Building db-tools"
 
 	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
