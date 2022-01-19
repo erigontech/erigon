@@ -368,24 +368,6 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-	/*
-		for i := sn.MaxAvailable + 1; i < s.ForwardProgress-params.FullImmutabilityThreshold; i++ {
-			hash, err := rawdb.ReadCanonicalHash(tx, i)
-			if err != nil {
-				return fmt.Errorf("failed ReadCanonicalHash: %w", err)
-			}
-			if hash == (common.Hash{}) {
-				break
-			}
-			//TODO: optimize - we don't need deserialize
-			block, _, err := rawdb.ReadBlockWithSenders(tx, hash, i)
-			if err != nil {
-				return err
-			}
-			sn.AppendRuntime()
-
-		}
-	*/
 	if !cfg.prune.TxIndex.Enabled() {
 		return nil
 	}
