@@ -357,9 +357,6 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	if !cfg.prune.TxIndex.Enabled() {
-		return nil
-	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
@@ -371,7 +368,9 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		defer tx.Rollback()
 	}
-
+	if !cfg.prune.TxIndex.Enabled() {
+		return nil
+	}
 	if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
 		return err
 	}

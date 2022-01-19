@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -40,7 +40,7 @@ var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -57,7 +57,7 @@ var cmdCompareStates = &cobra.Command{
 	Use:   "compare_states",
 	Short: "compare state buckets to buckets in '--chaindata.reference'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		if referenceChaindata == "" {
 			referenceChaindata = chaindata + "-copy"
 		}
@@ -74,7 +74,7 @@ var cmdMdbxToMdbx = &cobra.Command{
 	Use:   "mdbx_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		err := mdbxToMdbx(ctx, logger, chaindata, toChaindata)
 		if err != nil {
@@ -89,7 +89,7 @@ var cmdFToMdbx = &cobra.Command{
 	Use:   "f_to_mdbx",
 	Short: "copy data from '--chaindata' to '--chaindata.to'",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		err := fToMdbx(ctx, logger, toChaindata)
 		if err != nil {

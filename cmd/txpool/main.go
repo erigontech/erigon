@@ -6,6 +6,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -151,7 +152,7 @@ var rootCmd = &cobra.Command{
 }
 
 func main() {
-	ctx, cancel := utils.RootContext()
+	ctx, cancel := common.RootContext()
 	defer cancel()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
