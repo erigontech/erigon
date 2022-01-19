@@ -14,6 +14,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -72,7 +73,7 @@ func withDatadir(cmd *cobra.Command) {
 }
 
 func main() {
-	ctx, cancel := utils.RootContext()
+	ctx, cancel := common.RootContext()
 	defer cancel()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

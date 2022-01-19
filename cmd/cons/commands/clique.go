@@ -15,13 +15,13 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_cons "github.com/ledgerwatch/erigon-lib/gointerfaces/consensus"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
@@ -49,7 +49,7 @@ var cliqueCmd = &cobra.Command{
 	Use:   "clique",
 	Short: "Run clique consensus engine",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		return cliqueEngine(ctx, logger)
 	},

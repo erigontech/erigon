@@ -14,6 +14,7 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/tracker"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -34,7 +35,7 @@ func init() {
 }
 
 func main() {
-	ctx, cancel := utils.RootContext()
+	ctx, cancel := common2.RootContext()
 	defer cancel()
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

@@ -10,11 +10,11 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_testing "github.com/ledgerwatch/erigon-lib/gointerfaces/testing"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -42,7 +42,7 @@ var cmdTestCore = &cobra.Command{
 	Use:   "test_core",
 	Short: "Test server for testing core of Erigon or equivalent component",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common.RootContext()
 
 		if err := testCore(ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -56,7 +56,7 @@ var cmdTestCons = &cobra.Command{
 	Use:   "test_cons",
 	Short: "Integration test for consensus engine",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common.RootContext()
 		if err := testCons(ctx); err != nil {
 			log.Error("Error", "err", err)
 			return err

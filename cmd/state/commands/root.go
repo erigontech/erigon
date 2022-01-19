@@ -1,18 +1,15 @@
 package commands
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
 	"path"
-	"syscall"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -24,24 +21,6 @@ var (
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
-}
-
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
 }
 
 var rootCmd = &cobra.Command{
@@ -80,7 +59,9 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 }
 
 func Execute() {
-	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}

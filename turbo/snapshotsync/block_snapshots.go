@@ -349,6 +349,11 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 	return nil
 }
 
+// RetireBlocks - [from, to)
+func (s *AllSnapshots) RetireBlocks(from, to uint64) (err error) {
+	return nil
+}
+
 func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 	files, err := segmentsOfType(dir, ofType)
 	if err != nil {
