@@ -39,7 +39,7 @@ geth: erigon
 erigon: go-version
 	@echo "Building Erigon"
 	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
-	@git submodule update --init --recursive --force || true
+	@git submodule update --init --recursive --force || true # Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
@@ -97,7 +97,7 @@ evm:
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
 downloader:
-	@git submodule update --init --recursive --force || true
+	@git submodule update --init --recursive --force || true # Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
 	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
