@@ -33,17 +33,17 @@ import (
 )
 
 type HeadersCfg struct {
-	db                kv.RwDB
-	hd                *headerdownload.HeaderDownload
-	chainConfig       params.ChainConfig
-	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
-	announceNewHashes func(context.Context, []headerdownload.Announce)
-	penalize          func(context.Context, []headerdownload.PenaltyItem)
-	batchSize         datasize.ByteSize
-	noP2PDiscovery    bool
-	tmpdir            string
-	reverseDownloadCh chan privateapi.PayloadMessage
-	waitingPosHeaders *uint32 // atomic boolean flag
+	db                    kv.RwDB
+	hd                    *headerdownload.HeaderDownload
+	chainConfig           params.ChainConfig
+	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
+	announceNewHashes     func(context.Context, []headerdownload.Announce)
+	penalize              func(context.Context, []headerdownload.PenaltyItem)
+	batchSize             datasize.ByteSize
+	noP2PDiscovery        bool
+	tmpdir                string
+	reverseDownloadCh     chan privateapi.PayloadMessage
+	waitingForBeaconChain *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
@@ -60,27 +60,27 @@ func StageHeadersCfg(
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
 	reverseDownloadCh chan privateapi.PayloadMessage,
-	waitingPosHeaders *uint32, // atomic boolean flag
+	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                 db,
-		hd:                 headerDownload,
-		chainConfig:        chainConfig,
-		headerReqSend:      headerReqSend,
-		announceNewHashes:  announceNewHashes,
-		penalize:           penalize,
-		batchSize:          batchSize,
-		tmpdir:             tmpdir,
-		noP2PDiscovery:     noP2PDiscovery,
-		reverseDownloadCh:  reverseDownloadCh,
-		waitingPosHeaders:  waitingPosHeaders,
-		snapshots:          snapshots,
-		snapshotDownloader: snapshotDownloader,
-		blockReader:        blockReader,
+		db:                    db,
+		hd:                    headerDownload,
+		chainConfig:           chainConfig,
+		headerReqSend:         headerReqSend,
+		announceNewHashes:     announceNewHashes,
+		penalize:              penalize,
+		batchSize:             batchSize,
+		tmpdir:                tmpdir,
+		noP2PDiscovery:        noP2PDiscovery,
+		reverseDownloadCh:     reverseDownloadCh,
+		waitingForBeaconChain: waitingForBeaconChain,
+		snapshots:             snapshots,
+		snapshotDownloader:    snapshotDownloader,
+		blockReader:           blockReader,
 	}
 }
 
@@ -135,8 +135,8 @@ func HeadersPOS(
 ) error {
 	log.Info("Waiting for beacon chain payloads...")
 
-	atomic.StoreUint32(cfg.waitingPosHeaders, 1)
-	defer atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
+	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	var payloadMessage privateapi.PayloadMessage
 	select {
@@ -147,7 +147,7 @@ func HeadersPOS(
 	case payloadMessage = <-cfg.reverseDownloadCh:
 	}
 
-	atomic.StoreUint32(cfg.waitingPosHeaders, 0)
+	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	cfg.hd.ClearPendingExecutionStatus()
 

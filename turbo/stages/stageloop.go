@@ -251,7 +251,7 @@ func NewStagedSync(
 	tmpdir string,
 	accumulator *shards.Accumulator,
 	reverseDownloadCh chan privateapi.PayloadMessage,
-	waitingForPOSHeaders *uint32,
+	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
@@ -274,7 +274,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
 			reverseDownloadCh,
-			waitingForPOSHeaders,
+			waitingForBeaconChain,
 			allSnapshots,
 			snapshotDownloader,
 			blockReader,
