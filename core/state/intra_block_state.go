@@ -357,9 +357,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
-	if stateObject != nil {
-		stateObject.AddBalance(amount)
-	}
+	stateObject.AddBalance(amount)
 }
 
 // SubBalance subtracts amount from the account associated with addr.
@@ -493,26 +491,9 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
-// Retrieve a state object given my the address. Returns nil if not found.
-func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
-	b, bInc := sdb.balanceInc[addr]
-
+func (sdb *IntraBlockState) getStateObjectNoBalanceAdds(addr common.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
-		if bInc {
-			if obj.deleted {
-				obj = sdb.createObject(addr, nil /* previous */)
-			}
-			obj.data.Balance.Add(&obj.data.Balance, b)
-			delete(sdb.balanceInc, addr)
-		}
-		return obj
-	}
-
-	if bInc {
-		obj := sdb.createObject(addr, nil /* previous */)
-		obj.data.Balance.Add(&obj.data.Balance, b)
-		delete(sdb.balanceInc, addr)
 		return obj
 	}
 
@@ -533,6 +514,19 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(obj)
+	return obj
+}
+
+// Retrieve a state object given my the address. Returns nil if not found.
+func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
+	obj := sdb.getStateObjectNoBalanceAdds(addr)
+	if b, bInc := sdb.balanceInc[addr]; bInc {
+		if obj == nil || obj.deleted {
+			obj = sdb.createObject(addr, nil /* previous */)
+		}
+		obj.data.Balance.Add(&obj.data.Balance, b)
+		delete(sdb.balanceInc, addr)
+	}
 	return obj
 }
 
@@ -715,13 +709,9 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 	for addr := range sdb.journal.dirties {
 		var so *stateObject
 		var exist bool
-		if b, ok := sdb.balanceInc[addr]; ok {
-			if so, ok = sdb.stateObjects[addr]; !ok || so.deleted {
-				so = sdb.createObject(addr, nil /* previous */)
-			}
-			exist = true
-			so.data.Balance.Add(&so.data.Balance, b)
-			delete(sdb.balanceInc, addr)
+		if _, ok := sdb.balanceInc[addr]; ok {
+			so = sdb.getStateObject(addr)
+			exist = so != nil
 		}
 		if !exist {
 			so, exist = sdb.stateObjects[addr]
@@ -753,13 +743,8 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
-	for addr, b := range sdb.balanceInc {
-		so, ok := sdb.stateObjects[addr]
-		if !ok || so.deleted {
-			so = sdb.createObject(addr, nil /* previous */)
-		}
-		so.data.Balance.Add(&so.data.Balance, b)
-		delete(sdb.balanceInc, addr)
+	for addr := range sdb.balanceInc {
+		sdb.getStateObject(addr)
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]

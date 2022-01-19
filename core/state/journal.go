@@ -206,8 +206,7 @@ func (ch balanceIncrease) revert(s *IntraBlockState) {
 			delete(s.balanceInc, *ch.account)
 		}
 	} else {
-		so := s.getStateObject(*ch.account)
-		if so != nil {
+		if so, ok := s.stateObjects[*ch.account]; ok {
 			so.data.Balance.Sub(&so.data.Balance, &ch.increase)
 		}
 	}
