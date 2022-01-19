@@ -501,6 +501,42 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 	return from * 1_000, to * 1_000, snapshotType, nil
 }
 
+func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
+	for i := blockFrom; i < blockTo; i += blocksPerFile {
+		if err := dumpBlocksRange(ctx, i, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func dumpBlocksRange(ctx context.Context, blockFrom, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
+	fileName := FileName(blockFrom, blockFrom+blocksPerFile, Bodies)
+	tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
+	log.Info("Creating", "file", fileName)
+
+	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, int(blocksPerFile), workers); err != nil {
+		return err
+	}
+	_ = os.Remove(tmpFilePath)
+
+	fileName = FileName(blockFrom, blockFrom+blocksPerFile, Headers)
+	tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
+	log.Info("Creating", "file", fileName)
+	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, int(blocksPerFile), workers); err != nil {
+		return err
+	}
+	_ = os.Remove(tmpFilePath)
+
+	fileName = FileName(blockFrom, blockFrom+blocksPerFile, Transactions)
+	tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
+	log.Info("Creating", "file", fileName)
+	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, int(blocksPerFile), workers); err != nil {
+		return err
+	}
+	_ = os.Remove(tmpFilePath)
+	return nil
+}
+
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBlock uint64, blocksAmount, workers int) (firstTxID uint64, err error) {
