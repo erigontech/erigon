@@ -34,6 +34,7 @@ grpc:
 		remote/kv.proto remote/ethbackend.proto \
 		downloader/downloader.proto \
 		consensus_engine/consensus.proto \
+		starknet/cairo.proto \
 		testing/testing.proto \
 		txpool/txpool.proto txpool/mining.proto
 
