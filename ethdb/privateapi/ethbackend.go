@@ -322,7 +322,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	}
 }
 
-// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new bloc
+// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
@@ -331,24 +331,32 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	// Check if parent equate to the head
-	parent := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
+	beaconHeadHash := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
+
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	if parent != rawdb.ReadHeadHeaderHash(tx) {
-		// TODO(enriavil1): make unwind happen
+	beaconHeadHeader, err := rawdb.ReadHeaderByHash(tx, beaconHeadHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if beaconHeadHeader == nil || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: string(Syncing),
+			Status: "SYNCING",
 		}, nil
 	}
 
-	// Same if we are not waiting for the beacon chain
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+	if beaconHeadHash != rawdb.ReadHeadBlockHash(tx) {
+		// TODO(yperbasis): do the re-org
+	}
+
+	// If we are just updating forkchoice, this is enough
+	if req.Prepare == nil {
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: string(Syncing),
+			Status: "SUCCESS",
 		}, nil
 	}
 
