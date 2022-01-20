@@ -59,7 +59,7 @@ func (api *StarknetImpl) Call(ctx context.Context, request StarknetCallRequest, 
 	}
 
 	requestParams := &StarknetGrpcCallArgs{
-		Inputs:   strings.Join(request.CallData[:], ","),
+		Inputs:   strings.Join(request.CallData, ","),
 		Address:  request.ContractAddress.String(), //TODO: update address to Cairo format
 		Function: request.EntryPointSelector,
 		Code:     code.String(),

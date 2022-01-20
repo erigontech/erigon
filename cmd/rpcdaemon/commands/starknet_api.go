@@ -29,6 +29,6 @@ func NewStarknetAPI(base *BaseAPI, db kv.RoDB, client starknet.CAIROVMClient, tx
 		BaseAPI: base,
 		db:      db,
 		client:  client,
-		txPool: txPool,
+		txPool:  txPool,
 	}
 }
