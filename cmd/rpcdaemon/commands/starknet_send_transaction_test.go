@@ -3,6 +3,7 @@ package commands_test
 import (
 	"bytes"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
@@ -30,11 +31,12 @@ func TestErrorStarknetSendRawTransaction(t *testing.T) {
 	m, require := stages.MockWithTxPool(t), require.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
+	starknetClient := starknet.NewCAIROVMClient(conn)
 	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	for _, tt := range cases {
-		api := commands.NewStarknetAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, txPool)
+		api := commands.NewStarknetAPI(commands.NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), m.DB, starknetClient, txPool)
 
 		t.Run(tt.name, func(t *testing.T) {
 			hex, _ := hexutil.Decode(tt.tx)

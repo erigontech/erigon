@@ -262,6 +262,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_getLogsByHash                       | Yes     | Erigon only                                |
 | erigon_forks                               | Yes     | Erigon only                                |
 | erigon_issuance                            | Yes     | Erigon only                                |
+|                                            |         |                                            |
+| starknet_call                              | Yes     | Starknet only                              |
 
 This table is constantly updated. Please visit again.
 

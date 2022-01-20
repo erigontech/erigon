@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -13,18 +14,21 @@ import (
 type StarknetAPI interface {
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error)
+	Call(ctx context.Context, request StarknetCallRequest, blockNrOrHash rpc.BlockNumberOrHash) ([]string, error)
 }
 
 type StarknetImpl struct {
 	*BaseAPI
-	txPool txpool.TxpoolClient
 	db     kv.RoDB
+	client starknet.CAIROVMClient
+	txPool txpool.TxpoolClient
 }
 
-func NewStarknetAPI(base *BaseAPI, db kv.RoDB, txPool txpool.TxpoolClient) *StarknetImpl {
+func NewStarknetAPI(base *BaseAPI, db kv.RoDB, client starknet.CAIROVMClient, txPool txpool.TxpoolClient) *StarknetImpl {
 	return &StarknetImpl{
 		BaseAPI: base,
 		db:      db,
-		txPool:  txPool,
+		client:  client,
+		txPool: txPool,
 	}
 }
