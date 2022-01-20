@@ -101,6 +101,10 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		if err != nil {
 			return err
 		}
+		if currentBlockNumber > headNumber {
+			currentBlockNumber = headNumber
+			break
+		}
 		// read body without transactions
 		hash, err := rawdb.ReadCanonicalHash(tx, currentBlockNumber)
 		if err != nil {
@@ -194,9 +198,7 @@ func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err e
 }
 
 func PruneIssuanceStage(p *PruneState, tx kv.RwTx, ctx context.Context) (err error) {
-	useExternalTx := tx != nil
-
-	if !useExternalTx {
+	if tx != nil {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
