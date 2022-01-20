@@ -63,11 +63,7 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 	var data []byte
 	var err error
 	if ok {
-		if storage {
-			data, err = changeset.Mapper[csBucket].Find(changesC, changeSetBlock, key)
-		} else {
-			data, err = changeset.Mapper[csBucket].Find(changesC, changeSetBlock, key)
-		}
+		data, err = changeset.Mapper[csBucket].Find(changesC, changeSetBlock, key)
 		if err != nil {
 			if !errors.Is(err, changeset.ErrNotFound) {
 				return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
