@@ -19,8 +19,8 @@ Param(
     [Parameter(Position=0, 
     HelpMessage="Enter the build target")]
     [Alias("target")]
-    [ValidateSet("all", "clean", "test", "erigon","rpcdaemon","rpctest", "hack", "state", "integration", "db-tools", "sentry")]
-    [string[]]$BuildTargets=@("erigon","rpcdaemon","sentry","integration")
+    [ValidateSet("all", "clean", "test", "erigon", "rpcdaemon", "rpctest", "hack", "state", "integration", "db-tools", "sentry", "downloader")]
+    [string[]]$BuildTargets=@("erigon", "rpcdaemon", "sentry", "downloader", "integration")
 )
 
 # Sanity checks on $BuildTargets
@@ -362,11 +362,12 @@ if (!($?)) {
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
-$Erigon.Commit  = [string]@(git.exe rev-list -1 HEAD)
-$Erigon.Branch  = [string]@(git.exe rev-parse --abbrev-ref HEAD)
-$Erigon.Tag     = [string]@(git.exe describe --tags)
-$Erigon.Build   = "go build -v -trimpath -ldflags ""-X github.com/ledgerwatch/erigon/params.GitCommit=$($Erigon.Commit) -X github.com/ledgerwatch/erigon/params.GitBranch=$($Erigon.Branch) -X github.com/ledgerwatch/erigon/params.GitTag=$($Erigon.Tag)"""
-$Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
+$Erigon.Commit     = [string]@(git.exe rev-list -1 HEAD)
+$Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
+$Erigon.Tag        = [string]@(git.exe describe --tags)
+$Erigon.Build      = "go build -v -trimpath -ldflags ""-X github.com/ledgerwatch/erigon/params.GitCommit=$($Erigon.Commit) -X github.com/ledgerwatch/erigon/params.GitBranch=$($Erigon.Branch) -X github.com/ledgerwatch/erigon/params.GitTag=$($Erigon.Tag)"""
+$Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
+$Erigon.Submodules = $false
 $env:GO111MODULE = "on"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
@@ -536,15 +537,34 @@ if ($BuildTarget -eq "clean") {
         }
         $binaries += $binary
     }
-    
+
+    if ($BuildTarget -eq "all" -or $BuildTarget -eq "downloader") {
+        $binary = New-Object -TypeName psobject -Property @{
+            Executable="downloader.exe" 
+            Source="./cmd/downloader"
+        }
+        $binaries += $binary
+    }
+
     if ($binaries.Count -gt 0) {
         $binaries | ForEach-Object {
+            if($_.Executable -ieq "erigon.exe" -or $_.Executable -ieq "downloader.exe") {
+                if(-not $Erigon.Submodules) {
+                    Write-Host " Updating git submodules ..."
+                    Invoke-Expression -Command "git.exe submodule update --init --recursive --force" | Out-Host
+                    if($LASTEXITCODE) {
+                        Write-Host " ERROR : Update submodules failed"
+                        exit 1
+                    }
+                    $Erigon.Submodules = $true
+                }
+            }
             Write-Host "`n Building $($_.Executable)"
             $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
             $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
             $BuildCommand += ';$?'
-            $success = Invoke-Expression -Command $BuildCommand
-            if (-not $success) {
+            Invoke-Expression -Command $BuildCommand | Out-Null
+            if ($LASTEXITCODE) {
                 Write-Host " ERROR : Could not build $($_.Executable)"
                 exit 1
             } else {
