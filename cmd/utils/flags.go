@@ -1279,6 +1279,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.Snapshot.RetireEnabled = true
 	}
 
+	if ctx.Command.Name == "import" {
+		cfg.ImportMode = true
+	}
+
 	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)

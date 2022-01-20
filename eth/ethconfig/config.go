@@ -89,6 +89,8 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	BodyDownloadTimeoutSeconds: 30,
+
+	ImportMode: false,
 }
 
 func init() {
@@ -141,6 +143,8 @@ type Config struct {
 
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
+
+	ImportMode bool
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 

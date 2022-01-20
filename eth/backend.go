@@ -824,3 +824,23 @@ func (s *Ethereum) Stop() error {
 	}
 	return nil
 }
+
+func (s *Ethereum) ChainDB() kv.RwDB {
+	return s.chainDB
+}
+
+func (s *Ethereum) StagedSync() *stagedsync.Sync {
+	return s.stagedSync
+}
+
+func (s *Ethereum) Notifications() *stagedsync.Notifications {
+	return s.notifications
+}
+
+func (s *Ethereum) SentryCtx() context.Context {
+	return s.sentryCtx
+}
+
+func (s *Ethereum) SentryControlServer() *sentry.ControlServerImpl {
+	return s.sentryControlServer
+}
