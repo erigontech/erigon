@@ -515,7 +515,6 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	}
 
 	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Headers))
-	fmt.Printf("alex: %s\n", segmentFile)
 	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
@@ -696,9 +695,6 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	if err := f.Compress(); err != nil {
 		return err
 	}
-
-	s, err := os.Stat(segmentFilePath)
-	fmt.Printf("alex: %+v,%s\n", s, err)
 
 	return nil
 }
