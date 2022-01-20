@@ -547,6 +547,10 @@ var (
 		Name:  "experimental.snapshot",
 		Usage: "Enabling experimental snapshot sync",
 	}
+	SnapshotRetireFlag = cli.BoolFlag{
+		Name:  "experimental.snapshot.retire",
+		Usage: "Delete(!) old blocks from DB, by move them to snapshots",
+	}
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
@@ -1270,6 +1274,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
 		cfg.Snapshot.Dir = path.Join(nodeConfig.DataDir, "snapshots")
+	}
+	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
+		cfg.Snapshot.RetireEnabled = true
 	}
 
 	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)

@@ -18,13 +18,14 @@
 package ethconfig
 
 import (
-	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
@@ -118,6 +119,7 @@ func init() {
 
 type Snapshot struct {
 	Enabled             bool
+	RetireEnabled       bool
 	Dir                 string
 	ChainSnapshotConfig *snapshothashes.Config
 }

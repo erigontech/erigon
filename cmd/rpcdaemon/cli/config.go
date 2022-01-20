@@ -278,7 +278,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 				return nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot.Dir, snapshothashes.KnownConfig(cc.ChainName))
+			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, snapshothashes.KnownConfig(cc.ChainName))
 			if err := allSnapshots.ReopenSegments(); err != nil {
 				return nil, nil, nil, nil, nil, nil, err
 			}

@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -70,7 +71,7 @@ var (
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
 		Usage: "Amount of blocks in each segment",
-		Value: 500_000,
+		Value: snapshotsync.DEFAULT_SEGMENT_SIZE,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -91,7 +92,8 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	if rebuild {
-		if err := rebuildIndices(ctx, chainDB, snapshotDir, tmpDir); err != nil {
+		cfg := ethconfig.Snapshot{Dir: snapshotDir, RetireEnabled: true, Enabled: true}
+		if err := rebuildIndices(ctx, chainDB, cfg, tmpDir); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -121,17 +123,17 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, snapshotDir, tmpDir string) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, tmpDir string) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
-	_ = os.MkdirAll(snapshotDir, 0744)
+	_ = os.MkdirAll(cfg.Dir, 0744)
 
-	allSnapshots := snapshotsync.NewAllSnapshots(snapshotDir, snapshothashes.KnownConfig(chainConfig.ChainName))
+	allSnapshots := snapshotsync.NewAllSnapshots(cfg, snapshothashes.KnownConfig(chainConfig.ChainName))
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
+	idxFilesList, err := snapshotsync.IdxFiles(cfg.Dir)
 	if err != nil {
 		return err
 	}
@@ -202,7 +204,8 @@ func checkBlockSnapshot(chaindata string) error {
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
 
-	snapshots := snapshotsync.NewAllSnapshots(path.Join(dataDir, "snapshots"), snapshothashes.KnownConfig(chainConfig.ChainName))
+	cfg := ethconfig.Snapshot{Dir: path.Join(dataDir, "snapshots"), Enabled: true, RetireEnabled: true}
+	snapshots := snapshotsync.NewAllSnapshots(cfg, snapshothashes.KnownConfig(chainConfig.ChainName))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
