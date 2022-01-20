@@ -507,6 +507,9 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+			return sdb.createObject(addr, nil)
+		}
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
@@ -516,6 +519,9 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+			return sdb.createObject(addr, nil)
+		}
 		return nil
 	}
 
@@ -736,13 +742,13 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
-	for addr := range sdb.journal.dirties {
-		sdb.stateObjectsDirty[addr] = struct{}{}
-	}
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
+	}
+	for addr := range sdb.journal.dirties {
+		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
