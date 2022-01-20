@@ -18,13 +18,14 @@
 package ethconfig
 
 import (
-	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
@@ -88,6 +89,8 @@ var Defaults = Config{
 	RPCTxFeeCap: 1, // 1 ether
 
 	BodyDownloadTimeoutSeconds: 30,
+
+	ImportMode: false,
 }
 
 func init() {
@@ -118,6 +121,7 @@ func init() {
 
 type Snapshot struct {
 	Enabled             bool
+	RetireEnabled       bool
 	Dir                 string
 	ChainSnapshotConfig *snapshothashes.Config
 }
@@ -139,6 +143,8 @@ type Config struct {
 
 	Prune     prune.Mode
 	BatchSize datasize.ByteSize // Batch size for execution stage
+
+	ImportMode bool
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 

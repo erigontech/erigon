@@ -357,9 +357,6 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 }
 
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	if !cfg.prune.TxIndex.Enabled() {
-		return nil
-	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
@@ -372,10 +369,34 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
-		return err
+	if cfg.snapshots != nil && cfg.snapshots.Cfg().RetireEnabled {
+		if err := cfg.snapshots.EnsureExpectedBlocksAreAvailable(); err != nil {
+			return err
+		}
+		blockFrom := cfg.snapshots.BlocksAvailable() + 1
+		blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
+		if blockTo-blockFrom > 10_000 {
+			// in future we will do it in background
+			if err := snapshotsync.DumpBlocks(ctx, blockFrom, blockTo, snapshotsync.DEFAULT_SEGMENT_SIZE, cfg.tmpdir, cfg.snapshots.Dir(), cfg.db, 1); err != nil {
+				return err
+			}
+			if err := cfg.snapshots.ReopenSegments(); err != nil {
+				return err
+			}
+			if err := cfg.snapshots.ReopenIndices(); err != nil {
+				return err
+			}
+			if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
+				return nil
+			}
+		}
 	}
 
+	if cfg.prune.TxIndex.Enabled() {
+		if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
+			return err
+		}
+	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err

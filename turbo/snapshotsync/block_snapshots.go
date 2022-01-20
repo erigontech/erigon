@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
@@ -42,8 +43,7 @@ type BlocksSnapshot struct {
 	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
 	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
 
-	From uint64 // included
-	To   uint64 // excluded
+	From, To uint64 // [from,to)
 }
 
 type SnapshotType string
@@ -65,21 +65,12 @@ var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, name SnapshotType) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, name)
+func FileName(from, to uint64, t SnapshotType) string {
+	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, t)
 }
-
-func SegmentFileName(from, to uint64, name SnapshotType) string {
-	return FileName(from, to, name) + ".seg"
-}
-
-func TmpFileName(from, to uint64, name SnapshotType) string {
-	return FileName(from, to, name) + ".dat"
-}
-
-func IdxFileName(from, to uint64, name SnapshotType) string {
-	return FileName(from, to, name) + ".idx"
-}
+func SegmentFileName(from, to uint64, t SnapshotType) string { return FileName(from, to, t) + ".seg" }
+func DatFileName(from, to uint64, t SnapshotType) string     { return FileName(from, to, t) + ".dat" }
+func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(from, to, t) + ".idx" }
 
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
@@ -90,7 +81,8 @@ type AllSnapshots struct {
 	segmentsAvailable    uint64
 	idxAvailable         uint64
 	blocks               []*BlocksSnapshot
-	cfg                  *snapshothashes.Config
+	chainSnapshotCfg     *snapshothashes.Config
+	cfg                  ethconfig.Snapshot
 }
 
 // NewAllSnapshots - opens all snapshots. But to simplify everything:
@@ -98,20 +90,29 @@ type AllSnapshots struct {
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func NewAllSnapshots(dir string, cfg *snapshothashes.Config) *AllSnapshots {
-	if err := os.MkdirAll(dir, 0744); err != nil {
+func NewAllSnapshots(cfg ethconfig.Snapshot, snCfg *snapshothashes.Config) *AllSnapshots {
+	if err := os.MkdirAll(cfg.Dir, 0744); err != nil {
 		panic(err)
 	}
-	return &AllSnapshots{dir: dir, cfg: cfg}
+	return &AllSnapshots{dir: cfg.Dir, chainSnapshotCfg: snCfg, cfg: cfg}
 }
 
-func (s *AllSnapshots) ChainSnapshotConfig() *snapshothashes.Config { return s.cfg }
+func (s *AllSnapshots) ChainSnapshotConfig() *snapshothashes.Config { return s.chainSnapshotCfg }
+func (s *AllSnapshots) Cfg() ethconfig.Snapshot                     { return s.cfg }
+func (s *AllSnapshots) Dir() string                                 { return s.dir }
 func (s *AllSnapshots) AllSegmentsAvailable() bool                  { return s.allSegmentsAvailable }
 func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)              { s.allSegmentsAvailable = v }
 func (s *AllSnapshots) BlocksAvailable() uint64                     { return s.segmentsAvailable }
 func (s *AllSnapshots) AllIdxAvailable() bool                       { return s.allIdxAvailable }
 func (s *AllSnapshots) SetAllIdxAvailable(v bool)                   { s.allIdxAvailable = v }
 func (s *AllSnapshots) IndicesAvailable() uint64                    { return s.idxAvailable }
+
+func (s *AllSnapshots) EnsureExpectedBlocksAreAvailable() error {
+	if s.BlocksAvailable() < s.ChainSnapshotConfig().ExpectBlocks {
+		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", s.ChainSnapshotConfig().ExpectBlocks, s.BlocksAvailable())
+	}
+	return nil
+}
 
 func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
 	if headers, err = latestSegment(s.dir, Headers); err != nil {
@@ -214,7 +215,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 		if to == prevTo {
 			continue
 		}
-		if from > s.cfg.ExpectBlocks {
+		if from > s.chainSnapshotCfg.ExpectBlocks {
 			log.Debug("[open snapshots] skip snapshot because node expect less blocks in snapshots", "file", f)
 			continue
 		}
@@ -501,9 +502,37 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 	return from * 1_000, to * 1_000, snapshotType, nil
 }
 
+const DEFAULT_SEGMENT_SIZE = 500_000
+
+func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
+	for i := blockFrom; i < blockTo; i += blocksPerFile {
+		if err := dumpBlocksRange(ctx, i, i+blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
+	segmentFile := filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Bodies))
+	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
+		return err
+	}
+
+	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Headers))
+	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
+		return err
+	}
+
+	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Transactions))
+	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
+		return err
+	}
+	return nil
+}
+
 // DumpTxs -
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
-func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBlock uint64, blocksAmount, workers int) (firstTxID uint64, err error) {
+func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockFrom, blockTo uint64, workers int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -525,12 +554,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 
 	firstIDSaved := false
 
-	from := dbutils.EncodeBlockNumber(fromBlock)
+	from := dbutils.EncodeBlockNumber(blockFrom)
 	var lastBody types.BodyForStorage
 	var sender [20]byte
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= fromBlock+uint64(blocksAmount) {
+		if blockNum >= blockTo {
 			return false, nil
 		}
 
@@ -614,7 +643,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, fromBl
 	return firstTxID, nil
 }
 
-func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
+func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -625,10 +654,10 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	defer f.Close()
 
 	key := make([]byte, 8+32)
-	from := dbutils.EncodeBlockNumber(fromBlock)
+	from := dbutils.EncodeBlockNumber(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= fromBlock+uint64(blocksAmount) {
+		if blockNum >= blockTo {
 			return false, nil
 		}
 		copy(key, k)
@@ -667,11 +696,14 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	}); err != nil {
 		return err
 	}
+	if err := f.Compress(); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, fromBlock uint64, blocksAmount, workers int) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -682,10 +714,10 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	defer f.Close()
 
 	key := make([]byte, 8+32)
-	from := dbutils.EncodeBlockNumber(fromBlock)
+	from := dbutils.EncodeBlockNumber(blockFrom)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= fromBlock+uint64(blocksAmount) {
+		if blockNum >= blockTo {
 			return false, nil
 		}
 		copy(key, k)
@@ -716,6 +748,9 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		}
 		return true, nil
 	}); err != nil {
+		return err
+	}
+	if err := f.Compress(); err != nil {
 		return err
 	}
 	return nil

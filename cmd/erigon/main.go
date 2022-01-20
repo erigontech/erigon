@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/params"
+	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
@@ -14,7 +15,7 @@ import (
 
 func main() {
 	defer debug.LogPanic()
-	app := erigoncli.MakeApp(runErigon, erigoncli.DefaultFlags)
+	app := erigonapp.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

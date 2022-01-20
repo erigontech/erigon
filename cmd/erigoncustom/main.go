@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/urfave/cli"
@@ -23,7 +24,7 @@ const (
 // the regular main function
 func main() {
 	// initializing Erigon application here and providing our custom flag
-	app := erigoncli.MakeApp(runErigon,
+	app := erigonapp.MakeApp(runErigon,
 		append(erigoncli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.
 	)
 	if err := app.Run(os.Args); err != nil {
