@@ -825,6 +825,49 @@ func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader in
 	}
 }
 
+// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
+// Most common case - forking point is the height of the parent header
+func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *types.Header) (forkingPoint uint64, err error) {
+	blockHeight := header.Number.Uint64()
+	var ch common.Hash
+	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
+		ch = fromCache.(common.Hash)
+	} else {
+		if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
+			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
+		}
+	}
+	if ch == header.ParentHash {
+		forkingPoint = blockHeight - 1
+	} else {
+		// Going further back
+		ancestorHash := parent.ParentHash
+		ancestorHeight := blockHeight - 2
+		// Look in the cache first
+		for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
+			ch = fromCache.(common.Hash)
+			if ch == ancestorHash {
+				break
+			}
+			ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+			ancestorHash = ancestor.ParentHash
+			ancestorHeight--
+		}
+		// Now look in the DB
+		for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
+			ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+			ancestorHash = ancestor.ParentHash
+			ancestorHeight--
+		}
+		if err != nil {
+			return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+		}
+		// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
+		forkingPoint = ancestorHeight
+	}
+	return
+}
+
 func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
@@ -853,45 +896,9 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
 		hi.newCanonical = true
-		// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
-		// Most common case - forking point is the height of the parent header
-		var forkingPoint uint64
-		var ch common.Hash
-		var err error
-		if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
-			ch = fromCache.(common.Hash)
-		} else {
-			if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
-				return nil, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
-			}
-		}
-		if ch == header.ParentHash {
-			forkingPoint = blockHeight - 1
-		} else {
-			// Going further back
-			ancestorHash := parent.ParentHash
-			ancestorHeight := blockHeight - 2
-			// Look in the cache first
-			for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
-				ch = fromCache.(common.Hash)
-				if ch == ancestorHash {
-					break
-				}
-				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
-				ancestorHash = ancestor.ParentHash
-				ancestorHeight--
-			}
-			// Now look in the DB
-			for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
-				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
-				ancestorHash = ancestor.ParentHash
-				ancestorHeight--
-			}
-			if err != nil {
-				return nil, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
-			}
-			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
-			forkingPoint = ancestorHeight
+		forkingPoint, err := hi.ForkingPoint(db, header, parent)
+		if err != nil {
+			return nil, err
 		}
 		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
 			return nil, fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
