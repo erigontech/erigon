@@ -39,7 +39,7 @@ func NewTxPoolServer(ctx context.Context, txPool txPool) *TxPoolServer {
 }
 
 func (s *TxPoolServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
-	return MiningAPIVersion, nil
+	return TxPoolAPIVersion, nil
 }
 func (s *TxPoolServer) All(context.Context, *proto_txpool.AllRequest) (*proto_txpool.AllReply, error) {
 	pending, queued := s.txPool.Content()
