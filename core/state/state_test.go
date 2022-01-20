@@ -197,7 +197,7 @@ func TestSnapshot2(t *testing.T) {
 	so0.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e'}), []byte{'c', 'a', 'f', 'e'})
 	so0.suicided = false
 	so0.deleted = false
-	state.setStateObject(so0)
+	state.setStateObject(stateobjaddr0, so0)
 
 	err := state.FinalizeTx(params.Rules{}, w)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestSnapshot2(t *testing.T) {
 	so1.SetCode(crypto.Keccak256Hash([]byte{'c', 'a', 'f', 'e', '2'}), []byte{'c', 'a', 'f', 'e', '2'})
 	so1.suicided = true
 	so1.deleted = true
-	state.setStateObject(so1)
+	state.setStateObject(stateobjaddr1, so1)
 
 	so1 = state.getStateObject(stateobjaddr1)
 	if so1 != nil && !so1.deleted {

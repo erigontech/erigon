@@ -102,7 +102,8 @@ type (
 		account *common.Address
 	}
 	resetObjectChange struct {
-		prev *stateObject
+		account *common.Address
+		prev    *stateObject
 	}
 	suicideChange struct {
 		account     *common.Address
@@ -155,6 +156,9 @@ type (
 )
 
 func (ch createObjectChange) revert(s *IntraBlockState) {
+	if bi, ok := s.balanceInc[*ch.account]; ok {
+		bi.transferred = false
+	}
 	delete(s.stateObjects, *ch.account)
 	delete(s.stateObjectsDirty, *ch.account)
 }
@@ -164,7 +168,7 @@ func (ch createObjectChange) dirtied() *common.Address {
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) {
-	s.setStateObject(ch.prev)
+	s.setStateObject(*ch.account, ch.prev)
 }
 
 func (ch resetObjectChange) dirtied() *common.Address {
@@ -201,13 +205,14 @@ func (ch balanceChange) dirtied() *common.Address {
 }
 
 func (ch balanceIncrease) revert(s *IntraBlockState) {
-	if b, ok := s.balanceInc[*ch.account]; ok {
-		if b.Sub(b, &ch.increase).IsZero() {
+	if bi, ok := s.balanceInc[*ch.account]; ok {
+		if bi.increase.Sub(&bi.increase, &ch.increase).IsZero() {
 			delete(s.balanceInc, *ch.account)
 		}
-	} else {
-		if so, ok := s.stateObjects[*ch.account]; ok {
-			so.data.Balance.Sub(&so.data.Balance, &ch.increase)
+		if bi.transferred {
+			if so, exist := s.stateObjects[*ch.account]; exist {
+				so.data.Balance.Sub(&so.data.Balance, &ch.increase)
+			}
 		}
 	}
 }
