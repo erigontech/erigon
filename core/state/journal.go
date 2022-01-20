@@ -206,7 +206,9 @@ func (ch balanceChange) dirtied() *common.Address {
 
 func (ch balanceIncrease) revert(s *IntraBlockState) {
 	if bi, ok := s.balanceInc[*ch.account]; ok {
-		if bi.increase.Sub(&bi.increase, &ch.increase).IsZero() {
+		bi.increase.Sub(&bi.increase, &ch.increase)
+		bi.count--
+		if bi.count == 0 {
 			delete(s.balanceInc, *ch.account)
 		}
 		if bi.transferred {

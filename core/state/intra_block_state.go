@@ -50,6 +50,7 @@ var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffff
 type BalanceIncrease struct {
 	increase    uint256.Int
 	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
+	count       int  // Number of increases - this needs tracking for proper reversion
 }
 
 // IntraBlockState is responsible for caching and managing state changes
@@ -361,6 +362,7 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 			sdb.balanceInc[addr] = bi
 		}
 		bi.increase.Add(&bi.increase, amount)
+		bi.count++
 		return
 	}
 
