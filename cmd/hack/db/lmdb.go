@@ -502,7 +502,7 @@ func generate2(tx kv.RwTx, entries int) error {
 func generate3(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.(kv.BucketMigrator).CreateBucket(k); err != nil {
+		if err := tx.CreateBucket(k); err != nil {
 			return false, err
 		}
 	}

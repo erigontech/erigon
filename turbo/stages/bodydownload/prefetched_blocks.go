@@ -12,7 +12,9 @@ type PrefetchedBlocks struct {
 }
 
 func NewPrefetchedBlocks() *PrefetchedBlocks {
-	cache, err := lru.New(1000)
+	// Setting this to 2500 as `erigon import` imports blocks in batches of 2500
+	// and the import command makes use of PrefetchedBlocks.
+	cache, err := lru.New(2500)
 	if err != nil {
 		panic("error creating prefetching cache for blocks")
 	}
