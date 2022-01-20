@@ -502,37 +502,27 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
 	for i := blockFrom; i < blockTo; i += blocksPerFile {
-		if err := dumpBlocksRange(ctx, i+blocksPerFile, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+		if err := dumpBlocksRange(ctx, i, i+blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
-	fileName := FileName(blockFrom, blockTo, Bodies)
-	tmpFilePath, segmentFile := filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
-	log.Info("Creating", "file", fileName)
-
+	segmentFile := filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Bodies))
 	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
-	_ = os.Remove(tmpFilePath)
 
-	fileName = FileName(blockFrom, blockTo, Headers)
-	tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
-	log.Info("Creating", "file", fileName)
+	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Headers))
 	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
-	_ = os.Remove(tmpFilePath)
 
-	fileName = FileName(blockFrom, blockTo, Transactions)
-	tmpFilePath, segmentFile = filepath.Join(tmpDir, fileName)+".dat", filepath.Join(snapshotDir, fileName)+".seg"
-	log.Info("Creating", "file", fileName)
+	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Transactions))
 	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers); err != nil {
 		return err
 	}
-	_ = os.Remove(tmpFilePath)
 	return nil
 }
 
@@ -702,6 +692,9 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	}); err != nil {
 		return err
 	}
+	if err := f.Compress(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -751,6 +744,9 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		}
 		return true, nil
 	}); err != nil {
+		return err
+	}
+	if err := f.Compress(); err != nil {
 		return err
 	}
 	return nil
