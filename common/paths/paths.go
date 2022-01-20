@@ -70,3 +70,29 @@ func homeDir() string {
 	}
 	return ""
 }
+
+type Dirs struct {
+	DataDir   string
+	Chaindata string
+	Snapshots string
+	Tmp       string
+	Nodes     string
+	TxPool    string
+
+	Aggregator string
+	StateDB    string
+}
+
+func NewDirs(dataDir string) *Dirs {
+	return &Dirs{
+		DataDir:   dataDir,
+		Chaindata: filepath.Join(dataDir, "chaindata"),
+		Snapshots: filepath.Join(dataDir, "snapshots"),
+		Tmp:       filepath.Join(dataDir, "etl-temp"),
+		Nodes:     filepath.Join(dataDir, "nodes"),
+		TxPool:    filepath.Join(dataDir, "txpool"),
+
+		Aggregator: filepath.Join(dataDir, "aggregator"),
+		StateDB:    filepath.Join(dataDir, "statedb"),
+	}
+}
