@@ -447,7 +447,7 @@ func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 		encodings = ropstenPreverifiedHashes
 		height = ropstenPreverifiedHeight
 	default:
-		log.Warn("Preverified hashes not found for", "chain", chain)
+		log.Debug("Preverified hashes not found for", "chain", chain)
 		return nil, 0
 	}
 	return DecodeHashes(encodings), height
