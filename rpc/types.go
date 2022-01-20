@@ -118,7 +118,7 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 }
 
 func (bn BlockNumber) Int64() int64 {
-	return (int64)(bn)
+	return int64(bn)
 }
 
 type BlockNumberOrHash struct {

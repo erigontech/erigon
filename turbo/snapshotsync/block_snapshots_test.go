@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/stretchr/testify/require"
@@ -15,8 +16,9 @@ import (
 
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
-	cfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
-	cfg.ExpectBlocks = math.MaxUint64
+	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
+	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
+	cfg := ethconfig.Snapshot{Dir: dir, Enabled: true}
 	createFile := func(from, to uint64, name SnapshotType) {
 		c, err := compress.NewCompressor(context.Background(), "test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 		require.NoError(err)
@@ -38,7 +40,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = idx.Build()
 		require.NoError(err)
 	}
-	s := NewAllSnapshots(dir, cfg)
+	s := NewAllSnapshots(cfg, chainSnapshotCfg)
 	defer s.Close()
 	err := s.ReopenSegments()
 	require.NoError(err)
@@ -46,14 +48,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s.Close()
 
 	createFile(500_000, 1_000_000, Bodies)
-	s = NewAllSnapshots(dir, cfg)
+	s = NewAllSnapshots(cfg, chainSnapshotCfg)
 	defer s.Close()
 	require.Equal(0, len(s.blocks)) //because, no headers and transactions snapshot files are created
 	s.Close()
 
 	createFile(500_000, 1_000_000, Headers)
 	createFile(500_000, 1_000_000, Transactions)
-	s = NewAllSnapshots(dir, cfg)
+	s = NewAllSnapshots(cfg, chainSnapshotCfg)
 	err = s.ReopenSegments()
 	require.Error(err)
 	require.Equal(0, len(s.blocks)) //because, no gaps are allowed (expect snapshots from block 0)
@@ -62,7 +64,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(0, 500_000, Bodies)
 	createFile(0, 500_000, Headers)
 	createFile(0, 500_000, Transactions)
-	s = NewAllSnapshots(dir, cfg)
+	s = NewAllSnapshots(cfg, chainSnapshotCfg)
 	err = s.ReopenSegments()
 	require.NoError(err)
 	defer s.Close()
@@ -80,8 +82,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.False(ok)
 
 	// user must be able to limit amount of blocks which read from snapshot
-	cfg.ExpectBlocks = 500_000 - 1
-	s = NewAllSnapshots(dir, cfg)
+	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
+	s = NewAllSnapshots(cfg, chainSnapshotCfg)
 	err = s.ReopenSegments()
 	require.NoError(err)
 	defer s.Close()
@@ -90,8 +92,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 900_000, Headers)
 	createFile(500_000, 900_000, Bodies)
 	createFile(500_000, 900_000, Transactions)
-	cfg.ExpectBlocks = math.MaxUint64
-	s = NewAllSnapshots(dir, cfg)
+	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
+	s = NewAllSnapshots(cfg, chainSnapshotCfg)
 	defer s.Close()
 	err = s.ReopenSegments()
 	require.Error(err)

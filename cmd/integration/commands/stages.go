@@ -1041,7 +1041,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 				Enabled: true,
 				Dir:     path.Join(datadir, "snapshots"),
 			}
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, snapshothashes.KnownConfig(cc.ChainName))
+			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, snapshothashes.KnownConfig(cc.ChainName))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}

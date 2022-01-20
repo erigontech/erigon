@@ -175,11 +175,20 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 	}
 }
 
-func (hd *HeaderDownload) markPreverified(link *Link) {
-	// Go through all parent links that are not preveried and mark them too
+func (hd *HeaderDownload) MarkPreverified(link *Link) {
+	// Go through all parent links that are not preverified and mark them too
 	for link != nil && !link.persisted {
 		link.preverified = true
 		link = hd.links[link.header.ParentHash]
+	}
+}
+
+func (hd *HeaderDownload) MarkPreverifiedForward(link *Link) {
+	// Starting from a block link, go through all the child links
+	// that are not preverified and mark them too.
+	link.preverified = true
+	for _, childLink := range link.next {
+		hd.MarkPreverifiedForward(childLink)
 	}
 }
 
@@ -196,7 +205,7 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
 		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.markPreverified(link)
+			hd.MarkPreverified(link)
 		}
 	}
 }
@@ -241,14 +250,14 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool 
 		}
 		prevLink = link
 		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.markPreverified(link)
+			hd.MarkPreverified(link)
 		}
 	}
 	prevLink.next = anchor.links
 	anchor.links = nil
 	if anchorPreverified {
 		// Mark the entire segment as preverified
-		hd.markPreverified(prevLink)
+		hd.MarkPreverified(prevLink)
 	}
 	return !preExisting
 }
@@ -274,14 +283,14 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
 		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.markPreverified(link)
+			hd.MarkPreverified(link)
 		}
 	}
 	prevLink.next = anchor.links
 	anchor.links = nil
 	if anchorPreverified {
 		// Mark the entire segment as preverified
-		hd.markPreverified(prevLink)
+		hd.MarkPreverified(prevLink)
 	}
 	var penalties []PenaltyItem
 	if _, bad := hd.badHeaders[attachmentLink.hash]; bad {
@@ -334,7 +343,7 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) bool 
 		}
 		prevLink = link
 		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.markPreverified(link)
+			hd.MarkPreverified(link)
 		}
 	}
 	return !preExisting
@@ -972,9 +981,9 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
 func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID enode.ID) (requestMore bool, penalties []PenaltyItem) {
-	lowestNum := segment[0].Number
-	highest := segment[len(segment)-1]
-	highestNum := highest.Number
+	// ChainSegment is sorted in the order of descending block numbers, so the lowest is at the end, and the highest is in the beginning
+	highestNum := segment[0].Number
+	lowestNum := segment[len(segment)-1].Number
 	log.Trace("processSegment", "from", lowestNum, "to", highestNum)
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -990,7 +999,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		return
 	}
 	if highestNum > hd.topSeenHeightPoW {
-		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
+		if newBlock || hd.seenAnnounces.Seen(segment[0].Hash) {
 			hd.topSeenHeightPoW = highestNum
 		}
 	}
@@ -1132,6 +1141,12 @@ func (hd *HeaderDownload) ClearPendingExecutionStatus() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingExecutionStatus = common.Hash{}
+}
+
+func (hd *HeaderDownload) InsertList() []*Link {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.insertList
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {

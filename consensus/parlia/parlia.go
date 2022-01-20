@@ -980,7 +980,7 @@ func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBloc
 		return nil, err
 	}
 	// call
-	msgData := (hexutil.Bytes)(data)
+	msgData := hexutil.Bytes(data)
 	_, returnData, err := p.systemCall(header.Coinbase, systemcontracts.ValidatorContract, msgData[:], ibs, header, u256.Num0)
 	if err != nil {
 		return nil, err
