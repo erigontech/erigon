@@ -1,5 +1,5 @@
-// Package cli contains framework for building a command-line based Erigon node.
-package cli
+// Package app contains framework for building a command-line based Erigon node.
+package app
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -27,7 +27,7 @@ func MakeApp(action func(*cli.Context), cliFlags []cli.Flag) *cli.App {
 		debug.Exit()
 		return nil
 	}
-	app.Commands = []cli.Command{initCommand, snapshotCommand}
+	app.Commands = []cli.Command{initCommand, importCommand, snapshotCommand}
 	return app
 }
 
