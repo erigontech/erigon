@@ -248,6 +248,10 @@ const (
 	CallFromIndex = "CallFromIndex"
 	CallToIndex   = "CallToIndex"
 
+	// Cumulative indexes for estimation of stage execution
+	CumulativeGasIndex         = "CumulativeGasIndex"
+	CumulativeTransactionIndex = "CumulativeTransactionIndex"
+
 	TxLookup = "BlockTransactionLookup" // hash -> transaction/receipt lookup metadata
 
 	ConfigTable = "Config" // config prefix for the db
@@ -367,6 +371,8 @@ var ChaindataTables = []string{
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
+	CumulativeGasIndex,
+	CumulativeTransactionIndex,
 	Log,
 	Sequence,
 	EthTx,
