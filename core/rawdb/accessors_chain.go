@@ -482,6 +482,22 @@ func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
 	return nil
 }
 
+func ReadBodyForStorageByKey(db kv.Getter, k []byte) (*types.BodyForStorage, error) {
+	bodyRlp, err := db.GetOne(kv.BlockBody, k)
+	if err != nil {
+		return nil, err
+	}
+	if len(bodyRlp) == 0 {
+		return nil, nil
+	}
+	bodyForStorage := new(types.BodyForStorage)
+	if err := rlp.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
+		return nil, err
+	}
+
+	return bodyForStorage, nil
+}
+
 func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
 	data := ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
@@ -1019,6 +1035,50 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 		return err
 	}
 	WriteHeader(db, block.Header())
+	return nil
+}
+
+// DeleteAncientBlocks - delete old block after moving it to snapshots. [from, to)
+func DeleteAncientBlocks(db kv.RwTx, blockFrom, blockTo uint64) error {
+	//doesn't delete Receipts - because Receipts are not in snapshots yet
+
+	for n := blockFrom; n < blockTo; n++ {
+		canonicalHash, err := ReadCanonicalHash(db, n)
+		if err != nil {
+			return err
+		}
+		if err := db.ForPrefix(kv.Headers, dbutils.EncodeBlockNumber(n), func(k, v []byte) error {
+			isCanonical := bytes.Equal(k[8:], canonicalHash[:])
+			if err := db.Delete(kv.Headers, k, nil); err != nil {
+				return err
+			}
+			b, err := ReadBodyForStorageByKey(db, k)
+			if err != nil {
+				return err
+			}
+			txIDBytes := make([]byte, 8)
+			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+				binary.BigEndian.PutUint64(txIDBytes, txID)
+				bucket := kv.EthTx
+				if !isCanonical {
+					bucket = kv.NonCanonicalTxs
+				}
+				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+					return err
+				}
+			}
+			if err := db.Delete(kv.BlockBody, k, nil); err != nil {
+				return err
+			}
+			if err := db.Delete(kv.Senders, k, nil); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

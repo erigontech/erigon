@@ -337,7 +337,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot.Dir, snConfig)
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, snConfig)
 		if err != nil {
 			return nil, err
 		}
