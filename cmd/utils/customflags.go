@@ -158,7 +158,7 @@ func (b *bigValue) Set(s string) error {
 	if !ok {
 		return errors.New("invalid integer syntax")
 	}
-	*b = (bigValue)(*int)
+	*b = bigValue(*int)
 	return nil
 }
 
