@@ -120,6 +120,9 @@ type (
 		account  *common.Address
 		increase uint256.Int
 	}
+	balanceIncreaseTransfer struct {
+		bi *BalanceIncrease
+	}
 	nonceChange struct {
 		account *common.Address
 		prev    uint64
@@ -156,9 +159,6 @@ type (
 )
 
 func (ch createObjectChange) revert(s *IntraBlockState) {
-	if bi, ok := s.balanceInc[*ch.account]; ok {
-		bi.transferred = false
-	}
 	delete(s.stateObjects, *ch.account)
 	delete(s.stateObjectsDirty, *ch.account)
 }
@@ -211,11 +211,6 @@ func (ch balanceIncrease) revert(s *IntraBlockState) {
 		if bi.count == 0 {
 			delete(s.balanceInc, *ch.account)
 		}
-		if bi.transferred {
-			if so, exist := s.stateObjects[*ch.account]; exist {
-				so.data.Balance.Sub(&so.data.Balance, &ch.increase)
-			}
-		}
 	}
 }
 
@@ -223,6 +218,13 @@ func (ch balanceIncrease) dirtied() *common.Address {
 	return ch.account
 }
 
+func (ch balanceIncreaseTransfer) dirtied() *common.Address {
+	return nil
+}
+
+func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) {
+	ch.bi.transferred = false
+}
 func (ch nonceChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setNonce(ch.prev)
 }

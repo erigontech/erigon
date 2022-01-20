@@ -537,6 +537,7 @@ func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObj
 	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
 		object.data.Balance.Add(&object.data.Balance, &bi.increase)
 		bi.transferred = true
+		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
 	sdb.stateObjects[addr] = object
 }
