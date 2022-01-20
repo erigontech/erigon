@@ -97,7 +97,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			continue
 		}
 
-		currentBlockNumber, err := dbutils.DecodeBlockNumber(k[:8])
+		currentBlockNumber, err = dbutils.DecodeBlockNumber(k[:8])
 		if err != nil {
 			return err
 		}
