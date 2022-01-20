@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"os"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -226,27 +225,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err := prune.SetIfNotExist(tx, config.Prune); err != nil {
-			return err
-		}
-
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
-		pm, err := prune.Get(tx)
+		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
 		if err != nil {
 			return err
 		}
-		if config.Prune.Initialised {
-			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(pm, config.Prune) {
-				return errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
-			}
-		} else {
-			config.Prune = pm
+		if err := snapshotsync.EnsureNotChanged(tx, config.Snapshot); err != nil {
+			return err
 		}
-		log.Info("Effective", "prune", config.Prune.String())
+		log.Info("Effective", "prune", config.Prune.String(), config.Snapshot.String())
 
 		return nil
 	}); err != nil {
@@ -337,7 +327,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, snConfig)
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot)
 		if err != nil {
 			return nil, err
 		}

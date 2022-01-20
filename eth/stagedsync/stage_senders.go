@@ -22,21 +22,23 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 )
 
 type SendersCfg struct {
-	db              kv.RwDB
-	batchSize       int
-	blockSize       int
-	bufferSize      int
-	numOfGoroutines int
-	readChLen       int
-	tmpdir          string
-	prune           prune.Mode
-	chainConfig     *params.ChainConfig
-	snapshots       *snapshotsync.AllSnapshots
+	db                kv.RwDB
+	batchSize         int
+	blockSize         int
+	bufferSize        int
+	numOfGoroutines   int
+	readChLen         int
+	tmpdir            string
+	prune             prune.Mode
+	chainConfig       *params.ChainConfig
+	snapshots         *snapshotsync.AllSnapshots
+	snapshotHashesCfg *snapshothashes.Config
 }
 
 func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.AllSnapshots) SendersCfg {
@@ -44,16 +46,17 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 	const sendersBlockSize = 4096
 
 	return SendersCfg{
-		db:              db,
-		batchSize:       sendersBatchSize,
-		blockSize:       sendersBlockSize,
-		bufferSize:      (sendersBlockSize * 10 / 20) * 10000, // 20*4096
-		numOfGoroutines: secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
-		readChLen:       4,
-		tmpdir:          tmpdir,
-		chainConfig:     chainCfg,
-		prune:           prune,
-		snapshots:       snapshots,
+		db:                db,
+		batchSize:         sendersBatchSize,
+		blockSize:         sendersBlockSize,
+		bufferSize:        (sendersBlockSize * 10 / 20) * 10000, // 20*4096
+		numOfGoroutines:   secp256k1.NumOfContexts(),            // we can only be as parallels as our crypto library supports,
+		readChLen:         4,
+		tmpdir:            tmpdir,
+		chainConfig:       chainCfg,
+		prune:             prune,
+		snapshots:         snapshots,
+		snapshotHashesCfg: snapshothashes.KnownConfig(chainCfg.ChainName),
 	}
 }
 
@@ -370,7 +373,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	}
 
 	if cfg.snapshots != nil && cfg.snapshots.Cfg().RetireEnabled {
-		if err := cfg.snapshots.EnsureExpectedBlocksAreAvailable(); err != nil {
+		if err := cfg.snapshots.EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
 			return err
 		}
 		blockFrom := cfg.snapshots.BlocksAvailable() + 1

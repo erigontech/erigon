@@ -17,7 +17,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 	assert.Equal(t, Mode{true, Distance(math.MaxUint64), Distance(math.MaxUint64),
 		Distance(math.MaxUint64), Distance(math.MaxUint64), Experiments{TEVM: false}}, prune)
 
-	err = SetIfNotExist(tx, Mode{true, Distance(1), Distance(2),
+	err = setIfNotExist(tx, Mode{true, Distance(1), Distance(2),
 		Before(3), Before(4), Experiments{TEVM: false}})
 	assert.NoError(t, err)
 

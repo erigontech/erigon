@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 )
@@ -129,7 +128,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	_ = chainID
 	_ = os.MkdirAll(cfg.Dir, 0744)
 
-	allSnapshots := snapshotsync.NewAllSnapshots(cfg, snapshothashes.KnownConfig(chainConfig.ChainName))
+	allSnapshots := snapshotsync.NewAllSnapshots(cfg)
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
@@ -204,8 +203,8 @@ func checkBlockSnapshot(chaindata string) error {
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
 
-	cfg := ethconfig.Snapshot{Dir: path.Join(dataDir, "snapshots"), Enabled: true, RetireEnabled: true}
-	snapshots := snapshotsync.NewAllSnapshots(cfg, snapshothashes.KnownConfig(chainConfig.ChainName))
+	cfg := ethconfig.NewSnapshotCfg(true, true, path.Join(dataDir, "snapshots"))
+	snapshots := snapshotsync.NewAllSnapshots(cfg)
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {

@@ -2,8 +2,10 @@ package prune
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
+	"reflect"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
@@ -257,7 +259,28 @@ func Override(db kv.RwTx, sm Mode) error {
 	return nil
 }
 
-func SetIfNotExist(db kv.GetPut, pm Mode) error {
+// EnsureNotChanged - prohibit change some configs after node creation. prohibit from human mistakes
+func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
+	err := setIfNotExist(tx, pruneMode)
+	if err != nil {
+		return pruneMode, err
+	}
+
+	pm, err := Get(tx)
+	if err != nil {
+		return pruneMode, err
+	}
+
+	if pruneMode.Initialised {
+		// If storage mode is not explicitly specified, we take whatever is in the database
+		if !reflect.DeepEqual(pm, pruneMode) {
+			return pm, errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
+		}
+	}
+	return pm, nil
+}
+
+func setIfNotExist(db kv.GetPut, pm Mode) error {
 	var (
 		err error
 	)

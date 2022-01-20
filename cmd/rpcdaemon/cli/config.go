@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -131,7 +130,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
 			}
-			cfg.Snapshot.Dir = path.Join(cfg.Datadir, "snapshots")
+			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled, path.Join(cfg.Datadir, "snapshots"))
 		}
 		return nil
 	}
@@ -278,7 +277,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 				return nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, snapshothashes.KnownConfig(cc.ChainName))
+			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot)
 			if err := allSnapshots.ReopenSegments(); err != nil {
 				return nil, nil, nil, nil, nil, nil, err
 			}
