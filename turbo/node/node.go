@@ -53,29 +53,29 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
 	case params.RopstenChainName:
-		log.Info("Starting Erigon on Ropsten testnet...")
+		log.Info("Starting TurboBor on Ropsten testnet...")
 
 	case params.RinkebyChainName:
-		log.Info("Starting Erigon on Rinkeby testnet...")
+		log.Info("Starting TurboBor on Rinkeby testnet...")
 
 	case params.GoerliChainName:
-		log.Info("Starting Erigon on Görli testnet...")
+		log.Info("Starting TurboBor on Görli testnet...")
 
 	case params.DevChainName:
-		log.Info("Starting Erigon in ephemeral dev mode...")
+		log.Info("Starting TurboBor in ephemeral dev mode...")
 
 	case params.MumbaiChainName:
-		log.Info("Starting Erigon in Mumbai testnet")
+		log.Info("Starting TurboBor in Mumbai testnet")
 
 	case params.BorMainnetChainName:
-		log.Info("Starting Erigon on Bor Mainnet")
+		log.Info("Starting TurboBor on Bor Mainnet")
 
 	case "", params.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
-			log.Info("Starting Erigon on Ethereum mainnet...")
+			log.Info("Starting TurboBor on Ethereum mainnet...")
 		}
 	default:
-		log.Info("Starting Erigon on", "devnet", chain)
+		log.Info("Starting TurboBor on", "devnet", chain)
 	}
 
 	nodeConfig := NewNodeConfig()
@@ -133,7 +133,7 @@ func MakeConfigNodeDefault() *node.Node {
 func makeConfigNode(config *node.Config) *node.Node {
 	stack, err := node.New(config)
 	if err != nil {
-		utils.Fatalf("Failed to create Erigon node: %v", err)
+		utils.Fatalf("Failed to create TurboBor node: %v", err)
 	}
 
 	return stack
