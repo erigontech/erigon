@@ -1,7 +1,9 @@
 package kv
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -55,6 +57,47 @@ func BigChunks(db RoDB, table string, from []byte, walker func(tx Tx, k, v []byt
 		}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+var (
+	bytesTrue  = []byte{1}
+	bytesFalse = []byte{0}
+)
+
+func bytes2bool(in []byte) bool {
+	if bytes.Equal(in, bytesTrue) {
+		return true
+	}
+	if bytes.Equal(in, bytesFalse) {
+		return false
+	}
+	panic("db must have snapshot cfg record")
+}
+
+var ErrChanged = fmt.Errorf("key must not change")
+
+// EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
+func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) error {
+	v, err := tx.GetOne(bucket, k)
+	if err != nil {
+		return err
+	}
+	if v == nil {
+		if value {
+			v = bytesTrue
+		} else {
+			v = bytesFalse
+		}
+		if err := tx.Put(bucket, k, v); err != nil {
+			return err
+		}
+	}
+
+	enabled := bytes2bool(v)
+	if value != enabled {
+		return fmt.Errorf("%w: '%s' has value in db: %v, but got %v from outside", ErrChanged, k, enabled, value)
 	}
 	return nil
 }
