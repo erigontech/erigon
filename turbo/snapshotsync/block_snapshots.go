@@ -652,8 +652,10 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 
 	key := make([]byte, 8+32)
 	from := dbutils.EncodeBlockNumber(blockFrom)
+	fmt.Printf("alex2: %d,%d\n", blockFrom, blockTo)
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
+		fmt.Printf("alex3: %d\n", blockNum)
 		if blockNum >= blockTo {
 			return false, nil
 		}
@@ -691,6 +693,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		}
 		return true, nil
 	}); err != nil {
+		panic(err)
 		return err
 	}
 
