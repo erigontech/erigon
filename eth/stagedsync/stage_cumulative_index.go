@@ -56,24 +56,6 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 		return err
 	}
 
-	canonicalHashes := make(map[uint64]common.Hash)
-	// Load canonical chains
-	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
-	if err != nil {
-		return err
-	}
-
-	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber)); k != nil; k, v, err = canonicalC.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum, err := dbutils.DecodeBlockNumber(k)
-		if err != nil {
-			return err
-		}
-		canonicalHashes[blockNum] = common.BytesToHash(v)
-	}
 	prevProgress := s.BlockNumber
 	headerC, err := tx.Cursor(kv.Headers)
 	if err != nil {
@@ -90,14 +72,21 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 			continue
 		}
 
-		currentBlockNumber, err = dbutils.DecodeBlockNumber(k[:8])
+		blockNumber, err := dbutils.DecodeBlockNumber(k[:8])
 		if err != nil {
 			return err
 		}
 
-		if canonicalHashes[currentBlockNumber] != common.BytesToHash(k[8:]) {
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNumber)
+		if err != nil {
+			return err
+		}
+
+		if canonicalHash != common.BytesToHash(k[8:]) {
 			continue
 		}
+
+		currentBlockNumber = blockNumber
 
 		var header types.Header
 		if err := rlp.Decode(bytes.NewReader(v), &header); err != nil {
@@ -110,18 +99,16 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 			return err
 		}
 
-		// Sleep and check for logs
-		timer := time.NewTimer(1 * time.Nanosecond)
+		// Check for logs
 		select {
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s] Wrote Cumulative Index", s.LogPrefix()),
 				"gasUsed", cumulativeGasUsed.String(), "now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
-		case <-timer.C:
+		default:
 			log.Trace("RequestQueueTime (header) ticked")
 		}
 		// Cleanup timer
-		timer.Stop()
 	}
 	if err = s.Update(tx, currentBlockNumber); err != nil {
 		return err
