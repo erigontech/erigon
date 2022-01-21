@@ -236,7 +236,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err := snapshotsync.EnsureNotChanged(tx, config.Snapshot); err != nil {
 			return err
 		}
-		log.Info("Effective", "prune", config.Prune.String(), config.Snapshot.String())
+		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
 		return nil
 	}); err != nil {
