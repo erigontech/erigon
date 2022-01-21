@@ -30,6 +30,7 @@ type SyncStage string
 
 var (
 	Headers             SyncStage = "Headers"             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	CumulativeIndex     SyncStage = "CumulativeIndex"     // Calculate how much gas has been used up to each block.
 	BlockHashes         SyncStage = "BlockHashes"         // Headers Number are written, fills blockHash => number bucket
 	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written

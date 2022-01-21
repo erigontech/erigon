@@ -1153,6 +1153,22 @@ func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
 	return db.Put(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...), totalBurnt.Bytes())
 }
 
+func ReadCumulativeGasUsed(db kv.Getter, number uint64) (*big.Int, error) {
+	data, err := db.GetOne(kv.CumulativeGasIndex, dbutils.EncodeBlockNumber(number))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return big.NewInt(0), nil
+	}
+
+	return new(big.Int).SetBytes(data), nil
+}
+
+func WriteCumulativeGasUsed(db kv.Putter, number uint64, cumulativeGasUsed *big.Int) error {
+	return db.Put(kv.CumulativeGasIndex, dbutils.EncodeBlockNumber(number), cumulativeGasUsed.Bytes())
+}
+
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 	hash, err := ReadCanonicalHash(db, number)
 	if err != nil {

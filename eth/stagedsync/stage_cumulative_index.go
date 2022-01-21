@@ -1,13 +1,19 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -36,7 +42,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	headNumber, err := stages.GetStageProgress(tx, stages.Bodies)
+	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting bodies progress: %w", err)
 	}
@@ -45,33 +51,71 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 		return nil
 	}
 
-	stopped := false
-	prevProgress := s.BlockNumber
-	currentBlockNumber := s.BlockNumber + 1
-	for ; currentBlockNumber < headNumber && !stopped; currentBlockNumber++ {
-		// read body + transactions
-		hash, err := rawdb.ReadCanonicalHash(tx, currentBlockNumber)
+	cumulativeGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
+	if err != nil {
+		return err
+	}
+
+	canonicalHashes := make(map[uint64]common.Hash)
+	// Load canonical chains
+	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
+	if err != nil {
+		return err
+	}
+
+	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
 			return err
 		}
-		body, _, txCount := rawdb.ReadBody(tx, hash, currentBlockNumber)
-		if body == nil {
-			return fmt.Errorf("could not find block body for number: %d", currentBlockNumber)
-		}
-		header := rawdb.ReadHeader(tx, hash, currentBlockNumber)
 
-		if header == nil {
-			return fmt.Errorf("could not find block header for number: %d", currentBlockNumber)
+		blockNum, err := dbutils.DecodeBlockNumber(k)
+		if err != nil {
+			return err
+		}
+		canonicalHashes[blockNum] = common.BytesToHash(v)
+	}
+	prevProgress := s.BlockNumber
+	headerC, err := tx.Cursor(kv.Headers)
+	if err != nil {
+		return err
+	}
+
+	currentBlockNumber := s.BlockNumber + 1
+	for k, v, err := headerC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber)); k != nil; k, v, err = headerC.Next() {
+		if err != nil {
+			return err
+		}
+
+		if len(k) != 40 {
+			continue
+		}
+
+		currentBlockNumber, err = dbutils.DecodeBlockNumber(k[:8])
+		if err != nil {
+			return err
+		}
+
+		if canonicalHashes[currentBlockNumber] != common.BytesToHash(k[8:]) {
+			continue
+		}
+
+		var header types.Header
+		if err := rlp.Decode(bytes.NewReader(v), &header); err != nil {
+			log.Error("Invalid block header RLP", "number", currentBlockNumber, "err", err)
+			return nil
+		}
+		cumulativeGasUsed.Add(cumulativeGasUsed, big.NewInt(int64(header.GasUsed)))
+
+		if err := rawdb.WriteCumulativeGasUsed(tx, currentBlockNumber, cumulativeGasUsed); err != nil {
+			return err
 		}
 
 		// Sleep and check for logs
 		timer := time.NewTimer(1 * time.Nanosecond)
 		select {
-		case <-ctx.Done():
-			stopped = true
 		case <-logEvery.C:
 			log.Info(fmt.Sprintf("[%s] Wrote Cumulative Index", s.LogPrefix()),
-				"now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
+				"gasUsed", cumulativeGasUsed.String(), "now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
@@ -90,7 +134,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 	return nil
 }
 
-func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err error) {
+func UnwindCumulativeIndexStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 
 	if err = u.Done(tx); err != nil {
@@ -104,7 +148,7 @@ func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err e
 	return nil
 }
 
-func PruneIssuanceStage(p *PruneState, tx kv.RwTx, ctx context.Context) (err error) {
+func PruneCumulativeIndexStage(p *PruneState, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 
 	if !useExternalTx {
