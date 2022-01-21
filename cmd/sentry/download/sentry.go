@@ -528,6 +528,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			); err != nil {
 				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
+			ss.sendGonePeerToClients(gointerfaces.ConvertBytesToH512([]byte(peerID)))
 			return nil
 		},
 		NodeInfo: func() interface{} {
@@ -966,6 +967,12 @@ func (ss *SentryServerImpl) Close() {
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "error", err)
+	}
+}
+
+func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H512) {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
+		log.Warn("Sending gone peer notice to core P2P failed", "error", err)
 	}
 }
 
