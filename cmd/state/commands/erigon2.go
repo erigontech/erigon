@@ -63,7 +63,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Readonly().Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -150,6 +150,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
 	var txNum uint64 = 1
 	trace := false
 	for !interrupt {
@@ -165,9 +168,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if b == nil {
 			break
-		}
-		if rwTx, err = db.BeginRw(ctx); err != nil {
-			return err
 		}
 		r := agg.MakeStateReader(rwTx, blockNum)
 		if err = w.Reset(rwTx, blockNum); err != nil {
@@ -213,8 +213,16 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if err = w.Aggregate(trace); err != nil {
 			return err
 		}
-		if err = rwTx.Commit(); err != nil {
-			return err
+		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
+		if interrupt || (blockNum+1)%uint64(commitmentFrequency) == 0 {
+			if err = rwTx.Commit(); err != nil {
+				return err
+			}
+			if !interrupt {
+				if rwTx, err = db.BeginRw(ctx); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if w != nil {
