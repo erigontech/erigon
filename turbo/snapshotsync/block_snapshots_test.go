@@ -81,13 +81,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 	_, ok = s.Blocks(1_000_000)
 	require.False(ok)
 
-	// user must be able to limit amount of blocks which read from snapshot
+	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
+	// ExpectedBlocks - says only how much block must come from Torrent
 	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
 	s = NewAllSnapshots(cfg)
 	err = s.ReopenSegments()
 	require.NoError(err)
 	defer s.Close()
-	require.Equal(1, len(s.blocks))
+	require.Equal(2, len(s.blocks))
 
 	createFile(500_000, 900_000, Headers)
 	createFile(500_000, 900_000, Bodies)
