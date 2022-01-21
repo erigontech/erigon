@@ -224,9 +224,9 @@ var (
 		Name:  "mine",
 		Usage: "Enable mining",
 	}
-	ProposingEnabledFlag = cli.BoolFlag{
-		Name:  "proposer",
-		Usage: "Enable PoS proposer",
+	ProposingDisableFlag = cli.BoolFlag{
+		Name:  "proposer.disable",
+		Usage: "Disables PoS proposer",
 	}
 	MinerNotifyFlag = cli.StringFlag{
 		Name:  "miner.notify",
@@ -1180,7 +1180,7 @@ func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	cfg.Enabled = ctx.GlobalIsSet(MiningEnabledFlag.Name)
-	cfg.EnabledPOS = ctx.GlobalIsSet(ProposingEnabledFlag.Name)
+	cfg.EnabledPOS = !ctx.GlobalIsSet(ProposingDisableFlag.Name)
 
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
