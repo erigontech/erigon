@@ -4,19 +4,28 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/starknet/services"
+	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"os"
-	"strconv"
+	"path"
 	"strings"
+)
+
+const (
+	DefaultGas = 11_000_000
 )
 
 type Flags struct {
 	Contract   string
 	Salt       string
-	Gas        string
+	Gas        uint64
 	PrivateKey string
 	Datadir    string
+	Chaindata  string
 	Output     string
 }
 
@@ -26,35 +35,20 @@ var generateRawTxCmd = &cobra.Command{
 }
 
 func init() {
-	flags := Flags{}
-
-	generateRawTxCmd.Flags().StringVarP(&flags.Contract, "contract", "c", "", "Path to compiled cairo contract in JSON format")
-	generateRawTxCmd.MarkFlagRequired("contract")
-
-	generateRawTxCmd.Flags().StringVarP(&flags.Salt, "salt", "s", "", "Cairo contract address salt")
-	generateRawTxCmd.MarkFlagRequired("salt")
-
-	generateRawTxCmd.Flags().StringVarP(&flags.Gas, "gas", "g", "", "Gas")
-	generateRawTxCmd.MarkFlagRequired("gas")
-
-	generateRawTxCmd.Flags().StringVarP(&flags.PrivateKey, "private_key", "k", "", "Private key")
-	generateRawTxCmd.MarkFlagRequired("private_key")
-
-	rootCmd.PersistentFlags().StringVar(&flags.Datadir, "datadir", "", "path to Erigon working directory")
-
-	generateRawTxCmd.Flags().StringVarP(&flags.Output, "output", "o", "", "Path to file where sign transaction will be saved. Print to stdout if empty.")
-
+	generateRawTxCmd, flags := config()
 	generateRawTxCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		gas, err := strconv.ParseUint(flags.Gas, 10, 64)
+		logger := log.New()
+		db, err := db(flags, logger)
 		if err != nil {
 			return err
 		}
+		defer db.Close()
 
 		rawTxGenerator := services.NewRawTxGenerator(flags.PrivateKey)
 
 		fs := os.DirFS("/")
 		buf := bytes.NewBuffer(nil)
-		err = rawTxGenerator.CreateFromFS(fs, strings.Trim(flags.Contract, "/"), []byte(flags.Salt), gas, buf)
+		err = rawTxGenerator.CreateFromFS(cmd.Context(), fs, db, strings.Trim(flags.Contract, "/"), []byte(flags.Salt), flags.Gas, buf)
 		if err != nil {
 			return err
 		}
@@ -78,4 +72,42 @@ func init() {
 	}
 
 	rootCmd.AddCommand(generateRawTxCmd)
+}
+
+func config() (*cobra.Command, *Flags) {
+	flags := &Flags{}
+	generateRawTxCmd.PersistentFlags().StringVar(&flags.Contract, "contract", "", "Path to compiled cairo contract in JSON format")
+	generateRawTxCmd.MarkPersistentFlagRequired("contract")
+
+	generateRawTxCmd.PersistentFlags().StringVar(&flags.Salt, "salt", "", "Cairo contract address salt")
+	generateRawTxCmd.MarkPersistentFlagRequired("salt")
+
+	generateRawTxCmd.PersistentFlags().Uint64Var(&flags.Gas, "gas", DefaultGas, "Gas")
+
+	generateRawTxCmd.PersistentFlags().StringVar(&flags.PrivateKey, "private_key", "", "Private key")
+	generateRawTxCmd.MarkPersistentFlagRequired("private_key")
+
+	generateRawTxCmd.PersistentFlags().StringVar(&flags.Datadir, "datadir", "", "path to Erigon working directory")
+
+	generateRawTxCmd.PersistentFlags().StringVarP(&flags.Output, "output", "o", "", "Path to file where sign transaction will be saved. Print to stdout if empty.")
+
+	generateRawTxCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if flags.Datadir == "" {
+			flags.Datadir = paths.DefaultDataDir()
+		}
+		if flags.Chaindata == "" {
+			flags.Chaindata = path.Join(flags.Datadir, "chaindata")
+		}
+		return nil
+	}
+
+	return generateRawTxCmd, flags
+}
+
+func db(flags *Flags, logger log.Logger) (kv.RoDB, error) {
+	rwKv, err := kv2.NewMDBX(logger).Path(flags.Chaindata).Readonly().Open()
+	if err != nil {
+		return nil, err
+	}
+	return rwKv, nil
 }

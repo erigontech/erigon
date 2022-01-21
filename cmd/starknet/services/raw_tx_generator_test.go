@@ -1,8 +1,10 @@
-package services
+package services_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
+	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 	"testing"
 	"testing/fstest"
 
@@ -21,23 +23,25 @@ func TestCreate(t *testing.T) {
 		want       string
 		error      error
 	}{
-		{name: "invalid private key", privateKey: "abc", fileName: "not_exist.json", error: ErrInvalidPrivateKey},
-		{name: "contract file not found", privateKey: generatePrivateKey(t), fileName: "not_exist.json", error: ErrReadContract},
+		{name: "invalid private key", privateKey: "abc", fileName: "not_exist.json", error: services.ErrInvalidPrivateKey},
+		{name: "contract file not found", privateKey: generatePrivateKey(t), fileName: "not_exist.json", error: services.ErrReadContract},
 		{name: "success", privateKey: privateKey, fileName: "contract_test.json", salt: "contract_address_salt", gas: 1, want: "03f88283127ed880830186a084342770c0018001963762323236313632363932323361323035623564376495636f6e74726163745f616464726573735f73616c74c001a0f4c886792b3b0c92789b18e80cc8587715b40c51b4d85c8c2106f536506f22aba02855010af44a167d4a0c1b3ab38e7757bc45a4c31693a785f35172e510fd77ad"},
 	}
 
 	fs := fstest.MapFS{
 		"contract_test.json": {Data: []byte("{\"abi\": []}")},
 	}
+	store := services.NewStubStore(map[string]int{
+		"123": 1,
+	})
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			rawTxGenerator := RawTxGenerator{
-				privateKey: tt.privateKey,
-			}
+			rawTxGenerator := services.NewRawTxGenerator(tt.privateKey)
 
+			ctx := context.Background()
 			buf := bytes.NewBuffer(nil)
-			err := rawTxGenerator.CreateFromFS(fs, tt.fileName, []byte(tt.salt), tt.gas, buf)
+			err := rawTxGenerator.CreateFromFS(ctx, fs, store, tt.fileName, []byte(tt.salt), tt.gas, buf)
 
 			if tt.error == nil {
 				assertNoError(t, err)
