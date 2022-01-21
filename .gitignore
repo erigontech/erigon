@@ -47,6 +47,7 @@ profile.cov
 
 # VS Code
 .vscode
+*.code-workspace
 
 # dashboard
 /dashboard/assets/flow-typed
