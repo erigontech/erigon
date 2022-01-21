@@ -68,9 +68,6 @@ type EngineImpl struct {
 	api services.ApiBackend
 }
 
-// ForkchoiceUpdatedV1 is executed only if we are running a beacon validator,
-// in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
-// if the payloadAttributes is different than null, we return
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	var prepareParameters *remote.EnginePreparePayload
 	if payloadAttributes != nil {

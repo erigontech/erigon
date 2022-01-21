@@ -344,6 +344,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	if beaconHeadHeader == nil || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+		// TODO(yperbasis): should sent a proper error message if beaconHeadHeader == nil
 		return &remote.EngineForkChoiceUpdatedReply{
 			Status: "SYNCING",
 		}, nil
