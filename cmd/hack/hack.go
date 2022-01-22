@@ -655,25 +655,28 @@ func printCurrentBlockNumber(chaindata string) {
 	})
 }
 
-func printTxHashes() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
+func printTxHashes(chaindata string, block uint64) error {
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		for b := uint64(0); b < uint64(100000); b++ {
-			hash, err := rawdb.ReadCanonicalHash(tx, b)
-			tool.Check(err)
+		for b := block; b < block+1; b++ {
+			hash, e := rawdb.ReadCanonicalHash(tx, b)
+			if e != nil {
+				return e
+			}
 			block := rawdb.ReadBlock(tx, hash, b)
 			if block == nil {
 				break
 			}
-			for _, tx := range block.Transactions() {
-				fmt.Printf("%x\n", tx.Hash())
+			for i, tx := range block.Transactions() {
+				fmt.Printf("%d: %x\n", i, tx.Hash())
 			}
 		}
 		return nil
 	}); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
 func readTrie(filename string) *trie.Trie {
@@ -1789,9 +1792,11 @@ func extractHeaders(chaindata string, block uint64, blockTotal uint64) error {
 }
 
 func extractBodies(chaindata string, block uint64) error {
+	block = uint64(5981365)
+	txN := uint64(78)
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.BeginRo(context.Background())
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
@@ -1802,6 +1807,7 @@ func extractBodies(chaindata string, block uint64) error {
 	}
 	defer c.Close()
 	blockEncoded := dbutils.EncodeBlockNumber(block)
+	i := 0
 	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -1810,8 +1816,30 @@ func extractBodies(chaindata string, block uint64) error {
 		blockHash := common.BytesToHash(k[8:])
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], baseTxId+txN)
+		v, e := tx.GetOne(kv.EthTx, txKey[:])
+		if e != nil {
+			return e
+		}
+		fmt.Printf("tx%d = [%x]\n", txN, v)
+		v = common.FromHex("0xf86c82031f84c7145b0082c3509437707931a21e71f6315b3e2c799a5dbffe440dea8701f438daa06000801ca04bf88d323f0f3108ff42071e2597a410968afb3cec0ddd34fe3f39e601e98c10a0552720fc2c8a6316cc2e6bac88245afa931df5195759be8e99e20f75e49eaeb2")
+		tx.Put(kv.EthTx, txKey[:], v)
+		senders, errSenders := rawdb.ReadSenders(tx, blockHash, blockNumber)
+		if errSenders != nil {
+			return errSenders
+		}
+		fmt.Printf("senders = %d\n", len(senders))
+		senders[txN] = common.HexToAddress("0xbb333d35d3d7459feebc21fdb4989b787324bd7b")
+		if e = rawdb.WriteSenders(tx, blockHash, blockNumber, senders); e != nil {
+			return e
+		}
+		i++
+		if i == 1 {
+			break
+		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func fixUnwind(chaindata string) error {
@@ -2495,7 +2523,7 @@ func main() {
 		trieChart()
 
 	case "printTxHashes":
-		printTxHashes()
+		printTxHashes(*chaindata, uint64(*block))
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
