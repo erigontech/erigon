@@ -26,9 +26,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/consensus/parlia"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/common"
@@ -38,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
@@ -128,13 +126,18 @@ type Snapshot struct {
 func (s Snapshot) String() string {
 	var out []string
 	if s.Enabled {
-		out = append(out, "--"+snapshotsync.FlagSnapshot)
+		out = append(out, "--"+FlagSnapshot+"=true")
 	}
 	if s.RetireEnabled {
-		out = append(out, "--"+snapshotsync.FlagSnapshotRetire)
+		out = append(out, "--"+FlagSnapshotRetire+"=true")
 	}
 	return strings.Join(out, " ")
 }
+
+var (
+	FlagSnapshot       = "experimental.snapshot"
+	FlagSnapshotRetire = "experimental.snapshot.retire"
+)
 
 func NewSnapshotCfg(enabled, retireEnabled bool, snapshotDir string) Snapshot {
 	return Snapshot{Enabled: enabled, RetireEnabled: retireEnabled, Dir: snapshotDir}

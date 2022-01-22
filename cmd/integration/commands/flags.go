@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -94,7 +93,7 @@ func withDatadir2(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
-	cmd.Flags().BoolVar(&enableSnapshot, snapshotsync.FlagSnapshot, false, "")
+	cmd.Flags().BoolVar(&enableSnapshot, ethconfig.FlagSnapshot, false, "")
 }
 
 func withDatadir(cmd *cobra.Command) {
@@ -105,7 +104,7 @@ func withDatadir(cmd *cobra.Command) {
 	must(cmd.MarkFlagDirname("chaindata"))
 
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
-	cmd.Flags().BoolVar(&enableSnapshot, snapshotsync.FlagSnapshot, false, "")
+	cmd.Flags().BoolVar(&enableSnapshot, ethconfig.FlagSnapshot, false, "")
 }
 
 func withBatchSize(cmd *cobra.Command) {
