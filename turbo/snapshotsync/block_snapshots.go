@@ -1018,11 +1018,6 @@ var (
 
 	FlagSnapshot       = "experimental.snapshot"
 	FlagSnapshotRetire = "experimental.snapshot.retire"
-
-	mapCli2DB = map[string][]byte{
-		FlagSnapshot:       blockSnapshotEnabledKey,
-		FlagSnapshotRetire: blockSnapshotRetireEnabledKey,
-	}
 )
 
 func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {

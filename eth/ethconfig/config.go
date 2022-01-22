@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/consensus/parlia"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
@@ -127,10 +128,10 @@ type Snapshot struct {
 func (s Snapshot) String() string {
 	var out []string
 	if s.Enabled {
-		out = append(out, "--experimental.snapshot")
+		out = append(out, "--"+snapshotsync.FlagSnapshot)
 	}
 	if s.RetireEnabled {
-		out = append(out, "--experimental.snapshot.retire")
+		out = append(out, "--"+snapshotsync.FlagSnapshotRetire)
 	}
 	return strings.Join(out, " ")
 }

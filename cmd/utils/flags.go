@@ -32,6 +32,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -548,7 +549,7 @@ var (
 		Usage: "Enabling experimental snapshot sync",
 	}
 	SnapshotRetireFlag = cli.BoolFlag{
-		Name:  "experimental.snapshot.retire",
+		Name:  snapshotsync.FlagSnapshotRetire,
 		Usage: "Delete(!) old blocks from DB, by move them to snapshots",
 	}
 
