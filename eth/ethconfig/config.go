@@ -116,11 +116,11 @@ func init() {
 }
 
 //go:generate gencodec -type Config -formats toml -out gen_config.go
+//go:generate gencodec -type Snapshot -formats toml -out gen_snapshot.go
 
 type Snapshot struct {
 	Enabled       bool
 	RetireEnabled bool
-	Dir           string
 }
 
 func (s Snapshot) String() string {
@@ -139,8 +139,8 @@ var (
 	FlagSnapshotRetire = "experimental.snapshot.retire"
 )
 
-func NewSnapshotCfg(enabled, retireEnabled bool, snapshotDir string) Snapshot {
-	return Snapshot{Enabled: enabled, RetireEnabled: retireEnabled, Dir: snapshotDir}
+func NewSnapshotCfg(enabled, retireEnabled bool) Snapshot {
+	return Snapshot{Enabled: enabled, RetireEnabled: retireEnabled}
 }
 
 // Config contains configuration options for ETH protocol.

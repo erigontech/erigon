@@ -132,7 +132,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
 			}
-			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled, path.Join(cfg.Datadir, "snapshots"))
+			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled)
 		}
 		return nil
 	}
@@ -279,7 +279,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 				return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot)
+			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
 			if err := allSnapshots.ReopenSegments(); err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, err
 			}

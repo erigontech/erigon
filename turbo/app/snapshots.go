@@ -91,8 +91,8 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	if rebuild {
-		cfg := ethconfig.Snapshot{Dir: snapshotDir, RetireEnabled: true, Enabled: true}
-		if err := rebuildIndices(ctx, chainDB, cfg, tmpDir); err != nil {
+		cfg := ethconfig.NewSnapshotCfg(true, true)
+		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -122,17 +122,17 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, tmpDir string) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
-	_ = os.MkdirAll(cfg.Dir, 0744)
+	_ = os.MkdirAll(snapshotDir, 0744)
 
-	allSnapshots := snapshotsync.NewAllSnapshots(cfg)
+	allSnapshots := snapshotsync.NewAllSnapshots(cfg, snapshotDir)
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	idxFilesList, err := snapshotsync.IdxFiles(cfg.Dir)
+	idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
 	if err != nil {
 		return err
 	}
@@ -203,8 +203,8 @@ func checkBlockSnapshot(chaindata string) error {
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
 
-	cfg := ethconfig.NewSnapshotCfg(true, true, path.Join(dataDir, "snapshots"))
-	snapshots := snapshotsync.NewAllSnapshots(cfg)
+	cfg := ethconfig.NewSnapshotCfg(true, true)
+	snapshots := snapshotsync.NewAllSnapshots(cfg, path.Join(dataDir, "snapshots"))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {

@@ -87,11 +87,11 @@ type AllSnapshots struct {
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func NewAllSnapshots(cfg ethconfig.Snapshot) *AllSnapshots {
-	if err := os.MkdirAll(cfg.Dir, 0744); err != nil {
+func NewAllSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *AllSnapshots {
+	if err := os.MkdirAll(snapshotDir, 0744); err != nil {
 		panic(err)
 	}
-	return &AllSnapshots{dir: cfg.Dir, cfg: cfg}
+	return &AllSnapshots{dir: snapshotDir, cfg: cfg}
 }
 
 func (s *AllSnapshots) Cfg() ethconfig.Snapshot        { return s.cfg }
