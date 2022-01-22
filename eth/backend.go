@@ -432,7 +432,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
-	if config.Miner.EnabledPOS {
+	if config.Miner.EnabledPOS && chainConfig.TerminalTotalDifficulty != nil {
 		ethBackendRPC.StartProposer()
 	}
 	if stack.Config().PrivateApiAddr != "" {
