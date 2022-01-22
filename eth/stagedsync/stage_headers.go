@@ -46,6 +46,7 @@ type HeadersCfg struct {
 	waitingPosHeaders *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
+	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
 }
@@ -81,6 +82,7 @@ func StageHeadersCfg(
 		snapshots:          snapshots,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
+		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
 	}
 }
 
@@ -757,7 +759,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if err != nil {
 				return err
 			}
-			expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+			expect := cfg.snapshotHashesCfg.ExpectBlocks
 			if headers >= expect && bodies >= expect && txs >= expect {
 				if err := cfg.snapshots.ReopenSegments(); err != nil {
 					return err
@@ -795,7 +797,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err != nil {
 			return err
 		}
-		expect := cfg.snapshots.ChainSnapshotConfig().ExpectBlocks
+		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir); err != nil {

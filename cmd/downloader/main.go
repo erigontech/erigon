@@ -119,9 +119,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	}
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
-	if err := os.MkdirAll(snapshotsDir, 0755); err != nil {
-		return err
-	}
+	common.MustExist(snapshotsDir)
 
 	db := mdbx.MustOpen(snapshotsDir + "/db")
 	var t *downloader.Client
@@ -166,9 +164,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		var cc *params.ChainConfig
 		{
 			chaindataDir := path.Join(datadir, "chaindata")
-			if err := os.MkdirAll(chaindataDir, 0755); err != nil {
-				return err
-			}
+			common.MustExist(chaindataDir)
 			chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
 			if err != nil {
 				return fmt.Errorf("%w, path: %s", err, chaindataDir)
