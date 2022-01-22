@@ -42,18 +42,14 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 	buffer := bytes.NewBuffer(make([]byte, 0))
 	encoder := codec.NewEncoder(buffer, &cbor)
 
-	keys := make([]string, 100)
-	vals := make([]string, 100)
-
-	for i := range keys {
-		keys[i] = fmt.Sprintf("key-%d", i)
-		vals[i] = fmt.Sprintf("value-%d", i)
+	entries := make([]sortableBufferEntry, 100)
+	for i := range entries {
+		entries[i].key = []byte(fmt.Sprintf("key-%d", i))
+		entries[i].value = []byte(fmt.Sprintf("value-%d", i))
 	}
 
-	for i := range keys {
-		if err := writeToDisk(encoder, []byte(keys[i]), []byte(vals[i])); err != nil {
-			t.Error(err)
-		}
+	if err := writeToDisk(encoder, entries); err != nil {
+		t.Error(err)
 	}
 
 	bb := buffer.Bytes()
@@ -62,13 +58,13 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 
 	decoder := codec.NewDecoder(readBuffer, &cbor)
 
-	for i := range keys {
+	for i := range entries {
 		k, v, err := readElementFromDisk(decoder)
 		if err != nil {
 			t.Error(err)
 		}
-		assert.Equal(t, keys[i], string(k))
-		assert.Equal(t, vals[i], string(v))
+		assert.Equal(t, string(entries[i].key), string(k))
+		assert.Equal(t, string(entries[i].value), string(v))
 	}
 
 	_, _, err := readElementFromDisk(decoder)
