@@ -875,10 +875,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	header := block.Header()
-	if header == nil {
+	if block == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
+	header := block.Header()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
