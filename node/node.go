@@ -529,7 +529,6 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		}
 		if label == kv.ChainDB {
 			opts = opts.PageSize(config.MdbxPageSize)
-			fmt.Printf("papa: %v\n", opts)
 		}
 		return opts.Open()
 	}
