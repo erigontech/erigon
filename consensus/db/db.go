@@ -7,7 +7,7 @@ import (
 )
 
 func OpenDatabase(path string, logger log.Logger, inmem bool) kv.RwDB {
-	opts := mdbx.NewMDBX(logger)
+	opts := mdbx.NewMDBX(logger).Label(kv.ConsensusDB)
 	if inmem {
 		opts = opts.InMem()
 	} else {

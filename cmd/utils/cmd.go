@@ -18,20 +18,16 @@
 package utils
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"runtime"
-	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Fatalf formats a message to standard error and exits the program.
@@ -72,24 +68,4 @@ func StopDebug() {
 
 func SetupUrfave(ctx *cli.Context) error {
 	return debug.Setup(ctx)
-}
-
-func RootContext() (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		defer cancel()
-
-		ch := make(chan os.Signal, 1)
-		defer close(ch)
-
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case sig := <-ch:
-			log.Info("Got interrupt, shutting down...", "sig", sig)
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, cancel
 }

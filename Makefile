@@ -36,73 +36,60 @@ dbg:
 
 geth: erigon
 
-erigon: go-version
+erigon: go-version git-submodules
 	@echo "Building Erigon"
 	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
 hack:
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
 rpctest:
 	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
 state:
 	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 
 pics:
 	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 rpcdaemon:
 	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
 txpool:
 	$(GOBUILD) -o $(GOBIN)/txpool ./cmd/txpool
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/txpool\" to launch txpool."
 
 integration:
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
 sentry:
 	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
 	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
 cons:
 	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
 
 evm:
 	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
-downloader:
+downloader: git-submodules
 	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
 
 devnettest:
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
-	@echo "Done building."
 	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
 
 db-tools:
@@ -110,9 +97,7 @@ db-tools:
 
 	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
 	rm -rf libmdbx
-	rm -rf cmd/downloader/trackers/trackerslist
-	rm -rf turbo/snapshotsync/snapshothashes/erigon-snapshots
-	git submodule update --init --recursive --force
+	git submodule update --init --recursive --force libmdbx
 
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
@@ -148,7 +133,6 @@ clean:
 
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
-	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
@@ -170,3 +154,7 @@ prometheus:
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
+
+git-submodules:
+	# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule update --init --recursive --force || true

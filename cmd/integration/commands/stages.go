@@ -19,7 +19,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -38,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -46,7 +44,7 @@ var cmdStageHeaders = &cobra.Command{
 	Use:   "stage_headers",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -63,7 +61,7 @@ var cmdStageBodies = &cobra.Command{
 	Use:   "stage_bodies",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -81,7 +79,7 @@ var cmdStageSenders = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
@@ -97,7 +95,7 @@ var cmdStageExec = &cobra.Command{
 	Use:   "stage_exec",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -114,7 +112,7 @@ var cmdStageTrie = &cobra.Command{
 	Use:   "stage_trie",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -132,7 +130,7 @@ var cmdStageHashState = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
 
@@ -148,7 +146,7 @@ var cmdStageHistory = &cobra.Command{
 	Use:   "stage_history",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -165,7 +163,7 @@ var cmdLogIndex = &cobra.Command{
 	Use:   "stage_log_index",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -182,7 +180,7 @@ var cmdCallTraces = &cobra.Command{
 	Use:   "stage_call_traces",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -199,7 +197,7 @@ var cmdStageTxLookup = &cobra.Command{
 	Use:   "stage_tx_lookup",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -215,7 +213,7 @@ var cmdPrintStages = &cobra.Command{
 	Use:   "print_stages",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, false)
 		defer db.Close()
@@ -232,7 +230,7 @@ var cmdPrintMigrations = &cobra.Command{
 	Use:   "print_migrations",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, false)
 		defer db.Close()
@@ -248,7 +246,7 @@ var cmdRemoveMigration = &cobra.Command{
 	Use:   "remove_migration",
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, false)
 		defer db.Close()
@@ -1038,11 +1036,8 @@ var _allSnapshotsSingleton *snapshotsync.AllSnapshots
 func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
-			snapshotCfg := ethconfig.Snapshot{
-				Enabled: true,
-				Dir:     path.Join(datadir, "snapshots"),
-			}
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg.Dir, snapshothashes.KnownConfig(cc.ChainName))
+			snapshotCfg := ethconfig.NewSnapshotCfg(true, false)
+			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, path.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}

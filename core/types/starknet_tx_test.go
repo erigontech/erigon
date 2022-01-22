@@ -3,6 +3,9 @@ package types
 import (
 	"bytes"
 	"encoding/hex"
+	"math/big"
+	"testing"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -10,8 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
-	"math/big"
-	"testing"
 )
 
 var (
@@ -39,8 +40,8 @@ func TestStarknetTxDecodeRLP(t *testing.T) {
 				Gas:     1,
 				To:      &address,
 				Data:    []byte("{\"abi\": []}"),
-				Salt:    []byte("contract_salt"),
 			},
+			Salt:   []byte("contract_salt"),
 			Tip:    uint256.NewInt(1),
 			FeeCap: uint256.NewInt(1),
 		}},
@@ -52,8 +53,8 @@ func TestStarknetTxDecodeRLP(t *testing.T) {
 				Gas:     1,
 				To:      &address,
 				Data:    []byte("{\"abi\": []}"),
-				Salt:    []byte{},
 			},
+			Salt:   []byte{},
 			Tip:    uint256.NewInt(1),
 			FeeCap: uint256.NewInt(1),
 		}},
@@ -63,8 +64,11 @@ func TestStarknetTxDecodeRLP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tx := tt.tx
 
-			signedTx, err := tx.WithSignature(*signer, signature)
+			st, err := tx.WithSignature(*signer, signature)
 			require.NoError(err)
+
+			signedTx, ok := st.(*StarknetTransaction)
+			require.True(ok)
 
 			buf := bytes.NewBuffer(nil)
 
@@ -73,8 +77,11 @@ func TestStarknetTxDecodeRLP(t *testing.T) {
 
 			encodedTx := buf.Bytes()
 
-			txn, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))
+			txnObj, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))
 			require.NoError(err)
+
+			txn, ok := txnObj.(*StarknetTransaction)
+			require.True(ok)
 
 			require.Equal(signedTx.GetChainID(), txn.GetChainID())
 			require.Equal(signedTx.GetNonce(), txn.GetNonce())
@@ -116,8 +123,8 @@ func starknetTransaction(chainId *big.Int, address common.Address) *StarknetTran
 			Gas:     1,
 			To:      &address,
 			Data:    []byte("{\"abi\": []}"),
-			Salt:    []byte("contract_salt"),
 		},
+		Salt:   []byte("contract_salt"),
 		Tip:    uint256.NewInt(1),
 		FeeCap: uint256.NewInt(1),
 	}
