@@ -169,10 +169,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 				return nil, err
 			}
 		} else {
-			if opts.label == kv.ChainDB && opts.pageSize == 4096 {
-				panic(1)
-			}
-			fmt.Printf("al: %s, %d\n", opts.label, opts.pageSize)
 			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, int(opts.pageSize)); err != nil {
 				return nil, err
 			}

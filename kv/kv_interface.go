@@ -95,6 +95,8 @@ func (l Label) String() string {
 		return "txpool"
 	case SentryDB:
 		return "sentry"
+	case ConsensusDB:
+		return "consensus"
 	default:
 		return "unknown"
 	}
