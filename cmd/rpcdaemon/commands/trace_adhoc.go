@@ -871,7 +871,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	ibs := state.New(stateReader)
 
-	header := rawdb.ReadHeader(tx, hash, blockNumber)
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	header := block.Header()
 	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
