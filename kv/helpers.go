@@ -79,25 +79,22 @@ func bytes2bool(in []byte) bool {
 var ErrChanged = fmt.Errorf("key must not change")
 
 // EnsureNotChangedBool - used to store immutable config flags in db. protects from human mistakes
-func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) error {
-	v, err := tx.GetOne(bucket, k)
+func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (ok, enabled bool, err error) {
+	vBytes, err := tx.GetOne(bucket, k)
 	if err != nil {
-		return err
+		return false, enabled, err
 	}
-	if v == nil {
+	if vBytes == nil {
 		if value {
-			v = bytesTrue
+			vBytes = bytesTrue
 		} else {
-			v = bytesFalse
+			vBytes = bytesFalse
 		}
-		if err := tx.Put(bucket, k, v); err != nil {
-			return err
+		if err := tx.Put(bucket, k, vBytes); err != nil {
+			return false, enabled, err
 		}
 	}
 
-	enabled := bytes2bool(v)
-	if value != enabled {
-		return fmt.Errorf("%w: '%s' has value in db: %v, but got %v from outside", ErrChanged, k, enabled, value)
-	}
-	return nil
+	enabled = bytes2bool(vBytes)
+	return value == enabled, enabled, nil
 }

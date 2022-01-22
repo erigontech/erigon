@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -496,9 +497,7 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 func (rs *RecSplit) Build() error {
 	_, fileName := filepath.Split(rs.indexFile)
 	tmpIdxFilePath := filepath.Join(rs.tmpDir, fileName)
-	if err := os.MkdirAll(rs.tmpDir, 0744); err != nil {
-		return err
-	}
+	common.MustExist(rs.tmpDir)
 
 	if rs.built {
 		return fmt.Errorf("already built")
@@ -624,7 +623,7 @@ func (rs *RecSplit) Build() error {
 	_ = rs.indexF.Sync()
 	_ = rs.indexF.Close()
 	dir, _ := filepath.Split(rs.indexFile)
-	_ = os.MkdirAll(dir, 0744)
+	common.MustExist(dir)
 	if err := os.Rename(tmpIdxFilePath, rs.indexFile); err != nil {
 		return err
 	}

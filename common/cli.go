@@ -44,3 +44,10 @@ func RootContext() (context.Context, context.CancelFunc) {
 	}()
 	return ctx, cancel
 }
+
+func MustExist(path string) {
+	const perm = 0764 // user rwx, group rw, other r
+	if err := os.MkdirAll(path, perm); err != nil {
+		panic(err)
+	}
+}
