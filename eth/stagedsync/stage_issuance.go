@@ -23,16 +23,18 @@ import (
 )
 
 type IssuanceCfg struct {
-	db          kv.RwDB
-	chainConfig *params.ChainConfig
-	blockReader interfaces.FullBlockReader
+	db              kv.RwDB
+	chainConfig     *params.ChainConfig
+	blockReader     interfaces.FullBlockReader
+	enabledIssuance bool
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader, enabledIssuance bool) IssuanceCfg {
 	return IssuanceCfg{
-		db:          db,
-		chainConfig: chainConfig,
-		blockReader: blockReader,
+		db:              db,
+		chainConfig:     chainConfig,
+		blockReader:     blockReader,
+		enabledIssuance: enabledIssuance,
 	}
 }
 
@@ -56,10 +58,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	if headNumber == s.BlockNumber {
 		return nil
 	}
-	if cfg.chainConfig.Consensus != params.EtHashConsensus {
-		if err = s.Update(tx, headNumber); err != nil {
-			return err
-		}
+	if cfg.chainConfig.Consensus != params.EtHashConsensus || !cfg.enabledIssuance {
 		if !useExternalTx {
 			if err = tx.Commit(); err != nil {
 				return err
