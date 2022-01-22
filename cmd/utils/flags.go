@@ -552,6 +552,11 @@ var (
 		Name:  ethconfig.FlagSnapshotRetire,
 		Usage: "Delete(!) old blocks from DB, by move them to snapshots",
 	}
+	DbPageSizeFlag = cli.Uint64Flag{
+		Name:  "db.pagesize",
+		Usage: "can set mdbx pagesize when on db creation: must be power of 2 and '256 < pagesize < 64*1024' ",
+		Value: 4096,
+	}
 
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
@@ -981,6 +986,9 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 
 	if ctx.GlobalIsSet(MdbxAugmentLimitFlag.Name) {
 		cfg.MdbxAugumentLimit = ctx.GlobalUint64(MdbxAugmentLimitFlag.Name)
+	}
+	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
+		cfg.MdbxPageSize = ctx.GlobalUint64(DbPageSizeFlag.Name)
 	}
 }
 

@@ -49,6 +49,7 @@ var DefaultFlags = []cli.Flag{
 	BadBlockFlag,
 	utils.SnapshotSyncFlag,
 	utils.SnapshotRetireFlag,
+	utils.DbPageSizeFlag,
 	utils.ListenPortFlag,
 	utils.NATFlag,
 	utils.NoDiscoverFlag,
