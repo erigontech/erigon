@@ -2,7 +2,6 @@ package snapshotsync
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"testing"
 
@@ -15,10 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpenAllSnapshot2(t *testing.T) {
-	fmt.Printf("%v", true)
-	fmt.Printf("%v", false)
-}
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
