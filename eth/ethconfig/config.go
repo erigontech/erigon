@@ -116,7 +116,6 @@ func init() {
 }
 
 //go:generate gencodec -type Config -formats toml -out gen_config.go
-//go:generate gencodec -type Snapshot -formats toml -out gen_snapshot.go
 
 type Snapshot struct {
 	Enabled       bool
@@ -165,7 +164,8 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot Snapshot
+	Snapshot    Snapshot
+	SnapshotDir string
 
 	BlockDownloaderWindow int
 
