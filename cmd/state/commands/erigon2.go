@@ -179,15 +179,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if txNum, _, err = runBlock2(trace, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
-		if blockNum%1000 == 0 {
-			log.Info("Processed", "blocks", blockNum)
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
-		default:
-		}
 		if err := w.FinishTx(txNum, trace); err != nil {
 			return fmt.Errorf("final finish failed: %w", err)
 		}
@@ -195,6 +186,15 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
 		txNum++
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
+		default:
+		}
+		if blockNum >= 4157326 {
+			interrupt = true
+		}
 		if interrupt || blockNum%uint64(commitmentFrequency) == 0 {
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
@@ -224,6 +224,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 				}
 			}
 		}
+		//if blockNum%1000 == 0 || blockNum >= 4157000 {
+		//	log.Info("Processed", "blocks", blockNum)
+		//}
 	}
 	if w != nil {
 		w.Close()
