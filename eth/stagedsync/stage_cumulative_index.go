@@ -90,8 +90,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 
 		var header types.Header
 		if err := rlp.Decode(bytes.NewReader(v), &header); err != nil {
-			log.Error("Invalid block header RLP", "number", currentBlockNumber, "err", err)
-			return nil
+			return err
 		}
 		cumulativeGasUsed.Add(cumulativeGasUsed, big.NewInt(int64(header.GasUsed)))
 
