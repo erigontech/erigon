@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"runtime"
@@ -111,7 +110,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
 	snapshotDir := path.Join(dataDir, "snapshots")
 	tmpDir := path.Join(dataDir, etl.TmpDirName)
-	_ = os.MkdirAll(tmpDir, 0744)
+	common.MustExist(tmpDir)
 
 	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
@@ -123,10 +122,9 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 }
 
 func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string) error {
+	common.MustExist(snapshotDir)
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	_ = chainID
-	_ = os.MkdirAll(snapshotDir, 0744)
 
 	allSnapshots := snapshotsync.NewAllSnapshots(cfg, snapshotDir)
 	if err := allSnapshots.ReopenSegments(); err != nil {
@@ -178,10 +176,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		}
 	}
 
-	chainConfig := tool.ChainConfigFromDB(chainDB)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	_ = chainID
-	_ = os.MkdirAll(snapshotDir, fs.ModePerm)
+	common.MustExist(snapshotDir)
 
 	log.Info("Last body number", "last", last)
 	workers := runtime.NumCPU() - 1
