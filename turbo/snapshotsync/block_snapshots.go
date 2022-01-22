@@ -1015,14 +1015,30 @@ func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) err
 var (
 	blockSnapshotEnabledKey       = []byte("blocksSnapshotEnabled")
 	blockSnapshotRetireEnabledKey = []byte("blocksSnapshotRetireEnabled")
+
+	FlagSnapshot       = "experimental.snapshot"
+	FlagSnapshotRetire = "experimental.snapshot.retire"
+
+	mapCli2DB = map[string][]byte{
+		FlagSnapshot:       blockSnapshotEnabledKey,
+		FlagSnapshotRetire: blockSnapshotRetireEnabledKey,
+	}
 )
 
 func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
-	if err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey, cfg.Enabled); err != nil {
+	ok, v, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey, cfg.Enabled)
+	if err != nil {
 		return err
 	}
-	if err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotRetireEnabledKey, cfg.RetireEnabled); err != nil {
+	if !ok {
+		return fmt.Errorf("node was started with --%s=%v, can't change it", FlagSnapshot, v)
+	}
+	ok, v, err = kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotRetireEnabledKey, cfg.RetireEnabled)
+	if err != nil {
 		return err
+	}
+	if !ok {
+		return fmt.Errorf("node was started with --%s=%v, can't change it", FlagSnapshotRetire, v)
 	}
 	return nil
 }
