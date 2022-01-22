@@ -256,7 +256,7 @@ func NewStagedSync(
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.AllSnapshots
 	if cfg.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot)
+		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot, cfg.SnapshotDir)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
