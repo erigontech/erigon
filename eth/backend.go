@@ -329,9 +329,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, config.SnapshotDir)
-		if err != nil {
-			return nil, err
-		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		// connect to Downloader
