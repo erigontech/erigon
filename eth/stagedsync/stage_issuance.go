@@ -55,10 +55,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	if headNumber == s.BlockNumber {
-		return nil
-	}
-	if cfg.chainConfig.Consensus != params.EtHashConsensus || !cfg.enabledIssuance {
+	if cfg.chainConfig.Consensus != params.EtHashConsensus || !cfg.enabledIssuance || headNumber == s.BlockNumber {
 		if !useExternalTx {
 			if err = tx.Commit(); err != nil {
 				return err
@@ -66,6 +63,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		}
 		return nil
 	}
+
 	// Log timer
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -157,7 +155,6 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			return err
 		}
 		// Sleep and check for logs
-		timer := time.NewTimer(1 * time.Nanosecond)
 		select {
 		case <-ctx.Done():
 			stopped = true
@@ -165,11 +162,10 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			log.Info(fmt.Sprintf("[%s] Wrote Block Issuance", s.LogPrefix()),
 				"now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
-		case <-timer.C:
+		default:
 			log.Trace("RequestQueueTime (header) ticked")
 		}
 		// Cleanup timer
-		timer.Stop()
 	}
 	if err = s.Update(tx, currentBlockNumber); err != nil {
 		return err
