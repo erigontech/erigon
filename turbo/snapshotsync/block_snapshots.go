@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -88,9 +89,7 @@ type AllSnapshots struct {
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
 func NewAllSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *AllSnapshots {
-	if err := os.MkdirAll(snapshotDir, 0744); err != nil {
-		panic(err)
-	}
+	common2.MustExist(snapshotDir)
 	return &AllSnapshots{dir: snapshotDir, cfg: cfg}
 }
 

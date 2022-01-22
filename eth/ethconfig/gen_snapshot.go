@@ -7,12 +7,10 @@ func (s Snapshot) MarshalTOML() (interface{}, error) {
 	type Snapshot struct {
 		Enabled       bool
 		RetireEnabled bool
-		Dir           string
 	}
 	var enc Snapshot
 	enc.Enabled = s.Enabled
 	enc.RetireEnabled = s.RetireEnabled
-	enc.Dir = s.Dir
 	return &enc, nil
 }
 
@@ -21,7 +19,6 @@ func (s *Snapshot) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Snapshot struct {
 		Enabled       *bool
 		RetireEnabled *bool
-		Dir           *string
 	}
 	var dec Snapshot
 	if err := unmarshal(&dec); err != nil {
@@ -32,9 +29,6 @@ func (s *Snapshot) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.RetireEnabled != nil {
 		s.RetireEnabled = *dec.RetireEnabled
-	}
-	if dec.Dir != nil {
-		s.Dir = *dec.Dir
 	}
 	return nil
 }
