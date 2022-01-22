@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -16,13 +15,15 @@ import (
 )
 
 const (
-	DefaultGas = 11_000_000
+	DefaultGas   = 11_000_000
+	DefaultNonce = 0
 )
 
 type Flags struct {
 	Contract   string
 	Salt       string
 	Gas        uint64
+	Nonce      uint64
 	PrivateKey string
 	Datadir    string
 	Chaindata  string
@@ -48,7 +49,15 @@ func init() {
 
 		fs := os.DirFS("/")
 		buf := bytes.NewBuffer(nil)
-		err = rawTxGenerator.CreateFromFS(cmd.Context(), fs, db, strings.Trim(flags.Contract, "/"), []byte(flags.Salt), flags.Gas, buf)
+
+		config := &services.Config{
+			ContractFileName: strings.Trim(flags.Contract, "/"),
+			Salt:             []byte(flags.Salt),
+			Gas:              flags.Gas,
+			Nonce:            flags.Nonce,
+		}
+
+		err = rawTxGenerator.CreateFromFS(cmd.Context(), fs, db, config, buf)
 		if err != nil {
 			return err
 		}
@@ -60,12 +69,12 @@ func init() {
 			}
 			defer outputFile.Close()
 
-			_, err = outputFile.WriteString(hex.EncodeToString(buf.Bytes()))
+			_, err = outputFile.WriteString(buf.String())
 			if err != nil {
 				return fmt.Errorf("could not write to output file: %v", flags.Output)
 			}
 		} else {
-			fmt.Println(hex.EncodeToString(buf.Bytes()))
+			fmt.Println(buf.String())
 		}
 
 		return err
@@ -83,6 +92,8 @@ func config() (*cobra.Command, *Flags) {
 	generateRawTxCmd.MarkPersistentFlagRequired("salt")
 
 	generateRawTxCmd.PersistentFlags().Uint64Var(&flags.Gas, "gas", DefaultGas, "Gas")
+
+	generateRawTxCmd.PersistentFlags().Uint64Var(&flags.Nonce, "nonce", DefaultNonce, "Nonce")
 
 	generateRawTxCmd.PersistentFlags().StringVar(&flags.PrivateKey, "private_key", "", "Private key")
 	generateRawTxCmd.MarkPersistentFlagRequired("private_key")

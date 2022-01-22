@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 	"testing"
 	"testing/fstest"
@@ -17,23 +18,27 @@ func TestCreate(t *testing.T) {
 	var cases = []struct {
 		name       string
 		privateKey string
-		fileName   string
-		salt       string
-		gas        uint64
+		config     *services.Config
 		want       string
 		error      error
 	}{
-		{name: "invalid private key", privateKey: "abc", fileName: "not_exist.json", error: services.ErrInvalidPrivateKey},
-		{name: "contract file not found", privateKey: generatePrivateKey(t), fileName: "not_exist.json", error: services.ErrReadContract},
-		{name: "success", privateKey: privateKey, fileName: "contract_test.json", salt: "contract_address_salt", gas: 1, want: "03f88283127ed880830186a084342770c0018001963762323236313632363932323361323035623564376495636f6e74726163745f616464726573735f73616c74c001a0f4c886792b3b0c92789b18e80cc8587715b40c51b4d85c8c2106f536506f22aba02855010af44a167d4a0c1b3ab38e7757bc45a4c31693a785f35172e510fd77ad"},
+		{name: "invalid private key", privateKey: "abc", config: &services.Config{
+			ContractFileName: "not_exist.json",
+		}, error: services.ErrInvalidPrivateKey},
+		{name: "contract file not found", privateKey: generatePrivateKey(t), config: &services.Config{
+			ContractFileName: "not_exist.json",
+		}, error: services.ErrReadContract},
+		{name: "success", privateKey: privateKey, config: &services.Config{
+			ContractFileName: "contract_test.json",
+			Salt:             []byte("contract_address_salt"),
+			Gas:              1,
+			Nonce:            0,
+		}, want: "0xb88503f88283127ed801830186a084342770c0018001963762323236313632363932323361323035623564376495636f6e74726163745f616464726573735f73616c74c080a08b88467d0a9a6cba87ec6c2ad9e7399d12a1b6f7f5b951bdd2c5c2ea08b76134a0472e1b37ca5f87c9c38690718c6b2b9db1a3d5398dc664fc4e158ab60d02d64b"},
 	}
 
 	fs := fstest.MapFS{
 		"contract_test.json": {Data: []byte("{\"abi\": []}")},
 	}
-	store := services.NewStubStore(map[string]int{
-		"123": 1,
-	})
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -41,12 +46,14 @@ func TestCreate(t *testing.T) {
 
 			ctx := context.Background()
 			buf := bytes.NewBuffer(nil)
-			err := rawTxGenerator.CreateFromFS(ctx, fs, store, tt.fileName, []byte(tt.salt), tt.gas, buf)
+			db := memdb.NewTestDB(t)
+
+			err := rawTxGenerator.CreateFromFS(ctx, fs, db, tt.config, buf)
 
 			if tt.error == nil {
 				assertNoError(t, err)
 
-				got := hex.EncodeToString(buf.Bytes())
+				got := buf.String()
 
 				if got != tt.want {
 					t.Errorf("got %q not equals want %q", got, tt.want)
