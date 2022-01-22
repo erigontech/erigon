@@ -35,8 +35,6 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 )
 
-const pageSize = 4 * 1024
-
 const NonExistingDBI kv.DBI = 999_999_999
 
 type TableCfgFunc func(defaultBuckets kv.TableCfg) kv.TableCfg
@@ -55,6 +53,7 @@ type MdbxOpts struct {
 	flags         uint
 	log           log.Logger
 	augumentLimit uint64
+	pageSize      uint64
 }
 
 func testKVPath() string {
@@ -70,6 +69,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:        log,
+		pageSize:   4096,
 	}
 }
 
@@ -80,6 +80,11 @@ func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 
 func (opts MdbxOpts) AugumentLimit(v uint64) MdbxOpts {
 	opts.augumentLimit = v
+	return opts
+}
+
+func (opts MdbxOpts) PageSize(v uint64) MdbxOpts {
+	opts.pageSize = v
 	return opts
 }
 
@@ -164,7 +169,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 				return nil, err
 			}
 		} else {
-			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, pageSize); err != nil {
+			if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(2*datasize.GB), -1, int(opts.pageSize)); err != nil {
 				return nil, err
 			}
 		}
@@ -222,7 +227,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		log:     opts.log,
 		wg:      &sync.WaitGroup{},
 		buckets: kv.TableCfg{},
-		txSize:  dirtyPagesLimit * pageSize,
+		txSize:  dirtyPagesLimit * opts.pageSize,
 	}
 	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
@@ -530,7 +535,7 @@ func (tx *MdbxTx) CollectMetrics() {
 	}
 	kv.GcLeafMetric.Set(gc.LeafPages)
 	kv.GcOverflowMetric.Set(gc.OverflowPages)
-	kv.GcPagesMetric.Set((gc.LeafPages + gc.OverflowPages) * pageSize / 8)
+	kv.GcPagesMetric.Set((gc.LeafPages + gc.OverflowPages) * tx.db.opts.pageSize / 8)
 
 	{
 		st, err := tx.BucketStat(kv.PlainState)
@@ -540,7 +545,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		kv.TableStateLeaf.Set(st.LeafPages)
 		kv.TableStateBranch.Set(st.BranchPages)
 		kv.TableStateEntries.Set(st.Entries)
-		kv.TableStateSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+		kv.TableStateSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
 	}
 	{
 		st, err := tx.BucketStat(kv.StorageChangeSet)
@@ -550,7 +555,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		kv.TableScsLeaf.Set(st.LeafPages)
 		kv.TableScsBranch.Set(st.BranchPages)
 		kv.TableScsEntries.Set(st.Entries)
-		kv.TableScsSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+		kv.TableScsSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
 	}
 	{
 		st, err := tx.BucketStat(kv.EthTx)
@@ -561,7 +566,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		kv.TableTxBranch.Set(st.BranchPages)
 		kv.TableTxOverflow.Set(st.OverflowPages)
 		kv.TableTxEntries.Set(st.Entries)
-		kv.TableTxSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+		kv.TableTxSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
 	}
 	{
 		st, err := tx.BucketStat(kv.Log)
@@ -572,7 +577,7 @@ func (tx *MdbxTx) CollectMetrics() {
 		kv.TableLogBranch.Set(st.BranchPages)
 		kv.TableLogOverflow.Set(st.OverflowPages)
 		kv.TableLogEntries.Set(st.Entries)
-		kv.TableLogSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize)
+		kv.TableLogSize.Set((st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize)
 	}
 }
 
@@ -947,7 +952,7 @@ func (tx *MdbxTx) BucketSize(name string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return (st.LeafPages + st.BranchPages + st.OverflowPages) * pageSize, nil
+	return (st.LeafPages + st.BranchPages + st.OverflowPages) * tx.db.opts.pageSize, nil
 }
 
 func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
