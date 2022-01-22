@@ -851,7 +851,25 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if lastHeader != nil {
 			// Fill kv.HeaderCanonical table from snapshots
 			tx.ClearBucket(kv.HeaderCanonical)
+			tx.ClearBucket(kv.HeaderNumber)
 			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
+				return err
+			}
+
+			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+				if err = rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+					return err
+				}
+				if err = rawdb.WriteHeaderNumber(tx, header.Hash(), header.Number.Uint64()); err != nil {
+					return err
+				}
+				select {
+				case <-logEvery.C:
+					log.Info(fmt.Sprintf("[%s] write canonical markers", s.LogPrefix()), "block_number", header.Number.Uint64())
+				default:
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 
