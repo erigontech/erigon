@@ -161,7 +161,7 @@ type Config struct {
 	TLSKeyFile          string
 	TLSCACert           string
 
-	MdbxAugumentLimit uint64
+	MdbxPageSize uint64
 
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
