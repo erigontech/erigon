@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/c2h5oh/datasize"
 	"net"
 	"net/http"
 	"os"
@@ -28,6 +27,8 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+
+	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/erigon/params"
 
@@ -527,7 +528,7 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
-			opts.AugumentLimit(config.MdbxAugumentLimit)
+			opts.PageSize(config.MdbxPageSize)
 		}
 		return opts.Open()
 	}

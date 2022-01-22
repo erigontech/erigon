@@ -98,11 +98,6 @@ var (
 		Usage: "Data directory for the databases",
 		Value: DirectoryString(paths.DefaultDataDir()),
 	}
-	MdbxAugmentLimitFlag = DirectoryFlag{
-		Name:  "mdbx.augment.limit",
-		Usage: "Data directory for the databases",
-		Value: DirectoryString(paths.DefaultDataDir()),
-	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
@@ -984,9 +979,6 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 
-	if ctx.GlobalIsSet(MdbxAugmentLimitFlag.Name) {
-		cfg.MdbxAugumentLimit = ctx.GlobalUint64(MdbxAugmentLimitFlag.Name)
-	}
 	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
 		cfg.MdbxPageSize = ctx.GlobalUint64(DbPageSizeFlag.Name)
 	}
