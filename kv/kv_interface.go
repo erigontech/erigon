@@ -81,9 +81,10 @@ type DBVerbosityLvl int8
 type Label uint8
 
 const (
-	ChainDB  Label = 0
-	TxPoolDB Label = 1
-	SentryDB Label = 2
+	ChainDB     Label = 0
+	TxPoolDB    Label = 1
+	SentryDB    Label = 2
+	ConsensusDB Label = 3
 )
 
 func (l Label) String() string {
