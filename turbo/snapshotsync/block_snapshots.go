@@ -815,7 +815,7 @@ RETRY:
 			return err
 		}
 
-		if blockNum >= 1000000 && blockNum < 1000000+10 {
+		if blockNum >= 1000000 && blockNum < 1000000+5 {
 			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
 		}
 		for firstTxID+i > body.BaseTxId+uint64(body.TxAmount) { // skip empty blocks
@@ -823,13 +823,13 @@ RETRY:
 			if err := rlp.DecodeBytes(buf, body); err != nil {
 				return err
 			}
-			if blockNum >= 1000000 && blockNum < 1000000+10 {
+			blockNum++
+			if blockNum >= 1000000 && blockNum < 1000000+5 {
 				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, 1000000)
 			}
-			blockNum++
 		}
 
-		if blockNum >= 1000000 && blockNum < 1000000+10 {
+		if blockNum >= 1000000 && blockNum < 1000000+5 {
 			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
 		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
