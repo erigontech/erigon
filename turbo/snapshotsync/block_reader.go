@@ -476,7 +476,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		localID = sn.TxnHash2BlockNumIdx.Lookup(txnHash[:])
 		blockNum = sn.TxnHash2BlockNumIdx.Lookup2(localID)
 		fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
-
+		fmt.Printf("try2: %d,%d,%d,%d\n", sn.TxnHash2BlockNumIdx.Lookup2(0), sn.TxnHash2BlockNumIdx.Lookup2(1), sn.TxnHash2BlockNumIdx.Lookup2(2), sn.TxnHash2BlockNumIdx.Lookup2(3))
 		sender := buf[1 : 1+20]
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {
