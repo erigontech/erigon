@@ -49,7 +49,7 @@ func main() {
 			}
 		}
 
-		if len(engineRpcApi) > 0 {
+		if len(engineRpcApi) > 0 && len(defaultAPIList) == 0 {
 			cfg.API = []string{"engine"}
 			cfg.HttpPort = 8550
 			if err := cli.StartRpcServer(cmd.Context(), *cfg, engineRpcApi); err != nil {
