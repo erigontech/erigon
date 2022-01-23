@@ -832,6 +832,9 @@ RETRY:
 			if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
 				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
 			}
+			if blockNum%1000 == 0 {
+				fmt.Printf("bn: %d\n", blockNum)
+			}
 			select {
 			default:
 			case <-ctx.Done():
