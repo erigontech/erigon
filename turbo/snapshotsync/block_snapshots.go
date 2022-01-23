@@ -832,6 +832,14 @@ RETRY:
 			if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
 				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
 			}
+			select {
+			default:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+			}
+
 		}
 
 		if blockNum >= 2000000 && firstBlockNum == 1000000 {
