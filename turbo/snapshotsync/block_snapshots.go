@@ -831,11 +831,11 @@ RETRY:
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+		default:
 		}
 		j++
 		return nil
