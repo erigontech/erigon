@@ -832,7 +832,7 @@ RETRY:
 			}
 		}
 
-		if firstBlockNum == 1000_000 && blockNum <= 1000000+5 {
+		if firstBlockNum == 1000_000 && blockNum <= 1000000+15 {
 			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
 		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
