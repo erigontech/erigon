@@ -825,7 +825,7 @@ RETRY:
 			}
 			blockNum++
 			if blockNum >= 1000000 && blockNum < 1000000+5 {
-				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, 1000000)
+				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
 			}
 		}
 
