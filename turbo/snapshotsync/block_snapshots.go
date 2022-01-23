@@ -295,21 +295,21 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
-
-	for _, sn := range s.blocks {
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
-			return err
+	/*
+		for _, sn := range s.blocks {
+			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+			if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
+				return err
+			}
 		}
-	}
 
-	for _, sn := range s.blocks {
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
-			return err
+		for _, sn := range s.blocks {
+			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+			if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
+				return err
+			}
 		}
-	}
-
+	*/
 	// hack to read first block body - to get baseTxId from there
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
@@ -815,6 +815,9 @@ RETRY:
 			return err
 		}
 
+		if blockNum >= 1000000 && blockNum <= 1000000+5 {
+			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
+		}
 		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
 			if !bodyGetter.HasNext() {
 				return fmt.Errorf("not enough bodies")
@@ -824,8 +827,14 @@ RETRY:
 				return err
 			}
 			blockNum++
+			if blockNum >= 1000000 && blockNum <= 1000000+5 {
+				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
+			}
 		}
 
+		if blockNum >= 1000000 && blockNum <= 1000000+5 {
+			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
+		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
 			return err
 		}
