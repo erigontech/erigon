@@ -33,7 +33,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 				return SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindCumulativeIndexStage(u, tx, ctx)
+				return UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneCumulativeIndexStage(p, tx, ctx)

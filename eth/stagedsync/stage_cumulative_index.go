@@ -120,17 +120,26 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 	return nil
 }
 
-func UnwindCumulativeIndexStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err error) {
+func UnwindCumulativeIndexStage(u *UnwindState, cfg CumulativeIndexCfg, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 
 	if err = u.Done(tx); err != nil {
 		return fmt.Errorf(" reset: %w", err)
 	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("failed to write db commit: %w", err)
 		}
 	}
+
 	return nil
 }
 
