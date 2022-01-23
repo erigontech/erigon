@@ -30,6 +30,7 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/spf13/cobra"
@@ -97,11 +98,7 @@ var (
 		Usage: "Data directory for the databases",
 		Value: DirectoryString(paths.DefaultDataDir()),
 	}
-	MdbxAugmentLimitFlag = DirectoryFlag{
-		Name:  "mdbx.augment.limit",
-		Usage: "Data directory for the databases",
-		Value: DirectoryString(paths.DefaultDataDir()),
-	}
+
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",
@@ -224,9 +221,9 @@ var (
 		Name:  "mine",
 		Usage: "Enable mining",
 	}
-	ProposingEnabledFlag = cli.BoolFlag{
-		Name:  "proposer",
-		Usage: "Enable PoS proposer",
+	ProposingDisableFlag = cli.BoolFlag{
+		Name:  "proposer.disable",
+		Usage: "Disables PoS proposer",
 	}
 	MinerNotifyFlag = cli.StringFlag{
 		Name:  "miner.notify",
@@ -548,8 +545,13 @@ var (
 		Usage: "Enabling experimental snapshot sync",
 	}
 	SnapshotRetireFlag = cli.BoolFlag{
-		Name:  "experimental.snapshot.retire",
+		Name:  ethconfig.FlagSnapshotRetire,
 		Usage: "Delete(!) old blocks from DB, by move them to snapshots",
+	}
+	DbPageSizeFlag = cli.Uint64Flag{
+		Name:  "db.pagesize",
+		Usage: "can set mdbx pagesize when on db creation: must be power of 2 and '256 < pagesize < 64*1024' ",
+		Value: 4096,
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -575,10 +577,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
-		if err := os.MkdirAll(path.Dir(file), 0755); err != nil {
-			panic(err)
-		}
-
+		common2.MustExist(path.Dir(file))
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -981,8 +980,8 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 
-	if ctx.GlobalIsSet(MdbxAugmentLimitFlag.Name) {
-		cfg.MdbxAugumentLimit = ctx.GlobalUint64(MdbxAugmentLimitFlag.Name)
+	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
+		cfg.MdbxPageSize = ctx.GlobalUint64(DbPageSizeFlag.Name)
 	}
 }
 
@@ -1180,7 +1179,7 @@ func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	cfg.Enabled = ctx.GlobalIsSet(MiningEnabledFlag.Name)
-	cfg.EnabledPOS = ctx.GlobalIsSet(ProposingEnabledFlag.Name)
+	cfg.EnabledPOS = !ctx.GlobalIsSet(ProposingDisableFlag.Name)
 
 	if cfg.Enabled && len(cfg.Etherbase.Bytes()) == 0 {
 		panic(fmt.Sprintf("Erigon supports only remote miners. Flag --%s or --%s is required", MinerNotifyFlag.Name, MinerSigningKeyFileFlag.Name))
@@ -1271,9 +1270,9 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
+	cfg.SnapshotDir = path.Join(nodeConfig.DataDir, "snapshots")
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
-		cfg.Snapshot.Dir = path.Join(nodeConfig.DataDir, "snapshots")
 	}
 	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
 		cfg.Snapshot.RetireEnabled = true

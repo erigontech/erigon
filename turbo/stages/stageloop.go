@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -257,7 +256,7 @@ func NewStagedSync(
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.AllSnapshots
 	if cfg.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot, snapshothashes.KnownConfig(controlServer.ChainConfig.ChainName))
+		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot, cfg.SnapshotDir)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()

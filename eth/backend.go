@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"os"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -47,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -226,27 +226,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
-		if err := prune.SetIfNotExist(tx, config.Prune); err != nil {
-			return err
-		}
-
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
-		pm, err := prune.Get(tx)
+		config.Prune, err = prune.EnsureNotChanged(tx, config.Prune)
 		if err != nil {
 			return err
 		}
-		if config.Prune.Initialised {
-			// If storage mode is not explicitly specified, we take whatever is in the database
-			if !reflect.DeepEqual(pm, config.Prune) {
-				return errors.New("not allowed change of --prune flag, last time you used: " + pm.String())
-			}
-		} else {
-			config.Prune = pm
+		if err := snapshotsynccli.EnsureNotChanged(tx, config.Snapshot); err != nil {
+			return err
 		}
-		log.Info("Effective", "prune", config.Prune.String())
+		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
 		return nil
 	}); err != nil {
@@ -337,10 +328,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, snConfig)
-		if err != nil {
-			return nil, err
-		}
+		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, config.SnapshotDir)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		// connect to Downloader
@@ -442,7 +430,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
-	if config.Miner.EnabledPOS {
+	if config.Miner.EnabledPOS && chainConfig.TerminalTotalDifficulty != nil {
 		ethBackendRPC.StartProposer()
 	}
 	if stack.Config().PrivateApiAddr != "" {
