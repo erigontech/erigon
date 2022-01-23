@@ -295,21 +295,19 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
-	/*
-		for _, sn := range s.blocks {
-			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-			if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
-				return err
-			}
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
+			return err
 		}
+	}
 
-		for _, sn := range s.blocks {
-			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-			if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
-				return err
-			}
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
+			return err
 		}
-	*/
+	}
 	// hack to read first block body - to get baseTxId from there
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
