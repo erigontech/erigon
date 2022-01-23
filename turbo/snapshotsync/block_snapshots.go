@@ -149,6 +149,7 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.HeaderHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Headers)))
 				if err != nil {
+					panic(1)
 					return err
 				}
 			case Bodies:

@@ -744,6 +744,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
+	fmt.Printf("alex: %t, %t\n", cfg.snapshots.AllSegmentsAvailable(), cfg.snapshots.AllIdxAvailable())
+
 	// TODO: save AllSegmentsAvailable flag to DB? (to allow Erigon start without Downloader)
 	if !cfg.snapshots.AllSegmentsAvailable() {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
@@ -760,6 +762,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return err
 			}
 			expect := cfg.snapshotHashesCfg.ExpectBlocks
+			fmt.Printf("alex2: %d,%d,%d,%d\n", expect, headers, bodies, txs)
 			if headers >= expect && bodies >= expect && txs >= expect {
 				if err := cfg.snapshots.ReopenSegments(); err != nil {
 					return err
@@ -798,6 +801,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
+		fmt.Printf("alex3: %d,%d,%d,%d\n", expect, headers, bodies, txs)
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir); err != nil {
