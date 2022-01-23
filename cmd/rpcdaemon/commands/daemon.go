@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -15,7 +16,8 @@ import (
 
 // APIList describes the list of available RPC apis
 func APIList(ctx context.Context, db kv.RoDB,
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, filters *filters.Filters,
+	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet starknet.CAIROVMClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
 	blockReader interfaces.BlockAndTxnReader,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
@@ -27,7 +29,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	}
 	ethImpl := NewEthAPI(base, db, eth, txPool, mining, cfg.Gascap)
 	erigonImpl := NewErigonAPI(base, db, eth)
-	starknetImpl := NewStarknetAPI(base, db, txPool)
+	starknetImpl := NewStarknetAPI(base, db, starknet, txPool)
 	txpoolImpl := NewTxPoolAPI(base, db, txPool)
 	netImpl := NewNetAPIImpl(eth)
 	debugImpl := NewPrivateDebugAPI(base, db, cfg.Gascap)

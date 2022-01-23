@@ -23,25 +23,23 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
-
-	"github.com/ledgerwatch/erigon/consensus/parlia"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura"
+	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -120,10 +118,28 @@ func init() {
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled             bool
-	RetireEnabled       bool
-	Dir                 string
-	ChainSnapshotConfig *snapshothashes.Config
+	Enabled       bool
+	RetireEnabled bool
+}
+
+func (s Snapshot) String() string {
+	var out []string
+	if s.Enabled {
+		out = append(out, "--"+FlagSnapshot+"=true")
+	}
+	if s.RetireEnabled {
+		out = append(out, "--"+FlagSnapshotRetire+"=true")
+	}
+	return strings.Join(out, " ")
+}
+
+var (
+	FlagSnapshot       = "experimental.snapshot"
+	FlagSnapshotRetire = "experimental.snapshot.retire"
+)
+
+func NewSnapshotCfg(enabled, retireEnabled bool) Snapshot {
+	return Snapshot{Enabled: enabled, RetireEnabled: retireEnabled}
 }
 
 // Config contains configuration options for ETH protocol.
@@ -148,7 +164,8 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot Snapshot
+	Snapshot    Snapshot
+	SnapshotDir string
 
 	BlockDownloaderWindow int
 

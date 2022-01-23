@@ -300,7 +300,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	defer s.syncCond.L.Unlock()
 
 	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
 	if s.config.TerminalTotalDifficulty == nil {
@@ -362,7 +362,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	if !s.proposing {
-		return nil, fmt.Errorf("execution layer not running as a proposer. enable --proposer flag on startup")
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
 	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{

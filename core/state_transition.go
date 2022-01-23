@@ -341,6 +341,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	// 5. there is no overflow when calculating intrinsic gas
 	// 6. caller has enough balance to cover asset transfer for **topmost** call
 
+	// BSC always gave gas bailout due to system transactions that set 2^256/2 gas limit and
+	// for Parlia consensus this flag should be always be set
+	if st.evm.ChainConfig().Parlia != nil {
+		gasBailout = true
+	}
+
 	// Check clauses 1-3 and 6, buy gas if everything is correct
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err

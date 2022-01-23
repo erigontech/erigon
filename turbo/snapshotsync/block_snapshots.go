@@ -1,7 +1,6 @@
 package snapshotsync
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -18,8 +17,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -81,7 +80,6 @@ type AllSnapshots struct {
 	segmentsAvailable    uint64
 	idxAvailable         uint64
 	blocks               []*BlocksSnapshot
-	chainSnapshotCfg     *snapshothashes.Config
 	cfg                  ethconfig.Snapshot
 }
 
@@ -90,26 +88,23 @@ type AllSnapshots struct {
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func NewAllSnapshots(cfg ethconfig.Snapshot, snCfg *snapshothashes.Config) *AllSnapshots {
-	if err := os.MkdirAll(cfg.Dir, 0744); err != nil {
-		panic(err)
-	}
-	return &AllSnapshots{dir: cfg.Dir, chainSnapshotCfg: snCfg, cfg: cfg}
+func NewAllSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *AllSnapshots {
+	common2.MustExist(snapshotDir)
+	return &AllSnapshots{dir: snapshotDir, cfg: cfg}
 }
 
-func (s *AllSnapshots) ChainSnapshotConfig() *snapshothashes.Config { return s.chainSnapshotCfg }
-func (s *AllSnapshots) Cfg() ethconfig.Snapshot                     { return s.cfg }
-func (s *AllSnapshots) Dir() string                                 { return s.dir }
-func (s *AllSnapshots) AllSegmentsAvailable() bool                  { return s.allSegmentsAvailable }
-func (s *AllSnapshots) SetAllSegmentsAvailable(v bool)              { s.allSegmentsAvailable = v }
-func (s *AllSnapshots) BlocksAvailable() uint64                     { return s.segmentsAvailable }
-func (s *AllSnapshots) AllIdxAvailable() bool                       { return s.allIdxAvailable }
-func (s *AllSnapshots) SetAllIdxAvailable(v bool)                   { s.allIdxAvailable = v }
-func (s *AllSnapshots) IndicesAvailable() uint64                    { return s.idxAvailable }
+func (s *AllSnapshots) Cfg() ethconfig.Snapshot        { return s.cfg }
+func (s *AllSnapshots) Dir() string                    { return s.dir }
+func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
+func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
+func (s *AllSnapshots) BlocksAvailable() uint64        { return s.segmentsAvailable }
+func (s *AllSnapshots) AllIdxAvailable() bool          { return s.allIdxAvailable }
+func (s *AllSnapshots) SetAllIdxAvailable(v bool)      { s.allIdxAvailable = v }
+func (s *AllSnapshots) IndicesAvailable() uint64       { return s.idxAvailable }
 
-func (s *AllSnapshots) EnsureExpectedBlocksAreAvailable() error {
-	if s.BlocksAvailable() < s.ChainSnapshotConfig().ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", s.ChainSnapshotConfig().ExpectBlocks, s.BlocksAvailable())
+func (s *AllSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
+	if s.BlocksAvailable() < cfg.ExpectBlocks {
+		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}
 	return nil
 }
@@ -213,10 +208,6 @@ func (s *AllSnapshots) ReopenSegments() error {
 			return err
 		}
 		if to == prevTo {
-			continue
-		}
-		if from > s.chainSnapshotCfg.ExpectBlocks {
-			log.Debug("[open snapshots] skip snapshot because node expect less blocks in snapshots", "file", f)
 			continue
 		}
 		if from != prevTo { // no gaps
@@ -1015,41 +1006,6 @@ func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) err
 			if err := walker(header); err != nil {
 				return err
 			}
-		}
-	}
-	return nil
-}
-
-type SimpleFile struct {
-	name  string
-	f     *os.File
-	w     *bufio.Writer
-	count uint64
-	buf   []byte
-}
-
-func NewSimpleFile(name string) (*SimpleFile, error) {
-	f, err := os.Create(name)
-	if err != nil {
-		return nil, err
-	}
-	w := bufio.NewWriterSize(f, etl.BufIOSize)
-	return &SimpleFile{name: name, f: f, w: w, buf: make([]byte, 128)}, nil
-}
-func (f *SimpleFile) Close() {
-	f.w.Flush()
-	f.f.Sync()
-	f.f.Close()
-}
-func (f *SimpleFile) Append(v []byte) error {
-	f.count++
-	n := binary.PutUvarint(f.buf, uint64(len(v)))
-	if _, e := f.w.Write(f.buf[:n]); e != nil {
-		return e
-	}
-	if len(v) > 0 {
-		if _, e := f.w.Write(v); e != nil {
-			return e
 		}
 	}
 	return nil

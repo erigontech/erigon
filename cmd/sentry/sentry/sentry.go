@@ -538,6 +538,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			); err != nil {
 				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
+			ss.sendGonePeerToClients(gointerfaces.ConvertHashToH256(peerID))
 			return nil
 		},
 		NodeInfo: func() interface{} {
@@ -557,9 +558,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
-	if err := os.MkdirAll(datadir, 0744); err != nil {
-		return fmt.Errorf("could not create dir: %s, %w", datadir, err)
-	}
+	libcommon.MustExist(datadir)
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
@@ -978,6 +977,12 @@ func (ss *SentryServerImpl) Close() {
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "error", err)
+	}
+}
+
+func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H256) {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
+		log.Warn("Sending gone peer notice to core P2P failed", "error", err)
 	}
 }
 

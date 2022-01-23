@@ -18,7 +18,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-	cfg := ethconfig.Snapshot{Dir: dir, Enabled: true}
+	cfg := ethconfig.Snapshot{Enabled: true}
 	createFile := func(from, to uint64, name SnapshotType) {
 		c, err := compress.NewCompressor(context.Background(), "test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 		require.NoError(err)
@@ -40,7 +40,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = idx.Build()
 		require.NoError(err)
 	}
-	s := NewAllSnapshots(cfg, chainSnapshotCfg)
+	s := NewAllSnapshots(cfg, dir)
 	defer s.Close()
 	err := s.ReopenSegments()
 	require.NoError(err)
@@ -48,14 +48,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s.Close()
 
 	createFile(500_000, 1_000_000, Bodies)
-	s = NewAllSnapshots(cfg, chainSnapshotCfg)
+	s = NewAllSnapshots(cfg, dir)
 	defer s.Close()
 	require.Equal(0, len(s.blocks)) //because, no headers and transactions snapshot files are created
 	s.Close()
 
 	createFile(500_000, 1_000_000, Headers)
 	createFile(500_000, 1_000_000, Transactions)
-	s = NewAllSnapshots(cfg, chainSnapshotCfg)
+	s = NewAllSnapshots(cfg, dir)
 	err = s.ReopenSegments()
 	require.Error(err)
 	require.Equal(0, len(s.blocks)) //because, no gaps are allowed (expect snapshots from block 0)
@@ -64,7 +64,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(0, 500_000, Bodies)
 	createFile(0, 500_000, Headers)
 	createFile(0, 500_000, Transactions)
-	s = NewAllSnapshots(cfg, chainSnapshotCfg)
+	s = NewAllSnapshots(cfg, dir)
 	err = s.ReopenSegments()
 	require.NoError(err)
 	defer s.Close()
@@ -81,19 +81,20 @@ func TestOpenAllSnapshot(t *testing.T) {
 	_, ok = s.Blocks(1_000_000)
 	require.False(ok)
 
-	// user must be able to limit amount of blocks which read from snapshot
+	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
+	// ExpectedBlocks - says only how much block must come from Torrent
 	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
-	s = NewAllSnapshots(cfg, chainSnapshotCfg)
+	s = NewAllSnapshots(cfg, dir)
 	err = s.ReopenSegments()
 	require.NoError(err)
 	defer s.Close()
-	require.Equal(1, len(s.blocks))
+	require.Equal(2, len(s.blocks))
 
 	createFile(500_000, 900_000, Headers)
 	createFile(500_000, 900_000, Bodies)
 	createFile(500_000, 900_000, Transactions)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-	s = NewAllSnapshots(cfg, chainSnapshotCfg)
+	s = NewAllSnapshots(cfg, dir)
 	defer s.Close()
 	err = s.ReopenSegments()
 	require.Error(err)
