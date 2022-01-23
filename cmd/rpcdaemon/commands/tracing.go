@@ -34,7 +34,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if !ok {
-		fmt.Printf("alex1 \n")
 		return nil
 	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -42,13 +41,13 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if block == nil {
-		fmt.Printf("alex2 \n")
 		return nil
 	}
 	blockHash := block.Hash()
 	var txnIndex uint64
 	var txn types.Transaction
 	for i, transaction := range block.Transactions() {
+		fmt.Printf("h: %x\n", transaction.Hash())
 		if transaction.Hash() == hash {
 			txnIndex = uint64(i)
 			txn = transaction
@@ -56,7 +55,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 	}
 	if txn == nil {
-		fmt.Printf("alex3 \n")
 		stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
