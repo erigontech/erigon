@@ -295,21 +295,21 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
-	/*
-		for _, sn := range s.blocks {
-			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-			if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
-				return err
-			}
-		}
 
-		for _, sn := range s.blocks {
-			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-			if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
-				return err
-			}
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
+			return err
 		}
-	*/
+	}
+
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
+			return err
+		}
+	}
+
 	// hack to read first block body - to get baseTxId from there
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
@@ -609,7 +609,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			j++
 
 			select {
-			default:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
@@ -618,6 +617,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 				log.Info("Dumping txs", "block num", blockNum,
 					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 				)
+			default:
 			}
 			return nil
 		}); err != nil {
@@ -679,7 +679,6 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
@@ -688,6 +687,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 			log.Info("Dumping headers", "block num", blockNum,
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 			)
+		default:
 		}
 		return true, nil
 	}); err != nil {
@@ -733,7 +733,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
@@ -742,6 +741,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			log.Info("Wrote into file", "block num", blockNum,
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 			)
+		default:
 		}
 		return true, nil
 	}); err != nil {
@@ -891,11 +891,11 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 		//TODO: optimize by - types.RawRlpHash(word).Bytes()
 
 		select {
-		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[Snapshots Indexing] HeadersHashIdx", "blockNumber", h.Number.Uint64())
+		default:
 		}
 		return nil
 	}); err != nil {
@@ -922,11 +922,11 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[Snapshots Indexing] BodyNumberIdx", "blockNumber", firstBlockNumInSegment+i)
+		default:
 		}
 		return nil
 	}); err != nil {
