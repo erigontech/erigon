@@ -178,8 +178,15 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	return nil
 }
 
-func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err error) {
+func UnwindIssuanceStage(u *UnwindState, cfg IssuanceCfg, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 
 	if err = u.Done(tx); err != nil {
 		return fmt.Errorf(" reset: %w", err)
@@ -192,8 +199,17 @@ func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err e
 	return nil
 }
 
-func PruneIssuanceStage(p *PruneState, tx kv.RwTx, ctx context.Context) (err error) {
-	if tx != nil {
+func PruneIssuanceStage(p *PruneState, cfg IssuanceCfg, tx kv.RwTx, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}

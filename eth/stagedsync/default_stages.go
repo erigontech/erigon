@@ -193,10 +193,10 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, block
 				return SpawnStageIssuance(issuance, s, tx, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindIssuanceStage(u, tx, ctx)
+				return UnwindIssuanceStage(u, issuance, tx, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneIssuanceStage(p, tx, ctx)
+				return PruneIssuanceStage(p, issuance, tx, ctx)
 			},
 		},
 		{

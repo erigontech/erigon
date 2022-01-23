@@ -61,6 +61,12 @@ make erigon
 ./build/bin/erigon
 ```
 
+### Optional stages
+
+There optional stages that can be enabled through flags:
+
+* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to use `erigon_watchTheBurn`.
+
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2Tb on your drive, a good option is to start syncing one
