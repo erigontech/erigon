@@ -30,10 +30,32 @@ func main() {
 			log.Info("filters are not supported in chaindata mode")
 		}
 
-		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, backend, txPool, mining, starknet, ff, stateCache, blockReader, *cfg, nil)); err != nil {
+
+		defaultAPIList, engineRpcApi :=commands.APIList(cmd.Context(), db, backend, txPool, mining, starknet, ff, stateCache, blockReader, *cfg, nil)
+
+		var newAPIFlags []string
+		
+		for _, apiFlags := range(cfg.API){
+			if apiFlags != "engine"{
+				newAPIFlags = append(newAPIFlags, apiFlags)
+			}
+		}
+
+		cfg.API = newAPIFlags
+		if err := cli.StartRpcServer(cmd.Context(), *cfg, defaultAPIList); err != nil {
 			log.Error(err.Error())
 			return nil
 		}
+
+		if len(engineRpcApi) != 0{
+			cfg.API = []string{"engine"}
+			cfg.HttpPort = 8550
+			if err := cli.StartRpcServer(cmd.Context(), *cfg, engineRpcApi); err != nil{
+				log.Error(err.Error())
+			return nil
+			}
+		}
+
 		return nil
 	}
 
