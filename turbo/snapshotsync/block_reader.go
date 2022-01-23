@@ -461,6 +461,8 @@ func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeig
 }
 
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+	fmt.Printf("alex here: %d,%d\n", back.sn.blocks[3].TxnHash2BlockNumIdx.Lookup2(0),
+		back.sn.blocks[3].TxnHash2BlockNumIdx.Lookup2(1))
 	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
 		sn := back.sn.blocks[i]
 		localID := sn.TxnHashIdx.Lookup(txnHash[:])
