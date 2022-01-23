@@ -63,7 +63,7 @@ make erigon
 
 ### Optional stages
 
-There optional stages that can be enabled through flags:
+There is an optional stage that can be enabled through flags:
 
 * `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to use `erigon_watchTheBurn`.
 
