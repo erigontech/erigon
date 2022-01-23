@@ -27,7 +27,7 @@ Downloader does:
 
 ## How to
 
-### Start
+### Start erigon with snapshot sync
 
 ```shell
 downloader --datadir=<your_datadir> --downloader.api.addr=127.0.0.1:9093
