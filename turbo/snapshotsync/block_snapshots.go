@@ -830,7 +830,7 @@ RETRY:
 		}
 
 		if blockNum >= 1000000 && blockNum < 1000000+10 {
-			fmt.Printf("alex create: %x, %d\n", blockNum, slot.IdHash)
+			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
 		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
 			return err
