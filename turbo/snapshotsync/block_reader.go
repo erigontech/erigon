@@ -463,6 +463,7 @@ func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeig
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
 	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
 		sn := back.sn.blocks[i]
+
 		localID := sn.TxnHashIdx.Lookup(txnHash[:])
 		txnID = localID + sn.TxnHashIdx.BaseDataID()
 		offset := sn.TxnHashIdx.Lookup2(localID)
@@ -475,6 +476,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 
 		localID = sn.TxnHash2BlockNumIdx.Lookup(txnHash[:])
 		blockNum = sn.TxnHash2BlockNumIdx.Lookup2(localID)
+
 		sender := buf[1 : 1+20]
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {
