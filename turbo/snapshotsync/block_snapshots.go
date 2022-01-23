@@ -815,7 +815,7 @@ RETRY:
 			return err
 		}
 
-		if blockNum >= 2000000-5 && blockNum < 2000000+5 {
+		if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
 			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
 		}
 		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
@@ -824,12 +824,12 @@ RETRY:
 				return err
 			}
 			blockNum++
-			if blockNum >= 2000000-5 && blockNum < 2000000+5 {
+			if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
 				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
 			}
 		}
 
-		if blockNum >= 2000000 && blockNum < 2000000+5 {
+		if blockNum >= 2000000 && firstBlockNum == 1000000 {
 			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
 		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
