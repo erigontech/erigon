@@ -752,7 +752,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 }
 
 func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	dir, _ := filepath.Split(segmentFilePath)
 
@@ -832,7 +832,7 @@ RETRY:
 			if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
 				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
 			}
-			if blockNum%1000 == 0 {
+			if blockNum%10_000 == 0 {
 				fmt.Printf("bn: %d\n", blockNum)
 			}
 			select {
