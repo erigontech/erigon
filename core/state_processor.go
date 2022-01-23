@@ -98,11 +98,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, statedb)
 
-	gasBailout := false
-	if config.Parlia != nil {
-		gasBailout = true
-	}
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
+	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
 	}
