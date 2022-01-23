@@ -819,6 +819,11 @@ RETRY:
 			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
 		}
 		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+			if !bodyGetter.HasNext() {
+				fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
+				panic(1)
+				break
+			}
 			buf, _ = bodyGetter.Next(buf[:0])
 			if err := rlp.DecodeBytes(buf, body); err != nil {
 				return err
