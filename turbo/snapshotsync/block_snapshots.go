@@ -314,6 +314,8 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
 	}
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for _, sn := range s.blocks {
 		// build txs idx
 		gg := sn.Bodies.MakeGetter()
@@ -337,7 +339,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
-		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, f, expectedTxsAmount, tmpDir); err != nil {
+		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, expectedTxsAmount, f, tmpDir, logEvery); err != nil {
 			return err
 		}
 	}
@@ -751,9 +753,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	return nil
 }
 
-func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
+func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum, expectedCount uint64, segmentFilePath, tmpDir string, logEvery *time.Ticker) error {
 	dir, _ := filepath.Split(segmentFilePath)
 
 	parseCtx := txpool.NewTxParseContext(chainID)
@@ -815,39 +815,17 @@ RETRY:
 			return err
 		}
 
-		if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
-			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
-		}
 		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
 			if !bodyGetter.HasNext() {
-				fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
-				panic(1)
-				break
+				return fmt.Errorf("not enough bodies")
 			}
 			buf, _ = bodyGetter.Next(buf[:0])
 			if err := rlp.DecodeBytes(buf, body); err != nil {
 				return err
 			}
 			blockNum++
-			if blockNum >= 2000000-5 && firstBlockNum == 1000000 {
-				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
-			}
-			if blockNum%10_000 == 0 {
-				fmt.Printf("bn: %d\n", blockNum)
-			}
-			select {
-			default:
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
-			}
-
 		}
 
-		if blockNum >= 2000000 && firstBlockNum == 1000000 {
-			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
-		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
 			return err
 		}
