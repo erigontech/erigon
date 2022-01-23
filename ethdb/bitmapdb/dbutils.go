@@ -62,8 +62,8 @@ func WalkChunks(bm *roaring.Bitmap, sizeLimit uint64, f func(chunk *roaring.Bitm
 }
 
 func WalkChunkWithKeys(k []byte, m *roaring.Bitmap, sizeLimit uint64, f func(chunkKey []byte, chunk *roaring.Bitmap) error) error {
+	chunkKey := make([]byte, len(k)+4)
 	return WalkChunks(m, sizeLimit, func(chunk *roaring.Bitmap, isLast bool) error {
-		chunkKey := make([]byte, len(k)+4)
 		copy(chunkKey, k)
 		if isLast {
 			binary.BigEndian.PutUint32(chunkKey[len(k):], ^uint32(0))
@@ -211,8 +211,8 @@ func WalkChunks64(bm *roaring64.Bitmap, sizeLimit uint64, f func(chunk *roaring6
 }
 
 func WalkChunkWithKeys64(k []byte, m *roaring64.Bitmap, sizeLimit uint64, f func(chunkKey []byte, chunk *roaring64.Bitmap) error) error {
+	chunkKey := make([]byte, len(k)+8)
 	return WalkChunks64(m, sizeLimit, func(chunk *roaring64.Bitmap, isLast bool) error {
-		chunkKey := make([]byte, len(k)+8)
 		copy(chunkKey, k)
 		if isLast {
 			binary.BigEndian.PutUint64(chunkKey[len(k):], ^uint64(0))
