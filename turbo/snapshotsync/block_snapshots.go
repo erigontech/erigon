@@ -818,7 +818,7 @@ RETRY:
 		if blockNum >= 1000000 && blockNum < 1000000+5 {
 			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
 		}
-		for firstTxID+i >= body.BaseTxId+uint64(body.TxAmount) { // skip empty blocks
+		for body.BaseTxId+uint64(body.TxAmount) < firstTxID+i { // skip empty blocks
 			buf, _ = bodyGetter.Next(buf[:0])
 			if err := rlp.DecodeBytes(buf, body); err != nil {
 				return err
