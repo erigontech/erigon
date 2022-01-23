@@ -20,9 +20,8 @@ func APIList(ctx context.Context, db kv.RoDB,
 	starknet starknet.CAIROVMClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
 	blockReader interfaces.BlockAndTxnReader,
-	cfg cli.Flags, customAPIList []rpc.API) ([]rpc.API, []rpc.API) {
+	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
-	var engineRPCAPI []rpc.API
 
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
 	if cfg.TevmEnabled {
@@ -107,7 +106,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 				Version:   "1.0",
 			})
 		case "engine":
-			engineRPCAPI = append(engineRPCAPI, rpc.API{
+			defaultAPIList = append(defaultAPIList, rpc.API{
 				Namespace: "engine",
 				Public:    true,
 				Service:   EngineAPI(engineImpl),
@@ -130,5 +129,5 @@ func APIList(ctx context.Context, db kv.RoDB,
 		}
 	}
 
-	return append(defaultAPIList, customAPIList...), engineRPCAPI
+	return append(defaultAPIList, customAPIList...)
 }
