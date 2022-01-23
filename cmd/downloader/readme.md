@@ -45,8 +45,12 @@ downloader --download.limit=10mb --upload.limit=10mb
 ```shell
 # format compatible with https://github.com/ledgerwatch/erigon-snapshot
 downloader info_hashes --datadir=<your_datadir>
-# force re-create .torrent files
-downloader info_hashes --datadir=<your_datadir> --rebuild
+```
+
+### Create .torrent files
+
+```shell
+downloader info_hashes --rebuild --datadir=<your_datadir>
 ```
 
 ### Create new snapshots
