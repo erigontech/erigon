@@ -313,7 +313,6 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		return err
 	}
 	for _, sn := range s.blocks {
-
 		// build txs idx
 		gg := sn.Bodies.MakeGetter()
 		buf, _ := gg.Next(nil)
@@ -822,6 +821,9 @@ RETRY:
 			blockNum++
 		}
 
+		if blockNum >= 1000000 && blockNum < 1000000+10 {
+			fmt.Printf("alex create: %x, %d\n", blockNum, slot.IdHash)
+		}
 		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
 			return err
 		}
