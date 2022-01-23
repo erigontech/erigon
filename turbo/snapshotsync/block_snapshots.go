@@ -791,7 +791,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
-		BaseDataID: firstBlockNum,
+		BaseDataID: 0,
 	})
 	if err != nil {
 		return err
