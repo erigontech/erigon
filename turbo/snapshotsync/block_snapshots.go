@@ -791,7 +791,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
-		BaseDataID: 0,
+		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
 		return err
@@ -815,9 +815,6 @@ RETRY:
 			return err
 		}
 
-		if blockNum >= 1000000 && blockNum <= 1000000+5 {
-			fmt.Printf("alex12: %d, %d, %d\n", firstTxID+i, body.BaseTxId, body.TxAmount)
-		}
 		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
 			if !bodyGetter.HasNext() {
 				return fmt.Errorf("not enough bodies")
@@ -827,16 +824,9 @@ RETRY:
 				return err
 			}
 			blockNum++
-			if blockNum >= 1000000 && blockNum <= 1000000+5 {
-				fmt.Printf("alex34: %d, %d, %d -> %d\n", firstTxID+i, body.BaseTxId, body.TxAmount, blockNum)
-			}
 		}
 
-		if (firstBlockNum == 1000_000 && blockNum <= 1000000+10) ||
-			(firstBlockNum == 1500_000 && blockNum <= 1500000+1) {
-			fmt.Printf("alex create: %d, %x\n", blockNum, slot.IdHash)
-		}
-		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum-firstBlockNum); err != nil {
+		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
 			return err
 		}
 
