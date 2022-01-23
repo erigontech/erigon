@@ -295,16 +295,18 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
+		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
 	}
 
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
+		if err := BodiesIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
 	}
@@ -312,8 +314,6 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
 	}
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
 	for _, sn := range s.blocks {
 		// build txs idx
 		gg := sn.Bodies.MakeGetter()
@@ -868,10 +868,7 @@ RETRY:
 }
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
-
+func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker) error {
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -902,9 +899,7 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker) error {
 	num := make([]byte, 8)
 
 	d, err := compress.NewDecompressor(segmentFilePath)
