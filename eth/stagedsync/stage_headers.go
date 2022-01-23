@@ -814,28 +814,28 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.snapshots.SetAllIdxAvailable(true)
 	}
 
-	// Fill kv.HeaderTD table from snapshots
-	c, err := tx.Cursor(kv.HeaderTD)
-	if err != nil {
-		return err
-	}
-	count, err := c.Count()
-	if err != nil {
-		return err
-	}
-	if count == 0 || count == 1 { // genesis does write 1 record
+	if s.BlockNumber == 0 {
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
-		tx.ClearBucket(kv.HeaderTD)
-		var lastHeader *types.Header
-		//total  difficulty write
+		//tx.ClearBucket(kv.HeaderCanonical)
+		//tx.ClearBucket(kv.HeaderTD)
+		//tx.ClearBucket(kv.HeaderNumber)
+
+		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
+		// for now easier just store them in db
 		td := big.NewInt(0)
 		if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
 			td.Add(td, header.Difficulty)
-			// TODO: append
-			rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td)
-			lastHeader = header
+			if err := rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td); err != nil {
+				return err
+			}
+			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+				return err
+			}
+			if err := rawdb.WriteHeaderNumber(tx, header.Hash(), header.Number.Uint64()); err != nil {
+				return err
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -848,41 +848,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 
-		if lastHeader != nil {
-			// Fill kv.HeaderCanonical table from snapshots
-			tx.ClearBucket(kv.HeaderCanonical)
-			tx.ClearBucket(kv.HeaderNumber)
-			if err := fixCanonicalChain(s.LogPrefix(), logEvery, lastHeader.Number.Uint64(), lastHeader.Hash(), tx, cfg.blockReader); err != nil {
-				return err
-			}
+		sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+		if !ok {
+			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+		}
 
-			if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
-				if err = rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
-					return err
-				}
-				if err = rawdb.WriteHeaderNumber(tx, header.Hash(), header.Number.Uint64()); err != nil {
-					return err
-				}
-				select {
-				case <-logEvery.C:
-					log.Info(fmt.Sprintf("[%s] write canonical markers", s.LogPrefix()), "block_number", header.Number.Uint64())
-				default:
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-
-			sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
-			if !ok {
-				return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
-			}
-
-			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-			lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
-			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-				return err
-			}
+		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+		lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
+		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+			return err
 		}
 	}
 
