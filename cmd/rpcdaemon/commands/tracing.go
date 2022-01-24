@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
@@ -29,7 +28,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	defer tx.Rollback()
 
-	defer func(t time.Time) { fmt.Printf("tracing.go:32: %s\n", time.Since(t)) }(time.Now())
 	// Retrieve the transaction and assemble its EVM context
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
@@ -38,7 +36,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if !ok {
 		return nil
 	}
-	defer func(t time.Time) { fmt.Printf("tracing.go:40: %s\n", time.Since(t)) }(time.Now())
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return err
@@ -46,7 +43,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if block == nil {
 		return nil
 	}
-	defer func(t time.Time) { fmt.Printf("tracing.go:47: %s\n", time.Since(t)) }(time.Now())
 	blockHash := block.Hash()
 	var txnIndex uint64
 	var txn types.Transaction
@@ -61,7 +57,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
-	defer func(t time.Time) { fmt.Printf("tracing.go:64: %s\n", time.Since(t)) }(time.Now())
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
@@ -75,13 +70,11 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if api.TevmEnabled {
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
-	defer func(t time.Time) { fmt.Printf("tracing.go:78: %s, %T\n", time.Since(t), tx) }(time.Now())
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, blockHash, txnIndex)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
-	defer func(t time.Time) { fmt.Printf("tracing.go:84: %s\n", time.Since(t)) }(time.Now())
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
 }
