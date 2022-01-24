@@ -538,7 +538,7 @@ func TestHash_Format(t *testing.T) {
 	}
 }
 
-func TestStarknetAddressUnmarshalJSON(t *testing.T) {
+func TestAddress32UnmarshalJSON(t *testing.T) {
 	var tests = []struct {
 		Input     string
 		ShouldErr bool
@@ -553,7 +553,7 @@ func TestStarknetAddressUnmarshalJSON(t *testing.T) {
 		{`"0x0000000000000000000000000000000000000000000000000000000000000010"`, false, big.NewInt(16)},
 	}
 	for i, test := range tests {
-		var v StarknetAddress
+		var v Address32
 		err := json.Unmarshal([]byte(test.Input), &v)
 		if err != nil && !test.ShouldErr {
 			t.Errorf("test #%d: unexpected error: %v", i, err)
@@ -569,7 +569,7 @@ func TestStarknetAddressUnmarshalJSON(t *testing.T) {
 	}
 }
 
-func TestStarknetAddressHexChecksum(t *testing.T) {
+func TestAddress32HexChecksum(t *testing.T) {
 	var tests = []struct {
 		Input  string
 		Output string
@@ -585,26 +585,26 @@ func TestStarknetAddressHexChecksum(t *testing.T) {
 		{"0x000000000000000000000000000000000000000000000000000000000000000a", "0x000000000000000000000000000000000000000000000000000000000000000A"},
 	}
 	for i, test := range tests {
-		output := HexToStarknetAddress(test.Input).Hex()
+		output := HexToAddress32(test.Input).Hex()
 		if output != test.Output {
 			t.Errorf("test #%d: failed to match when it should (%s != %s)", i, output, test.Output)
 		}
 	}
 }
 
-func BenchmarkStarknetAddressHex(b *testing.B) {
+func BenchmarkAddress32Hex(b *testing.B) {
 	testAddr := HexToAddress("0x02f9e8d79ceb60818adef3372729c60aeb0428d6357eb7d1587c347f0113b338")
 	for n := 0; n < b.N; n++ {
 		println(testAddr.Hex())
 	}
 }
 
-func TestStarknetAddress_Format(t *testing.T) {
+func TestAddress32_Format(t *testing.T) {
 	b := []byte{
 		0x2, 0xf9, 0xe8, 0xd7, 0x9c, 0xeb, 0x60, 0x81, 0x8a, 0xde, 0xf3, 0x37, 0x27, 0x29, 0xc6, 0xa,
 		0xeb, 0x4, 0x28, 0xd6, 0x35, 0x7e, 0xb7, 0xd1, 0x58, 0x7c, 0x34, 0x7f, 0x1, 0x13, 0xb3, 0x33,
 	}
-	var addr StarknetAddress
+	var addr Address32
 	addr.SetBytes(b)
 
 	tests := []struct {

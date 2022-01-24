@@ -42,14 +42,14 @@ const (
 	BlockNumberLength = 8
 	// IncarnationLength length of uint64 for contract incarnations
 	IncarnationLength = 8
-	// StarknetAddressLength is the expected length of the Starknet address (in bytes)
-	StarknetAddressLength = 32
+	// Address32Length is the expected length of the Starknet address (in bytes)
+	Address32Length = 32
 )
 
 var (
 	hashT     = reflect.TypeOf(Hash{})
 	addressT  = reflect.TypeOf(Address{})
-	addressSt = reflect.TypeOf(StarknetAddress{})
+	addressSt = reflect.TypeOf(Address32{})
 )
 
 // Hash represents the 32 byte Keccak256 hash of arbitrary data.
@@ -452,49 +452,49 @@ func (keys StorageKeys) Swap(i, j int) {
 	keys[i], keys[j] = keys[j], keys[i]
 }
 
-/////////// Starknet Address
+/////////// Address32
 
-// StarknetAddress represents the 32 byte address of Starknet account.
-type StarknetAddress [StarknetAddressLength]byte
+// Address32 represents the 32 byte address.
+type Address32 [Address32Length]byte
 
-// BytesToStarknetAddress returns StarknetAddress with value b.
+// BytesToAddress32 returns Address32 with value b.
 // If b is larger than len(h), b will be cropped from the left.
-func BytesToStarknetAddress(b []byte) StarknetAddress {
-	var a StarknetAddress
+func BytesToAddress32(b []byte) Address32 {
+	var a Address32
 	a.SetBytes(b)
 	return a
 }
 
-// HexToStarknetAddress returns StarknetAddress with byte values of s.
+// HexToAddress32 returns Address32 with byte values of s.
 // If s is larger than len(h), s will be cropped from the left.
-func HexToStarknetAddress(s string) StarknetAddress { return BytesToStarknetAddress(FromHex(s)) }
+func HexToAddress32(s string) Address32 { return BytesToAddress32(FromHex(s)) }
 
-// IsHexStarknetAddress verifies whether a string can represent a valid hex-encoded
+// IsHexAddress32 verifies whether a string can represent a valid hex-encoded
 // Starknet address or not.
-func IsHexStarknetAddress(s string) bool {
+func IsHexAddress32(s string) bool {
 	if has0xPrefix(s) {
 		s = s[2:]
 	}
-	return len(s) == 2*StarknetAddressLength && isHex(s)
+	return len(s) == 2*Address32Length && isHex(s)
 }
 
 // Bytes gets the string representation of the underlying address.
-func (a StarknetAddress) Bytes() []byte { return a[:] }
+func (a Address32) Bytes() []byte { return a[:] }
 
 // Hash converts an address to a hash by left-padding it with zeros.
-func (a StarknetAddress) Hash() Hash { return BytesToHash(a[:]) }
+func (a Address32) Hash() Hash { return BytesToHash(a[:]) }
 
 // Hex returns an EIP55-compliant hex string representation of the address.
-func (a StarknetAddress) Hex() string {
+func (a Address32) Hex() string {
 	return string(a.checksumHex())
 }
 
 // String implements fmt.Stringer.
-func (a StarknetAddress) String() string {
+func (a Address32) String() string {
 	return a.Hex()
 }
 
-func (a *StarknetAddress) checksumHex() []byte {
+func (a *Address32) checksumHex() []byte {
 	buf := a.hex()
 
 	// compute checksum
@@ -516,7 +516,7 @@ func (a *StarknetAddress) checksumHex() []byte {
 	return buf
 }
 
-func (a StarknetAddress) hex() []byte {
+func (a Address32) hex() []byte {
 	var buf [len(a)*2 + 2]byte
 	copy(buf[:2], "0x")
 	hex.Encode(buf[2:], a[:])
@@ -525,38 +525,38 @@ func (a StarknetAddress) hex() []byte {
 
 // SetBytes sets the address to the value of b.
 // If b is larger than len(a), b will be cropped from the left.
-func (a *StarknetAddress) SetBytes(b []byte) {
+func (a *Address32) SetBytes(b []byte) {
 	if len(b) > len(a) {
-		b = b[len(b)-StarknetAddressLength:]
+		b = b[len(b)-Address32Length:]
 	}
-	copy(a[StarknetAddressLength-len(b):], b)
+	copy(a[Address32Length-len(b):], b)
 }
 
 // MarshalText returns the hex representation of a.
-func (a StarknetAddress) MarshalText() ([]byte, error) {
+func (a Address32) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(a[:]).MarshalText()
 }
 
 // UnmarshalText parses a hash in hex syntax.
-func (a *StarknetAddress) UnmarshalText(input []byte) error {
+func (a *Address32) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Address", input, a[:])
 }
 
 // UnmarshalJSON parses a hash in hex syntax.
-func (a *StarknetAddress) UnmarshalJSON(input []byte) error {
+func (a *Address32) UnmarshalJSON(input []byte) error {
 	return hexutil.UnmarshalFixedJSON(addressSt, input, a[:])
 }
 
-// ToCommonAddress converts StarknetAddress to Address
-func (a *StarknetAddress) ToCommonAddress() Address {
+// ToCommonAddress converts Address32 to Address
+func (a *Address32) ToCommonAddress() Address {
 	ad := Address{}
 	ad.SetBytes(a.Bytes())
 	return ad
 }
 
 // Format implements fmt.Formatter.
-// StarknetAddress supports the %v, %s, %v, %x, %X and %d format verbs.
-func (a StarknetAddress) Format(s fmt.State, c rune) {
+// Address32 supports the %v, %s, %v, %x, %X and %d format verbs.
+func (a Address32) Format(s fmt.State, c rune) {
 	switch c {
 	case 'v', 's':
 		s.Write(a.checksumHex())

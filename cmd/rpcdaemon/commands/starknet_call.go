@@ -22,7 +22,7 @@ type StarknetGrpcCallArgs struct {
 }
 
 type StarknetCallRequest struct {
-	ContractAddress    common.StarknetAddress
+	ContractAddress    common.Address32
 	EntryPointSelector string
 	CallData           []string
 }
@@ -60,7 +60,7 @@ func (api *StarknetImpl) Call(ctx context.Context, request StarknetCallRequest, 
 
 	requestParams := &StarknetGrpcCallArgs{
 		Inputs:   strings.Join(request.CallData, ","),
-		Address:  request.ContractAddress.String(), //TODO: update address to Cairo format
+		Address:  request.ContractAddress.String(),
 		Function: request.EntryPointSelector,
 		Code:     code.String(),
 	}
