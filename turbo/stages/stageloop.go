@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -61,11 +62,11 @@ func StageLoop(
 			if err != nil {
 				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
 			} else {
-				var status privateapi.PayloadStatus
+				var status remote.EngineStatus
 				if headBlockHash == pendingExecutionStatus {
-					status = privateapi.Valid
+					status = remote.EngineStatus_VALID
 				} else {
-					status = privateapi.Invalid
+					status = remote.EngineStatus_INVALID
 				}
 				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
 					Status:          status,

@@ -96,7 +96,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
-	var reply *remote.EngineExecutePayloadReply
+	var reply *remote.EngineNewPayloadReply
 	done := make(chan bool)
 
 	go func() {
@@ -105,11 +105,11 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	<-reverseDownloadCh
-	statusCh <- ExecutionStatus{Status: Syncing}
+	statusCh <- ExecutionStatus{Status: remote.EngineStatus_SYNCING}
 	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
 	require.NoError(err)
-	require.Equal(reply.Status, string(Syncing))
+	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
 	require.Nil(reply.LatestValidHash)
 
 	// If we get another request we don't need to process it with processDownloadCh and ignore it and return Syncing status
@@ -121,7 +121,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	<-done
 	// Same result as before
 	require.NoError(err)
-	require.Equal(reply.Status, string(Syncing))
+	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
 	require.Nil(reply.LatestValidHash)
 
 	// However if we simulate that we finish reverse downloading the chain by updating the head, we just execute 1:1
@@ -138,7 +138,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, string(Syncing))
+	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
 	require.Nil(reply.LatestValidHash)
 }
 
@@ -156,7 +156,7 @@ func TestMockValidExecution(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
-	var reply *remote.EngineExecutePayloadReply
+	var reply *remote.EngineNewPayloadReply
 	done := make(chan bool)
 
 	go func() {
@@ -167,13 +167,13 @@ func TestMockValidExecution(t *testing.T) {
 	<-reverseDownloadCh
 
 	statusCh <- ExecutionStatus{
-		Status:          Valid,
+		Status:          remote.EngineStatus_VALID,
 		LatestValidHash: payload3Hash,
 	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, string(Valid))
+	require.Equal(reply.Status, remote.EngineStatus_VALID)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], payload3Hash[:])
 }
@@ -192,7 +192,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
-	var reply *remote.EngineExecutePayloadReply
+	var reply *remote.EngineNewPayloadReply
 	done := make(chan bool)
 
 	go func() {
@@ -203,13 +203,13 @@ func TestMockInvalidExecution(t *testing.T) {
 	<-reverseDownloadCh
 	// Simulate invalid status
 	statusCh <- ExecutionStatus{
-		Status:          Invalid,
+		Status:          remote.EngineStatus_INVALID,
 		LatestValidHash: startingHeadHash,
 	}
 	<-done
 
 	require.NoError(err)
-	require.Equal(reply.Status, string(Invalid))
+	require.Equal(reply.Status, remote.EngineStatus_INVALID)
 	replyHash := gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
 	require.Equal(replyHash[:], startingHeadHash[:])
 }

@@ -14,6 +14,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
@@ -168,7 +169,7 @@ func HeadersPOS(
 	if headerHash == existingHash {
 		// previously received valid header
 		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
-			Status:          privateapi.Valid,
+			Status:          remote.EngineStatus_VALID,
 			LatestValidHash: headerHash,
 		}
 		return nil
@@ -229,7 +230,7 @@ func verifyAndSavePoSHeader(
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
 		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
-			Status:          privateapi.Invalid,
+			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
 		}
 		return
@@ -272,7 +273,7 @@ func verifyAndSavePoSHeader(
 	} else {
 		// Side chain or something weird
 		// TODO(yperbasis): proper logic
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
+		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: remote.EngineStatus_SYNCING}
 	}
 
 	shouldSaveBody = true
@@ -287,7 +288,7 @@ func downloadMissingPoSHeaders(
 	header *types.Header,
 	headerInserter *headerdownload.HeaderInserter,
 ) (shouldSaveBody bool, err error) {
-	cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: privateapi.Syncing}
+	cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: remote.EngineStatus_SYNCING}
 
 	cfg.hd.SetPOSSync(true)
 	err = cfg.hd.ReadProgressFromDb(tx)

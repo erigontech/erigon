@@ -24,14 +24,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-type PayloadStatus string
-
-const (
-	Syncing PayloadStatus = "SYNCING"
-	Valid   PayloadStatus = "VALID"
-	Invalid PayloadStatus = "INVALID"
-)
-
 type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error)
 
 // EthBackendAPIVersion
@@ -77,7 +69,7 @@ type EthBackend interface {
 // Hash: Block hash
 // Status: block's status
 type ExecutionStatus struct {
-	Status          PayloadStatus
+	Status          remote.EngineStatus
 	LatestValidHash common.Hash
 	Error           error
 }
@@ -223,7 +215,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 }
 
 // EngineExecutePayloadV1, executes payload
-func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineNewPayloadReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 
@@ -235,7 +227,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	// If another payload is already commissioned then we just reply with syncing
 	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		// We are still syncing a commissioned payload
-		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
+		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
 	var baseFee *big.Int
@@ -285,7 +277,7 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 	// Discard all payload assembled
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// Send reply over
-	reply := remote.EngineExecutePayloadReply{Status: string(executedStatus.Status)}
+	reply := remote.EngineNewPayloadReply{Status: executedStatus.Status}
 	if executedStatus.LatestValidHash != (common.Hash{}) {
 		reply.LatestValidHash = gointerfaces.ConvertHashToH256(executedStatus.LatestValidHash)
 	}
@@ -331,7 +323,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	beaconHeadHash := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
+	beaconHeadHash := gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash)
 
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
@@ -346,7 +338,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if beaconHeadHeader == nil || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		// TODO(yperbasis): should sent a proper error message if beaconHeadHeader == nil
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: "SYNCING",
+			Status: remote.EngineStatus_SYNCING,
 		}, nil
 	}
 
@@ -355,9 +347,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	// If we are just updating forkchoice, this is enough
-	if req.Prepare == nil {
+	if req.PayloadAttributes == nil {
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: "SUCCESS",
+			Status: remote.EngineStatus_VALID,
 		}, nil
 	}
 
@@ -365,17 +357,19 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
+	// Start payload IDs from 1 (0 signifies null)
+	s.payloadId++
+
 	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
-		Random:    req.Prepare.Random,
-		Timestamp: req.Prepare.Timestamp,
-		Coinbase:  req.Prepare.FeeRecipient,
+		Random:    req.PayloadAttributes.Random,
+		Timestamp: req.PayloadAttributes.Timestamp,
+		Coinbase:  req.PayloadAttributes.SuggestedFeeRecipient,
 	}
 	// Unpause assemble process
 	s.syncCond.Broadcast()
 	// successfully assembled the payload and assigned the correct id
-	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
-		Status:    "SUCCESS",
+		Status:    remote.EngineStatus_VALID,
 		PayloadId: s.payloadId,
 	}, nil
 }
