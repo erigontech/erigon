@@ -17,9 +17,11 @@
 package compress
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/mmap"
 )
@@ -168,6 +170,7 @@ func (g *Getter) nextPattern() []byte {
 	if g.offset < g.patternDict.cutoff {
 		return g.pattern()
 	}
+
 	for {
 		if g.mask == 0 {
 			g.mask = 1
@@ -192,7 +195,7 @@ func (g *Getter) nextPattern() []byte {
 func (d *Decompressor) Count() int { return int(d.count) }
 
 // MakeGetter creates an object that can be used to access superstrings in the decompressor's file
-// Getter is not thread-safe, but there can be multiple getters used simultaneously and concrently
+// Getter is not thread-safe, but there can be multiple getters used simultaneously and concurrently
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
 	return &Getter{patternDict: &d.dict, posDict: &d.posDict, data: d.data[d.wordsStart:], uncovered: make([]int, 0, 128)}
@@ -245,4 +248,146 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	}
 	buf = append(buf, g.word[:l]...)
 	return buf, g.dataP
+}
+
+// Skip moves offset to the next word and returns the new offset.
+func (g *Getter) Skip() uint64 {
+	l := g.nextPos(true)
+	l-- // because when create huffman tree we do ++ , because 0 is terminator
+	if l == 0 {
+		return g.dataP
+	}
+	wordLen := int(l)
+
+	var add uint64
+	var pos uint64
+	var lastPos int
+	var lastUncovered int
+	for pos = g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
+		intPos := lastPos + int(pos) - 1
+		lastPos = intPos
+		if wordLen < intPos {
+			panic("likely .idx is invalid")
+		}
+		if intPos > lastUncovered {
+			add += uint64(intPos - lastUncovered)
+		}
+		pattern := g.nextPattern()
+		lastUncovered = intPos + len(pattern)
+	}
+	if int(l) > lastUncovered {
+		add += l - uint64(lastUncovered)
+	}
+	// Uncovered characters
+	g.dataP += add
+	return g.dataP
+}
+
+// Match returns true and next offset if the word at current offset fully matches the buf
+// returns false and current offset otherwise.
+func (g *Getter) Match(buf []byte) (bool, uint64) {
+	savePos := g.dataP
+	l := g.nextPos(true)
+	l-- // because when create huffman tree we do ++ , because 0 is terminator
+	if l == 0 {
+		return false, g.dataP
+	}
+	// count available space for word without actual reallocating memory
+	wordLen := len(g.word)
+	if int(l) > wordLen {
+		wordLen = int(l)
+	}
+
+	var add uint64
+	var pos uint64
+	var lastPos int
+	var lastUncovered int
+	var pattern []byte
+	res := true
+	for pos = g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
+		intPos := lastPos + int(pos) - 1
+		lastPos = intPos
+		if wordLen < intPos {
+			panic("likely .idx is invalid")
+		}
+		pattern = g.nextPattern()
+
+		if len(buf) < len(pattern) || !bytes.Equal(buf[:len(pattern)], pattern) {
+			res = false
+		}
+		if intPos > lastUncovered {
+			dif := uint64(intPos - lastUncovered)
+			add += dif
+			if res && !bytes.Equal(buf[len(pattern):], g.data[g.dataP:g.dataP+dif]) {
+				res = false
+			}
+		}
+
+		lastUncovered = intPos + len(pattern)
+	}
+	if int(l) > lastUncovered {
+		dif := l - uint64(lastUncovered)
+		add += dif
+		if res && !bytes.Equal(buf[len(pattern):], g.data[g.dataP:g.dataP+dif]) {
+			res = false
+		}
+	}
+	g.dataP += add
+	if !res {
+		g.dataP = savePos
+	}
+	return res, g.dataP
+}
+
+// MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.
+func (g *Getter) MatchPrefix(buf []byte) bool {
+	savePos := g.dataP
+	defer func() {
+		g.dataP = savePos
+	}()
+	l := g.nextPos(true)
+	l-- // because when create huffman tree we do ++ , because 0 is terminator
+	if l == 0 {
+		return false
+	}
+	// count available space for word without actual reallocating memory
+	wordLen := len(g.word)
+	if int(l) > wordLen {
+		wordLen = int(l)
+	}
+
+	var pos uint64
+	var lastPos int
+	var lastUncovered int
+	var pattern []byte
+
+	for pos = g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
+		intPos := lastPos + int(pos) - 1
+		lastPos = intPos
+		if wordLen < intPos {
+			panic("likely .idx is invalid")
+		}
+		pattern = g.nextPattern()
+		if strings.HasPrefix(string(pattern), string(buf)) {
+			return true
+		}
+
+		if intPos > lastUncovered {
+			dif := uint64(intPos - lastUncovered)
+			if strings.HasPrefix(string(pattern)+string(g.data[g.dataP:g.dataP+dif]), string(buf)) {
+				return true
+			}
+		}
+
+		lastUncovered = intPos + len(pattern)
+	}
+
+	if int(l) > lastUncovered {
+		dif := l - uint64(lastUncovered)
+		if strings.HasPrefix(string(pattern)+string(g.data[g.dataP:g.dataP+dif]), string(buf)) {
+			return true
+		}
+	}
+
+	return false
 }

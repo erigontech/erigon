@@ -57,7 +57,7 @@ func TestCompressEmptyDict(t *testing.T) {
 	}
 }
 
-func TestCompressDict1(t *testing.T) {
+func prepareDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := path.Join(tmpDir, "compressed")
 	t.Name()
@@ -78,6 +78,11 @@ func TestCompressDict1(t *testing.T) {
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
+	return d
+}
+
+func TestCompressDict1(t *testing.T) {
+	d := prepareDict(t)
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
