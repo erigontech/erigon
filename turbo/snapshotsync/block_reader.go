@@ -486,12 +486,11 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		}
 		txn.SetSender(common.BytesToAddress(sender))
 		// final txnHash check  - completely avoid false-positives
-		if txn.Hash() != txnHash {
-			fmt.Printf("try_failed: %x, %x\n", txn.Hash(), txnHash)
-			continue
+		if txn.Hash() == txnHash {
+			fmt.Printf("try_succeed: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
+			return
 		}
-		fmt.Printf("try_succeed: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
-
+		fmt.Printf("try_failed: %x, %x\n", txn.Hash(), txnHash)
 	}
 	return
 }
