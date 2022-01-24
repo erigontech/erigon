@@ -22,7 +22,7 @@ type StarknetGrpcCallArgs struct {
 }
 
 type StarknetCallRequest struct {
-	ContractAddress    common.Address
+	ContractAddress    common.StarknetAddress
 	EntryPointSelector string
 	CallData           []string
 }
@@ -53,7 +53,7 @@ func (api *StarknetImpl) Call(ctx context.Context, request StarknetCallRequest, 
 	}
 	defer tx.Rollback()
 
-	code, err := api.GetCode(ctx, request.ContractAddress, blockNrOrHash)
+	code, err := api.GetCode(ctx, request.ContractAddress.ToCommonAddress(), blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}

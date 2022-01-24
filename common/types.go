@@ -42,11 +42,14 @@ const (
 	BlockNumberLength = 8
 	// IncarnationLength length of uint64 for contract incarnations
 	IncarnationLength = 8
+	// StarknetAddressLength is the expected length of the Starknet address (in bytes)
+	StarknetAddressLength = 32
 )
 
 var (
-	hashT    = reflect.TypeOf(Hash{})
-	addressT = reflect.TypeOf(Address{})
+	hashT     = reflect.TypeOf(Hash{})
+	addressT  = reflect.TypeOf(Address{})
+	addressSt = reflect.TypeOf(StarknetAddress{})
 )
 
 // Hash represents the 32 byte Keccak256 hash of arbitrary data.
@@ -447,4 +450,134 @@ func (keys StorageKeys) Less(i, j int) bool {
 }
 func (keys StorageKeys) Swap(i, j int) {
 	keys[i], keys[j] = keys[j], keys[i]
+}
+
+/////////// Starknet Address
+
+// StarknetAddress represents the 32 byte address of Starknet account.
+type StarknetAddress [StarknetAddressLength]byte
+
+// BytesToStarknetAddress returns StarknetAddress with value b.
+// If b is larger than len(h), b will be cropped from the left.
+func BytesToStarknetAddress(b []byte) StarknetAddress {
+	var a StarknetAddress
+	a.SetBytes(b)
+	return a
+}
+
+// HexToStarknetAddress returns StarknetAddress with byte values of s.
+// If s is larger than len(h), s will be cropped from the left.
+func HexToStarknetAddress(s string) StarknetAddress { return BytesToStarknetAddress(FromHex(s)) }
+
+// IsHexStarknetAddress verifies whether a string can represent a valid hex-encoded
+// Starknet address or not.
+func IsHexStarknetAddress(s string) bool {
+	if has0xPrefix(s) {
+		s = s[2:]
+	}
+	return len(s) == 2*StarknetAddressLength && isHex(s)
+}
+
+// Bytes gets the string representation of the underlying address.
+func (a StarknetAddress) Bytes() []byte { return a[:] }
+
+// Hash converts an address to a hash by left-padding it with zeros.
+func (a StarknetAddress) Hash() Hash { return BytesToHash(a[:]) }
+
+// Hex returns an EIP55-compliant hex string representation of the address.
+func (a StarknetAddress) Hex() string {
+	return string(a.checksumHex())
+}
+
+// String implements fmt.Stringer.
+func (a StarknetAddress) String() string {
+	return a.Hex()
+}
+
+func (a *StarknetAddress) checksumHex() []byte {
+	buf := a.hex()
+
+	// compute checksum
+	sha := sha3.NewLegacyKeccak256()
+	//nolint:errcheck
+	sha.Write(buf[2:])
+	hash := sha.Sum(nil)
+	for i := 2; i < len(buf); i++ {
+		hashByte := hash[(i-2)/2]
+		if i%2 == 0 {
+			hashByte = hashByte >> 4
+		} else {
+			hashByte &= 0xf
+		}
+		if buf[i] > '9' && hashByte > 7 {
+			buf[i] -= 32
+		}
+	}
+	return buf
+}
+
+func (a StarknetAddress) hex() []byte {
+	var buf [len(a)*2 + 2]byte
+	copy(buf[:2], "0x")
+	hex.Encode(buf[2:], a[:])
+	return buf[:]
+}
+
+// SetBytes sets the address to the value of b.
+// If b is larger than len(a), b will be cropped from the left.
+func (a *StarknetAddress) SetBytes(b []byte) {
+	if len(b) > len(a) {
+		b = b[len(b)-StarknetAddressLength:]
+	}
+	copy(a[StarknetAddressLength-len(b):], b)
+}
+
+// MarshalText returns the hex representation of a.
+func (a StarknetAddress) MarshalText() ([]byte, error) {
+	return hexutil.Bytes(a[:]).MarshalText()
+}
+
+// UnmarshalText parses a hash in hex syntax.
+func (a *StarknetAddress) UnmarshalText(input []byte) error {
+	return hexutil.UnmarshalFixedText("Address", input, a[:])
+}
+
+// UnmarshalJSON parses a hash in hex syntax.
+func (a *StarknetAddress) UnmarshalJSON(input []byte) error {
+	return hexutil.UnmarshalFixedJSON(addressSt, input, a[:])
+}
+
+// ToCommonAddress converts StarknetAddress to Address
+func (a *StarknetAddress) ToCommonAddress() Address {
+	ad := Address{}
+	ad.SetBytes(a.Bytes())
+	return ad
+}
+
+// Format implements fmt.Formatter.
+// StarknetAddress supports the %v, %s, %v, %x, %X and %d format verbs.
+func (a StarknetAddress) Format(s fmt.State, c rune) {
+	switch c {
+	case 'v', 's':
+		s.Write(a.checksumHex())
+	case 'q':
+		q := []byte{'"'}
+		s.Write(q)
+		s.Write(a.checksumHex())
+		s.Write(q)
+	case 'x', 'X':
+		// %x disables the checksum.
+		hex := a.hex()
+		if !s.Flag('#') {
+			hex = hex[2:]
+		}
+		if c == 'X' {
+			hex = bytes.ToUpper(hex)
+		}
+		s.Write(hex)
+	case 'd':
+		fmt.Fprint(s, ([len(a)]byte)(a))
+	default:
+		fmt.Fprintf(s, "%%!%c(address=%x)", c, a)
+	}
 }
