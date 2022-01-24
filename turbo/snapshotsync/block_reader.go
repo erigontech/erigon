@@ -471,6 +471,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		gg.Reset(offset)
 		fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 		buf, _ = gg.Next(buf[:0])
+		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if txnHash[0] != buf[0] {
 			continue
 		}
@@ -487,10 +488,10 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		txn.SetSender(common.BytesToAddress(sender))
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			fmt.Printf("try_succeed: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
+			//fmt.Printf("try_succeed: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 			return
 		}
-		fmt.Printf("try_failed: %x, %x\n", txn.Hash(), txnHash)
+		//fmt.Printf("try_failed: %x, %x\n", txn.Hash(), txnHash)
 	}
 	return
 }
