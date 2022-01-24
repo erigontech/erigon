@@ -1795,7 +1795,7 @@ func extractHeaders(chaindata string, block uint64, blockTotal uint64) error {
 func extractBodies(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	tx, err := db.BeginRw(context.Background())
+	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return err
 	}
