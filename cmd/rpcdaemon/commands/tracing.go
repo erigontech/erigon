@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
@@ -28,6 +29,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	defer tx.Rollback()
 
+	defer func(t time.Time) { fmt.Printf("tracing.go:32: %s\n", time.Since(t)) }(time.Now())
 	// Retrieve the transaction and assemble its EVM context
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
@@ -36,6 +38,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if !ok {
 		return nil
 	}
+	defer func(t time.Time) { fmt.Printf("tracing.go:40: %s\n", time.Since(t)) }(time.Now())
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return err
@@ -43,6 +46,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if block == nil {
 		return nil
 	}
+	defer func(t time.Time) { fmt.Printf("tracing.go:47: %s\n", time.Since(t)) }(time.Now())
 	blockHash := block.Hash()
 	var txnIndex uint64
 	var txn types.Transaction
