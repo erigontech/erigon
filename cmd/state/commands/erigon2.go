@@ -192,9 +192,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
-		if blockNum >= 4157326 {
-			interrupt = true
-		}
 		if interrupt || blockNum%uint64(commitmentFrequency) == 0 {
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
