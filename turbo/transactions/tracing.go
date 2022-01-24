@@ -130,7 +130,7 @@ func TraceTx(
 	}
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-
+	defer func(t time.Time) { fmt.Printf("tracing.go:133: %s\n", time.Since(t)) }(time.Now())
 	var refunds bool = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
@@ -140,6 +140,7 @@ func TraceTx(
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}
+	defer func(t time.Time) { fmt.Printf("tracing.go:143: %s\n", time.Since(t)) }(time.Now())
 	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	if err != nil {
 		if streaming {
@@ -148,6 +149,7 @@ func TraceTx(
 		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}
+	defer func(t time.Time) { fmt.Printf("tracing.go:152: %s\n", time.Since(t)) }(time.Now())
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
