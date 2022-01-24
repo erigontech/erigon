@@ -223,13 +223,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-	// If another payload is already commissioned then we just reply with syncing
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
-		// We are still syncing a commissioned payload
-		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_SYNCING}, nil
-	}
-
 	var baseFee *big.Int
 	eip1559 := false
 
@@ -257,9 +250,18 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
+
+	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
-		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
+		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
+
+	// If another payload is already commissioned then we just reply with syncing
+	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+		// We are still syncing a commissioned payload
+		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_SYNCING}, nil
+	}
+
 	// Send the block over
 	s.reverseDownloadCh <- PayloadMessage{
 		Header: &header,
