@@ -74,7 +74,7 @@ type ExecutionStatus struct {
 	Error           error
 }
 
-// The message we are going to send to the stage sync in ExecutePayload
+// The message we are going to send to the stage sync in NewPayload
 type PayloadMessage struct {
 	Header *types.Header
 	Body   *types.RawBody
@@ -214,8 +214,8 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
 
-// EngineExecutePayloadV1, executes payload
-func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineNewPayloadReply, error) {
+// EngineNewPayloadV1, validates and possibly executes payload
+func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineNewPayloadReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 

@@ -228,7 +228,7 @@ type HeaderDownload struct {
 	synced                 bool                            // if we found a canonical hash during backward sync, in this case our sync process is done
 	posSync                bool                            // True if the chain is syncing backwards or not
 	headersCollector       *etl.Collector                  // ETL collector for headers
-	ExecutionStatusCh      chan privateapi.ExecutionStatus // Channel to report payload execution status (engine_executePayloadV1 response)
+	ExecutionStatusCh      chan privateapi.ExecutionStatus // Channel to report payload execution status (engine_newPayloadV1/forkchoiceUpdatedV1 response)
 	pendingExecutionStatus common.Hash                     // Header whose status we still should send to the ExecutionStatusCh
 }
 

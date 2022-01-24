@@ -56,7 +56,7 @@ type PayloadAttributes struct {
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
-	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
+	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
 }
@@ -107,10 +107,10 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	return json, nil
 }
 
-// ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things
+// NewPayloadV1 takes a block from the beacon chain and do either two of the following things
 // - Stageloop the block just received if we have the payload's parent hash already
 // - Start the reverse sync process otherwise, and return "Syncing"
-func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
+func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
 		var overflow bool
@@ -126,7 +126,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 	for i, transaction := range payload.Transactions {
 		transactions[i] = ([]byte)(transaction)
 	}
-	reply, err := e.api.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
+	reply, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
