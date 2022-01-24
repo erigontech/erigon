@@ -160,6 +160,7 @@ func TraceTx(
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
+		defer func(t time.Time) { fmt.Printf("tracing.go:163: %s\n", time.Since(t)) }(time.Now())
 		// If the result contains a revert reason, return it.
 		returnVal := fmt.Sprintf("%x", result.Return())
 		if len(result.Revert()) > 0 {
@@ -169,12 +170,14 @@ func TraceTx(
 		stream.WriteString(returnVal)
 		stream.WriteObjectEnd()
 	} else {
+		defer func(t time.Time) { fmt.Printf("tracing.go:172: %s\n", time.Since(t)) }(time.Now())
 		if r, err1 := tracer.(*tracers.Tracer).GetResult(); err1 == nil {
 			stream.Write(r)
 		} else {
 			return err1
 		}
 	}
+	defer func(t time.Time) { fmt.Printf("tracing.go:178: %s\n", time.Since(t)) }(time.Now())
 	return nil
 }
 
