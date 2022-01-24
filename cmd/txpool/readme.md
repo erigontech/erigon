@@ -1,6 +1,12 @@
 # TxPool v2
 
-Design docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
+it’s exactly what you run inside Erigon now, but you also can disable pool inside erigon by —txpool.disable and run it outside ( so can run multiple of them, or use your own implementation, or customize logic).
+
+Same thing you can do with sentry. Also, after the-megre you will run external consensus service.
+
+95% of pool-related code (from p2p message parsing, to sorting logic) is inside this folder: https://github.com/ledgerwatch/erigon-lib/tree/main/txpool
+
+Our pool implementation is not fork of Geth’s ( And it’s Apache licensed) - Design docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
 
 Has 2 modes: internal and external
 

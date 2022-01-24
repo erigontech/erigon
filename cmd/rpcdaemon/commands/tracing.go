@@ -57,7 +57,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
-
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()

@@ -66,8 +66,8 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "sentry",
-	Short: "Run p2p sentry",
+	Use:   "txpool",
+	Short: "Launch externa Transaction Pool instance - same as built-into Erigon, but as independent Service",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return debug.SetupCobra(cmd)
 	},

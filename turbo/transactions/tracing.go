@@ -30,7 +30,7 @@ type BlockGetter interface {
 	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
-// computeTxEnv returns the execution environment of a certain transaction.
+// ComputeTxEnv returns the execution environment of a certain transaction.
 func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, dbtx kv.Tx, blockHash common.Hash, txIndex uint64) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, *state.PlainState, error) {
 	// Create the parent state database
 	reader := state.NewPlainState(dbtx, block.NumberU64()-1)
@@ -130,7 +130,6 @@ func TraceTx(
 	}
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-
 	var refunds bool = true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false

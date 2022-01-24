@@ -1,8 +1,6 @@
 # Downloader
 
-Is a service which does download and seed historical data.
-
-Historical data - is immutable, files have .seg extension.
+Service to seed/download historical data (immutable .seg files)
 
 ## Architecture
 
@@ -29,31 +27,30 @@ Downloader does:
 
 ## How to
 
-### Start
+### Start erigon with snapshot sync
 
-```
+```shell
 downloader --datadir=<your_datadir> --downloader.api.addr=127.0.0.1:9093
 erigon --downloader.api.addr=127.0.0.1:9093 --experimental.snapshot
 ```
 
 ### Limit download/upload speed
 
-```
+```shell
 downloader --download.limit=10mb --upload.limit=10mb
 ```
 
-### Print info_hashes in format compatible with https://github.com/ledgerwatch/erigon-snapshot
+### Print info_hashes
 
-```
+```shell
+# format compatible with https://github.com/ledgerwatch/erigon-snapshot
 downloader info_hashes --datadir=<your_datadir>
 ```
 
-### Force re-calculate info_hashes and print in format compatible with https://github.com/ledgerwatch/erigon-snapshot
+### Create .torrent files
 
-```
-// will re-read all .seg files (high disk IO)
-// also does remove and create .torrent files
-downloader info_hashes --datadir=<your_datadir> --rebuild
+```shell
+downloader info_hashes --rebuild --datadir=<your_datadir>
 ```
 
 ### Create new snapshots
@@ -67,13 +64,13 @@ erigon snapshots create --datadir=<your_datadir> --from=0 --segment.size=500_000
 
 ```
 rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshots/
-// re-start downloader 
+# re-start downloader 
 ```
 
 ### Re-create all .idx files (by re-read all .seg files)
 
 ```
-// Disk-read-intense
+# Disk-read-intense
 erigon snapshots index --datadir=<your_datadir> --rebuild
 ```
 
