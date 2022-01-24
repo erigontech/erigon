@@ -871,10 +871,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	ibs := state.New(stateReader)
 
-	header := rawdb.ReadHeader(tx, hash, blockNumber)
-	if header == nil {
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
+	header := block.Header()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
