@@ -469,7 +469,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		offset := sn.TxnHashIdx.Lookup2(localID)
 		gg := sn.Transactions.MakeGetter()
 		gg.Reset(offset)
-		fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
+		//fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 		buf, _ = gg.Next(buf[:0])
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if txnHash[0] != buf[0] {
