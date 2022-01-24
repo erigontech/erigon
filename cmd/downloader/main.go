@@ -54,7 +54,7 @@ func init() {
 
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
-	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Info.LogString(), "DEBUG | INFO | WARN | ERROR")
+	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
 	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "1gb", "bytes per second, example: 32mb")
 	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "1gb", "bytes per second, example: 32mb")
 

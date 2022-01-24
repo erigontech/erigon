@@ -295,22 +295,26 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir); err != nil {
+		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
+	}
 
-		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		if err := BodiesIdx(ctx, f, sn.From, tmpDir); err != nil {
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		if err := BodiesIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
-
-		// hack to read first block body - to get baseTxId from there
-		if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
-			return err
-		}
-
+	}
+	// hack to read first block body - to get baseTxId from there
+	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
+		return err
+	}
+	for _, sn := range s.blocks {
 		// build txs idx
 		gg := sn.Bodies.MakeGetter()
 		buf, _ := gg.Next(nil)
@@ -332,8 +336,8 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			}
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
-		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
-		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, f, expectedTxsAmount, tmpDir); err != nil {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, expectedTxsAmount, f, tmpDir, logEvery); err != nil {
 			return err
 		}
 	}
@@ -603,7 +607,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			j++
 
 			select {
-			default:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
@@ -612,6 +615,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 				log.Info("Dumping txs", "block num", blockNum,
 					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 				)
+			default:
 			}
 			return nil
 		}); err != nil {
@@ -673,7 +677,6 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
@@ -682,6 +685,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 			log.Info("Dumping headers", "block num", blockNum,
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 			)
+		default:
 		}
 		return true, nil
 	}); err != nil {
@@ -727,7 +731,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-logEvery.C:
@@ -736,6 +739,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			log.Info("Wrote into file", "block num", blockNum,
 				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
 			)
+		default:
 		}
 		return true, nil
 	}); err != nil {
@@ -747,9 +751,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	return nil
 }
 
-func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum uint64, segmentFilePath string, expectedCount uint64, tmpDir string) error {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum, expectedCount uint64, segmentFilePath, tmpDir string, logEvery *time.Ticker) error {
 	dir, _ := filepath.Split(segmentFilePath)
 
 	parseCtx := txpool.NewTxParseContext(chainID)
@@ -811,7 +813,10 @@ RETRY:
 			return err
 		}
 
-		for firstTxID+i > body.BaseTxId+uint64(body.TxAmount) { // skip empty blocks
+		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+			if !bodyGetter.HasNext() {
+				return fmt.Errorf("not enough bodies")
+			}
 			buf, _ = bodyGetter.Next(buf[:0])
 			if err := rlp.DecodeBytes(buf, body); err != nil {
 				return err
@@ -824,11 +829,11 @@ RETRY:
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+		default:
 		}
 		j++
 		return nil
@@ -863,10 +868,7 @@ RETRY:
 }
 
 // HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
-
+func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker) error {
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -884,11 +886,11 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 		//TODO: optimize by - types.RawRlpHash(word).Bytes()
 
 		select {
-		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[Snapshots Indexing] HeadersHashIdx", "blockNumber", h.Number.Uint64())
+		default:
 		}
 		return nil
 	}); err != nil {
@@ -897,9 +899,7 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string) error {
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker) error {
 	num := make([]byte, 8)
 
 	d, err := compress.NewDecompressor(segmentFilePath)
@@ -915,11 +915,11 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 		}
 
 		select {
-		default:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
 			log.Info("[Snapshots Indexing] BodyNumberIdx", "blockNumber", firstBlockNumInSegment+i)
+		default:
 		}
 		return nil
 	}); err != nil {
