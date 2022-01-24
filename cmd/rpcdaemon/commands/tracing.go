@@ -47,7 +47,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	var txnIndex uint64
 	var txn types.Transaction
 	for i, transaction := range block.Transactions() {
-		fmt.Printf("h: %d, %x, %x\n", block.NumberU64(), transaction.Hash(), hash)
 		if transaction.Hash() == hash {
 			txnIndex = uint64(i)
 			txn = transaction
