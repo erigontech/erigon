@@ -474,7 +474,7 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
 			return
 		}
-		if cfg.WebsocketEnabled && r.Method == "GET" {
+		if cfg.WebsocketEnabled && wsHandler != nil && r.Method  == "GET" {
 			wsHandler.ServeHTTP(w, r)
 			return
 		}
@@ -500,11 +500,7 @@ func createEngineListener(cfg Flags, engineApi []rpc.API, engineFlag []string) (
 	}
 
 	engineHttpHandler := node.NewHTTPHandlerStack(enginesrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-	var engineWsHandler http.Handler
-	if cfg.WebsocketEnabled {
-		engineWsHandler = enginesrv.WebsocketHandler([]string{"*"}, cfg.WebsocketCompression)
-	}
-	engineApiHandler := createHandler(cfg, engineApi, engineHttpHandler, engineWsHandler)
+	engineApiHandler := createHandler(cfg, engineApi, engineHttpHandler, nil)
 
 	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
 	if err != nil {
