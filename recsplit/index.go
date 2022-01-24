@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/mmap"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/spaolacci/murmur3"
 )
 
 // Index implements index lookup from the file created by the RecSplit
@@ -43,8 +42,7 @@ type Index struct {
 	enums              bool
 	offsetEf           *eliasfano32.EliasFano
 	baseDataID         uint64
-	bucketCount        uint64          // Number of buckets
-	hasher             murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
+	bucketCount        uint64 // Number of buckets
 	bucketSize         int
 	leafSize           uint16 // Leaf size for recursive split algorithms
 	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
@@ -103,7 +101,6 @@ func OpenIndex(indexFile string) (*Index, error) {
 	// Salt
 	idx.salt = binary.BigEndian.Uint32(idx.data[offset:])
 	offset += 4
-	idx.hasher = murmur3.New128WithSeed(idx.salt)
 	// Start seed
 	startSeedLen := int(idx.data[offset])
 	offset++
@@ -173,7 +170,7 @@ func (idx *Index) Empty() bool {
 }
 
 // Lookup is not thread-safe because it used id.hasher
-func (idx *Index) Lookup(key []byte) uint64 {
+func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	if idx.keyCount == 0 {
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard")
 	}
@@ -182,9 +179,7 @@ func (idx *Index) Lookup(key []byte) uint64 {
 	}
 	var gr GolombRiceReader
 	gr.data = idx.grData
-	idx.hasher.Reset()
-	idx.hasher.Write(key) //nolint:errcheck
-	bucketHash, fingerprint := idx.hasher.Sum128()
+
 	bucket := remap(bucketHash, idx.bucketCount)
 	cumKeys, cumKeysNext, bitPos := idx.ef.Get3(bucket)
 	m := uint16(cumKeysNext - cumKeys) // Number of keys in this bucket

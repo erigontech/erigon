@@ -1008,7 +1008,8 @@ func (a *Aggregator) readAccount(blockNum uint64, addr []byte, trace bool) []byt
 		if item.accountsIdx.Empty() {
 			return true
 		}
-		offset := item.accountsIdx.Lookup(addr)
+		reader := recsplit.NewIndexReader(item.accountsIdx)
+		offset := reader.Lookup(addr)
 		g := item.accountsD.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
@@ -1039,7 +1040,8 @@ func (a *Aggregator) readCode(blockNum uint64, addr []byte, trace bool) []byte {
 		if item.codeIdx.Empty() {
 			return true
 		}
-		offset := item.codeIdx.Lookup(addr)
+		reader := recsplit.NewIndexReader(item.codeIdx)
+		offset := reader.Lookup(addr)
 		g := item.codeD.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
@@ -1070,7 +1072,8 @@ func (a *Aggregator) readStorage(blockNum uint64, filekey []byte, trace bool) []
 		if item.storageIdx.Empty() {
 			return true
 		}
-		offset := item.storageIdx.Lookup(filekey)
+		reader := recsplit.NewIndexReader(item.storageIdx)
+		offset := reader.Lookup(filekey)
 		g := item.storageD.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
@@ -1101,7 +1104,8 @@ func (a *Aggregator) readBranchNode(blockNum uint64, filekey []byte, trace bool)
 		if item.commitmentIdx.Empty() {
 			return true
 		}
-		offset := item.commitmentIdx.Lookup(filekey)
+		reader := recsplit.NewIndexReader(item.commitmentIdx)
+		offset := reader.Lookup(filekey)
 		g := item.commitmentD.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
@@ -1814,7 +1818,8 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) error {
 		if item.storageIdx.Empty() {
 			return true
 		}
-		offset := item.storageIdx.Lookup(addr)
+		reader := recsplit.NewIndexReader(item.storageIdx)
+		offset := reader.Lookup(addr)
 		g := item.storageD.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
