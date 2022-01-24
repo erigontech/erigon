@@ -75,7 +75,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if api.TevmEnabled {
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
-	defer func(t time.Time) { fmt.Printf("tracing.go:78: %s\n", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { fmt.Printf("tracing.go:78: %s, %T\n", time.Since(t), tx) }(time.Now())
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, blockHash, txnIndex)
 	if err != nil {
 		stream.WriteNil()
