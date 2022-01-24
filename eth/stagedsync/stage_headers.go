@@ -272,8 +272,7 @@ func verifyAndSavePoSHeader(
 		}
 	} else {
 		// Side chain or something weird
-		// TODO(yperbasis): proper logic
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: remote.EngineStatus_SYNCING}
+		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: remote.EngineStatus_ACCEPTED}
 	}
 
 	shouldSaveBody = true

@@ -259,6 +259,9 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	// If another payload is already commissioned then we just reply with syncing
 	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		// We are still syncing a commissioned payload
+		// TODO(yperbasis): not entirely correct since per the spec:
+		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
+		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
 		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
