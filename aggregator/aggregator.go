@@ -30,6 +30,7 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -550,7 +551,7 @@ func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx
 	datPath := path.Join(c.dir, fmt.Sprintf("%s.%d-%d.dat", c.namebase, blockFrom, blockTo))
 	idxPath := path.Join(c.dir, fmt.Sprintf("%s.%d-%d.idx", c.namebase, blockFrom, blockTo))
 	var count int
-	if count, err = btreeToFile(bt, datPath, c.dir); err != nil {
+	if count, err = btreeToFile(bt, datPath, c.dir, false /* trace */, 8 /* workers */); err != nil {
 		return nil, nil, fmt.Errorf("btreeToFile: %w", err)
 	}
 	return buildIndex(datPath, idxPath, c.dir, count)
@@ -566,7 +567,7 @@ func (i *AggregateItem) Less(than btree.Item) bool {
 }
 
 func (c *Changes) produceChangeSets(datPath, idxPath string) error {
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, c.dir, compress.MinPatternScore, 1)
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, c.dir, compress.MinPatternScore, 8)
 	if err != nil {
 		return fmt.Errorf("produceChangeSets NewCompressorSequential: %w", err)
 	}
@@ -700,12 +701,13 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int) error {
 
 const AggregatorPrefix = "aggregator"
 
-func btreeToFile(bt *btree.BTree, datPath string, tmpdir string) (int, error) {
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, 1)
+func btreeToFile(bt *btree.BTree, datPath string, tmpdir string, trace bool, workers int) (int, error) {
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, workers)
 	if err != nil {
 		return 0, err
 	}
 	defer comp.Close()
+	comp.SetTrace(trace)
 	count := 0
 	bt.Ascend(func(i btree.Item) bool {
 		item := i.(*AggregateItem)
@@ -1933,6 +1935,8 @@ func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int
 }
 
 func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
+	log.Info("Aggregation", "from", blockFrom, "to", blockTo)
+	t := time.Now()
 	i := w.a.changesBtree.Get(&ChangesItem{startBlock: blockFrom, endBlock: blockTo})
 	if i == nil {
 		return fmt.Errorf("did not find change files for [%d-%d], w.a.changesBtree.Len() = %d", blockFrom, blockTo, w.a.changesBtree.Len())
@@ -2020,8 +2024,11 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	}
 	if len(toAggregate) == 1 {
 		// Nothing to aggregate yet
+		log.Info("Finished aggregation", "time", time.Since(t))
 		return nil
 	}
+	log.Info("Finished aggregation", "time", time.Since(t), "now merging from", lastStart, "to", blockTo)
+	t = time.Now()
 	var item2 = &byEndBlockItem{fileCount: 6, startBlock: lastStart, endBlock: blockTo}
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -2136,6 +2143,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		}
 	}
 	w.a.changesBtree.Delete(i)
+	log.Info("Finished merging", "time", time.Since(t))
 	return nil
 }
 
@@ -2143,7 +2151,7 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename 
 	datPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
 	idxPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.idx", basename, startBlock, endBlock))
 	//comp, err := compress.NewCompressorSequential(AggregatorPrefix, datPath, dir, compress.MinPatternScore)
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 8)
 	if err != nil {
 		return nil, nil, fmt.Errorf("compressor %s: %w", datPath, err)
 	}

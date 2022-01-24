@@ -93,7 +93,7 @@ func makestate(n *node) *state {
 
 // transition consumes next byte of the key, moves the state to corresponding
 // node of the patricia tree and returns divergence prefix (0 if there is no divergence)
-func (s *state) transition(b byte) uint32 {
+func (s *state) transition(b byte, readonly bool) uint32 {
 	bitsLeft := 8 // Bits in b to process
 	b32 := uint32(b) << 24
 	for bitsLeft > 0 {
@@ -122,6 +122,9 @@ func (s *state) transition(b byte) uint32 {
 				// Need to switch to the next node
 				if (s.head == 0 && s.tail&0x80000000 == 0) || (s.head != 0 && s.head&0x80000000 == 0) {
 					if s.n.n0 == nil {
+						if readonly {
+							return b32 | uint32(bitsLeft)
+						}
 						//fmt.Printf("new node n0\n")
 						s.n.n0 = &node{}
 						if b32&0x80000000 == 0 {
@@ -133,6 +136,9 @@ func (s *state) transition(b byte) uint32 {
 					s.n = s.n.n0
 				} else {
 					if s.n.n1 == nil {
+						if readonly {
+							return b32 | uint32(bitsLeft)
+						}
 						//fmt.Printf("new node n1\n")
 						s.n.n1 = &node{}
 						if b32&0x80000000 == 0 {
@@ -164,6 +170,9 @@ func (s *state) transition(b byte) uint32 {
 			// Switch to the next node
 			if (s.head == 0 && s.tail&0x80000000 == 0) || (s.head != 0 && s.head&0x80000000 == 0) {
 				if s.n.n0 == nil {
+					if readonly {
+						return b32 | uint32(bitsLeft)
+					}
 					s.n.n0 = &node{}
 					if b32&0x80000000 == 0 {
 						s.n.n0.p0 = b32 | uint32(bitsLeft)
@@ -174,6 +183,9 @@ func (s *state) transition(b byte) uint32 {
 				s.n = s.n.n0
 			} else {
 				if s.n.n1 == nil {
+					if readonly {
+						return b32 | uint32(bitsLeft)
+					}
 					s.n.n1 = &node{}
 					if b32&0x80000000 == 0 {
 						s.n.n1.p0 = b32 | uint32(bitsLeft)
@@ -287,7 +299,7 @@ func (s *state) diverge(divergence uint32) {
 func (n *node) insert(key []byte, value interface{}) {
 	s := makestate(n)
 	for _, b := range key {
-		divergence := s.transition(b)
+		divergence := s.transition(b, false /* readonly */)
 		if divergence != 0 {
 			s.diverge(divergence)
 		}
@@ -315,7 +327,7 @@ func (s *state) insert(value interface{}) {
 func (n *node) get(key []byte) (interface{}, bool) {
 	s := makestate(n)
 	for _, b := range key {
-		divergence := s.transition(b)
+		divergence := s.transition(b, true /* readonly */)
 		//fmt.Printf("get %x, b = %x, divergence = %s\nstate=%s\n", key, b, tostr(divergence), s)
 		if divergence != 0 {
 			return nil, false
@@ -358,7 +370,7 @@ func (mf *MatchFinder) FindLongestMatches(pt *PatriciaTree, data []byte) []Match
 		s.reset(&pt.root)
 		emitted := false
 		for end := start + 1; end < len(data); end++ {
-			if d := s.transition(data[end-1]); d == 0 {
+			if d := s.transition(data[end-1], true /* readonly */); d == 0 {
 				if s.tail == 0 && s.n.val != nil && end > lastEnd {
 					var m *Match
 					if !emitted {

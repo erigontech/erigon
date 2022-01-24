@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -77,9 +76,6 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 		f := matches[i-1]
 		p := f.Val.(*Pattern)
 		firstCell := cellRing.Get(0)
-		if firstCell == nil {
-			fmt.Printf("cellRing.Len() = %d\n", cellRing.Len())
-		}
 		maxCompression := firstCell.compression
 		maxScore := firstCell.score
 		maxCell := firstCell
@@ -98,8 +94,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 				maxScore = score
 				maxInclude = true
 				maxCell = cell
-			}
-			if cell.optimStart > f.End {
+			} else if cell.optimStart > f.End {
 				cellRing.Truncate(e)
 				break
 			}
@@ -189,7 +184,7 @@ func optimiseCluster(trace bool, numBuf []byte, input []byte, trie *patricia.Pat
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(trace bool, inputCh chan []byte, completion *sync.WaitGroup, trie *patricia.PatriciaTree, collector *etl.Collector, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -201,7 +196,7 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 		// First 8 bytes are idx
 		n := binary.PutUvarint(numBuf, uint64(len(input)-8))
 		output = append(output[:0], numBuf[:n]...)
-		output, patterns, uncovered = optimiseCluster(false, numBuf, input[8:], trie, &mf, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = optimiseCluster(trace, numBuf, input[8:], trie, &mf, output, uncovered, patterns, cellRing, posMap)
 		if err := collector.Collect(input[:8], output); err != nil {
 			log.Error("Could not collect", "error", err)
 			return
@@ -214,7 +209,7 @@ func reduceDictWorker(inputCh chan []byte, completion *sync.WaitGroup, trie *pat
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *DecompressedFile, workers int) error {
+func reducedict(trace bool, logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *DecompressedFile, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -253,7 +248,7 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 		posMap := make(map[uint64]uint64)
 		posMaps = append(posMaps, posMap)
 		wg.Add(1)
-		go reduceDictWorker(ch, &wg, &pt, collector, inputSize, outputSize, posMap)
+		go reduceDictWorker(trace, ch, &wg, &pt, collector, inputSize, outputSize, posMap)
 	}
 	var wordsCount uint64
 	if err := datFile.ForEach(func(v []byte) error {
@@ -537,22 +532,6 @@ func reducedict(logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *De
 		}
 	}
 	log.Debug(fmt.Sprintf("[%s] Positional dictionary", logPrefix), "size", common.ByteCount(offset), "position cutoff", positionCutoff)
-	huffmanFile := filepath.Join(tmpDir, "huffman_codes.txt")
-	defer os.Remove(huffmanFile)
-	df, err := os.Create(huffmanFile)
-	if err != nil {
-		return err
-	}
-	defer df.Close()
-	w := bufio.NewWriterSize(df, etl.BufIOSize)
-	defer w.Flush()
-	for _, p := range positionList {
-		fmt.Fprintf(w, "%d %x %d uses %d\n", p.codeBits, p.code, p.pos, p.uses)
-	}
-	if err = w.Flush(); err != nil {
-		return err
-	}
-	df.Close()
 
 	aggregator := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer aggregator.Close()
