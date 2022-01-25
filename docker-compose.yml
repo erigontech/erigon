@@ -5,7 +5,7 @@ services:
   erigon:
     image: thorax/erigon:latest
     build: .
-    command: erigon --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --private.api.addr=0.0.0.0:9090 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
+    command: erigon --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
     ports:
@@ -46,5 +46,16 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
     ports:
       - "8545:8545"
+    restart: unless-stopped
+
+  downloader: # To download/seed historical data
+    image: thorax/erigon:latest
+    command: downloader --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
+    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
+    volumes_from:
+      - erigon
+    ports:
+      - "9093:9093"
+      - "42069:42069"
     restart: unless-stopped
 
