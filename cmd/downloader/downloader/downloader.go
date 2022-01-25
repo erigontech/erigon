@@ -29,6 +29,7 @@ type Client struct {
 
 func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
+	torrentConfig.ListenPort = 42069
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
@@ -66,7 +67,7 @@ func New(cfg *torrent.ClientConfig, progressStore storage.PieceCompletion) (*Cli
 
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
-	torrentConfig.ListenPort = 0
+	//torrentConfig.ListenPort = 0
 
 	// enable dht
 	torrentConfig.NoDHT = true
