@@ -46,7 +46,8 @@ type EthBackendServer struct {
 	payloadId       uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send new Beacon Chain payloads to staged sync
-	beaconPayloadCh chan<- PayloadMessage
+	newPayloadCh chan<- PayloadMessage
+	forkChoiceCh chan<- ForkChoiceMessage
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan PayloadStatus
 	// Determines whether stageloop is processing a block or not
@@ -80,12 +81,18 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
+type ForkChoiceMessage struct {
+	HeadBlockHash      common.Hash
+	SafeBlockHash      common.Hash
+	DinalizedBlockHash common.Hash
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, beaconPayloadCh chan<- PayloadMessage, statusCh <-chan PayloadStatus, waitingForBeaconChain *uint32,
-	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
+	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		beaconPayloadCh: beaconPayloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
+		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
@@ -266,7 +273,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	// Send the block over
-	s.beaconPayloadCh <- PayloadMessage{
+	s.newPayloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
 			Transactions: req.Transactions,

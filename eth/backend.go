@@ -135,8 +135,9 @@ type Ethereum struct {
 	txPool2GrpcServer       *txpool2.GrpcServer
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
-	// to proof-of-stake so we start reverse syncing from the header
-	beaconPayloadCh       chan privateapi.PayloadMessage
+	// to proof-of-stake so we start reverse syncing from the block
+	newPayloadCh          chan privateapi.PayloadMessage
+	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain uint32 // atomic boolean flag
 }
 
@@ -385,7 +386,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
-	backend.beaconPayloadCh = make(chan privateapi.PayloadMessage)
+	backend.newPayloadCh = make(chan privateapi.PayloadMessage)
+	backend.forkChoiceCh = make(chan privateapi.ForkChoiceMessage)
 
 	// proof-of-work mining
 	mining := stagedsync.New(
@@ -426,8 +428,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.beaconPayloadCh, backend.sentryControlServer.Hd.PayloadStatusCh, &backend.waitingForBeaconChain,
-		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
+		blockReader, chainConfig, backend.newPayloadCh, backend.forkChoiceCh, backend.sentryControlServer.Hd.PayloadStatusCh,
+		&backend.waitingForBeaconChain, backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
 	if config.Miner.EnabledPOS && chainConfig.TerminalTotalDifficulty != nil {
@@ -503,7 +505,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.beaconPayloadCh, &backend.waitingForBeaconChain,
+		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,
 		backend.downloaderClient)
 	if err != nil {
 		return nil, err

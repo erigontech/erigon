@@ -43,7 +43,8 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
-	beaconPayloadCh       chan privateapi.PayloadMessage
+	newPayloadCh          chan privateapi.PayloadMessage
+	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.AllSnapshots
@@ -61,7 +62,8 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	beaconPayloadCh chan privateapi.PayloadMessage,
+	newPayloadCh chan privateapi.PayloadMessage,
+	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -78,7 +80,8 @@ func StageHeadersCfg(
 		batchSize:             batchSize,
 		tmpdir:                tmpdir,
 		noP2PDiscovery:        noP2PDiscovery,
-		beaconPayloadCh:       beaconPayloadCh,
+		newPayloadCh:          newPayloadCh,
+		forkChoiceCh:          forkChoiceCh,
 		waitingForBeaconChain: waitingForBeaconChain,
 		snapshots:             snapshots,
 		snapshotDownloader:    snapshotDownloader,
@@ -147,7 +150,7 @@ func HeadersPOS(
 		return nil
 	case <-cfg.hd.SkipCycleHack:
 		return nil
-	case payloadMessage = <-cfg.beaconPayloadCh:
+	case payloadMessage = <-cfg.newPayloadCh:
 	}
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
