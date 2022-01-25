@@ -3,11 +3,12 @@ version: '2.2'
 services:
 
   erigon:
-    image: thorax/erigon:latest
+    image: thorax/erigon:${TAG:-latest}
     build: .
     command: erigon --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
+      # can mount different sub-folders of "datadir" to different drives
     ports:
       - "30303:30303/tcp"
       - "30303:30303/udp"
@@ -16,7 +17,7 @@ services:
     restart: unless-stopped
 
   rpcdaemon:
-    image: thorax/erigon:latest
+    image: thorax/erigon:${TAG:-latest}
     command: rpcdaemon --datadir=/home/erigon/.local/share/erigon --private.api.addr=erigon:9090 --txpool.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net --ws
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
     volumes_from:
@@ -26,7 +27,7 @@ services:
     restart: unless-stopped
 
   downloader: # To download/seed historical data
-    image: thorax/erigon:latest
+    image: thorax/erigon:${TAG:-latest}
     command: downloader --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
     volumes_from:
