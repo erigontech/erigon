@@ -24,12 +24,13 @@ import (
 )
 
 const (
-	DefaultHTTPHost = "localhost" // Default host interface for the HTTP RPC server
-	DefaultHTTPPort = 8545        // Default TCP port for the HTTP RPC server
-	DefaultWSHost   = "localhost" // Default host interface for the websocket RPC server
-	DefaultWSPort   = 8546        // Default TCP port for the websocket RPC server
-	DefaultGRPCHost = "localhost" // Default host interface for the GRPC server
-	DefaultGRPCPort = 8547        // Default TCP port for the GRPC server
+	DefaultHTTPHost       = "localhost" // Default host interface for the HTTP RPC server
+	DefaultHTTPPort       = 8545        // Default TCP port for the HTTP RPC server
+	DefaultEngineHTTPPort = 8550        // Default TCP port for the engineApi HTTP RPC server
+	DefaultWSHost         = "localhost" // Default host interface for the websocket RPC server
+	DefaultWSPort         = 8546        // Default TCP port for the websocket RPC server
+	DefaultGRPCHost       = "localhost" // Default host interface for the GRPC server
+	DefaultGRPCPort       = 8547        // Default TCP port for the GRPC server
 )
 
 // DefaultConfig contains reasonable default settings.

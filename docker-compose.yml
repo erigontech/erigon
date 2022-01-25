@@ -46,5 +46,6 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
     ports:
       - "8545:8545"
+      - "8550:8550"
     restart: unless-stopped
 

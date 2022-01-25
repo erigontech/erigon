@@ -34,6 +34,7 @@ func main() {
 			log.Error(err.Error())
 			return nil
 		}
+
 		return nil
 	}
 
