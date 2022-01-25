@@ -193,9 +193,14 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	return nil
 }
 
-func (s *AllSnapshots) AsyncOpenAll() {
+func (s *AllSnapshots) AsyncOpenAll(ctx context.Context) {
 	go func() {
 		for !s.ready.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
