@@ -63,7 +63,7 @@ func TestCreate2Revive(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -256,7 +256,7 @@ func TestCreate2Polymorth(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -503,7 +503,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1033,7 +1033,7 @@ func TestWrongIncarnation(t *testing.T) {
 				EIP158Block:    big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1147,7 +1147,7 @@ func TestWrongIncarnation2(t *testing.T) {
 				EIP158Block:    big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -1402,7 +1402,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		gspec   = &core.Genesis{
 			Config: params.AllEthashProtocolChanges,
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1609,7 +1609,7 @@ func TestTxLookupUnwind(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)

@@ -63,7 +63,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Readonly().Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -150,12 +150,9 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	var tx kv.Tx
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	if rwTx, err = db.BeginRw(ctx); err != nil {
+		return err
+	}
 	var txNum uint64 = 1
 	trace := false
 	for !interrupt {
@@ -172,33 +169,16 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if b == nil {
 			break
 		}
-		if tx, err = db.BeginRo(ctx); err != nil {
-			return err
-		}
-		if rwTx, err = db.BeginRw(ctx); err != nil {
-			return err
-		}
-		r := agg.MakeStateReader(tx, blockNum)
+		r := agg.MakeStateReader(rwTx, blockNum)
 		if err = w.Reset(rwTx, blockNum); err != nil {
 			return err
 		}
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
 		writeWrapper := &WriterWrapper{w: w, blockNum: blockNum}
-		intraBlockState := state.New(readWrapper)
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		if txNum, _, err = runBlock2(trace, txNum, intraBlockState, readWrapper, writeWrapper, chainConfig, getHeader, nil, b, vmConfig); err != nil {
+		if txNum, _, err = runBlock2(trace, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
-		if blockNum%1000 == 0 {
-			log.Info("Processed", "blocks", blockNum)
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
-		default:
-		}
-		tx.Rollback()
 		if err := w.FinishTx(txNum, trace); err != nil {
 			return fmt.Errorf("final finish failed: %w", err)
 		}
@@ -206,6 +186,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
 		txNum++
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
+		default:
+		}
 		if interrupt || blockNum%uint64(commitmentFrequency) == 0 {
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
@@ -224,9 +210,20 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if err = w.Aggregate(trace); err != nil {
 			return err
 		}
-		if err = rwTx.Commit(); err != nil {
-			return err
+		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
+		if interrupt || (blockNum+1)%uint64(commitmentFrequency) == 0 {
+			if err = rwTx.Commit(); err != nil {
+				return err
+			}
+			if !interrupt {
+				if rwTx, err = db.BeginRw(ctx); err != nil {
+					return err
+				}
+			}
 		}
+		//if blockNum%1000 == 0 || blockNum >= 4157000 {
+		//	log.Info("Processed", "blocks", blockNum)
+		//}
 	}
 	if w != nil {
 		w.Close()
@@ -234,22 +231,24 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, rw *ReaderWrapper, ww *WriterWrapper,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runBlock2(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWrapper, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(ibs)
-	}
+	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	for i, tx := range block.Transactions() {
+		ibs := state.New(rw)
+		if daoBlock {
+			misc.ApplyDAOHardFork(ibs)
+			daoBlock = false
+		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, contractHasTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
@@ -263,6 +262,7 @@ func runBlock2(trace bool, txNumStart uint64, ibs *state.IntraBlockState, rw *Re
 		txNum++
 	}
 
+	ibs := state.New(rw)
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
 		return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)

@@ -45,6 +45,14 @@ type StateTracer interface {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
+// BalanceIncrease represents the increase of balance of an account that did not require
+// reading the account first
+type BalanceIncrease struct {
+	increase    uint256.Int
+	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
+	count       int  // Number of increases - this needs tracking for proper reversion
+}
+
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
 // NOT THREAD SAFE!
@@ -80,74 +88,21 @@ type IntraBlockState struct {
 	tracer         StateTracer
 	trace          bool
 	accessList     *accessList
+	balanceInc     map[common.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
 // Create a new state from a given trie
 func New(stateReader StateReader) *IntraBlockState {
 	return &IntraBlockState{
 		stateReader:       stateReader,
-		stateObjects:      make(map[common.Address]*stateObject),
-		stateObjectsDirty: make(map[common.Address]struct{}),
-		nilAccounts:       make(map[common.Address]struct{}),
-		logs:              make(map[common.Hash][]*types.Log),
+		stateObjects:      map[common.Address]*stateObject{},
+		stateObjectsDirty: map[common.Address]struct{}{},
+		nilAccounts:       map[common.Address]struct{}{},
+		logs:              map[common.Hash][]*types.Log{},
 		journal:           newJournal(),
 		accessList:        newAccessList(),
+		balanceInc:        map[common.Address]*BalanceIncrease{},
 	}
-}
-
-// Copy creates a deep, independent copy of the state.
-// Snapshots of the copied state cannot be applied to the copy.
-func (sdb *IntraBlockState) Copy() *IntraBlockState {
-	// Copy all the basic fields, initialize the memory ones
-	ibs := &IntraBlockState{
-		stateReader:       sdb.stateReader,
-		stateObjects:      make(map[common.Address]*stateObject, len(sdb.journal.dirties)),
-		stateObjectsDirty: make(map[common.Address]struct{}, len(sdb.journal.dirties)),
-		nilAccounts:       make(map[common.Address]struct{}),
-		refund:            sdb.refund,
-		logs:              make(map[common.Hash][]*types.Log, len(sdb.logs)),
-		logSize:           sdb.logSize,
-		journal:           newJournal(),
-	}
-	// Copy the dirty states, logs, and preimages
-	for addr := range sdb.journal.dirties {
-		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
-		// and in the Finalise-method, there is a case where an object is in the journal but not
-		// in the stateObjects: OOG after touch on ripeMD prior to Byzantium. Thus, we need to check for
-		// nil
-		if object, exist := sdb.stateObjects[addr]; exist {
-			// Even though the original object is dirty, we are not copying the journal,
-			// so we need to make sure that anyside effect the journal would have caused
-			// during a commit (or similar op) is already applied to the copy.
-			ibs.stateObjects[addr] = object.deepCopy(ibs)
-			ibs.stateObjectsDirty[addr] = struct{}{} // Mark the copy dirty to force internal (code/state) commits
-		}
-	}
-	// Above, we don't copy the actual journal. This means that if the copy is copied, the
-	// loop above will be a no-op, since the copy's journal is empty.
-	// Thus, here we iterate over stateObjects, to enable copies of copies
-	for addr := range sdb.stateObjectsDirty {
-		if _, exist := ibs.stateObjects[addr]; !exist {
-			ibs.stateObjects[addr] = sdb.stateObjects[addr].deepCopy(ibs)
-		}
-		ibs.stateObjectsDirty[addr] = struct{}{}
-	}
-	for hash, logs := range sdb.logs {
-		cpy := make([]*types.Log, len(logs))
-		for i, l := range logs {
-			cpy[i] = new(types.Log)
-			*cpy[i] = *l
-		}
-		ibs.logs[hash] = cpy
-	}
-	// comment from https://github.com/ethereum/go-ethereum/commit/6487c002f6b47e08cb9814f16712c6789b313a97#diff-c3757dc9e9d868f63bc84a0cc67159c1d5c22cc5d8c9468757098f0492e0658cR705
-	// Do we need to copy the access list? In practice: No. At the start of a
-	// transaction, the access list is empty. In practice, we only ever copy state
-	// _between_ transactions/blocks, never in the middle of a transaction.
-	// However, it doesn't cost us much to copy an empty list, so we do it anyway
-	// to not blow up if we ever decide copy it in the middle of a transaction
-	ibs.accessList = sdb.accessList.Copy()
-	return ibs
 }
 
 func (sdb *IntraBlockState) SetTracer(tracer StateTracer) {
@@ -181,6 +136,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.logSize = 0
 	sdb.clearJournalAndRefund()
 	sdb.accessList = newAccessList()
+	sdb.balanceInc = make(map[common.Address]*BalanceIncrease)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -394,11 +350,28 @@ func (sdb *IntraBlockState) AddBalance(addr common.Address, amount *uint256.Int)
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
+	// If this account has not been read, add to the balance increment map
+	_, needAccount := sdb.stateObjects[addr]
+	if !needAccount && addr == ripemd && amount.IsZero() {
+		needAccount = true
+	}
+	if !needAccount {
+		sdb.journal.append(balanceIncrease{
+			account:  &addr,
+			increase: *amount,
+		})
+		bi, ok := sdb.balanceInc[addr]
+		if !ok {
+			bi = &BalanceIncrease{}
+			sdb.balanceInc[addr] = bi
+		}
+		bi.increase.Add(&bi.increase, amount)
+		bi.count++
+		return
+	}
 
 	stateObject := sdb.GetOrNewStateObject(addr)
-	if stateObject != nil {
-		stateObject.AddBalance(amount)
-	}
+	stateObject.AddBalance(amount)
 }
 
 // SubBalance subtracts amount from the account associated with addr.
@@ -532,7 +505,6 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 	return true
 }
 
-// Retrieve a state object given my the address. Returns nil if not found.
 func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
@@ -541,6 +513,9 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+			return sdb.createObject(addr, nil)
+		}
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
@@ -550,17 +525,25 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+			return sdb.createObject(addr, nil)
+		}
 		return nil
 	}
 
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
-	sdb.setStateObject(obj)
+	sdb.setStateObject(addr, obj)
 	return obj
 }
 
-func (sdb *IntraBlockState) setStateObject(object *stateObject) {
-	sdb.stateObjects[object.Address()] = object
+func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObject) {
+	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+		object.data.Balance.Add(&object.data.Balance, &bi.increase)
+		bi.transferred = true
+		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
+	}
+	sdb.stateObjects[addr] = object
 }
 
 // Retrieve a state object or create a new state object if nil.
@@ -595,9 +578,9 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
 	} else {
-		sdb.journal.append(resetObjectChange{prev: previous})
+		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
 	}
-	sdb.setStateObject(newobj)
+	sdb.setStateObject(addr, newobj)
 	return newobj
 }
 
@@ -735,8 +718,13 @@ func printAccount(EIP158Enabled bool, addr common.Address, stateObject *stateObj
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
+	for addr, bi := range sdb.balanceInc {
+		if !bi.transferred {
+			sdb.getStateObject(addr)
+		}
+	}
 	for addr := range sdb.journal.dirties {
-		stateObject, exist := sdb.stateObjects[addr]
+		so, exist := sdb.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
 			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
@@ -747,7 +735,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, true); err != nil {
+		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, so, true); err != nil {
 			return err
 		}
 
@@ -761,6 +749,11 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
+	for addr, bi := range sdb.balanceInc {
+		if !bi.transferred {
+			sdb.getStateObject(addr)
+		}
+	}
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}

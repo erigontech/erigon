@@ -81,11 +81,11 @@ func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 }
 
 // WriteHeaderNumber stores the hash->number mapping.
-func WriteHeaderNumber(db kv.Putter, hash common.Hash, number uint64) {
-	enc := dbutils.EncodeBlockNumber(number)
-	if err := db.Put(kv.HeaderNumber, hash[:], enc); err != nil {
-		log.Crit("Failed to store hash to number mapping", "err", err)
+func WriteHeaderNumber(db kv.Putter, hash common.Hash, number uint64) error {
+	if err := db.Put(kv.HeaderNumber, hash[:], dbutils.EncodeBlockNumber(number)); err != nil {
+		return err
 	}
+	return nil
 }
 
 // DeleteHeaderNumber removes hash->number mapping.

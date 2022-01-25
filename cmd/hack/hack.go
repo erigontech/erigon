@@ -655,25 +655,28 @@ func printCurrentBlockNumber(chaindata string) {
 	})
 }
 
-func printTxHashes() {
-	db := mdbx.MustOpen(paths.DefaultDataDir() + "/geth/chaindata")
+func printTxHashes(chaindata string, block uint64) error {
+	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		for b := uint64(0); b < uint64(100000); b++ {
-			hash, err := rawdb.ReadCanonicalHash(tx, b)
-			tool.Check(err)
+		for b := block; b < block+1; b++ {
+			hash, e := rawdb.ReadCanonicalHash(tx, b)
+			if e != nil {
+				return e
+			}
 			block := rawdb.ReadBlock(tx, hash, b)
 			if block == nil {
 				break
 			}
-			for _, tx := range block.Transactions() {
-				fmt.Printf("%x\n", tx.Hash())
+			for i, tx := range block.Transactions() {
+				fmt.Printf("%d: %x\n", i, tx.Hash())
 			}
 		}
 		return nil
 	}); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
 func readTrie(filename string) *trie.Trie {
@@ -1348,6 +1351,7 @@ func mphf(chaindata string, block int) error {
 	l, e = r.ReadByte()
 	i = 0
 	var lookupTime time.Duration
+	idxReader := recsplit.NewIndexReader(idx)
 	for ; e == nil; l, e = r.ReadByte() {
 		if _, e = io.ReadFull(r, buf[:l]); e != nil {
 			return e
@@ -1355,7 +1359,7 @@ func mphf(chaindata string, block int) error {
 		if i%2 == 0 {
 			// It is key, we skip the values here
 			start := time.Now()
-			offset := idx.Lookup(buf[:l])
+			offset := idxReader.Lookup(buf[:l])
 			lookupTime += time.Since(start)
 			if offset >= count {
 				return fmt.Errorf("idx %d >= count %d", offset, count)
@@ -1802,6 +1806,7 @@ func extractBodies(chaindata string, block uint64) error {
 	}
 	defer c.Close()
 	blockEncoded := dbutils.EncodeBlockNumber(block)
+	i := 0
 	for k, _, err := c.Seek(blockEncoded); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
@@ -1810,6 +1815,10 @@ func extractBodies(chaindata string, block uint64) error {
 		blockHash := common.BytesToHash(k[8:])
 		_, baseTxId, txAmount := rawdb.ReadBody(tx, blockHash, blockNumber)
 		fmt.Printf("Body %d %x: baseTxId %d, txAmount %d\n", blockNumber, blockHash, baseTxId, txAmount)
+		i++
+		if i == 1 {
+			break
+		}
 	}
 	return nil
 }
@@ -2495,7 +2504,7 @@ func main() {
 		trieChart()
 
 	case "printTxHashes":
-		printTxHashes()
+		printTxHashes(*chaindata, uint64(*block))
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)

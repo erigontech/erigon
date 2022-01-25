@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -390,7 +391,8 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 // but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
 // to make sure is to fetch it and compare hash
 func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *BlocksSnapshot, buf []byte) (*types.Header, error) {
-	localID := sn.HeaderHashIdx.Lookup(hash[:])
+	reader := recsplit.NewIndexReader(sn.HeaderHashIdx)
+	localID := reader.Lookup(hash[:])
 	headerOffset := sn.HeaderHashIdx.Lookup2(localID)
 	gg := sn.Headers.MakeGetter()
 	gg.Reset(headerOffset)
@@ -464,30 +466,36 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
 		sn := back.sn.blocks[i]
 
-		localID := sn.TxnHashIdx.Lookup(txnHash[:])
+		reader := recsplit.NewIndexReader(sn.TxnHashIdx)
+		localID := reader.Lookup(txnHash[:])
 		txnID = localID + sn.TxnHashIdx.BaseDataID()
 		offset := sn.TxnHashIdx.Lookup2(localID)
 		gg := sn.Transactions.MakeGetter()
 		gg.Reset(offset)
+		//fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 		buf, _ = gg.Next(buf[:0])
+		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if txnHash[0] != buf[0] {
 			continue
 		}
 
-		localID = sn.TxnHash2BlockNumIdx.Lookup(txnHash[:])
+		reader2 := recsplit.NewIndexReader(sn.TxnHash2BlockNumIdx)
+		localID = reader2.Lookup(txnHash[:])
 		blockNum = sn.TxnHash2BlockNumIdx.Lookup2(localID)
-
+		//fmt.Printf("try2: %d,%d,%d,%d,%d,%d\n", sn.TxnHash2BlockNumIdx.Lookup2(0), sn.TxnHash2BlockNumIdx.Lookup2(1), sn.TxnHash2BlockNumIdx.Lookup2(2), sn.TxnHash2BlockNumIdx.Lookup2(3), sn.TxnHash2BlockNumIdx.Lookup2(4), sn.TxnHash2BlockNumIdx.Lookup2(5))
+		//fmt.Printf("try3: %d,%d,%d,%d\n", sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xc2c3ba07f05ddd8552508e7facf25dc5bd6d16e95c12cff42cb8b9ea6bbfc225")), sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xca8a182f21b98318e94ec7884f572c0a1385dbc10a2bea62a38079eab7d8cfef")), sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xf1b3306dd4bfa2a86f7f1b3c22bf0b6b4da50f5d37f2fed89d1221cb3690c700")), sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xf59129e464525261217833d4bafae0ed8be5a94044eafacb47a45a4b23802a70")))
 		sender := buf[1 : 1+20]
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {
 			return
 		}
 		txn.SetSender(common.BytesToAddress(sender))
-
 		// final txnHash check  - completely avoid false-positives
-		if txn.Hash() != txnHash {
+		if txn.Hash() == txnHash {
+			//fmt.Printf("try_succeed: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 			return
 		}
+		//fmt.Printf("try_failed: %x, %x\n", txn.Hash(), txnHash)
 	}
 	return
 }

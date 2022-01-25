@@ -102,7 +102,8 @@ type (
 		account *common.Address
 	}
 	resetObjectChange struct {
-		prev *stateObject
+		account *common.Address
+		prev    *stateObject
 	}
 	suicideChange struct {
 		account     *common.Address
@@ -114,6 +115,13 @@ type (
 	balanceChange struct {
 		account *common.Address
 		prev    uint256.Int
+	}
+	balanceIncrease struct {
+		account  *common.Address
+		increase uint256.Int
+	}
+	balanceIncreaseTransfer struct {
+		bi *BalanceIncrease
 	}
 	nonceChange struct {
 		account *common.Address
@@ -160,7 +168,7 @@ func (ch createObjectChange) dirtied() *common.Address {
 }
 
 func (ch resetObjectChange) revert(s *IntraBlockState) {
-	s.setStateObject(ch.prev)
+	s.setStateObject(*ch.account, ch.prev)
 }
 
 func (ch resetObjectChange) dirtied() *common.Address {
@@ -196,6 +204,27 @@ func (ch balanceChange) dirtied() *common.Address {
 	return ch.account
 }
 
+func (ch balanceIncrease) revert(s *IntraBlockState) {
+	if bi, ok := s.balanceInc[*ch.account]; ok {
+		bi.increase.Sub(&bi.increase, &ch.increase)
+		bi.count--
+		if bi.count == 0 {
+			delete(s.balanceInc, *ch.account)
+		}
+	}
+}
+
+func (ch balanceIncrease) dirtied() *common.Address {
+	return ch.account
+}
+
+func (ch balanceIncreaseTransfer) dirtied() *common.Address {
+	return nil
+}
+
+func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) {
+	ch.bi.transferred = false
+}
 func (ch nonceChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setNonce(ch.prev)
 }
