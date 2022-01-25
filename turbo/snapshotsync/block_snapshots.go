@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/fs"
 	"io/ioutil"
 	"os"
 	"path"
@@ -137,9 +136,7 @@ func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error
 	return
 }
 
-func (s *AllSnapshots) ReopenIndices() error {
-	return s.ReopenSomeIndices(AllSnapshotTypes...)
-}
+func (s *AllSnapshots) ReopenIndices() error { return s.ReopenSomeIndices(AllSnapshotTypes...) }
 
 func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	for _, bs := range s.blocks {
@@ -152,9 +149,6 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.HeaderHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Headers)))
 				if err != nil {
-					if errors.Is(err, fs.ErrNotExist) {
-						return nil
-					}
 					return err
 				}
 			case Bodies:
@@ -164,9 +158,6 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.BodyNumberIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Bodies)))
 				if err != nil {
-					if errors.Is(err, fs.ErrNotExist) {
-						return nil
-					}
 					return err
 				}
 			case Transactions:
@@ -176,9 +167,6 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.TxnHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions)))
 				if err != nil {
-					if errors.Is(err, fs.ErrNotExist) {
-						return nil
-					}
 					return err
 				}
 
@@ -188,9 +176,6 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.TxnHash2BlockNumIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions2Block)))
 				if err != nil {
-					if errors.Is(err, fs.ErrNotExist) {
-						return nil
-					}
 					return err
 				}
 			default:
@@ -206,6 +191,24 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	}
 	s.ready.Store(true)
 	return nil
+}
+
+func (s *AllSnapshots) AsyncOpenAll() {
+	go func() {
+		for !s.ready.Load() {
+			if err := s.ReopenSegments(); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					log.Error("AsyncOpenAll", "err", err)
+				}
+			}
+			if err := s.ReopenIndices(); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					log.Error("AsyncOpenAll", "err", err)
+				}
+			}
+			time.Sleep(15 * time.Second)
+		}
+	}()
 }
 
 func (s *AllSnapshots) ReopenSegments() error {

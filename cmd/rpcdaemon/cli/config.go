@@ -280,12 +280,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			}
 
 			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
-			if err := allSnapshots.ReopenSegments(); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, err
-			}
-			if err := allSnapshots.ReopenIndices(); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, err
-			}
+			allSnapshots.AsyncOpenAll()
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
 			blockReader = snapshotsync.NewBlockReader()
