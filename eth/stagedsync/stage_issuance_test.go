@@ -51,7 +51,7 @@ func TestIssuanceStage(t *testing.T) {
 	// Execute stage issuance
 	err := SpawnStageIssuance(StageIssuanceCfg(db, &params.ChainConfig{
 		Consensus: params.EtHashConsensus,
-	}, snapshotsync.NewBlockReader()), &StageState{
+	}, snapshotsync.NewBlockReader(), true), &StageState{
 		ID: stages.Issuance,
 	}, tx, ctx)
 	assert.NoError(err)
