@@ -45,8 +45,8 @@ type EthBackendServer struct {
 	// Block proposing for proof-of-stake
 	payloadId       uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
-	// Send reverse sync starting point to staged sync
-	reverseDownloadCh chan<- PayloadMessage
+	// Send new Beacon Chain payloads to staged sync
+	beaconPayloadCh chan<- PayloadMessage
 	// Notify whether the current block being processed is Valid or not
 	statusCh <-chan ExecutionStatus
 	// Determines whether stageloop is processing a block or not
@@ -81,11 +81,11 @@ type PayloadMessage struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	config *params.ChainConfig, beaconPayloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
+		beaconPayloadCh: beaconPayloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
@@ -266,7 +266,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	// Send the block over
-	s.reverseDownloadCh <- PayloadMessage{
+	s.beaconPayloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
 			Transactions: req.Transactions,

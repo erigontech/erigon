@@ -250,7 +250,7 @@ func NewStagedSync(
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	reverseDownloadCh chan privateapi.PayloadMessage,
+	beaconPayloadCh chan privateapi.PayloadMessage,
 	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
@@ -277,7 +277,7 @@ func NewStagedSync(
 			controlServer.Penalize,
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
-			reverseDownloadCh,
+			beaconPayloadCh,
 			waitingForBeaconChain,
 			allSnapshots,
 			snapshotDownloader,

@@ -89,11 +89,11 @@ func TestMockDownloadRequest(t *testing.T) {
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	reverseDownloadCh := make(chan PayloadMessage)
+	beaconPayloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineNewPayloadReply
@@ -104,7 +104,7 @@ func TestMockDownloadRequest(t *testing.T) {
 		done <- true
 	}()
 
-	<-reverseDownloadCh
+	<-beaconPayloadCh
 	statusCh <- ExecutionStatus{Status: remote.EngineStatus_SYNCING}
 	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
@@ -149,11 +149,11 @@ func TestMockValidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan PayloadMessage)
+	beaconPayloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineNewPayloadReply
@@ -164,7 +164,7 @@ func TestMockValidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	<-reverseDownloadCh
+	<-beaconPayloadCh
 
 	statusCh <- ExecutionStatus{
 		Status:          remote.EngineStatus_VALID,
@@ -185,11 +185,11 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan PayloadMessage)
+	beaconPayloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 
 	waitingForHeaders := uint32(1)
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineNewPayloadReply
@@ -200,7 +200,7 @@ func TestMockInvalidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	<-reverseDownloadCh
+	<-beaconPayloadCh
 	// Simulate invalid status
 	statusCh <- ExecutionStatus{
 		Status:          remote.EngineStatus_INVALID,
@@ -221,11 +221,11 @@ func TestNoTTD(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	reverseDownloadCh := make(chan PayloadMessage)
+	beaconPayloadCh := make(chan PayloadMessage)
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 
