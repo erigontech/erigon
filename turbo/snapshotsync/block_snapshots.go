@@ -196,15 +196,11 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 func (s *AllSnapshots) AsyncOpenAll() {
 	go func() {
 		for !s.ready.Load() {
-			if err := s.ReopenSegments(); err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					log.Error("AsyncOpenAll", "err", err)
-				}
+			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Error("AsyncOpenAll", "err", err)
 			}
-			if err := s.ReopenIndices(); err != nil {
-				if !errors.Is(err, os.ErrNotExist) {
-					log.Error("AsyncOpenAll", "err", err)
-				}
+			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
 		}
