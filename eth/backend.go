@@ -426,7 +426,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.beaconPayloadCh, backend.sentryControlServer.Hd.ExecutionStatusCh, &backend.waitingForBeaconChain,
+		blockReader, chainConfig, backend.beaconPayloadCh, backend.sentryControlServer.Hd.PayloadStatusCh, &backend.waitingForBeaconChain,
 		backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread

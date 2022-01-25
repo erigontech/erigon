@@ -90,7 +90,7 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	makeTestDb(ctx, db)
 	beaconPayloadCh := make(chan PayloadMessage)
-	statusCh := make(chan ExecutionStatus)
+	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
@@ -105,7 +105,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	}()
 
 	<-beaconPayloadCh
-	statusCh <- ExecutionStatus{Status: remote.EngineStatus_SYNCING}
+	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
 	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
 	require.NoError(err)
@@ -150,7 +150,7 @@ func TestMockValidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	beaconPayloadCh := make(chan PayloadMessage)
-	statusCh := make(chan ExecutionStatus)
+	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
@@ -166,7 +166,7 @@ func TestMockValidExecution(t *testing.T) {
 
 	<-beaconPayloadCh
 
-	statusCh <- ExecutionStatus{
+	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
 		LatestValidHash: payload3Hash,
 	}
@@ -186,7 +186,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	beaconPayloadCh := make(chan PayloadMessage)
-	statusCh := make(chan ExecutionStatus)
+	statusCh := make(chan PayloadStatus)
 
 	waitingForHeaders := uint32(1)
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
@@ -202,7 +202,7 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	<-beaconPayloadCh
 	// Simulate invalid status
-	statusCh <- ExecutionStatus{
+	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
 		LatestValidHash: startingHeadHash,
 	}
@@ -222,7 +222,7 @@ func TestNoTTD(t *testing.T) {
 	makeTestDb(ctx, db)
 
 	beaconPayloadCh := make(chan PayloadMessage)
-	statusCh := make(chan ExecutionStatus)
+	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)

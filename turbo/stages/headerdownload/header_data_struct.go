@@ -222,14 +222,14 @@ type HeaderDownload struct {
 	fetching           bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
 	// proof-of-stake
-	topSeenHeightPoS       uint64
-	lastProcessedPayload   uint64                          // The last header number inserted when processing the chain backwards
-	expectedHash           common.Hash                     // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
-	synced                 bool                            // if we found a canonical hash during backward sync, in this case our sync process is done
-	posSync                bool                            // True if the chain is syncing backwards or not
-	headersCollector       *etl.Collector                  // ETL collector for headers
-	ExecutionStatusCh      chan privateapi.ExecutionStatus // Channel to report payload execution status (engine_newPayloadV1/forkchoiceUpdatedV1 response)
-	pendingExecutionStatus common.Hash                     // Header whose status we still should send to the ExecutionStatusCh
+	topSeenHeightPoS     uint64
+	lastProcessedPayload uint64                        // The last header number inserted when processing the chain backwards
+	expectedHash         common.Hash                   // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	synced               bool                          // if we found a canonical hash during backward sync, in this case our sync process is done
+	posSync              bool                          // True if the chain is syncing backwards or not
+	headersCollector     *etl.Collector                // ETL collector for headers
+	PayloadStatusCh      chan privateapi.PayloadStatus // Channel to report payload validation/execution status (engine_newPayloadV1/forkchoiceUpdatedV1 response)
+	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -259,7 +259,7 @@ func NewHeaderDownload(
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
-		ExecutionStatusCh:  make(chan privateapi.ExecutionStatus, 1),
+		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 	}
 	heap.Init(hd.persistedLinkQueue)
 	heap.Init(hd.linkQueue)

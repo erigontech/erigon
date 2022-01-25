@@ -48,7 +48,7 @@ type EthBackendServer struct {
 	// Send new Beacon Chain payloads to staged sync
 	beaconPayloadCh chan<- PayloadMessage
 	// Notify whether the current block being processed is Valid or not
-	statusCh <-chan ExecutionStatus
+	statusCh <-chan PayloadStatus
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -68,7 +68,7 @@ type EthBackend interface {
 // This is the status of a newly execute block.
 // Hash: Block hash
 // Status: block's status
-type ExecutionStatus struct {
+type PayloadStatus struct {
 	Status          remote.EngineStatus
 	LatestValidHash common.Hash
 	Error           error
@@ -81,7 +81,7 @@ type PayloadMessage struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, beaconPayloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
+	config *params.ChainConfig, beaconPayloadCh chan<- PayloadMessage, statusCh <-chan PayloadStatus, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,

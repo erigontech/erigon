@@ -57,24 +57,24 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		pendingExecutionStatus := hd.GetPendingExecutionStatus()
-		if pendingExecutionStatus != (common.Hash{}) {
+		pendingPayloadStatus := hd.GetPendingPayloadStatus()
+		if pendingPayloadStatus != (common.Hash{}) {
 			if err != nil {
-				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
 			} else {
 				var status remote.EngineStatus
-				if headBlockHash == pendingExecutionStatus {
+				if headBlockHash == pendingPayloadStatus {
 					status = remote.EngineStatus_VALID
 				} else {
 					status = remote.EngineStatus_INVALID
 				}
-				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{
 					Status:          status,
 					LatestValidHash: headBlockHash,
 				}
 			}
 
-			hd.ClearPendingExecutionStatus()
+			hd.ClearPendingPayloadStatus()
 		}
 
 		if err != nil {

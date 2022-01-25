@@ -1132,22 +1132,22 @@ func (hd *HeaderDownload) Fetching() bool {
 	return hd.fetching
 }
 
-func (hd *HeaderDownload) GetPendingExecutionStatus() common.Hash {
+func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.pendingExecutionStatus
+	return hd.pendingPayloadStatus
 }
 
-func (hd *HeaderDownload) SetPendingExecutionStatus(header common.Hash) {
+func (hd *HeaderDownload) SetPendingPayloadStatus(header common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingExecutionStatus = header
+	hd.pendingPayloadStatus = header
 }
 
-func (hd *HeaderDownload) ClearPendingExecutionStatus() {
+func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingExecutionStatus = common.Hash{}
+	hd.pendingPayloadStatus = common.Hash{}
 }
 
 func (hd *HeaderDownload) InsertList() []*Link {

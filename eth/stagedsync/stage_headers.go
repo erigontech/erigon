@@ -152,7 +152,7 @@ func HeadersPOS(
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
-	cfg.hd.ClearPendingExecutionStatus()
+	cfg.hd.ClearPendingPayloadStatus()
 
 	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
@@ -162,13 +162,13 @@ func HeadersPOS(
 
 	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
 		return err
 	}
 
 	if headerHash == existingHash {
 		// previously received valid header
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_VALID,
 			LatestValidHash: headerHash,
 		}
@@ -182,7 +182,7 @@ func HeadersPOS(
 	// If we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
 		return err
 	}
 
@@ -229,7 +229,7 @@ func verifyAndSavePoSHeader(
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
 		}
@@ -238,14 +238,14 @@ func verifyAndSavePoSHeader(
 
 	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
 	if err != nil {
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
 		return
 	}
 
 	headBlockHash := rawdb.ReadHeadBlockHash(tx)
 	if headBlockHash == header.ParentHash {
 		// OK, we're on the canonical chain
-		cfg.hd.SetPendingExecutionStatus(headerHash)
+		cfg.hd.SetPendingPayloadStatus(headerHash)
 
 		err = rawdb.WriteHeadHeaderHash(tx, headerHash)
 		if err != nil {
@@ -272,7 +272,7 @@ func verifyAndSavePoSHeader(
 		}
 	} else {
 		// Side chain or something weird
-		cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: remote.EngineStatus_ACCEPTED}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
 	}
 
 	shouldSaveBody = true
@@ -287,7 +287,7 @@ func downloadMissingPoSHeaders(
 	header *types.Header,
 	headerInserter *headerdownload.HeaderInserter,
 ) (shouldSaveBody bool, err error) {
-	cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Status: remote.EngineStatus_SYNCING}
+	cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 
 	cfg.hd.SetPOSSync(true)
 	err = cfg.hd.ReadProgressFromDb(tx)
