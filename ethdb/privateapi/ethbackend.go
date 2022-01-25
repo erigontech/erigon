@@ -39,7 +39,8 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 // 2.1.0 - add NetPeerCount function
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
-var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
+// 3.1.0 - add Subscribe to logs
+var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 1, Patch: 0}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -172,6 +173,15 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	}
 	log.Info("event subscription channel closed with the RPC daemon")
 	return nil
+}
+
+func (s *EthBackendServer) SubscribeLogs(*emptypb.Empty, remote.ETHBACKEND_SubscribeLogsServer) error {
+	return nil
+}
+
+// Replaces current logs filter with the new version
+func (s *EthBackendServer) UpdateLogsFilter(context.Context, *remote.LogsFilterRequest) (*emptypb.Empty, error) {
+	return &emptypb.Empty{}, nil
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {

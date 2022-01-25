@@ -12,6 +12,7 @@ type HeaderSubscription func(*types.Header) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
+type LogsSubscription func(*types.Log) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
