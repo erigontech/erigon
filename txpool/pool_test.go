@@ -42,7 +42,7 @@ func BenchmarkName(b *testing.B) {
 		txs[i] = &metaTx{Tx: &TxSlot{}}
 	}
 	for i := 0; i < len(txs); i++ {
-		p.UnsafeAdd(txs[i])
+		p.Add(txs[i])
 	}
 	p.EnforceInvariants()
 	b.ResetTimer()

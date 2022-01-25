@@ -90,7 +90,8 @@ enum Direction {
 message StateChangeBatch {
   uint64 databaseViewID = 1; // mdbx's tx.ID() - id of write transaction in db - where this changes happened
   repeated StateChange changeBatch = 2;
-  uint64 pendingBlockBaseFee = 3;
+  uint64 pendingBlockBaseFee = 3; // BaseFee of the next block to be produced
+  uint64 blockGasLimit = 4; // GasLimit of the latest block - proxy for the gas limit of the next block to be produced
 }
 
 // StateChange - changes done by 1 block or by 1 unwind

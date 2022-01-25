@@ -39,7 +39,8 @@ const MaxTxTTL = 60 * time.Second
 // 3.0.0 - ??
 // 4.0.0 - Server send tx.ViewID() after open tx
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
-var KvServiceAPIVersion = &types.VersionReply{Major: 5, Minor: 0, Patch: 0}
+// 5.1.0 - Added blockGasLimit to the StateChangeBatch
+var KvServiceAPIVersion = &types.VersionReply{Major: 5, Minor: 1, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
