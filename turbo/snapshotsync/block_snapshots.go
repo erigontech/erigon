@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"path"
@@ -151,6 +152,9 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.HeaderHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Headers)))
 				if err != nil {
+					if errors.Is(err, fs.ErrNotExist) {
+						return nil
+					}
 					return err
 				}
 			case Bodies:
@@ -160,6 +164,9 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.BodyNumberIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Bodies)))
 				if err != nil {
+					if errors.Is(err, fs.ErrNotExist) {
+						return nil
+					}
 					return err
 				}
 			case Transactions:
@@ -169,6 +176,9 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.TxnHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions)))
 				if err != nil {
+					if errors.Is(err, fs.ErrNotExist) {
+						return nil
+					}
 					return err
 				}
 
@@ -178,6 +188,9 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 				}
 				bs.TxnHash2BlockNumIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions2Block)))
 				if err != nil {
+					if errors.Is(err, fs.ErrNotExist) {
+						return nil
+					}
 					return err
 				}
 			default:
