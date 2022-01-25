@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 type BlocksSnapshot struct {
@@ -74,6 +75,7 @@ func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(f
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type AllSnapshots struct {
+	ready                atomic.Bool
 	dir                  string
 	allSegmentsAvailable bool
 	allIdxAvailable      bool
@@ -189,6 +191,7 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 			s.idxAvailable = 0
 		}
 	}
+	s.ready.Store(true)
 	return nil
 }
 
@@ -283,6 +286,10 @@ func (s *AllSnapshots) Close() {
 }
 
 func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
+	if !s.ready.Load() {
+		return nil, false
+	}
+
 	if blockNumber > s.segmentsAvailable {
 		return snapshot, false
 	}
