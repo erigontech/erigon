@@ -68,6 +68,20 @@ type EngineImpl struct {
 	api services.ApiBackend
 }
 
+func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} {
+	json := map[string]interface{}{
+		"status": x.Status.String(),
+	}
+	if x.LatestValidHash != nil {
+		json["latestValidHash"] = gointerfaces.ConvertH256ToHash(x.LatestValidHash)
+	}
+	if x.ValidationError != "" {
+		json["validationError"] = x.ValidationError
+	}
+
+	return json
+}
+
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	var prepareParameters *remote.EnginePayloadAttributes
 	if payloadAttributes != nil {
@@ -90,13 +104,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	}
 
 	json := map[string]interface{}{
-		"status": reply.Status.String(),
-	}
-	if reply.LatestValidHash != nil {
-		json["latestValidHash"] = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	}
-	if reply.ValidationError != "" {
-		json["validationError"] = reply.ValidationError
+		"payloadStatus": convertPayloadStatus(reply.PayloadStatus),
 	}
 	if reply.PayloadId != 0 {
 		encodedPayloadId := make([]byte, 8)
@@ -146,17 +154,7 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		return nil, err
 	}
 
-	json := map[string]interface{}{
-		"status": reply.Status.String(),
-	}
-	if reply.LatestValidHash != nil {
-		json["latestValidHash"] = gointerfaces.ConvertH256ToHash(reply.LatestValidHash)
-	}
-	if reply.ValidationError != "" {
-		json["validationError"] = reply.ValidationError
-	}
-
-	return json, nil
+	return convertPayloadStatus(reply), nil
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {

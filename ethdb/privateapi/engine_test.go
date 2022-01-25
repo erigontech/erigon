@@ -96,7 +96,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
-	var reply *remote.EngineNewPayloadReply
+	var reply *remote.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
@@ -156,7 +156,7 @@ func TestMockValidExecution(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
-	var reply *remote.EngineNewPayloadReply
+	var reply *remote.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
@@ -192,7 +192,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconPayloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
-	var reply *remote.EngineNewPayloadReply
+	var reply *remote.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {

@@ -215,7 +215,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 }
 
 // EngineNewPayloadV1, validates and possibly executes payload
-func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineNewPayloadReply, error) {
+func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 
@@ -253,7 +253,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
-		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 
 	// If another payload is already commissioned then we just reply with syncing
@@ -262,7 +262,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		// TODO(yperbasis): not entirely correct since per the spec:
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
 		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
-		return &remote.EngineNewPayloadReply{Status: remote.EngineStatus_SYNCING}, nil
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
 	// Send the block over
@@ -282,7 +282,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	// Discard all payload assembled
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
 	// Send reply over
-	reply := remote.EngineNewPayloadReply{Status: executedStatus.Status}
+	reply := remote.EnginePayloadStatus{Status: executedStatus.Status}
 	if executedStatus.LatestValidHash != (common.Hash{}) {
 		reply.LatestValidHash = gointerfaces.ConvertHashToH256(executedStatus.LatestValidHash)
 	}
@@ -343,7 +343,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if beaconHeadHeader == nil || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		// TODO(yperbasis): should sent a proper error message if beaconHeadHeader == nil
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: remote.EngineStatus_SYNCING,
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
 	}
 
@@ -354,7 +354,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// If we are just updating forkchoice, this is enough
 	if req.PayloadAttributes == nil {
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: remote.EngineStatus_VALID,
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
 		}, nil
 	}
 
@@ -374,8 +374,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	s.syncCond.Broadcast()
 	// successfully assembled the payload and assigned the correct id
 	return &remote.EngineForkChoiceUpdatedReply{
-		Status:    remote.EngineStatus_VALID,
-		PayloadId: s.payloadId,
+		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
+		PayloadId:     s.payloadId,
 	}, nil
 }
 
