@@ -5,7 +5,7 @@ services:
   erigon:
     image: thorax/erigon:${TAG:-latest}
     build: .
-    command: erigon --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
+    command: erigon --datadir=/home/erigon/.local/share/erigon --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
     volumes:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
       # can mount different sub-folders of "datadir" to different drives
