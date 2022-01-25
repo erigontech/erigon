@@ -27,9 +27,9 @@ type Client struct {
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
-	torrentConfig.ListenPort = 42069
+	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
