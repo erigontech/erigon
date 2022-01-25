@@ -297,18 +297,6 @@ func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
 }
 
-func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := newObject(db, so.address, &so.data, &so.original)
-	stateObject.code = so.code
-	stateObject.dirtyStorage = so.dirtyStorage.Copy()
-	stateObject.originStorage = so.originStorage.Copy()
-	stateObject.blockOriginStorage = so.blockOriginStorage.Copy()
-	stateObject.suicided = so.suicided
-	stateObject.dirtyCode = so.dirtyCode
-	stateObject.deleted = so.deleted
-	return stateObject
-}
-
 //
 // Attribute accessors
 //
