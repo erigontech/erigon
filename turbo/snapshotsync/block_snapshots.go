@@ -75,13 +75,14 @@ func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(f
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type AllSnapshots struct {
-	ready                atomic.Bool
+	indicesReady         atomic.Bool
+	segmentsReady        atomic.Bool
+	blocks               []*BlocksSnapshot
 	dir                  string
 	allSegmentsAvailable bool
 	allIdxAvailable      bool
 	segmentsAvailable    uint64
 	idxAvailable         uint64
-	blocks               []*BlocksSnapshot
 	cfg                  ethconfig.Snapshot
 }
 
@@ -95,14 +96,12 @@ func NewAllSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *AllSnapshots {
 	return &AllSnapshots{dir: snapshotDir, cfg: cfg}
 }
 
-func (s *AllSnapshots) Cfg() ethconfig.Snapshot        { return s.cfg }
-func (s *AllSnapshots) Dir() string                    { return s.dir }
-func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
-func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
-func (s *AllSnapshots) BlocksAvailable() uint64        { return s.segmentsAvailable }
-func (s *AllSnapshots) AllIdxAvailable() bool          { return s.allIdxAvailable }
-func (s *AllSnapshots) SetAllIdxAvailable(v bool)      { s.allIdxAvailable = v }
-func (s *AllSnapshots) IndicesAvailable() uint64       { return s.idxAvailable }
+func (s *AllSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
+func (s *AllSnapshots) Dir() string              { return s.dir }
+func (s *AllSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
+func (s *AllSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable }
+func (s *AllSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
+func (s *AllSnapshots) IndicesAvailable() uint64 { return s.idxAvailable }
 
 func (s *AllSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
@@ -189,13 +188,13 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 			s.idxAvailable = 0
 		}
 	}
-	s.ready.Store(true)
+	s.indicesReady.Store(true)
 	return nil
 }
 
 func (s *AllSnapshots) AsyncOpenAll(ctx context.Context) {
 	go func() {
-		for !s.ready.Load() {
+		for !s.segmentsReady.Load() || !s.indicesReady.Load() {
 			select {
 			case <-ctx.Done():
 				return
@@ -276,6 +275,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 			s.segmentsAvailable = 0
 		}
 	}
+	s.segmentsReady.Store(true)
 	return nil
 }
 
@@ -303,7 +303,7 @@ func (s *AllSnapshots) Close() {
 }
 
 func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
-	if !s.ready.Load() {
+	if !s.indicesReady.Load() {
 		return nil, false
 	}
 

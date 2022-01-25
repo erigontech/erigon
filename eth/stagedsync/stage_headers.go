@@ -744,8 +744,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	// TODO: save AllSegmentsAvailable flag to DB? (to allow Erigon start without Downloader)
-	if !cfg.snapshots.AllSegmentsAvailable() {
+	if !cfg.snapshots.SegmentsReady() {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
 		}
@@ -767,7 +766,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				if expect > cfg.snapshots.BlocksAvailable() {
 					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
 				}
-				cfg.snapshots.SetAllSegmentsAvailable(true)
 
 				break
 			}
@@ -785,8 +783,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	// Create .idx files
-	if !cfg.snapshots.AllIdxAvailable() {
-		if !cfg.snapshots.AllSegmentsAvailable() {
+	if !cfg.snapshots.IndicesReady() {
+		if !cfg.snapshots.SegmentsReady() {
 			return fmt.Errorf("not all snapshot segments are available")
 		}
 
@@ -811,7 +809,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if expect > cfg.snapshots.IndicesAvailable() {
 			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
 		}
-		cfg.snapshots.SetAllIdxAvailable(true)
 	}
 
 	if s.BlockNumber == 0 {
