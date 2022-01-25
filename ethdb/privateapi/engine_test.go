@@ -20,7 +20,7 @@ import (
 var (
 	startingHeadHash = common.HexToHash("0x1")
 	payload1Hash     = common.HexToHash("2afc6f4132be8d1fded51aa7f914fd831d2939a100f61322842ab41d7898255b")
-	payload2Hash     = common.HexToHash("a19013b8b5f95ffaa008942fd2f04f72a3ae91f54eb64a3f6f8c6630db742aef")
+	payload2Hash     = common.HexToHash("219bb787708f832e40b734ab925e67e33f91f2c2a2a01b8f5f5f6284410982a6")
 	payload3Hash     = common.HexToHash("a2dd4fc599747c1ce2176a4abae13afbc7ccb4a240f8f4cf22252767bab52f12")
 )
 
