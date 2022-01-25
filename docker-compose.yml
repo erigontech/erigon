@@ -16,7 +16,7 @@ services:
       - "30304:30304/udp"
     restart: unless-stopped
 
-  rpcdaemon:
+  rpcdaemon: # Service to server JSON-RCP API
     image: thorax/erigon:${TAG:-latest}
     command: rpcdaemon ${RPCDAEMON_FLAGS} --datadir=/home/erigon/.local/share/erigon --private.api.addr=erigon:9090 --txpool.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net --ws
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
@@ -26,7 +26,7 @@ services:
       - "8545:8545"
     restart: unless-stopped
 
-  downloader: # To download/seed historical data
+  downloader: # Service to download/seed historical data
     image: thorax/erigon:${TAG:-latest}
     command: downloader ${DOWNLOADER_FLAGS} --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
