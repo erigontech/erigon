@@ -47,7 +47,7 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 
 	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
+		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: likely another process already run on this directory: %w", err)
 	}
 	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
 
