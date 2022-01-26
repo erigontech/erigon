@@ -65,6 +65,7 @@ type EthBackendServer struct {
 	proposing             bool
 	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
 	shutdown              bool
+	logsFilter            LogsFilter
 }
 
 type EthBackend interface {
@@ -87,6 +88,13 @@ type ExecutionStatus struct {
 type PayloadMessage struct {
 	Header *types.Header
 	Body   *types.RawBody
+}
+
+type LogsFilter struct {
+	allAddrs  bool
+	addrs     map[common.Address]struct{}
+	allTopics bool
+	topics    map[common.Hash]struct{}
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
@@ -175,12 +183,69 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	return nil
 }
 
-func (s *EthBackendServer) SubscribeLogs(*emptypb.Empty, remote.ETHBACKEND_SubscribeLogsServer) error {
+func (s *EthBackendServer) SubscribeLogs(_ *emptypb.Empty, subscribeServer remote.ETHBACKEND_SubscribeLogsServer) error {
+	log.Trace("Establishing logs subscription channel with the RPC daemon ...")
+	s.events.AddLogsSubscription(func(l *types.Log) error {
+		select {
+		case <-s.ctx.Done():
+			return nil
+		case <-subscribeServer.Context().Done():
+			return nil
+		default:
+		}
+
+		var buf bytes.Buffer
+		if err := rlp.Encode(&buf, h); err != nil {
+			log.Warn("error while marshaling a header", "err", err)
+			return err
+		}
+		payload := buf.Bytes()
+
+		err := subscribeServer.Send(&remote.SubscribeReply{
+			Type: remote.Event_HEADER,
+			Data: payload,
+		})
+
+		// we only close the wg on error because if we successfully sent an event,
+		// that means that the channel wasn't closed and is ready to
+		// receive more events.
+		// if rpcdaemon disconnects, we will receive an error here
+		// next time we try to send an event
+		if err != nil {
+			log.Info("event subscription channel was closed", "reason", err)
+		}
+		return err
+	})
+
+	log.Info("logs subscription channel established with the RPC daemon")
+	select {
+	case <-subscribeServer.Context().Done():
+	case <-s.ctx.Done():
+	}
+	log.Info("logs subscription channel closed with the RPC daemon")
 	return nil
 }
 
 // Replaces current logs filter with the new version
-func (s *EthBackendServer) UpdateLogsFilter(context.Context, *remote.LogsFilterRequest) (*emptypb.Empty, error) {
+func (s *EthBackendServer) UpdateLogsFilter(_ context.Context, filterReq *remote.LogsFilterRequest) (*emptypb.Empty, error) {
+	s.logsFilter.addrs = map[common.Address]struct{}{}
+	if filterReq.GetAllAddresses() {
+		s.logsFilter.allAddrs = true
+	} else {
+		s.logsFilter.allAddrs = false
+		for _, addr := range filterReq.GetAddresses() {
+			s.logsFilter.addrs[gointerfaces.ConvertH160toAddress(addr)] = struct{}{}
+		}
+	}
+	s.logsFilter.topics = map[common.Hash]struct{}{}
+	if filterReq.GetAllTopics() {
+		s.logsFilter.allTopics = true
+	} else {
+		s.logsFilter.allTopics = false
+		for _, topic := range filterReq.GetTopics() {
+			s.logsFilter.topics[gointerfaces.ConvertH256ToHash(topic)] = struct{}{}
+		}
+	}
 	return &emptypb.Empty{}, nil
 }
 
