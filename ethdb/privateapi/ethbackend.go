@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -65,7 +66,10 @@ type EthBackendServer struct {
 	proposing             bool
 	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
 	shutdown              bool
-	logsFilter            LogsFilter
+	aggLogsFilter         LogsFilter             // Aggregation of all current log filters
+	logsFilters           map[uint64]*LogsFilter // Filter for each subscriber, keyed by filterID
+	logsFilterLock        sync.Mutex
+	nextFilterId          uint64
 }
 
 type EthBackend interface {
@@ -90,22 +94,33 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
+// LogFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
+// and "aggregated" log filter representing a union of all subscribers. Therefore, the values in
+// the mappings are counters (of type int) and they get deleted when counter goes back to 0
+// Also, addAddr and allTopic are int instead of bool because they are also counter, counting
+// how many subscribers have this set on
 type LogsFilter struct {
-	allAddrs  bool
-	addrs     map[common.Address]struct{}
-	allTopics bool
-	topics    map[common.Hash]struct{}
+	allAddrs  int
+	addrs     map[common.Address]int
+	allTopics int
+	topics    map[common.Hash]int
+	sender    remote.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
 	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
+	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
+		pendingPayloads: map[uint64]types2.ExecutionPayload{}, skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
+		logsFilters: map[uint64]*LogsFilter{},
 	}
+	s.aggLogsFilter.addrs = map[common.Address]int{}
+	s.aggLogsFilter.topics = map[common.Hash]int{}
+	s.events.AddLogsSubscription(s.distributeLogs)
+	return s
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -183,70 +198,96 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	return nil
 }
 
-func (s *EthBackendServer) SubscribeLogs(_ *emptypb.Empty, subscribeServer remote.ETHBACKEND_SubscribeLogsServer) error {
-	log.Trace("Establishing logs subscription channel with the RPC daemon ...")
-	s.events.AddLogsSubscription(func(l *types.Log) error {
-		select {
-		case <-s.ctx.Done():
-			return nil
-		case <-subscribeServer.Context().Done():
-			return nil
-		default:
+func (s *EthBackendServer) insertLogsFilter(sender remote.ETHBACKEND_SubscribeLogsServer) (uint64, *LogsFilter) {
+	s.logsFilterLock.Lock()
+	defer s.logsFilterLock.Unlock()
+	filterId := s.nextFilterId
+	s.nextFilterId++
+	filter := &LogsFilter{addrs: map[common.Address]int{}, topics: map[common.Hash]int{}, sender: sender}
+	s.logsFilters[filterId] = filter
+	return filterId, filter
+}
+
+func subtractLogFilters(agg *LogsFilter, f *LogsFilter) {
+	agg.allAddrs -= f.allAddrs
+	for addr, count := range f.addrs {
+		agg.addrs[addr] -= count
+		if agg.addrs[addr] == 0 {
+			delete(agg.addrs, addr)
 		}
-
-		var buf bytes.Buffer
-		if err := rlp.Encode(&buf, h); err != nil {
-			log.Warn("error while marshaling a header", "err", err)
-			return err
-		}
-		payload := buf.Bytes()
-
-		err := subscribeServer.Send(&remote.SubscribeReply{
-			Type: remote.Event_HEADER,
-			Data: payload,
-		})
-
-		// we only close the wg on error because if we successfully sent an event,
-		// that means that the channel wasn't closed and is ready to
-		// receive more events.
-		// if rpcdaemon disconnects, we will receive an error here
-		// next time we try to send an event
-		if err != nil {
-			log.Info("event subscription channel was closed", "reason", err)
-		}
-		return err
-	})
-
-	log.Info("logs subscription channel established with the RPC daemon")
-	select {
-	case <-subscribeServer.Context().Done():
-	case <-s.ctx.Done():
 	}
-	log.Info("logs subscription channel closed with the RPC daemon")
+	agg.allTopics -= f.allTopics
+	for topic, count := range f.topics {
+		agg.topics[topic] -= count
+		if agg.topics[topic] == 0 {
+			delete(agg.topics, topic)
+		}
+	}
+}
+
+func addLogsFilters(agg *LogsFilter, f *LogsFilter) {
+	agg.allAddrs += f.allAddrs
+	for addr, count := range f.addrs {
+		agg.addrs[addr] += count
+	}
+	agg.allTopics += f.allTopics
+	for topic, count := range f.topics {
+		agg.topics[topic] += count
+	}
+}
+
+func (s *EthBackendServer) removeLogsFilter(filterId uint64, filter *LogsFilter) {
+	s.logsFilterLock.Lock()
+	defer s.logsFilterLock.Unlock()
+	subtractLogFilters(&s.aggLogsFilter, filter)
+	delete(s.logsFilters, filterId)
+}
+
+func (s *EthBackendServer) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
+	s.logsFilterLock.Lock()
+	defer s.logsFilterLock.Unlock()
+	subtractLogFilters(&s.aggLogsFilter, filter)
+	filter.addrs = map[common.Address]int{}
+	if filterReq.GetAllAddresses() {
+		filter.allAddrs = 1
+	} else {
+		filter.allAddrs = 0
+		for _, addr := range filterReq.GetAddresses() {
+			filter.addrs[gointerfaces.ConvertH160toAddress(addr)] = 1
+		}
+	}
+	filter.topics = map[common.Hash]int{}
+	if filterReq.GetAllTopics() {
+		filter.allTopics = 1
+	} else {
+		filter.allTopics = 0
+		for _, topic := range filterReq.GetTopics() {
+			filter.topics[gointerfaces.ConvertH256ToHash(topic)] = 1
+		}
+	}
+	addLogsFilters(&s.aggLogsFilter, filter)
+}
+
+// Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
+func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+	filterId, filter := s.insertLogsFilter(server)
+	defer s.removeLogsFilter(filterId, filter)
+	// Listen to filter updates and modify the filters, until terminated
+	for {
+		filterReq, recvErr := server.Recv()
+		if recvErr != nil {
+			if recvErr == io.EOF { // termination
+				return nil
+			}
+			return fmt.Errorf("server-side error: %w", recvErr)
+		}
+		s.updateLogsFilter(filter, filterReq)
+	}
 	return nil
 }
 
-// Replaces current logs filter with the new version
-func (s *EthBackendServer) UpdateLogsFilter(_ context.Context, filterReq *remote.LogsFilterRequest) (*emptypb.Empty, error) {
-	s.logsFilter.addrs = map[common.Address]struct{}{}
-	if filterReq.GetAllAddresses() {
-		s.logsFilter.allAddrs = true
-	} else {
-		s.logsFilter.allAddrs = false
-		for _, addr := range filterReq.GetAddresses() {
-			s.logsFilter.addrs[gointerfaces.ConvertH160toAddress(addr)] = struct{}{}
-		}
-	}
-	s.logsFilter.topics = map[common.Hash]struct{}{}
-	if filterReq.GetAllTopics() {
-		s.logsFilter.allTopics = true
-	} else {
-		s.logsFilter.allTopics = false
-		for _, topic := range filterReq.GetTopics() {
-			s.logsFilter.topics[gointerfaces.ConvertH256ToHash(topic)] = struct{}{}
-		}
-	}
-	return &emptypb.Empty{}, nil
+func (s *EthBackendServer) distributeLogs(*types.Log) error {
+	return nil
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
