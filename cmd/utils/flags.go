@@ -219,6 +219,10 @@ var (
 		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
 		Value: "",
 	}
+	EnabledIssuance = cli.BoolFlag{
+		Name:  "watch-the-burn",
+		Usage: "Enable WatchTheBurn stage to keep track of ETH issuance",
+	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
 		Name:  "mine",
@@ -1221,7 +1225,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setWhitelist(ctx, cfg)
 
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
-
+	cfg.EnabledIssuance = ctx.GlobalIsSet(EnabledIssuance.Name)
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.GlobalUint64(NetworkIdFlag.Name)
 	}

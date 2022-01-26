@@ -43,6 +43,7 @@ var (
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
 	TxPool              SyncStage = "TxPool"              // Starts Backend
+	Issuance            SyncStage = "WatchTheBurn"        // Compute ether issuance for each block
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
