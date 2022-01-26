@@ -65,9 +65,11 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(0, 500_000, Headers)
 	createFile(0, 500_000, Transactions)
 	s = NewAllSnapshots(cfg, dir)
+	defer s.Close()
+
 	err = s.ReopenSegments()
 	require.NoError(err)
-	defer s.Close()
+	s.indicesReady.Store(true)
 	require.Equal(2, len(s.blocks))
 
 	sn, ok := s.Blocks(10)

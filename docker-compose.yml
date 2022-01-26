@@ -54,7 +54,7 @@ services:
     image: thorax/erigon:${TAG:-latest}
     command: downloader ${DOWNLOADER_FLAGS-} --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
-    cpus: 0.3 # No real-time computation here, so - limit it hard
+    #cpus: 0.2 # No real-time computation here, so - limit it hard
     volumes_from:
       - erigon
     ports:
