@@ -41,35 +41,37 @@ import (
 )
 
 type Flags struct {
-	PrivateApiAddr         string
-	SingleNodeMode         bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
-	Datadir                string
-	Chaindata              string
-	HttpListenAddress      string
-	TLSCertfile            string
-	TLSCACert              string
-	TLSKeyFile             string
-	HttpPort               int
-	HttpCORSDomain         []string
-	HttpVirtualHost        []string
-	HttpCompression        bool
-	API                    []string
-	Gascap                 uint64
-	MaxTraces              uint64
-	WebsocketEnabled       bool
-	WebsocketCompression   bool
-	RpcAllowListFilePath   string
-	RpcBatchConcurrency    uint
-	TraceCompatibility     bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr          string
-	TevmEnabled            bool
-	StateCache             kvcache.CoherentConfig
-	Snapshot               ethconfig.Snapshot
-	GRPCServerEnabled      bool
-	GRPCListenAddress      string
-	GRPCPort               int
-	GRPCHealthCheckEnabled bool
-	StarknetGRPCAddress    string
+	PrivateApiAddr          string
+	SingleNodeMode          bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
+	Datadir                 string
+	Chaindata               string
+	HttpListenAddress       string
+	EngineHTTPListenAddress string
+	TLSCertfile             string
+	TLSCACert               string
+	TLSKeyFile              string
+	HttpPort                int
+	EnginePort              int
+	HttpCORSDomain          []string
+	HttpVirtualHost         []string
+	HttpCompression         bool
+	API                     []string
+	Gascap                  uint64
+	MaxTraces               uint64
+	WebsocketEnabled        bool
+	WebsocketCompression    bool
+	RpcAllowListFilePath    string
+	RpcBatchConcurrency     uint
+	TraceCompatibility      bool // Bug for bug compatibility for trace_ routines with OpenEthereum
+	TxPoolApiAddr           string
+	TevmEnabled             bool
+	StateCache              kvcache.CoherentConfig
+	Snapshot                ethconfig.Snapshot
+	GRPCServerEnabled       bool
+	GRPCListenAddress       string
+	GRPCPort                int
+	GRPCHealthCheckEnabled  bool
+	StarknetGRPCAddress     string
 }
 
 var rootCmd = &cobra.Command{
@@ -85,10 +87,12 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.PersistentFlags().IntVar(&cfg.EnginePort, "engine.port", node.DefaultEngineHTTPPort, "HTTP-RPC server listening port for the engineAPI")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
@@ -354,6 +358,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
+	var engineListener *http.Server
+	var enginesrv *rpc.Server
+	var engineHttpEndpoint string
+
 	// register apis and create handler stack
 	httpEndpoint := fmt.Sprintf("%s:%d", cfg.HttpListenAddress, cfg.HttpPort)
 
@@ -365,7 +373,29 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	}
 	srv.SetAllowList(allowListForRPC)
 
-	if err := node.RegisterApisFromWhitelist(rpcAPI, cfg.API, srv, false); err != nil {
+	var defaultAPIList []rpc.API
+	var engineAPI []rpc.API
+
+	for _, api := range rpcAPI {
+		if api.Namespace != "engine" {
+			defaultAPIList = append(defaultAPIList, api)
+		} else {
+			engineAPI = append(engineAPI, api)
+		}
+	}
+
+	var apiFlags []string
+	var engineFlag []string
+
+	for _, flag := range cfg.API {
+		if flag != "engine" {
+			apiFlags = append(apiFlags, flag)
+		} else {
+			engineFlag = append(engineFlag, flag)
+		}
+	}
+
+	if err := node.RegisterApisFromWhitelist(defaultAPIList, apiFlags, srv, false); err != nil {
 		return fmt.Errorf("could not start register RPC apis: %w", err)
 	}
 
@@ -375,24 +405,22 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		wsHandler = srv.WebsocketHandler([]string{"*"}, cfg.WebsocketCompression)
 	}
 
-	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// adding a healthcheck here
-		if health.ProcessHealthcheckIfNeeded(w, r, rpcAPI) {
-			return
-		}
-		if cfg.WebsocketEnabled && r.Method == "GET" {
-			wsHandler.ServeHTTP(w, r)
-			return
-		}
-		httpHandler.ServeHTTP(w, r)
-	})
+	apiHandler := createHandler(cfg, defaultAPIList, httpHandler, wsHandler)
 
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, handler)
+	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, apiHandler)
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
 	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
+
+	if len(engineAPI) > 0 {
+		engineListener, enginesrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI, engineFlag)
+		if err != nil {
+			return fmt.Errorf("could not start RPC api for engine: %w", err)
+		}
+	}
+
 	var (
 		healthServer *grpcHealth.Server
 		grpcServer   *grpc.Server
@@ -417,10 +445,18 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 
 	defer func() {
 		srv.Stop()
+		if enginesrv != nil {
+			enginesrv.Stop()
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+
+		if engineListener != nil {
+			_ = engineListener.Shutdown(shutdownCtx)
+			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
+		}
 
 		if cfg.GRPCServerEnabled {
 			if cfg.GRPCHealthCheckEnabled {
@@ -434,4 +470,49 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	<-ctx.Done()
 	log.Info("Exiting...")
 	return nil
+}
+
+func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// adding a healthcheck here
+		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
+			return
+		}
+		if cfg.WebsocketEnabled && wsHandler != nil && r.Method == "GET" {
+			wsHandler.ServeHTTP(w, r)
+			return
+		}
+		httpHandler.ServeHTTP(w, r)
+	})
+
+	return handler
+}
+
+func createEngineListener(cfg Flags, engineApi []rpc.API, engineFlag []string) (*http.Server, *rpc.Server, string, error) {
+	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
+
+	enginesrv := rpc.NewServer(cfg.RpcBatchConcurrency)
+
+	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	enginesrv.SetAllowList(allowListForRPC)
+
+	if err := node.RegisterApisFromWhitelist(engineApi, engineFlag, enginesrv, false); err != nil {
+		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
+	}
+
+	engineHttpHandler := node.NewHTTPHandlerStack(enginesrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
+	engineApiHandler := createHandler(cfg, engineApi, engineHttpHandler, nil)
+
+	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
+	}
+	engineInfo := []interface{}{"url", engineHttpEndpoint}
+	log.Info("HTTP endpoint opened for engine", engineInfo...)
+
+	return engineListener, enginesrv, engineHttpEndpoint, nil
+
 }

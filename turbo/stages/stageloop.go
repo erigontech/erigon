@@ -208,7 +208,7 @@ func StageLoopStep(
 			if header.Number.Uint64() == 0 {
 				notifications.Accumulator.StartChange(0, header.Hash(), nil, false)
 			}
-			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
+			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 
 			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
 
@@ -293,7 +293,7 @@ func NewStagedSync(
 			cfg.BatchSize,
 			allSnapshots,
 			blockReader,
-		), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
+		), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance), stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots), stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,

@@ -300,7 +300,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			cfg.BatchSize,
 			allSnapshots,
 			blockReader,
-		), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader),
+		), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, allSnapshots),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,

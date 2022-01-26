@@ -47,6 +47,7 @@ services:
       - erigon
     ports:
       - "8545:8545"
+      - "8550:8550"
     restart: unless-stopped
 
   downloader: # Service to download/seed historical data
