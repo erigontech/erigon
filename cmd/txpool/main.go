@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -28,6 +29,7 @@ import (
 
 var (
 	sentryAddr     []string // Address of the sentry <host>:<port>
+	traceSenders   []string
 	privateApiAddr string
 	txpoolApiAddr  string
 	datadir        string // Path to td working dir
@@ -63,6 +65,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpool.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
+	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
 var rootCmd = &cobra.Command{
@@ -119,6 +122,12 @@ var rootCmd = &cobra.Command{
 
 		cacheConfig := kvcache.DefaultCoherentConfig
 		cacheConfig.MetricsLabel = "txpool"
+
+		cfg.TracedSenders = make([]string, len(traceSenders))
+		for i, senderHex := range traceSenders {
+			sender := common2.HexToAddress(senderHex)
+			cfg.TracedSenders[i] = string(sender[:])
+		}
 
 		newTxs := make(chan txpool.Hashes, 1024)
 		defer close(newTxs)
