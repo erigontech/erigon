@@ -9,11 +9,9 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -25,15 +23,13 @@ import (
 type IssuanceCfg struct {
 	db              kv.RwDB
 	chainConfig     *params.ChainConfig
-	blockReader     interfaces.FullBlockReader
 	enabledIssuance bool
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader, enabledIssuance bool) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, enabledIssuance bool) IssuanceCfg {
 	return IssuanceCfg{
 		db:              db,
 		chainConfig:     chainConfig,
-		blockReader:     blockReader,
 		enabledIssuance: enabledIssuance,
 	}
 }
@@ -123,28 +119,24 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			burnt.Set(header.BaseFee)
 			burnt.Mul(burnt, big.NewInt(int64(header.GasUsed)))
 		}
-		// TotalIssued, BlockReward and UncleReward, depends on consensus engine
-		if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
-			// Proof-of-stake is 0.3 ether per block
-			totalIssued.Add(totalIssued, serenity.RewardSerenity)
+
+		var blockReward uint256.Int
+		var uncleRewards []uint256.Int
+		if header.UncleHash == types.EmptyUncleHash {
+			blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, nil)
 		} else {
-			var blockReward uint256.Int
-			var uncleRewards []uint256.Int
-			if header.UncleHash == types.EmptyUncleHash {
-				blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, nil)
-			} else {
-				body, err := cfg.blockReader.Body(ctx, tx, hash, currentBlockNumber)
-				if err != nil {
-					return err
-				}
-				blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, body.Uncles)
+			body, _, _ := rawdb.ReadBody(tx, hash, currentBlockNumber)
+			if body == nil {
+				return fmt.Errorf("block body not found for block number %d", currentBlockNumber)
 			}
-			// Set BlockReward
-			totalIssued.Add(totalIssued, blockReward.ToBig())
-			// Compute uncleRewards
-			for _, uncleReward := range uncleRewards {
-				totalIssued.Add(totalIssued, uncleReward.ToBig())
-			}
+
+			blockReward, uncleRewards = ethash.AccumulateRewards(cfg.chainConfig, &header, body.Uncles)
+		}
+		// Set BlockReward
+		totalIssued.Add(totalIssued, blockReward.ToBig())
+		// Compute uncleRewards
+		for _, uncleReward := range uncleRewards {
+			totalIssued.Add(totalIssued, uncleReward.ToBig())
 		}
 		totalBurnt.Add(totalBurnt, burnt)
 		// Write to database
@@ -165,7 +157,6 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		default:
 			log.Trace("RequestQueueTime (header) ticked")
 		}
-		// Cleanup timer
 	}
 	if err = s.Update(tx, currentBlockNumber); err != nil {
 		return err

@@ -273,7 +273,7 @@ func NewStagedSync(
 				}
 				txPoolServer.TxFetcher.Start()
 			}
-		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
+		}), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, cfg.EnabledIssuance), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil

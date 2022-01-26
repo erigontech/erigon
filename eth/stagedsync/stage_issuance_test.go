@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,24 +18,27 @@ func TestIssuanceStage(t *testing.T) {
 	db, tx := memdb.NewTestTx(t)
 
 	header1 := &types.Header{
-		BaseFee: big.NewInt(10),
-		GasUsed: 1000,
-		Number:  big.NewInt(1),
-		Eip1559: true,
+		BaseFee:   big.NewInt(10),
+		GasUsed:   1000,
+		Number:    big.NewInt(1),
+		UncleHash: types.EmptyUncleHash,
+		Eip1559:   true,
 	}
 
 	header2 := &types.Header{
-		BaseFee: big.NewInt(30),
-		GasUsed: 1000,
-		Number:  big.NewInt(2),
-		Eip1559: true,
+		BaseFee:   big.NewInt(30),
+		GasUsed:   1000,
+		Number:    big.NewInt(2),
+		UncleHash: types.EmptyUncleHash,
+		Eip1559:   true,
 	}
 
 	header3 := &types.Header{
-		BaseFee: big.NewInt(100),
-		GasUsed: 1000,
-		Number:  big.NewInt(3),
-		Eip1559: true,
+		BaseFee:   big.NewInt(100),
+		GasUsed:   1000,
+		Number:    big.NewInt(3),
+		UncleHash: types.EmptyUncleHash,
+		Eip1559:   true,
 	}
 	// Write Headers
 	rawdb.WriteHeader(tx, header1)
@@ -51,7 +53,7 @@ func TestIssuanceStage(t *testing.T) {
 	// Execute stage issuance
 	err := SpawnStageIssuance(StageIssuanceCfg(db, &params.ChainConfig{
 		Consensus: params.EtHashConsensus,
-	}, snapshotsync.NewBlockReader(), true), &StageState{
+	}, true), &StageState{
 		ID: stages.Issuance,
 	}, tx, ctx)
 	assert.NoError(err)
@@ -62,5 +64,6 @@ func TestIssuanceStage(t *testing.T) {
 
 	ti, err := rawdb.ReadTotalIssued(tx, 3)
 	assert.NoError(err)
-	assert.Equal(ti, big.NewInt(900000000000000000))
+	issued, _ := new(big.Int).SetString("15000000000000000000", 10)
+	assert.Equal(ti, issued)
 }

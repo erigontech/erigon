@@ -178,6 +178,9 @@ type Config struct {
 
 	// SyncLoopThrottle sets a minimum time between staged loop iterations
 	SyncLoopThrottle time.Duration
+
+	// Enable WatchTheBurn stage
+	EnabledIssuance bool
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {

@@ -301,7 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			mock.DB,
 			cfg.BatchSize,
 			mock.ChainConfig,
-		), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageTxPoolCfg(mock.DB, nil, cfg.TxPool, func() {}), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
+		), stagedsync.StageHashStateCfg(mock.DB, mock.tmpdir), stagedsync.StageTrieCfg(mock.DB, true, true, mock.tmpdir), stagedsync.StageHistoryCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir), stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir), stagedsync.StageTxPoolCfg(mock.DB, nil, cfg.TxPool, func() {}), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, true), stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
