@@ -611,7 +611,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			if len(senders) > 0 {
 				parseCtx.WithSender(true)
 			}
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:]); err != nil {
+			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
 				return err
 			}
 			if len(senders) > 0 {
@@ -828,7 +828,7 @@ RETRY:
 	}
 
 	if err := forEach(d, func(i, offset uint64, word []byte) error {
-		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:]); err != nil {
+		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
 			return err
 		}
 		if err := txnHashIdx.AddKey(slot.IdHash[:], offset); err != nil {
