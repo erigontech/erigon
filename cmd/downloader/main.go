@@ -148,7 +148,6 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
 		return nil
 	}); err != nil {
-		panic(err)
 		return err
 	}
 	defer t.Close()
