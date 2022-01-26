@@ -75,15 +75,13 @@ func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(f
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type AllSnapshots struct {
-	indicesReady         atomic.Bool
-	segmentsReady        atomic.Bool
-	blocks               []*BlocksSnapshot
-	dir                  string
-	allSegmentsAvailable bool
-	allIdxAvailable      bool
-	segmentsAvailable    uint64
-	idxAvailable         uint64
-	cfg                  ethconfig.Snapshot
+	indicesReady      atomic.Bool
+	segmentsReady     atomic.Bool
+	blocks            []*BlocksSnapshot
+	dir               string
+	segmentsAvailable uint64
+	idxAvailable      uint64
+	cfg               ethconfig.Snapshot
 }
 
 // NewAllSnapshots - opens all snapshots. But to simplify everything:
