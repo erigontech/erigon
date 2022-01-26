@@ -2,10 +2,40 @@
 
 Service to seed/download historical data (immutable .seg files)
 
+## Start Erigon in snapshot sync mode
+
+```shell
+make erigon downloader 
+
+# Start downloader (can limit network usage by 512mb/sec: --download.limit=512mb --upload.limit=512mb)
+downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<your_datadir>
+# --downloader.api.addr - is for internal communication with Erigon
+# --torrent.port=42068  - is for public BitTorrent protocol listen 
+
+# Erigon on startup does send list of .torrent files to Downloader and wait for 100% download accomplishment
+erigon --experimental.snapshot --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
+```
+
+## To create new network or bootnode, need create new snapshots and start seeding them
+
+```shell
+# Create new snapshots (can change snapshot size by: --from=0 --to=1_000_000 --segment.size=500_000)
+# It will dump blocks from Database to .seg files:
+erigon snapshots create --datadir=<your_datadir> 
+
+# Create .torrent files (Downloader will seed automatically all .torrent files)
+# output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
+downloader info_hashes --rebuild --datadir=<your_datadir>
+
+# Start downloader
+downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
+
+# Erigon is not required for snapshots seeding 
+```
+
 ## Architecture
 
-Downloader works based on <your_datadir>/snapshots/*.torrent files (`etl-tmp` and `snapshots` directories MUST be on
-same drive). Such files can be created 4 ways:
+Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files can be created 4 ways:
 
 - Erigon can do grpc call downloader.Download(list_of_hashes), it will trigger creation of .torrent files
 - Erigon can create new .seg file, Downloader will scan .seg file and create .torrent
@@ -17,6 +47,7 @@ Erigon does:
 - connect to Downloader
 - share list of hashes (see https://github.com/ledgerwatch/erigon-snapshot )
 - wait for download of all snapshots
+- when .seg available - automatically create .idx files - secondary indices, for example to find block by hash
 - then switch to normal staged sync (which doesn't require connection to Downloader)
 
 Downloader does:
@@ -25,55 +56,6 @@ Downloader does:
 - Use https://github.com/ngosang/trackerslist see [./trackers/embed.go](./trackers/embed.go)
 - automatically seeding
 
-## How to
+Technical details:
 
-### Start erigon with snapshot sync
-
-```shell
-downloader --datadir=<your_datadir> --downloader.api.addr=127.0.0.1:9093
-erigon --downloader.api.addr=127.0.0.1:9093 --experimental.snapshot
-```
-
-### Limit download/upload speed
-
-```shell
-downloader --download.limit=10mb --upload.limit=10mb
-```
-
-### Print info_hashes
-
-```shell
-# format compatible with https://github.com/ledgerwatch/erigon-snapshot
-downloader info_hashes --datadir=<your_datadir>
-```
-
-### Create .torrent files
-
-```shell
-downloader info_hashes --rebuild --datadir=<your_datadir>
-```
-
-### Create new snapshots
-
-```
-rm <your_datadir>/snapshots/*.torrent
-erigon snapshots create --datadir=<your_datadir> --from=0 --segment.size=500_000
-```
-
-### Download snapshots to new server
-
-```
-rsync server1:<your_datadir>/snapshots/*.torrent server2:<your_datadir>/snapshots/
-# re-start downloader 
-```
-
-### Re-create all .idx files (by re-read all .seg files)
-
-```
-# Disk-read-intense
-erigon snapshots index --datadir=<your_datadir> --rebuild
-```
-
-## Known Issues
-
-- RPCDaemon with --datadir option need restart to make new segments available
+- To prevent attack - .idx creation using random Seed - all nodes will have different .idx file (and same .seg files)
