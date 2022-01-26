@@ -89,6 +89,8 @@ var Defaults = Config{
 	BodyDownloadTimeoutSeconds: 30,
 
 	ImportMode: false,
+
+	Starknet: core.DefaultStarknetConfig,
 }
 
 func init() {
@@ -207,6 +209,9 @@ type Config struct {
 
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
+
+	// Starknet GRPC address
+	Starknet core.StarknetConfig
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {

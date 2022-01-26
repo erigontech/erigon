@@ -2,8 +2,8 @@ package stagedsync
 
 import (
 	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -24,14 +24,15 @@ import (
 )
 
 type MiningExecCfg struct {
-	db          kv.RwDB
-	miningState MiningState
-	notifier    ChainEventNotifier
-	chainConfig params.ChainConfig
-	engine      consensus.Engine
-	blockReader interfaces.FullBlockReader
-	vmConfig    *vm.Config
-	tmpdir      string
+	db                 kv.RwDB
+	miningState        MiningState
+	notifier           ChainEventNotifier
+	chainConfig        params.ChainConfig
+	engine             consensus.Engine
+	starknetGrpcClient starknet.CAIROVMClient
+	blockReader        interfaces.FullBlockReader
+	vmConfig           *vm.Config
+	tmpdir             string
 }
 
 func StageMiningExecCfg(
@@ -40,18 +41,20 @@ func StageMiningExecCfg(
 	notifier ChainEventNotifier,
 	chainConfig params.ChainConfig,
 	engine consensus.Engine,
+	starknetGrpcClient starknet.CAIROVMClient,
 	vmConfig *vm.Config,
 	tmpdir string,
 ) MiningExecCfg {
 	return MiningExecCfg{
-		db:          db,
-		miningState: miningState,
-		notifier:    notifier,
-		chainConfig: chainConfig,
-		engine:      engine,
-		blockReader: snapshotsync.NewBlockReader(),
-		vmConfig:    vmConfig,
-		tmpdir:      tmpdir,
+		db:                 db,
+		miningState:        miningState,
+		notifier:           notifier,
+		chainConfig:        chainConfig,
+		engine:             engine,
+		starknetGrpcClient: starknetGrpcClient,
+		blockReader:        snapshotsync.NewBlockReader(),
+		vmConfig:           vmConfig,
+		tmpdir:             tmpdir,
 	}
 }
 
@@ -89,7 +92,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if !localTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, cfg.starknetGrpcClient, localTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -101,7 +104,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			//}
 		}
 		if !remoteTxs.Empty() {
-			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
+			logs, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, contractHasTEVM, cfg.engine, cfg.starknetGrpcClient, remoteTxs, cfg.miningState.MiningConfig.Etherbase, ibs, quit)
 			if err != nil {
 				return err
 			}
@@ -164,7 +167,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	return nil
 }
 
-func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
+func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), engine consensus.Engine, starknetGrpcClient starknet.CAIROVMClient, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}) (types.Logs, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(current.Header.GasLimit)
@@ -175,7 +178,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		snap := ibs.Snapshot()
-		receipt, _, err := core.ApplyTransaction(&chainConfig, getHeader, engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, contractHasTEVM)
+		receipt, _, err := core.ApplyTransaction(&chainConfig, getHeader, engine, starknetGrpcClient, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, contractHasTEVM)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
 			return nil, err

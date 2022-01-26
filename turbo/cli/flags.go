@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/core"
 	"strings"
 	"time"
 
@@ -154,9 +155,16 @@ var (
 		Name:  "healthcheck",
 		Usage: "Enable grpc health check",
 	}
+
+	StarknetGRPCAddress = cli.StringFlag{
+		Name:  "starknet.grpc.address",
+		Usage: "Starknet GRPC address",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+	setStarknet(ctx, &cfg.Starknet)
+
 	mode, err := prune.FromCli(
 		ctx.GlobalString(PruneFlag.Name),
 		ctx.GlobalUint64(PruneHistoryFlag.Name),
@@ -210,7 +218,6 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 			cfg.BadBlockHash = common.BytesToHash(bytes)
 		}
 	}
-
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -306,4 +313,9 @@ func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
 		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
 	}
 	cfg.HealthCheck = ctx.GlobalBool(HealthCheckFlag.Name)
+}
+
+func setStarknet(ctx *cli.Context, cfg *core.StarknetConfig) {
+	//TODO::check format by url.ParseRequestURI ?
+	cfg.Address = ctx.GlobalString(StarknetGRPCAddress.Name)
 }

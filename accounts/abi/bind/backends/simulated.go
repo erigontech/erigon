@@ -689,7 +689,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
 	if _, _, err := core.ApplyTransaction(
-		b.m.ChainConfig, b.getHeader, b.m.Engine,
+		b.m.ChainConfig, b.getHeader, b.m.Engine, nil,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,

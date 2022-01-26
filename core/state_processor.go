@@ -18,7 +18,7 @@ package core
 
 import (
 	"fmt"
-
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -139,13 +139,13 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, contractHasTEVM func(contractHash common.Hash) (bool, error)) (*types.Receipt, []byte, error) {
+func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, starknetGrpcClient starknet.CAIROVMClient, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, contractHasTEVM func(contractHash common.Hash) (bool, error)) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
 	var vmenv vm.VMInterface
 
 	if tx.IsStarkNet() {
-		vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+		vmenv = vm.NewCVMAdapter(ibs, starknetGrpcClient)
 	} else {
 		blockContext := NewEVMBlockContext(header, getHeader, engine, author, contractHasTEVM)
 		vmenv = vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)

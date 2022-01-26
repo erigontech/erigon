@@ -90,4 +90,5 @@ var DefaultFlags = []cli.Flag{
 	utils.SentryAddrFlag,
 	utils.DownloaderAddrFlag,
 	HealthCheckFlag,
+	StarknetGRPCAddress,
 }

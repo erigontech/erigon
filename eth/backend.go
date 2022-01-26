@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon-lib/starknet"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
@@ -387,11 +388,16 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.minedBlocks = miner.MiningResultCh
 	backend.reverseDownloadCh = make(chan privateapi.PayloadMessage)
 
+	starknetClient, err := starknet.NewGrpcClient(config.Starknet.Address)
+	if err != nil {
+		return nil, err
+	}
+
 	// proof-of-work mining
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, starknetClient, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
@@ -411,7 +417,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 					SuggestedFeeRecipient: suggestedFeeRecipient,
 					Timestamp:             timestamp,
 				}, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, starknetClient, &vm.Config{}, tmpdir),
 				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),

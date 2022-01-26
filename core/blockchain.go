@@ -138,7 +138,7 @@ func ExecuteBlockEphemerallyForBSC(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
+		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {
@@ -252,7 +252,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
+		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {
@@ -349,7 +349,7 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
+	_, result, err = ApplyTransaction(&chainConfig, nil, engine, nil, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}

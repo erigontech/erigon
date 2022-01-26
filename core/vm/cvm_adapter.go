@@ -2,13 +2,19 @@ package vm
 
 import (
 	"fmt"
-
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 const CairoNotImplemented = "the method is currently not implemented for cvm: %s"
+
+func NewCVMAdapter(ibs IntraBlockState, starknetGrpcClient starknet.CAIROVMClient) *CVMAdapter {
+	return &CVMAdapter{
+		Cvm: NewCVM(ibs, starknetGrpcClient),
+	}
+}
 
 type CVMAdapter struct {
 	Cvm *CVM
