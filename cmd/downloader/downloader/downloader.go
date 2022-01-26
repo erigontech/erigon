@@ -10,7 +10,6 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/dustin/go-humanize"
@@ -27,8 +26,9 @@ type Client struct {
 	pieceCompletionStore storage.PieceCompletion
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := DefaultTorrentConfig()
+	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
@@ -46,7 +46,7 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 
 	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: likely another process already run on this directory: %w", err)
 	}
 	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
 
@@ -66,7 +66,6 @@ func New(cfg *torrent.ClientConfig, progressStore storage.PieceCompletion) (*Cli
 
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
-	torrentConfig.ListenPort = 0
 
 	// enable dht
 	torrentConfig.NoDHT = true
@@ -79,11 +78,9 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
 
-	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
-
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
-	torrentConfig.TorrentPeersHighWater = 100     // default: 500
-	torrentConfig.TorrentPeersLowWater = 50       // default: 50
+	//torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
+	//torrentConfig.TorrentPeersHighWater = 100     // default: 500
+	//torrentConfig.TorrentPeersLowWater = 50 // default: 50
 
 	return torrentConfig
 }

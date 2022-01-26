@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 type BlocksSnapshot struct {
@@ -74,13 +75,13 @@ func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(f
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
 type AllSnapshots struct {
-	dir                  string
-	allSegmentsAvailable bool
-	allIdxAvailable      bool
-	segmentsAvailable    uint64
-	idxAvailable         uint64
-	blocks               []*BlocksSnapshot
-	cfg                  ethconfig.Snapshot
+	indicesReady      atomic.Bool
+	segmentsReady     atomic.Bool
+	blocks            []*BlocksSnapshot
+	dir               string
+	segmentsAvailable uint64
+	idxAvailable      uint64
+	cfg               ethconfig.Snapshot
 }
 
 // NewAllSnapshots - opens all snapshots. But to simplify everything:
@@ -93,14 +94,12 @@ func NewAllSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *AllSnapshots {
 	return &AllSnapshots{dir: snapshotDir, cfg: cfg}
 }
 
-func (s *AllSnapshots) Cfg() ethconfig.Snapshot        { return s.cfg }
-func (s *AllSnapshots) Dir() string                    { return s.dir }
-func (s *AllSnapshots) AllSegmentsAvailable() bool     { return s.allSegmentsAvailable }
-func (s *AllSnapshots) SetAllSegmentsAvailable(v bool) { s.allSegmentsAvailable = v }
-func (s *AllSnapshots) BlocksAvailable() uint64        { return s.segmentsAvailable }
-func (s *AllSnapshots) AllIdxAvailable() bool          { return s.allIdxAvailable }
-func (s *AllSnapshots) SetAllIdxAvailable(v bool)      { s.allIdxAvailable = v }
-func (s *AllSnapshots) IndicesAvailable() uint64       { return s.idxAvailable }
+func (s *AllSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
+func (s *AllSnapshots) Dir() string              { return s.dir }
+func (s *AllSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
+func (s *AllSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable }
+func (s *AllSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
+func (s *AllSnapshots) IndicesAvailable() uint64 { return s.idxAvailable }
 
 func (s *AllSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
@@ -134,9 +133,7 @@ func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error
 	return
 }
 
-func (s *AllSnapshots) ReopenIndices() error {
-	return s.ReopenSomeIndices(AllSnapshotTypes...)
-}
+func (s *AllSnapshots) ReopenIndices() error { return s.ReopenSomeIndices(AllSnapshotTypes...) }
 
 func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	for _, bs := range s.blocks {
@@ -189,7 +186,27 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 			s.idxAvailable = 0
 		}
 	}
+	s.indicesReady.Store(true)
 	return nil
+}
+
+func (s *AllSnapshots) AsyncOpenAll(ctx context.Context) {
+	go func() {
+		for !s.segmentsReady.Load() || !s.indicesReady.Load() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Error("AsyncOpenAll", "err", err)
+			}
+			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Error("AsyncOpenAll", "err", err)
+			}
+			time.Sleep(15 * time.Second)
+		}
+	}()
 }
 
 func (s *AllSnapshots) ReopenSegments() error {
@@ -256,6 +273,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 			s.segmentsAvailable = 0
 		}
 	}
+	s.segmentsReady.Store(true)
 	return nil
 }
 
@@ -283,6 +301,10 @@ func (s *AllSnapshots) Close() {
 }
 
 func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
+	if !s.indicesReady.Load() {
+		return nil, false
+	}
+
 	if blockNumber > s.segmentsAvailable {
 		return snapshot, false
 	}

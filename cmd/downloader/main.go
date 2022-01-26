@@ -44,6 +44,7 @@ var (
 	downloaderApiAddr             string
 	torrentVerbosity              string
 	downloadRateStr, uploadRteStr string
+	torrentPort                   int
 )
 
 func init() {
@@ -55,8 +56,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
-	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "1gb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
@@ -129,9 +131,9 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("get peer id: %w", err)
 		}
 
-		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate)
+		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
 		if err != nil {
-			return err
+			return fmt.Errorf("TorrentConfig: %w", err)
 		}
 		t, err = downloader.New(cfg, pieceStore)
 		if err != nil {

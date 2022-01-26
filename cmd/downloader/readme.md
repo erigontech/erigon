@@ -7,7 +7,7 @@ Service to seed/download historical data (immutable .seg files)
 ```shell
 make erigon downloader 
 
-# Start downloader (can limit network usage by 512mb/sec: --download.limit=512mb --upload.limit=512mb)
+# Start downloader (can limit network usage by 512mb/sec: --download.rate=512mb --upload.rate=512mb)
 downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<your_datadir>
 # --downloader.api.addr - is for internal communication with Erigon
 # --torrent.port=42068  - is for public BitTorrent protocol listen 
