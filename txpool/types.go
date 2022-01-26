@@ -118,7 +118,7 @@ func (ctx *TxParseContext) WithSender(v bool)                       { ctx.withSe
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
-func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte) (p int, err error) {
+func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope bool) (p int, err error) {
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
 	}
@@ -134,22 +134,16 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if err != nil {
 		return 0, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err)
 	}
-	// For legacy transaction, the entire payload in expected to be in "rlp" field
-	// whereas for non-legacy, only the content of the envelope
-	if legacy {
-		slot.rlp = payload[pos : dataPos+dataLen]
-	} else {
-		slot.rlp = payload[dataPos : dataPos+dataLen]
-	}
-	if ctx.validateRlp != nil {
-		if err := ctx.validateRlp(payload[dataPos : dataPos+dataLen]); err != nil {
-			return p, err
-		}
-	}
-
+	// This handles the transactions coming from other Erigon peers of older versions, which add 0x80 (empty) transactions into packets
 	if dataLen == 0 {
 		return 0, fmt.Errorf("%w: transaction must be either 1 list or 1 string", ErrParseTxn)
 	}
+	if dataLen == 1 && !legacy {
+		if hasEnvelope {
+			return 0, fmt.Errorf("%w: expected envelope in the payload, got %x", ErrParseTxn, payload[dataPos:dataPos+dataLen])
+		}
+	}
+
 	p = dataPos
 
 	var txType int
@@ -174,7 +168,18 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		if _, err = ctx.keccak1.Write(payload[p : dataPos+dataLen]); err != nil {
 			return 0, fmt.Errorf("%w: computing IdHash (hashing the envelope): %s", ErrParseTxn, err)
 		}
+		// For legacy transaction, the entire payload in expected to be in "rlp" field
+		// whereas for non-legacy, only the content of the envelope (start with position p)
+		slot.rlp = payload[p-1 : dataPos+dataLen]
 		p = dataPos
+	} else {
+		slot.rlp = payload[pos : dataPos+dataLen]
+	}
+
+	if ctx.validateRlp != nil {
+		if err := ctx.validateRlp(slot.rlp); err != nil {
+			return p, err
+		}
 	}
 
 	// Remember where signing hash data begins (it will need to be wrapped in an RLP list)

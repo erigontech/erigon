@@ -154,7 +154,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		slots.Resize(uint(j + 1))
 		slots.txs[j] = &TxSlot{}
 		slots.isLocal[j] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[j], slots.senders.At(j)); err != nil {
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[j], slots.senders.At(j), false /* hasEnvelope */); err != nil {
 			switch err {
 			case ErrAlreadyKnown: // Noop, but need to handle to not count these
 				reply.Errors[i] = AlreadyKnown.String()

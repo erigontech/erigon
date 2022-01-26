@@ -460,7 +460,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 				for i := range change.Txs {
 					minedTxs.txs[i] = &TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *TxParseContext) error {
-						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.txs[i], minedTxs.senders.At(i))
+						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.txs[i], minedTxs.senders.At(i), true /* hasEnvelope */)
 						return err
 					}); err != nil {
 						log.Warn("stream.Recv", "err", err)
@@ -473,7 +473,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 				for i := range change.Txs {
 					unwindTxs.txs[i] = &TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *TxParseContext) error {
-						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.txs[i], unwindTxs.senders.At(i))
+						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.txs[i], unwindTxs.senders.At(i), true /* hasEnvelope */)
 						return err
 					}); err != nil {
 						log.Warn("stream.Recv", "err", err)

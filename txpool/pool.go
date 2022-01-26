@@ -378,7 +378,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.lastSeenBlock.Store(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight)
 	if !p.started.Load() {
 		if err := p.fromDB(ctx, tx, coreTx); err != nil {
-			return err
+			return fmt.Errorf("loading txs from DB: %w", err)
 		}
 	}
 
@@ -1508,7 +1508,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		addr, txRlp := v[:20], v[20:]
 		txn := &TxSlot{}
 
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txn, nil)
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */)
 		if err != nil {
 			return fmt.Errorf("err: %w, rlp: %x", err, txRlp)
 		}

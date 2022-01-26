@@ -43,7 +43,7 @@ var txParseMainnetTests = []parseTxTest{
 	{payloadStr: "b86d02f86a7b80843b9aca00843b9aca0082520894e80d2a018c813577f33f9e69387dc621206fb3a48080c001a02c73a04cd144e5a84ceb6da942f83763c2682896b51f7922e2e2f9a524dd90b7a0235adda5f87a1d098e2739e40e83129ff82837c9042e6ad61d0481334dcb6f1a",
 		senderStr: "e80d2a018c813577f33f9e69387dc621206fb3a4", idHashStr: "1247438da30b5919f1401eff4422fd11added646eff41278cd5276a5d3df802e",
 		signHashStr: "34ef1790ebd860a84c73ba27576ae96621ec21e96f70935c94e8e24dc1b62f2b", nonce: 0},
-	{payloadStr: "b86e01f86b7b018203e882520894236ff1e97419ae93ad80cafbaa21220c5d78fb7d880de0b6b3a764000080c080a0987e3d8d0dcd86107b041e1dca2e0583118ff466ad71ad36a8465dd2a166ca2da02361c5018e63beea520321b290097cd749febc2f437c7cb41fdd085816742060",
+	{payloadStr: "01f86b7b018203e882520894236ff1e97419ae93ad80cafbaa21220c5d78fb7d880de0b6b3a764000080c080a0987e3d8d0dcd86107b041e1dca2e0583118ff466ad71ad36a8465dd2a166ca2da02361c5018e63beea520321b290097cd749febc2f437c7cb41fdd085816742060",
 		senderStr: "4774e55994fce67b26c94716612c7048dcbf2dcd", idHashStr: "dec28fbfd19eb82ba91437922ea91d550d2861efb8cc7a4040b0f5efd3658284",
 		signHashStr: "1ee032826e5aa14bc7353bf9f3af8683fd9f657a779879ff562ddcab0ecda30a", nonce: 1},
 	{payloadStr: "f86780862d79883d2000825208945df9b87991262f6ba471f09758cde1c0fc1de734827a69801ca088ff6cf0fefd94db46111149ae4bfc179e9b94721fffd821d38d16464b3f71d0a045e0aff800961cfce805daef7016b9b675c137a6a41a548f7b60a3484c06a33a",
@@ -111,7 +111,7 @@ func TestParseTransactionRLP(t *testing.T) {
 			for i, tt := range testSet.tests {
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					payload := decodeHex(tt.payloadStr)
-					parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:])
+					parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:], false /* hasEnvelope */)
 					require.NoError(err)
 					require.Equal(len(payload), parseEnd)
 					if tt.signHashStr != "" {
