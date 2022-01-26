@@ -1,14 +1,12 @@
 # TxPool v2
 
-it’s exactly what you run inside Erigon now, but you also can disable pool inside erigon by —txpool.disable and run it outside ( so can run multiple of them, or use your own implementation, or customize logic).
+Transaction Pool - place where living "not-included-to-block-yet transactions".
+Erigon's TxPool can work inside Erigon (default) and as separated process.
 
-Same thing you can do with sentry. Also, after the-megre you will run external consensus service.
-
-95% of pool-related code (from p2p message parsing, to sorting logic) is inside this folder: https://github.com/ledgerwatch/erigon-lib/tree/main/txpool
-
-Our pool implementation is not fork of Geth’s ( And it’s Apache licensed) - Design docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
-
-Has 2 modes: internal and external
+Erigon's pool implementation is not fork of Geth’s, has Apache license - Design
+docs: https://github.com/ledgerwatch/erigon/wiki/Transaction-Pool-Design
+95% of pool-related code (from p2p message parsing, to sorting logic) is inside this
+folder: https://github.com/ledgerwatch/erigon-lib/tree/main/txpool
 
 ## Internal mode
 
@@ -27,20 +25,19 @@ make txpool
 Start by:
 
 ```
-# Add `--txpool.disable` flags to Erigon.
-./build/bin/sentry
-./build/bin/txpool
+# Add `--txpool.disable` flag to Erigon
+
+# External TxPool require external Sentry
+./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your_datadir>
+
+# Start pool service:
+# --private.api.addr - connect to Erigon's grpc api
+# --sentry.api.addr  - connect to Sentry's grpc api
+# --txpool.api.addr  - other services to connect TxPool's grpc api
+./build/bin/txpool --private.api.addr=localhost:9090 --sentry.api.addr=localhost:9091 --txpool.api.addr=localhost:9094 --datadir=<your_datadir>
+
+# Increase pool limits by flags: --txpool.globalslots, --txpool.globalbasefeeeslots, --txpool.globalqueue 
 ```
-
-To change address/port of Erigon or Sentry:
-
-```
-./build/bin/txpool --private.api.addr localhost:9090 --sentry.api.addr localhost:9091 --txpool.api.addr localhost:9094
-```
-
-## Increase pool limits
-
-In `./build/bin/txpool --help` see flags: `--txpool.globalslots`, `--txpool.globalbasefeeeslots`, `--txpool.globalqueue`
 
 ## ToDo list
 
