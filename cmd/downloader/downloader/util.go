@@ -29,7 +29,20 @@ var Trackers = [][]string{
 	// trackers.Udp, trackers.Https, trackers.Http,
 }
 
-func allTorrentFiles(dir string) ([]string, error) {
+func AllTorrentPaths(dir string) ([]string, error) {
+	files, err := AllTorrentFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	var res []string
+	for _, f := range files {
+		torrentFilePath := filepath.Join(dir, f)
+		res = append(res, torrentFilePath)
+	}
+	return res, nil
+}
+
+func AllTorrentFiles(dir string) ([]string, error) {
 	files, err := ioutil.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -68,26 +81,6 @@ func allSegmentFiles(dir string) ([]string, error) {
 		res = append(res, f.Name())
 	}
 	return res, nil
-}
-
-func ForEachTorrentFile(root string, walker func(torrentFileName string) error) error {
-	files, err := allTorrentFiles(root)
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		torrentFileName := filepath.Join(root, f)
-		if _, err := os.Stat(torrentFileName); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return err
-		}
-		if err := walker(torrentFileName); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually

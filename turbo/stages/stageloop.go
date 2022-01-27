@@ -282,7 +282,7 @@ func NewStagedSync(
 			snapshotDownloader,
 			blockReader,
 			tmpdir,
-		), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
+		), stagedsync.StageCumulativeIndexCfg(db), stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig), stagedsync.StageBodiesCfg(
 			db,
 			controlServer.Bd,
 			controlServer.SendBodyRequest,

@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Headers,
@@ -24,6 +24,19 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, block
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return HeadersPrune(p, tx, headers, ctx)
+			},
+		},
+		{
+			ID:          stages.CumulativeIndex,
+			Description: "Write Cumulative Index",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				return SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return PruneCumulativeIndexStage(p, tx, ctx)
 			},
 		},
 		{
