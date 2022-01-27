@@ -41,7 +41,6 @@ require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20220127052619-b5c53fa48acc
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
-	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/gomega v1.16.0 // indirect
 	github.com/pelletier/go-toml v1.9.3
