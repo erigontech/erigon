@@ -25,6 +25,7 @@ type CVM struct {
 func (cvm *CVM) Create(caller ContractRef, code, salt []byte) ([]byte, common.Address, error) {
 	addressRequest := &starknet.AddressRequest{
 		Salt:                string(salt),
+		ContractDefinition:  string(code),
 		ConstructorCalldata: make([]uint32, 10),
 		CallerAddress:       caller.Address().String(),
 	}
@@ -38,8 +39,8 @@ func (cvm *CVM) Create(caller ContractRef, code, salt []byte) ([]byte, common.Ad
 	address := address32.ToCommonAddress()
 
 	cvm.intraBlockState.SetCode(address, code)
-	fmt.Println(">>>> Create Starknet Contract", address.Hex())
-	return code, common.Address{}, nil
+	fmt.Println(">>>> Create Starknet Contract", address32.Hex())
+	return code, address, nil
 
 	//TODO:: execute cairo construct
 	//ret, err := cvm.run(code)
