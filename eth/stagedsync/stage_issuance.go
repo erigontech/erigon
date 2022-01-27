@@ -23,16 +23,18 @@ import (
 )
 
 type IssuanceCfg struct {
-	db          kv.RwDB
-	chainConfig *params.ChainConfig
-	blockReader interfaces.FullBlockReader
+	db              kv.RwDB
+	chainConfig     *params.ChainConfig
+	blockReader     interfaces.FullBlockReader
+	enabledIssuance bool
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader, enabledIssuance bool) IssuanceCfg {
 	return IssuanceCfg{
-		db:          db,
-		chainConfig: chainConfig,
-		blockReader: blockReader,
+		db:              db,
+		chainConfig:     chainConfig,
+		blockReader:     blockReader,
+		enabledIssuance: enabledIssuance,
 	}
 }
 
@@ -53,13 +55,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	if headNumber == s.BlockNumber {
-		return nil
-	}
-	if cfg.chainConfig.Consensus != params.EtHashConsensus {
-		if err = s.Update(tx, headNumber); err != nil {
-			return err
-		}
+	if cfg.chainConfig.Consensus != params.EtHashConsensus || !cfg.enabledIssuance || headNumber == s.BlockNumber {
 		if !useExternalTx {
 			if err = tx.Commit(); err != nil {
 				return err
@@ -67,6 +63,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		}
 		return nil
 	}
+
 	// Log timer
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -158,7 +155,6 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			return err
 		}
 		// Sleep and check for logs
-		timer := time.NewTimer(1 * time.Nanosecond)
 		select {
 		case <-ctx.Done():
 			stopped = true
@@ -166,11 +162,10 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			log.Info(fmt.Sprintf("[%s] Wrote Block Issuance", s.LogPrefix()),
 				"now", currentBlockNumber, "blk/sec", float64(currentBlockNumber-prevProgress)/float64(logInterval/time.Second))
 			prevProgress = currentBlockNumber
-		case <-timer.C:
+		default:
 			log.Trace("RequestQueueTime (header) ticked")
 		}
 		// Cleanup timer
-		timer.Stop()
 	}
 	if err = s.Update(tx, currentBlockNumber); err != nil {
 		return err
@@ -183,8 +178,15 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	return nil
 }
 
-func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err error) {
+func UnwindIssuanceStage(u *UnwindState, cfg IssuanceCfg, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
 
 	if err = u.Done(tx); err != nil {
 		return fmt.Errorf(" reset: %w", err)
@@ -197,8 +199,17 @@ func UnwindIssuanceStage(u *UnwindState, tx kv.RwTx, ctx context.Context) (err e
 	return nil
 }
 
-func PruneIssuanceStage(p *PruneState, tx kv.RwTx, ctx context.Context) (err error) {
-	if tx != nil {
+func PruneIssuanceStage(p *PruneState, cfg IssuanceCfg, tx kv.RwTx, ctx context.Context) (err error) {
+	useExternalTx := tx != nil
+	if !useExternalTx {
+		tx, err = cfg.db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+
+	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
 		}

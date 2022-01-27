@@ -61,6 +61,12 @@ make erigon
 ./build/bin/erigon
 ```
 
+### Optional stages
+
+There is an optional stage that can be enabled through flags:
+
+* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to use `erigon_watchTheBurn`.
+
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2Tb on your drive, a good option is to start syncing one
@@ -298,8 +304,11 @@ internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 |  Port |  Protocol |      Purpose      |  Expose |
 |:-----:|:---------:|:-----------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets | Private |
+|:-----:|:---------:|:-----------------:|:-------:|
+|  8550 |    TCP    |       HTTP        | Private |
 
-Typically 8545 is exposed only interally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
+Typically 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
+Typically 8550 is exposed only internally for the engineApi JSON-RPC queries
 
 #### `sentry` ports
 

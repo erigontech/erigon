@@ -10,10 +10,9 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/dustin/go-humanize"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
@@ -23,12 +22,12 @@ import (
 const ASSERT = false
 
 type Client struct {
-	Cli                  *torrent.Client
-	pieceCompletionStore storage.PieceCompletion
+	Cli *torrent.Client
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
 	torrentConfig := DefaultTorrentConfig()
+	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
@@ -44,33 +43,27 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	}
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
 
-	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
+	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
 
-	return torrentConfig, progressStore, nil
+	return torrentConfig, nil
 }
 
-func New(cfg *torrent.ClientConfig, progressStore storage.PieceCompletion) (*Client, error) {
+func New(cfg *torrent.ClientConfig) (*Client, error) {
 	torrentClient, err := torrent.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
 	return &Client{
-		Cli:                  torrentClient,
-		pieceCompletionStore: progressStore,
+		Cli: torrentClient,
 	}, nil
 }
 
 func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
-	torrentConfig.ListenPort = 0
 
 	// enable dht
-	torrentConfig.NoDHT = true
-	torrentConfig.DisableTrackers = false
+	//torrentConfig.NoDHT = true
+	//torrentConfig.DisableTrackers = true
 	//torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
@@ -79,11 +72,9 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
 
-	torrentConfig.MinPeerExtensions.SetBit(peer_protocol.ExtensionBitFast, true)
-
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
-	torrentConfig.TorrentPeersHighWater = 100     // default: 500
-	torrentConfig.TorrentPeersLowWater = 50       // default: 50
+	//torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
+	//torrentConfig.TorrentPeersHighWater = 100     // default: 500
+	//torrentConfig.TorrentPeersLowWater = 50 // default: 50
 
 	return torrentConfig
 }
@@ -96,7 +87,6 @@ func (cli *Client) Close() {
 	for _, tr := range cli.Cli.Torrents() {
 		tr.Drop()
 	}
-	cli.pieceCompletionStore.Close()
 	cli.Cli.Close()
 }
 
@@ -143,8 +133,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			if allComplete {
 				log.Info(fmt.Sprintf(
 					"[torrent] Seeding: ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-					humanize.Bytes(uint64(stats.readBytesPerSec)),
-					humanize.Bytes(uint64(stats.writeBytesPerSec)),
+					common2.ByteCount(uint64(stats.readBytesPerSec)),
+					common2.ByteCount(uint64(stats.writeBytesPerSec)),
 					stats.peersCount,
 					stats.torrentsCount,
 				), "alloc", alloc, "sys", sys)
@@ -154,8 +144,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			log.Info(fmt.Sprintf(
 				"[torrent] Downloading: %.2f%%, ↓%v/s ↑%v/s, peers: %d, torrents: %d",
 				stats.progress,
-				humanize.Bytes(uint64(stats.readBytesPerSec)),
-				humanize.Bytes(uint64(stats.writeBytesPerSec)),
+				common2.ByteCount(uint64(stats.readBytesPerSec)),
+				common2.ByteCount(uint64(stats.writeBytesPerSec)),
 				stats.peersCount,
 				stats.torrentsCount,
 			), "alloc", alloc, "sys", sys)
@@ -232,8 +222,12 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
-	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
+	files, err := AllTorrentPaths(snapshotsDir)
+	if err != nil {
+		return err
+	}
+	for _, torrentFilePath := range files {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
@@ -243,12 +237,8 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
-	//waitForChecksumVerify(ctx, torrentClient)
 	return nil
 }
 
@@ -311,8 +301,8 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 
 				line := fmt.Sprintf(
 					"[torrent] verifying snapshots: %s/%s",
-					humanize.Bytes(uint64(aggBytesCompleted)),
-					humanize.Bytes(uint64(aggLen)),
+					common2.ByteCount(uint64(aggBytesCompleted)),
+					common2.ByteCount(uint64(aggLen)),
 				)
 				log.Info(line)
 			}

@@ -44,6 +44,7 @@ var (
 	downloaderApiAddr             string
 	torrentVerbosity              string
 	downloadRateStr, uploadRteStr string
+	torrentPort                   int
 )
 
 func init() {
@@ -55,8 +56,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
-	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "1gb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "1gb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
 	withDatadir(printInfoHashes)
 	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
@@ -129,11 +131,11 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("get peer id: %w", err)
 		}
 
-		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate)
+		cfg, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
 		if err != nil {
-			return err
+			return fmt.Errorf("TorrentConfig: %w", err)
 		}
-		t, err = downloader.New(cfg, pieceStore)
+		t, err = downloader.New(cfg)
 		if err != nil {
 			return err
 		}
@@ -202,10 +204,14 @@ var printInfoHashes = &cobra.Command{
 		ctx := cmd.Context()
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			if err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
-				return os.Remove(torrentFilePath)
-			}); err != nil {
+			files, err := downloader.AllTorrentPaths(snapshotsDir)
+			if err != nil {
 				return err
+			}
+			for _, filePath := range files {
+				if err := os.Remove(filePath); err != nil {
+					return err
+				}
 			}
 			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotsDir); err != nil {
 				return err
@@ -213,7 +219,11 @@ var printInfoHashes = &cobra.Command{
 		}
 
 		res := map[string]string{}
-		err := downloader.ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+		files, err := downloader.AllTorrentPaths(snapshotsDir)
+		if err != nil {
+			return err
+		}
+		for _, torrentFilePath := range files {
 			mi, err := metainfo.LoadFromFile(torrentFilePath)
 			if err != nil {
 				return err
@@ -223,10 +233,6 @@ var printInfoHashes = &cobra.Command{
 				return err
 			}
 			res[info.Name] = mi.HashInfoBytes().String()
-			return nil
-		})
-		if err != nil {
-			return err
 		}
 		var serialized []byte
 		if asJson {
