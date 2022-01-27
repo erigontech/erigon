@@ -131,11 +131,11 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("get peer id: %w", err)
 		}
 
-		cfg, pieceStore, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
+		cfg, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			return fmt.Errorf("TorrentConfig: %w", err)
 		}
-		t, err = downloader.New(cfg, pieceStore)
+		t, err = downloader.New(cfg)
 		if err != nil {
 			return err
 		}
