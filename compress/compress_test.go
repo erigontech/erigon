@@ -19,6 +19,9 @@ package compress
 import (
 	"context"
 	"fmt"
+	"hash/crc32"
+	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"testing"
@@ -57,6 +60,20 @@ func TestCompressEmptyDict(t *testing.T) {
 	}
 }
 
+//nolint
+func checksum(file string) uint32 {
+	hasher := crc32.NewIEEE()
+	f, err := os.Open(file)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(hasher, f); err != nil {
+		panic(err)
+	}
+	return hasher.Sum32()
+}
+
 func prepareDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := path.Join(tmpDir, "compressed")
@@ -93,5 +110,11 @@ func TestCompressDict1(t *testing.T) {
 			t.Errorf("expected %s, got (hex) %s", expected, word)
 		}
 		i++
+	}
+
+	if checksum(d.compressedFile) != 1949470243 {
+		// it's ok if hash changed, but need re-generate all existing snapshot hashes
+		// in https://github.com/ledgerwatch/erigon-snapshot
+		t.Errorf("result file hash changed")
 	}
 }

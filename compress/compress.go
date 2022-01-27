@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/patricia"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const ASSERT = false
@@ -49,15 +48,17 @@ type Compressor struct {
 	uncompressedFile           *DecompressedFile
 	outputFile, tmpOutFilePath string // File where to output the dictionary and compressed data
 	tmpDir                     string // temporary directory to use for ETL when building dictionary
-	minPatternScore            uint64 //minimum score (per superstring) required to consider including pattern into the dictionary
 	workers                    int
 
 	// Buffer for "superstring" - transformation of superstrings where each byte of a word, say b,
 	// is turned into 2 bytes, 0x01 and b, and two zero bytes 0x00 0x00 are inserted after each word
 	// this is needed for using ordinary (one string) suffix sorting algorithm instead of a generalised (many superstrings) suffix
 	// sorting algorithm
-	superstring []byte
-	wordsCount  uint64
+	superstring      []byte
+	superstrings     chan []byte
+	wg               *sync.WaitGroup
+	suffixCollectors []*etl.Collector
+	wordsCount       uint64
 
 	ctx       context.Context
 	logPrefix string
@@ -80,20 +81,38 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		return nil, err
 	}
 
+	// Collector for dictionary superstrings (sorted by their score)
+	superstrings := make(chan []byte, workers*2)
+	wg := &sync.WaitGroup{}
+	wg.Add(workers)
+	suffixCollectors := make([]*etl.Collector, workers)
+	for i := 0; i < workers; i++ {
+		//nolint
+		collector := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		suffixCollectors[i] = collector
+		go processSuperstring(superstrings, collector, minPatternScore, wg)
+	}
+
 	return &Compressor{
 		uncompressedFile: uncompressedFile,
 		tmpOutFilePath:   tmpOutFilePath,
 		outputFile:       outputFile,
 		tmpDir:           tmpDir,
 		logPrefix:        logPrefix,
-		minPatternScore:  minPatternScore,
 		workers:          workers,
 		ctx:              ctx,
+		superstrings:     superstrings,
+		suffixCollectors: suffixCollectors,
+		wg:               wg,
 	}, nil
 }
 
 func (c *Compressor) Close() {
 	c.uncompressedFile.Close()
+	for _, collector := range c.suffixCollectors {
+		collector.Close()
+	}
+	c.suffixCollectors = nil
 }
 
 func (c *Compressor) SetTrace(trace bool) {
@@ -102,6 +121,16 @@ func (c *Compressor) SetTrace(trace bool) {
 
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
+
+	if len(c.superstring)+2*len(word)+2 > superstringLimit {
+		c.superstrings <- c.superstring
+		c.superstring = nil
+	}
+	for _, a := range word {
+		c.superstring = append(c.superstring, 1, a)
+	}
+	c.superstring = append(c.superstring, 0, 0)
+
 	return c.uncompressedFile.Append(word)
 }
 
@@ -109,61 +138,19 @@ func (c *Compressor) Compress() error {
 	c.uncompressedFile.w.Flush()
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
-	// Collector for dictionary superstrings (sorted by their score)
-	superstrings := make(chan []byte, c.workers)
-	wg := &sync.WaitGroup{}
-	wg.Add(c.workers)
-	suffixCollectors := make([]*etl.Collector, c.workers)
-	defer func() {
-		for _, collector := range suffixCollectors {
-			collector.Close()
-		}
-	}()
-	for i := 0; i < c.workers; i++ {
-		//nolint
-		collector := etl.NewCollector(compressLogPrefix, c.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-		suffixCollectors[i] = collector
-		go processSuperstring(superstrings, collector, c.minPatternScore, wg)
-	}
-	i := 0
-	c.superstring = nil
-	if err := c.uncompressedFile.ForEach(func(word []byte) error {
-		if len(c.superstring)+2*len(word)+2 > superstringLimit {
-			superstrings <- c.superstring
-			c.superstring = nil
-		}
-		for _, a := range word {
-			c.superstring = append(c.superstring, 1, a)
-		}
-		c.superstring = append(c.superstring, 0, 0)
-		i++
-
-		select {
-		default:
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Dictionary preprocessing", c.logPrefix), "processed", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(c.uncompressedFile.count)))
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
 	if len(c.superstring) > 0 {
-		superstrings <- c.superstring
+		c.superstrings <- c.superstring
 	}
-	close(superstrings)
-	wg.Wait()
+	close(c.superstrings)
+	c.wg.Wait()
 
-	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, suffixCollectors)
+	db, err := DictionaryBuilderFromCollectors(c.ctx, compressLogPrefix, c.tmpDir, c.suffixCollectors)
 	if err != nil {
 
 		return err
 	}
-	_, fileName := filepath.Split(c.outputFile)
-
 	if c.trace {
+		_, fileName := filepath.Split(c.outputFile)
 		if err := PersistDictrionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
 			return err
 		}
