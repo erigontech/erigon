@@ -115,9 +115,8 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	return json, nil
 }
 
-// NewPayloadV1 takes a block from the beacon chain and do either two of the following things
-// - Stageloop the block just received if we have the payload's parent hash already
-// - Start the reverse sync process otherwise, and return "Syncing"
+// NewPayloadV1 processes new payloads (blocks) from the beacon chain.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {

@@ -122,24 +122,22 @@ func SpawnStageHeaders(
 	}
 
 	if isTrans {
-		return HeadersPOS(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
+		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
 }
 
-// HeadersPOS progresses Headers stage for Proof-of-Stake headers
+// HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated)
 func HeadersPOS(
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	initialCycle bool,
-	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	log.Info("Waiting for beacon chain payloads...")
+	log.Info("Waiting for beacon chain...")
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
