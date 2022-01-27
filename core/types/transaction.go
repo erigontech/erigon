@@ -452,18 +452,20 @@ type Message struct {
 	gasPrice   uint256.Int
 	feeCap     uint256.Int
 	tip        uint256.Int
+	salt       []byte
 	data       []byte
 	accessList AccessList
 	checkNonce bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, salt []byte) Message {
 	m := Message{
 		from:       from,
 		to:         to,
 		nonce:      nonce,
 		amount:     *amount,
 		gasLimit:   gasLimit,
+		salt:       salt,
 		data:       data,
 		accessList: accessList,
 		checkNonce: checkNonce,
@@ -488,6 +490,7 @@ func (m Message) Tip() *uint256.Int      { return &m.tip }
 func (m Message) Value() *uint256.Int    { return &m.amount }
 func (m Message) Gas() uint64            { return m.gasLimit }
 func (m Message) Nonce() uint64          { return m.nonce }
+func (m Message) Salt() []byte           { return m.salt }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
 func (m Message) CheckNonce() bool       { return m.checkNonce }

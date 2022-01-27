@@ -129,6 +129,7 @@ func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, er
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+		salt:       tx.Salt,
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)

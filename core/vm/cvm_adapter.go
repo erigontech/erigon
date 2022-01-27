@@ -24,10 +24,10 @@ func (c *CVMAdapter) Reset(txCtx TxContext, ibs IntraBlockState) {
 	c.Cvm.intraBlockState = ibs
 }
 
-func (c *CVMAdapter) Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
+func (c *CVMAdapter) Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int, salt []byte) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	leftOverGas = 0
 
-	ret, contractAddr, err = c.Cvm.Create(caller, code)
+	ret, contractAddr, err = c.Cvm.Create(caller, code, salt)
 
 	return ret, contractAddr, leftOverGas, err
 }

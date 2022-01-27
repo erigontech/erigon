@@ -96,4 +96,6 @@ type dummyStatedb struct {
 	state.IntraBlockState
 }
 
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
+func (*dummyStatedb) GetRefund() uint64                        { return 1337 }
+func (*dummyStatedb) GetNonce(common.Address) uint64           { return 0 }
+func (*dummyStatedb) SetCode(addr common.Address, code []byte) {}

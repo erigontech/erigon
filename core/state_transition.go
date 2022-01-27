@@ -59,6 +59,7 @@ type StateTransition struct {
 	tip        *uint256.Int
 	initialGas uint64
 	value      *uint256.Int
+	salt       []byte
 	data       []byte
 	state      vm.IntraBlockState
 	evm        vm.VMInterface
@@ -81,6 +82,7 @@ type Message interface {
 
 	Nonce() uint64
 	CheckNonce() bool
+	Salt() []byte
 	Data() []byte
 	AccessList() types.AccessList
 }
@@ -199,8 +201,10 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		gasFeeCap: msg.FeeCap(),
 		tip:       msg.Tip(),
 		value:     msg.Value(),
+		salt:      msg.Salt(),
 		data:      msg.Data(),
-		state:     evm.IntraBlockState(),
+
+		state: evm.IntraBlockState(),
 
 		sharedBuyGas:        uint256.NewInt(0),
 		sharedBuyGasBalance: uint256.NewInt(0),
@@ -390,7 +394,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value)
+		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value, st.salt)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)

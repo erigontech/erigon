@@ -1,10 +1,10 @@
 package vm
 
 import (
+	"context"
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func NewCVM(state IntraBlockState, starknetGrpcClient starknet.CAIROVMClient) *CVM {
@@ -22,9 +22,20 @@ type CVM struct {
 	starknetGrpcClient starknet.CAIROVMClient
 }
 
-func (cvm *CVM) Create(caller ContractRef, code []byte) ([]byte, common.Address, error) {
-	address := crypto.CreateAddress(caller.Address(), cvm.intraBlockState.GetNonce(caller.Address()))
-	//address := cvm.starknetService.Call()
+func (cvm *CVM) Create(caller ContractRef, code, salt []byte) ([]byte, common.Address, error) {
+	addressRequest := &starknet.AddressRequest{
+		Salt:                string(salt),
+		ConstructorCalldata: make([]uint32, 10),
+		CallerAddress:       caller.Address().String(),
+	}
+
+	addressResponse, err := cvm.starknetGrpcClient.Address(context.Background(), addressRequest)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+
+	address32 := common.HexToAddress32(addressResponse.GetAddress())
+	address := address32.ToCommonAddress()
 
 	cvm.intraBlockState.SetCode(address, code)
 	fmt.Println(">>>> Create Starknet Contract", address.Hex())
