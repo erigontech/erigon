@@ -8,14 +8,10 @@ import (
 	"time"
 
 	lg "github.com/anacrolix/log"
-	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
-	"github.com/c2h5oh/datasize"
-	"github.com/dustin/go-humanize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
 )
 
@@ -229,8 +225,12 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
-	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
+	files, err := AllTorrentPaths(snapshotsDir)
+	if err != nil {
+		return err
+	}
+	for i, torrentFilePath := range files {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
@@ -240,12 +240,8 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
-	//waitForChecksumVerify(ctx, torrentClient)
 	return nil
 }
 
