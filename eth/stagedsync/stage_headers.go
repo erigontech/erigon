@@ -169,7 +169,7 @@ func HeadersPOS(
 
 	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
 
@@ -189,7 +189,7 @@ func HeadersPOS(
 	// If we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
 
@@ -239,13 +239,14 @@ func verifyAndSavePoSHeader(
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
+			ValidationError: verificationErr,
 		}
 		return
 	}
 
 	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
 	if err != nil {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return
 	}
 

@@ -60,7 +60,7 @@ func StageLoop(
 		pendingPayloadStatus := hd.GetPendingPayloadStatus()
 		if pendingPayloadStatus != (common.Hash{}) {
 			if err != nil {
-				hd.PayloadStatusCh <- privateapi.PayloadStatus{Error: err}
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 			} else {
 				var status remote.EngineStatus
 				if headBlockHash == pendingPayloadStatus {

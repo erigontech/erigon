@@ -71,7 +71,8 @@ type EthBackend interface {
 type PayloadStatus struct {
 	Status          remote.EngineStatus
 	LatestValidHash common.Hash
-	Error           error
+	ValidationError error
+	CriticalError   error
 }
 
 // The message we are going to send to the stage sync in NewPayload
@@ -225,7 +226,9 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 	if payloadStatus.LatestValidHash != (common.Hash{}) {
 		reply.LatestValidHash = gointerfaces.ConvertHashToH256(payloadStatus.LatestValidHash)
 	}
-	// TODO(yperbasis): ValidationError
+	if payloadStatus.ValidationError != nil {
+		reply.ValidationError = payloadStatus.ValidationError.Error()
+	}
 	return &reply
 }
 
@@ -290,8 +293,8 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	payloadStatus := <-s.statusCh
-	if payloadStatus.Error != nil {
-		return nil, payloadStatus.Error
+	if payloadStatus.CriticalError != nil {
+		return nil, payloadStatus.CriticalError
 	}
 
 	// Discard all previous prepared payloads
@@ -354,8 +357,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	payloadStatus := <-s.statusCh
-	if payloadStatus.Error != nil {
-		return nil, payloadStatus.Error
+	if payloadStatus.CriticalError != nil {
+		return nil, payloadStatus.CriticalError
 	}
 
 	// No need for payload building
