@@ -22,15 +22,12 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -209,14 +206,14 @@ func reduceDictWorker(trace bool, inputCh chan []byte, completion *sync.WaitGrou
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(trace bool, logPrefix, dictPath, segmentFilePath, tmpDir string, datFile *DecompressedFile, workers int) error {
+func reducedict(trace bool, logPrefix, segmentFilePath, tmpDir string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	// DictionaryBuilder is for sorting words by their freuency (to assign codes)
 	var pt patricia.PatriciaTree
 	code2pattern := make([]*Pattern, 0, 256)
-	if err := ReadDictrionary(dictPath, func(score uint64, word []byte) error {
+	dictBuilder.ForEach(func(score uint64, word []byte) {
 		p := &Pattern{
 			score:    score,
 			uses:     0,
@@ -226,10 +223,8 @@ func reducedict(trace bool, logPrefix, dictPath, segmentFilePath, tmpDir string,
 		}
 		pt.Insert(word, p)
 		code2pattern = append(code2pattern, p)
-		return nil
-	}); err != nil {
-		return err
-	}
+	})
+	dictBuilder.Close()
 	log.Debug(fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	ch := make(chan []byte, 10_000)
 	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
@@ -837,31 +832,6 @@ func PersistDictrionary(fileName string, db *DictionaryBuilder) error {
 	}
 	if err := df.Sync(); err != nil {
 		return err
-	}
-	return df.Close()
-}
-
-func ReadDictrionary(fileName string, walker func(score uint64, word []byte) error) error {
-	df, err := os.Open(fileName)
-	if err != nil {
-		return err
-	}
-	defer df.Close()
-	// DictonaryBuilder is for sorting words by their freuency (to assign codes)
-	ds := bufio.NewScanner(df)
-	for ds.Scan() {
-		tokens := strings.Split(ds.Text(), " ")
-		score, err := strconv.ParseInt(tokens[0], 10, 64)
-		if err != nil {
-			return err
-		}
-		word, err := hex.DecodeString(tokens[1])
-		if err != nil {
-			return err
-		}
-		if err := walker(uint64(score), word); err != nil {
-			return err
-		}
 	}
 	return df.Close()
 }

@@ -163,18 +163,14 @@ func (c *Compressor) Compress() error {
 	}
 	_, fileName := filepath.Split(c.outputFile)
 
-	dictPath := filepath.Join(c.tmpDir, fileName) + ".dictionary.txt"
-	defer os.Remove(dictPath)
-
-	if err := PersistDictrionary(dictPath, db); err != nil {
-		return err
+	if c.trace {
+		if err := PersistDictrionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+			return err
+		}
 	}
 
-	defer func() {
-		os.Remove(c.tmpOutFilePath)
-	}()
-
-	if err := reducedict(c.trace, c.logPrefix, dictPath, c.tmpOutFilePath, c.tmpDir, c.uncompressedFile, c.workers); err != nil {
+	defer os.Remove(c.tmpOutFilePath)
+	if err := reducedict(c.trace, c.logPrefix, c.tmpOutFilePath, c.tmpDir, c.uncompressedFile, c.workers, db); err != nil {
 		return err
 	}
 
@@ -306,6 +302,11 @@ func (db *DictionaryBuilder) ForEach(f func(score uint64, word []byte)) {
 	for i := db.Len(); i > 0; i-- {
 		f(db.items[i-1].score, db.items[i-1].word)
 	}
+}
+
+func (db *DictionaryBuilder) Close() {
+	db.items = nil
+	db.lastWord = nil
 }
 
 // Pattern is representation of a pattern that is searched in the superstrings to compress them
