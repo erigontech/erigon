@@ -27,6 +27,9 @@ type ErigonAPI interface {
 	// WatchTheBurn / reward related (see ./erigon_issuance.go)
 	WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 
+	// CumulativeChainTraffic / related to chain traffic (see ./erigon_cumulative_index.go)
+	CumulativeChainTraffic(ctx context.Context, blockNr rpc.BlockNumber) (ChainTraffic, error)
+
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) ([]p2p.NodeInfo, error)
 }
