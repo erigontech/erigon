@@ -289,7 +289,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			snapshotsDownloader,
 			blockReader,
 			mock.tmpdir,
-		), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
+		), stagedsync.StageCumulativeIndexCfg(mock.DB), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
 			mock.DB,
 			mock.downloader.Bd,
 			sendBodyRequest,
