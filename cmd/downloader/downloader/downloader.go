@@ -22,11 +22,10 @@ import (
 const ASSERT = false
 
 type Client struct {
-	Cli                  *torrent.Client
-	pieceCompletionStore storage.PieceCompletion
+	Cli *torrent.Client
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = seeding
@@ -44,23 +43,18 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	}
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
 
-	progressStore, err := storage.NewBoltPieceCompletion(snapshotsDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: likely another process already run on this directory: %w", err)
-	}
-	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, progressStore)
+	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
 
-	return torrentConfig, progressStore, nil
+	return torrentConfig, nil
 }
 
-func New(cfg *torrent.ClientConfig, progressStore storage.PieceCompletion) (*Client, error) {
+func New(cfg *torrent.ClientConfig) (*Client, error) {
 	torrentClient, err := torrent.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
 	return &Client{
-		Cli:                  torrentClient,
-		pieceCompletionStore: progressStore,
+		Cli: torrentClient,
 	}, nil
 }
 
@@ -93,7 +87,6 @@ func (cli *Client) Close() {
 	for _, tr := range cli.Cli.Torrents() {
 		tr.Drop()
 	}
-	cli.pieceCompletionStore.Close()
 	cli.Cli.Close()
 }
 
