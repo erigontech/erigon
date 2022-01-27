@@ -12,7 +12,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/dustin/go-humanize"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
@@ -140,8 +140,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			if allComplete {
 				log.Info(fmt.Sprintf(
 					"[torrent] Seeding: ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-					humanize.Bytes(uint64(stats.readBytesPerSec)),
-					humanize.Bytes(uint64(stats.writeBytesPerSec)),
+					common2.ByteCount(uint64(stats.readBytesPerSec)),
+					common2.ByteCount(uint64(stats.writeBytesPerSec)),
 					stats.peersCount,
 					stats.torrentsCount,
 				), "alloc", alloc, "sys", sys)
@@ -151,8 +151,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			log.Info(fmt.Sprintf(
 				"[torrent] Downloading: %.2f%%, ↓%v/s ↑%v/s, peers: %d, torrents: %d",
 				stats.progress,
-				humanize.Bytes(uint64(stats.readBytesPerSec)),
-				humanize.Bytes(uint64(stats.writeBytesPerSec)),
+				common2.ByteCount(uint64(stats.readBytesPerSec)),
+				common2.ByteCount(uint64(stats.writeBytesPerSec)),
 				stats.peersCount,
 				stats.torrentsCount,
 			), "alloc", alloc, "sys", sys)
@@ -229,8 +229,12 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
-	if err := ForEachTorrentFile(snapshotsDir, func(torrentFilePath string) error {
+func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
+	files, err := AllTorrentPaths(snapshotsDir)
+	if err != nil {
+		return err
+	}
+	for _, torrentFilePath := range files {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
@@ -240,12 +244,8 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
-	//waitForChecksumVerify(ctx, torrentClient)
 	return nil
 }
 
@@ -308,8 +308,8 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 
 				line := fmt.Sprintf(
 					"[torrent] verifying snapshots: %s/%s",
-					humanize.Bytes(uint64(aggBytesCompleted)),
-					humanize.Bytes(uint64(aggLen)),
+					common2.ByteCount(uint64(aggBytesCompleted)),
+					common2.ByteCount(uint64(aggLen)),
 				)
 				log.Info(line)
 			}

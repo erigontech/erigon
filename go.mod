@@ -16,7 +16,6 @@ require (
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
 	github.com/dlclark/regexp2 v1.4.0 // indirect
 	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
-	github.com/dustin/go-humanize v1.0.0
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.16.0
 	github.com/fatih/color v1.13.0
