@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -84,7 +83,7 @@ type PayloadMessage struct {
 type ForkChoiceMessage struct {
 	HeadBlockHash      common.Hash
 	SafeBlockHash      common.Hash
-	DinalizedBlockHash common.Hash
+	FinalizedBlockHash common.Hash
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
@@ -221,6 +220,15 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
 
+func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadStatus {
+	reply := remote.EnginePayloadStatus{Status: payloadStatus.Status}
+	if payloadStatus.LatestValidHash != (common.Hash{}) {
+		reply.LatestValidHash = gointerfaces.ConvertHashToH256(payloadStatus.LatestValidHash)
+	}
+	// TODO(yperbasis): ValidationError
+	return &reply
+}
+
 // EngineNewPayloadV1, validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	s.syncCond.L.Lock()
@@ -281,19 +289,17 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		},
 	}
 
-	executedStatus := <-s.statusCh
-	// Discard all previous prepared payloads if another block was proposed
-	if executedStatus.Error != nil {
-		return nil, executedStatus.Error
+	payloadStatus := <-s.statusCh
+	if payloadStatus.Error != nil {
+		return nil, payloadStatus.Error
 	}
-	// Discard all payload assembled
+
+	// Discard all previous prepared payloads
+	// TODO(yperbasis): must be much more specific (something like if canonical block changes)
+	// or moved to EngineGetPayloadV1 / EngineForkChoiceUpdatedV1
 	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
-	// Send reply over
-	reply := remote.EnginePayloadStatus{Status: executedStatus.Status}
-	if executedStatus.LatestValidHash != (common.Hash{}) {
-		reply.LatestValidHash = gointerfaces.ConvertHashToH256(executedStatus.LatestValidHash)
-	}
-	return &reply, nil
+
+	return convertPayloadStatus(&payloadStatus), nil
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
@@ -335,41 +341,33 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	beaconHeadHash := gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash)
-
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	beaconHeadHeader, err := rawdb.ReadHeaderByHash(tx, beaconHeadHash)
-	if err != nil {
-		return nil, err
-	}
-
-	if beaconHeadHeader == nil || atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
-		// TODO(yperbasis): should sent a proper error message if beaconHeadHeader == nil
+	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
 	}
 
-	if beaconHeadHash != rawdb.ReadHeadBlockHash(tx) {
-		// TODO(yperbasis): do the re-org
+	s.forkChoiceCh <- ForkChoiceMessage{
+		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
+		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
+		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	// If we are just updating forkchoice, this is enough
-	if req.PayloadAttributes == nil {
-		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
-		}, nil
+	payloadStatus := <-s.statusCh
+	if payloadStatus.Error != nil {
+		return nil, payloadStatus.Error
+	}
+
+	// No need for payload building
+	if req.PayloadAttributes == nil || payloadStatus.Status != remote.EngineStatus_VALID {
+		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(&payloadStatus)}, nil
 	}
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	// Start payload IDs from 1 (0 signifies null)
+	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 
 	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{

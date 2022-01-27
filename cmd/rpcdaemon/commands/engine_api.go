@@ -134,7 +134,7 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 	for i, transaction := range payload.Transactions {
 		transactions[i] = ([]byte)(transaction)
 	}
-	reply, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
+	res, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
@@ -154,7 +154,7 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		return nil, err
 	}
 
-	return convertPayloadStatus(reply), nil
+	return convertPayloadStatus(res), nil
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {

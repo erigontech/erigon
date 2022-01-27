@@ -150,6 +150,10 @@ func HeadersPOS(
 		return nil
 	case <-cfg.hd.SkipCycleHack:
 		return nil
+	case <-cfg.forkChoiceCh:
+		// TODO(yperbasis): implement properly
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+		return nil
 	case payloadMessage = <-cfg.newPayloadCh:
 	}
 
@@ -205,7 +209,7 @@ func HeadersPOS(
 	if shouldSaveBody {
 		// Note an inconsistency here:
 		// We insert raw bodies immediately and skip stage 3. (Stage 2 will not be skipped.)
-		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB
+		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
 		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
 			return err
 		}
@@ -268,7 +272,7 @@ func verifyAndSavePoSHeader(
 			return
 		}
 
-		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB
+		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
 		err = stages.SaveStageProgress(tx, stages.Bodies, headerNumber)
 		if err != nil {
 			return
@@ -328,7 +332,7 @@ func downloadMissingPoSHeaders(
 		sentToPeer := false
 		maxRequests := 4096
 		for !sentToPeer && !stopped && maxRequests != 0 {
-			// TODO(yperbasis): double check that we don't download headers that are already in the DB
+			// TODO(yperbasis): double check that we don't download headers that are already in the DB. What does header/body Unwind do?
 			// TODO(yperbasis): handle the case when are not able to sync a chain
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
