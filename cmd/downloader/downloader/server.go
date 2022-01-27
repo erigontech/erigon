@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -35,7 +34,7 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentCl
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
-	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient); err != nil {
+	if err := AddTorrentFiles(snapshotDir, torrentClient); err != nil {
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {

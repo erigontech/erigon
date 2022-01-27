@@ -230,7 +230,7 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 	if err != nil {
 		return err
 	}
-	for i, torrentFilePath := range files {
+	for _, torrentFilePath := range files {
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
