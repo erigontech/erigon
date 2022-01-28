@@ -36,7 +36,7 @@ changes but we don't guarantee anything. Things can and will break.
 
 
 ## Build from source
-Building TurboBor requires both a Go (version 1.16 or later) and a C compiler (GCC 10+). You can install them using your favourite package manager. Once the dependencies are installed, run
+Building TurboBor requires both a Go (version 1.17 or later) and a C compiler (GCC 10+). You can install them using your favourite package manager. Once the dependencies are installed, run
 
 ```sh
 git clone https://github.com/maticnetwork/turbo-bor
