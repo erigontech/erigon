@@ -23,6 +23,7 @@ func DefaultStages(ctx context.Context,
 	callTraces CallTracesCfg,
 	txLookup TxLookupCfg,
 	txPool TxPoolCfg,
+	issuance IssuanceCfg,
 	finish FinishCfg,
 	test bool,
 ) []*Stage {
@@ -60,7 +61,7 @@ func DefaultStages(ctx context.Context,
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return BodiesForward(s, u, ctx, tx, bodies, test)
+				return BodiesForward(s, u, ctx, tx, bodies, test, firstCycle)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindBodiesStage(u, tx, bodies, ctx)
@@ -215,6 +216,19 @@ func DefaultStages(ctx context.Context,
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneTxPool(p, tx, txPool, ctx)
+			},
+		},
+		{
+			ID:          stages.Issuance,
+			Description: "Issuance computation",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
+				return SpawnStageIssuance(issuance, s, tx, ctx)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
+				return UnwindIssuanceStage(u, issuance, tx, ctx)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
+				return PruneIssuanceStage(p, issuance, tx, ctx)
 			},
 		},
 		{

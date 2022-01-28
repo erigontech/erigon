@@ -342,7 +342,7 @@ func handleNewBlock(backend Backend, msg Decoder, peer *Peer) error {
 		log.Warn("Propagated block has invalid body", "have", hash, "exp", ann.Block.TxHash())
 		return nil // TODO(karalabe): return error eventually, but wait a few releases
 	}
-	if err := ann.sanityCheck(); err != nil {
+	if err := ann.SanityCheck(); err != nil {
 		return err
 	}
 	ann.Block.ReceivedAt = msg.Time()

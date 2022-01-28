@@ -183,7 +183,7 @@ func StageLoopStep(
 			if header.Number.Uint64() == 0 {
 				notifications.Accumulator.StartChange(0, header.Hash(), nil, false)
 			}
-			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64())
+			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 
 			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
 
@@ -273,7 +273,7 @@ func NewStagedSync(
 				}
 				txPoolServer.TxFetcher.Start()
 			}
-		}), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
+		}), stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, cfg.EnabledIssuance), stagedsync.StageFinishCfg(db, tmpdir, logger), false),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil

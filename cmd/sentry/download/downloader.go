@@ -304,8 +304,15 @@ func RecvMessage(
 		}
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsDecodeError(err) {
-				log.Debug("[RecvMessage] Handling incoming message", "error", err)
+			if rlp.IsInvalidRLPError(err) {
+				log.Debug("[RecvMessage] Kick peer for invalid RLP", "error", err)
+				outreq := proto_sentry.PenalizePeerRequest{
+					PeerId:  req.PeerId,
+					Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				}
+				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+					log.Error("Could not send penalty", "err", err1)
+				}
 			} else {
 				log.Warn("[RecvMessage] Handling incoming message", "error", err)
 			}
@@ -515,9 +522,12 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 		return fmt.Errorf("decode 3 NewBlockMsg: %w", err)
 	}
 	// Parse the entire request from scratch
-	var request eth.NewBlockPacket
-	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
+	request := &eth.NewBlockPacket{}
+	if err := rlp.DecodeBytes(inreq.Data, request); err != nil {
 		return fmt.Errorf("decode 4 NewBlockMsg: %w", err)
+	}
+	if err := request.SanityCheck(); err != nil {
+		return fmt.Errorf("newBlock66: %w", err)
 	}
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {

@@ -2,16 +2,19 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -229,11 +232,18 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
-	var allBlocks roaring64.Bitmap
+	var (
+		allBlocks roaring64.Bitmap
+		blocksTo  roaring64.Bitmap
+	)
+
 	for _, addr := range req.FromAddress {
 		if addr != nil {
 			b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
 			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
 				stream.WriteNil()
 				return err
 			}
@@ -241,17 +251,31 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
+
 	for _, addr := range req.ToAddress {
 		if addr != nil {
 			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
 			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
 				stream.WriteNil()
 				return err
 			}
-			allBlocks.Or(b)
+			blocksTo.Or(b)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
+
+	switch req.Mode {
+	case TraceFilterModeIntersection:
+		allBlocks.And(&blocksTo)
+	case TraceFilterModeUnion:
+		fallthrough
+	default:
+		allBlocks.Or(&blocksTo)
+	}
+
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
 		allBlocks.AddRange(fromBlock, toBlock+1)
@@ -473,6 +497,16 @@ type TraceFilterRequest struct {
 	ToBlock     *hexutil.Uint64   `json:"toBlock"`
 	FromAddress []*common.Address `json:"fromAddress"`
 	ToAddress   []*common.Address `json:"toAddress"`
+	Mode        TraceFilterMode   `json:"mode"`
 	After       *uint64           `json:"after"`
 	Count       *uint64           `json:"count"`
 }
+
+type TraceFilterMode string
+
+const (
+	// Default mode for TraceFilter. Unions results referred to addresses from FromAddress or ToAddress
+	TraceFilterModeUnion = "union"
+	// IntersectionMode retrives results referred to addresses provided both in FromAddress and ToAddress
+	TraceFilterModeIntersection = "intersection"
+)

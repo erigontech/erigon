@@ -76,8 +76,7 @@ var Defaults = Config{
 	NetworkID: 1,
 	Prune:     prune.DefaultMode,
 	Miner: params.MiningConfig{
-		GasFloor: 8000000,
-		GasCeil:  8000000,
+		GasLimit: 30_000_000,
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
@@ -179,6 +178,9 @@ type Config struct {
 
 	// SyncLoopThrottle sets a minimum time between staged loop iterations
 	SyncLoopThrottle time.Duration
+
+	// Enable WatchTheBurn stage
+	EnabledIssuance bool
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {

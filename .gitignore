@@ -71,5 +71,4 @@ docker-compose.dev.yml
 libmdbx/build/*
 tests/testdata/*
 
-/tx_analysis/scetches
-/tx_analysis/__main.go
+go.work

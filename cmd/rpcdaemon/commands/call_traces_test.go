@@ -3,14 +3,19 @@ package commands
 import (
 	"bytes"
 	"context"
+	"sync"
 	"testing"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
@@ -175,4 +180,88 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
 	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, buf.Bytes()))
+}
+
+func TestFilterAddressIntersection(t *testing.T) {
+	m := stages.Mock(t)
+	defer m.DB.Close()
+
+	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), false), m.DB, &cli.Flags{})
+
+	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
+
+	once := new(sync.Once)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *core.BlockGen) {
+		once.Do(func() { block.SetCoinbase(common.Address{4}) })
+
+		var rcv common.Address
+		if i < 5 {
+			rcv = toAddress1
+		} else if i < 10 {
+			rcv = toAddress2
+		} else {
+			rcv = other
+		}
+
+		signer := types.LatestSigner(m.ChainConfig)
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(m.Address), rcv, new(uint256.Int), 21000, new(uint256.Int), nil), *signer, m.Key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		block.AddTx(txn)
+	}, false /* intemediateHashes */)
+	require.NoError(t, err, "generate chain")
+
+	err = m.InsertChain(chain)
+	require.NoError(t, err, "inserting chain")
+
+	fromBlock, toBlock := uint64(1), uint64(15)
+	t.Run("second", func(t *testing.T) {
+		stream := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(stream)
+
+		traceReq1 := TraceFilterRequest{
+			FromBlock:   (*hexutil.Uint64)(&fromBlock),
+			ToBlock:     (*hexutil.Uint64)(&toBlock),
+			FromAddress: []*common.Address{&m.Address, &other},
+			ToAddress:   []*common.Address{&m.Address, &toAddress2},
+			Mode:        TraceFilterModeIntersection,
+		}
+		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+			t.Fatalf("trace_filter failed: %v", err)
+		}
+		assert.Equal(t, []int{6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
+	})
+	t.Run("first", func(t *testing.T) {
+		stream := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(stream)
+
+		traceReq1 := TraceFilterRequest{
+			FromBlock:   (*hexutil.Uint64)(&fromBlock),
+			ToBlock:     (*hexutil.Uint64)(&toBlock),
+			FromAddress: []*common.Address{&m.Address, &other},
+			ToAddress:   []*common.Address{&toAddress1, &m.Address},
+			Mode:        TraceFilterModeIntersection,
+		}
+		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+			t.Fatalf("trace_filter failed: %v", err)
+		}
+		assert.Equal(t, []int{1, 2, 3, 4, 5}, blockNumbersFromTraces(t, stream.Buffer()))
+	})
+	t.Run("empty", func(t *testing.T) {
+		stream := jsoniter.ConfigDefault.BorrowStream(nil)
+		defer jsoniter.ConfigDefault.ReturnStream(stream)
+
+		traceReq1 := TraceFilterRequest{
+			FromBlock:   (*hexutil.Uint64)(&fromBlock),
+			ToBlock:     (*hexutil.Uint64)(&toBlock),
+			ToAddress:   []*common.Address{&other},
+			FromAddress: []*common.Address{&toAddress2, &toAddress1, &other},
+			Mode:        TraceFilterModeIntersection,
+		}
+		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
+			t.Fatalf("trace_filter failed: %v", err)
+		}
+		require.Empty(t, blockNumbersFromTraces(t, stream.Buffer()))
+	})
 }
