@@ -307,6 +307,12 @@ const (
 	StateStorage    = "StateStorage"
 	StateCode       = "StateCode"
 	StateCommitment = "StateCommitment"
+
+	// BOR
+
+	BorReceipts = "BorReceipt"
+	BorTxLookup = "BlockBorTransactionLookup"
+	BorSeparate = "BorSeparate"
 )
 
 // Keys
@@ -393,6 +399,9 @@ var ChaindataTables = []string{
 	StateStorage,
 	StateCode,
 	StateCommitment,
+	BorReceipts,
+	BorTxLookup,
+	BorSeparate,
 }
 
 const (
