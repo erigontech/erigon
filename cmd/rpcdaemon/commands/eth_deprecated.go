@@ -8,12 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
-// GetCompilers implements eth_getCompilers. Returns a list of available compilers in the client.
-// Deprecated: This function will be removed in the future.
-func (api *APIImpl) GetCompilers(_ context.Context) ([]string, error) {
-	return []string{}, fmt.Errorf(NotAvailableDeprecated, "eth_getCompilers")
-}
-
 // CompileLLL implements eth_compileLLL. Returns compiled LLL code.
 // Deprecated: This function will be removed in the future.
 func (api *APIImpl) CompileLLL(_ context.Context, _ string) (hexutil.Bytes, error) {
