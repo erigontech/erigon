@@ -143,15 +143,16 @@ func HeadersPOS(
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	var payloadMessage privateapi.PayloadMessage
+	var forkChoiceMessage privateapi.ForkChoiceMessage
+	forkChoiceInsteadOfNewPayload := false
+
 	select {
 	case <-ctx.Done():
 		return nil
 	case <-cfg.hd.SkipCycleHack:
 		return nil
-	case <-cfg.forkChoiceCh:
-		// TODO(yperbasis): implement properly
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-		return nil
+	case forkChoiceMessage = <-cfg.forkChoiceCh:
+		forkChoiceInsteadOfNewPayload = true
 	case payloadMessage = <-cfg.newPayloadCh:
 	}
 
@@ -159,6 +160,38 @@ func HeadersPOS(
 
 	cfg.hd.ClearPendingPayloadStatus()
 
+	if forkChoiceInsteadOfNewPayload {
+		handleForkChoice(cfg, &forkChoiceMessage)
+	} else {
+		if err := handleNewPayload(s, ctx, tx, cfg, &payloadMessage); err != nil {
+			return err
+		}
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func handleForkChoice(
+	cfg HeadersCfg,
+	forkChoiceMessage *privateapi.ForkChoiceMessage,
+) {
+	// TODO(yperbasis): implement properly
+	cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+}
+
+func handleNewPayload(
+	s *StageState,
+	ctx context.Context,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	payloadMessage *privateapi.PayloadMessage,
+) error {
 	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
@@ -209,12 +242,6 @@ func HeadersPOS(
 		// We insert raw bodies immediately and skip stage 3. (Stage 2 will not be skipped.)
 		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
 		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
-			return err
-		}
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
