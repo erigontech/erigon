@@ -17,6 +17,7 @@ TurboBor is only available on Testnet (Mumbai) right now (Mainnet testing is in 
 
 
 - [Setup](#build-from-source)
+- [System Requirements](#system-requirements)
 - [Usage](#usage)
     + [How to Start](#how-to-start)
     + [Configurations](#how-to-config)
@@ -35,7 +36,7 @@ changes but we don't guarantee anything. Things can and will break.
 
 
 ## Build from source
-Building TurboBor requires both a Go (version 1.16 or later) and a C compiler (GCC 10+). You can install them using your favourite package manager. Once the dependencies are installed, run
+Building TurboBor requires both a Go (version 1.17 or later) and a C compiler (GCC 10+). You can install them using your favourite package manager. Once the dependencies are installed, run
 
 ```sh
 git clone https://github.com/maticnetwork/turbo-bor
@@ -43,6 +44,14 @@ cd turbo-bor/
 make turbo
 ```
 This will build utilities in `.build/bin/turbo` to run TurboBor
+
+## System Requirements
+ 
+Storage (Recommended) on a single partition:
+- Mumbai - 1TB
+- Mainnet - 4TB
+
+RAM: 16GB, 64-bit architecture, [Golang version >= 1.17](https://golang.org/doc/install), GCC 10+
 
 ## Usage
 
