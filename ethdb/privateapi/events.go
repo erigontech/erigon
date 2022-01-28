@@ -55,6 +55,7 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 func (e *Events) AddLogsSubscription(s LogsSubscription) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	e.logsSubscriptions[len(e.logsSubscriptions)] = s
 }
 
 func (e *Events) OnNewHeader(newHeader *types.Header) {

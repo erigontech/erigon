@@ -93,7 +93,8 @@ func TestMockDownloadRequest(t *testing.T) {
 	statusCh := make(chan ExecutionStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, reverseDownloadCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EngineExecutePayloadReply
