@@ -17,6 +17,7 @@ TurboBor is only available on Testnet (Mumbai) right now (Mainnet testing is in 
 
 
 - [Setup](#build-from-source)
+- [System Requirements](#system-requirements)
 - [Usage](#usage)
     + [How to Start](#how-to-start)
     + [Configurations](#how-to-config)
@@ -43,6 +44,14 @@ cd turbo-bor/
 make turbo
 ```
 This will build utilities in `.build/bin/turbo` to run TurboBor
+
+## System Requirements
+ 
+Storage (Recommended) on a single partition:
+- Mumbai - 1TB
+- Mainnet - 4TB
+
+RAM: 16GB, 64-bit architecture, [Golang version >= 1.17](https://golang.org/doc/install), GCC 10+
 
 ## Usage
 
