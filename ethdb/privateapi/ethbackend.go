@@ -273,20 +273,18 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	filterId, filter := s.insertLogsFilter(server)
 	defer s.removeLogsFilter(filterId, filter)
 	// Listen to filter updates and modify the filters, until terminated
-	for {
-		filterReq, recvErr := server.Recv()
-		if recvErr != nil {
-			if recvErr == io.EOF { // termination
-				return nil
-			}
-			return fmt.Errorf("server-side error: %w", recvErr)
-		}
+	var filterReq *remote.LogsFilterRequest
+	var recvErr error
+	for filterReq, recvErr = server.Recv(); recvErr != nil; filterReq, recvErr = server.Recv() {
 		s.updateLogsFilter(filter, filterReq)
+	}
+	if recvErr != nil && recvErr != io.EOF { // termination
+		return fmt.Errorf("receiving log filter request: %w", recvErr)
 	}
 	return nil
 }
 
-func (s *EthBackendServer) distributeLogs(*types.Log) error {
+func (s *EthBackendServer) distributeLogs(types.Logs) error {
 	return nil
 }
 

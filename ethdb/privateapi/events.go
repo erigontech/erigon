@@ -12,7 +12,7 @@ type HeaderSubscription func(*types.Header) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
-type LogsSubscription func(*types.Log) error
+type LogsSubscription func(types.Logs) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
@@ -20,6 +20,7 @@ type Events struct {
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
+	logsSubscriptions         map[int]LogsSubscription
 	lock                      sync.RWMutex
 }
 
@@ -29,6 +30,7 @@ func NewEvents() *Events {
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
+		logsSubscriptions:         map[int]LogsSubscription{},
 	}
 }
 
@@ -71,6 +73,16 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 	for i, sub := range e.pendingLogsSubscriptions {
 		if err := sub(logs); err != nil {
 			delete(e.pendingLogsSubscriptions, i)
+		}
+	}
+}
+
+func (e *Events) OnLogs(logs types.Logs) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for i, sub := range e.logsSubscriptions {
+		if err := sub(logs); err != nil {
+			delete(e.logsSubscriptions, i)
 		}
 	}
 }

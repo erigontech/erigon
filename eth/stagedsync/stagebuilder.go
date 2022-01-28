@@ -13,6 +13,7 @@ import (
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
 	OnNewPendingLogs(types.Logs)
+	OnLogs(types.Logs)
 }
 
 type Notifications struct {
