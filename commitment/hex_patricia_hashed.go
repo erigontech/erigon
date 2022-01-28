@@ -27,7 +27,6 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"golang.org/x/crypto/sha3"
@@ -918,7 +917,7 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	hph.delBitmap[row] = 0
 	if upCell.downHashedLen == 0 {
 		depth = upDepth + 1
-		branchData, err := hph.branchFn(hph.currentKey[:hph.currentKeyLen])
+		branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
 		if err != nil {
 			return err
 		}
@@ -1092,7 +1091,7 @@ func (hph *HexPatriciaHashed) needFolding(hashedKey []byte) bool {
 // until that current key becomes a prefix of hashedKey that we will proccess next
 // (in other words until the needFolding function returns 0)
 func (hph *HexPatriciaHashed) fold() ([]byte, []byte, error) {
-	updateKey := common.Copy(hph.currentKey[:hph.currentKeyLen])
+	updateKey := hexToCompact(hph.currentKey[:hph.currentKeyLen])
 	if hph.activeRows == 0 {
 		return nil, nil, fmt.Errorf("cannot fold - no active rows")
 	}
@@ -1685,4 +1684,46 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 		}
 	}
 	return branchNodeUpdates, nil
+}
+
+func hexToCompact(key []byte) []byte {
+	zeroByte, keyPos, keyLen := makeCompactZeroByte(key)
+	bufLen := keyLen/2 + 1 // always > 0
+	buf := make([]byte, bufLen)
+	buf[0] = zeroByte
+	return decodeKey(key[keyPos:], buf)
+}
+
+func makeCompactZeroByte(key []byte) (compactZeroByte byte, keyPos, keyLen int) {
+	keyLen = len(key)
+	if hasTerm(key) {
+		keyLen--
+		compactZeroByte = 0x20
+	}
+	var firstNibble byte
+	if len(key) > 0 {
+		firstNibble = key[0]
+	}
+	if keyLen&1 == 1 {
+		compactZeroByte |= 0x10 | firstNibble // Odd: (1<<4) + first nibble
+		keyPos++
+	}
+
+	return
+}
+
+func decodeKey(key, buf []byte) []byte {
+	keyLen := len(key)
+	if hasTerm(key) {
+		keyLen--
+	}
+	for keyIndex, bufIndex := 0, 1; keyIndex < keyLen; keyIndex, bufIndex = keyIndex+2, bufIndex+1 {
+		if keyIndex == keyLen-1 {
+			buf[bufIndex] = buf[bufIndex] & 0x0f
+		} else {
+			buf[bufIndex] = key[keyIndex+1]
+		}
+		buf[bufIndex] |= key[keyIndex] << 4
+	}
+	return buf
 }

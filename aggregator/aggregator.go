@@ -515,9 +515,6 @@ func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, tx kv.RwTx
 			return true
 		}
 		dbPrefix := item.k
-		if len(dbPrefix) == 0 {
-			dbPrefix = []byte{16}
-		}
 		prevV, err := tx.GetOne(table, dbPrefix)
 		if err != nil {
 			e = err
@@ -1288,9 +1285,6 @@ func (i *CommitmentItem) Less(than btree.Item) bool {
 func (w *Writer) branchFn(prefix []byte) ([]byte, error) {
 	// Look in the summary table first
 	dbPrefix := prefix
-	if len(dbPrefix) == 0 {
-		dbPrefix = []byte{16}
-	}
 	v, err := w.tx.GetOne(kv.StateCommitment, dbPrefix)
 	if err != nil {
 		return nil, err
@@ -1549,9 +1543,6 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 	for prefixStr, branchNodeUpdate := range branchNodeUpdates {
 		prefix := []byte(prefixStr)
 		dbPrefix := prefix
-		if len(dbPrefix) == 0 {
-			dbPrefix = []byte{16}
-		}
 		prevV, err := w.tx.GetOne(kv.StateCommitment, dbPrefix)
 		if err != nil {
 			return nil, err
