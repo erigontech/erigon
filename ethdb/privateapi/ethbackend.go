@@ -284,7 +284,7 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 	return nil
 }
 
-func (s *EthBackendServer) distributeLogs(types.Logs) error {
+func (s *EthBackendServer) distributeLogs(logs []remote.SubscribeLogsReply) error {
 	return nil
 }
 

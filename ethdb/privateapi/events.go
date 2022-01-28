@@ -3,6 +3,7 @@ package privateapi
 import (
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -12,7 +13,7 @@ type HeaderSubscription func(*types.Header) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
-type LogsSubscription func(types.Logs) error
+type LogsSubscription func([]remote.SubscribeLogsReply) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
@@ -78,7 +79,7 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 	}
 }
 
-func (e *Events) OnLogs(logs types.Logs) {
+func (e *Events) OnLogs(logs []remote.SubscribeLogsReply) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for i, sub := range e.logsSubscriptions {

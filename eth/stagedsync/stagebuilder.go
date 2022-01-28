@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -13,7 +14,7 @@ import (
 type ChainEventNotifier interface {
 	OnNewHeader(*types.Header)
 	OnNewPendingLogs(types.Logs)
-	OnLogs(types.Logs)
+	OnLogs([]remote.SubscribeLogsReply)
 }
 
 type Notifications struct {
