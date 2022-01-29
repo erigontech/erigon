@@ -263,7 +263,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		log.Trace("Creating consensus db", "path", borDbPath)
 		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 		// Skip the compatibility check, until we have a schema in erigon-lib
 		borDb = borKv
