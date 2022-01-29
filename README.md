@@ -1,38 +1,37 @@
-# TurboBor
+# Erigon
 
-![Forks](https://img.shields.io/github/forks/maticnetwork/turbo-bor?style=social)
-![Stars](https://img.shields.io/github/stars/maticnetwork/turbo-bor?style=social)
-![Languages](https://img.shields.io/github/languages/count/maticnetwork/turbo-bor)
-![Issues](https://img.shields.io/github/issues/maticnetwork/turbo-bor)
-![PRs](https://img.shields.io/github/issues-pr-raw/maticnetwork/turbo-bor)
-![MIT License](https://img.shields.io/github/license/maticnetwork/turbo-bor)
-![contributors](https://img.shields.io/github/contributors-anon/maticnetwork/turbo-bor)
-![size](https://img.shields.io/github/languages/code-size/maticnetwork/turbo-bor)
-![lines](https://img.shields.io/tokei/lines/github/maticnetwork/turbo-bor)
-[![Discord](https://img.shields.io/discord/714888181740339261?color=1C1CE1&label=Polygon%20%7C%20Discord%20%F0%9F%91%8B%20&style=flat-square)](https://discord.gg/zdwkdvMNY2)
-[![Twitter Follow](https://img.shields.io/twitter/follow/0xPolygon.svg?style=social)](https://twitter.com/0xPolygon)
+Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficiency frontier, written in Go.
 
-TurboBor is a Golang implementation of the Matic protocol. It is a fork of [Erigon](https://github.com/ledgerwatch/erigon/) and EVM compabile. For now it only supports Syncing and RPC Calls, Mining is not supported yet!
+![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
-TurboBor is only available on Testnet (Mumbai) right now (Mainnet testing is in process).
+<!--ts-->
 
-- [Setup](#build-from-source)
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
-  - [How to Start](#how-to-start)
-  - [Configurations](#how-to-config)
-- [RPC Calls](#json-rpc-daemon)
-  - [Build](#build)
-  - [Local DB](#for-local-db)
-  - [Remote DB](#for-remote-db)
-  - [Request](#rpc-request)
-- [Maintenance](#maintenance)
-  - [Rewinding chain](#rewinding-chain)
-  - [Sync Status](#checking-sync-status)
-- [Reporting issues/concerns](#report-issues)
 
-**Disclaimer**: This software is currently a tech preview. We will do our best to keep it stable and make no breaking
-changes but we don't guarantee anything. Things can and will break.
+  - [Getting Started](#getting-started)
+  - [Testnets](#testnets)
+  - [Mining](#mining)
+  - [Windows](#windows)
+  - [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
+  - [Beacon Chain](#beacon-chain)
+  - [Dev Chain](#dev-chain)
+
+- [Key features](#key-features)
+  - [More Efficient State Storage](#more-efficient-state-storage)
+  - [Faster Initial Sync](#faster-initial-sync)
+  - [JSON-RPC daemon](#json-rpc-daemon)
+  - [Run all components by docker-compose](#run-all-components-by-docker-compose)
+  - [Grafana dashboard](#grafana-dashboard)
+- [FAQ](#faq)
+- [Getting in touch](#getting-in-touch)
+  - [Erigon Discord Server](#erigon-discord-server)
+  - [Reporting security issues/concerns](#reporting-security-issues-concerns)
+  - [Team](#team)
+- [Known issues](#known-issues)
+  - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
+
+<!--te-->
 
 NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 
@@ -71,12 +70,11 @@ If you would like to give Erigon a try, but do not have spare 2Tb on your drive,
 of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 
 ```sh
-git clone https://github.com/maticnetwork/turbo-bor
-cd turbo-bor/
-make turbo
+git clone --recurse-submodules -j8 https://github.com/ledgerwatch/erigon.git
+cd erigon
+make erigon
+./build/bin/erigon --datadir goerli --chain goerli
 ```
-
-This will build utilities in `.build/bin/turbo` to run TurboBor
 
 Please note the `--datadir` option that allows you to store Erigon files in a non-default location, in this example,
 in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
@@ -155,75 +153,111 @@ If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RP
 Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
 where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC daemon.
 
-## Usage
+Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
 
-### How to Start
+### Dev Chain
 
-To start TurboBor, run
+<code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
-```sh
-turbo-bor --chain=mumbai
-```
+# Key features
 
-- Use `chain=mumbai` for Mumbai testnet (Working)
-- Use `chain=bor-mainnet` for Mainnet (Not properly tested yet)
+<code>🔬 See more
+detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It
+is being updated on recurring basis.</code>
 
-### How to Config
+### More Efficient State Storage
 
-- If you want to store TurboBor files in a non-default location use `--datadir`
+**Flat KV storage.** Erigon uses a key-value database and storing accounts and storage in a simple way.
 
-  ```sh
-  turbo-bor --chain=mumbai --datadir=<your_data_dir>
-  ```
+<code> 🔬 See our detailed DB walkthrough [here](./docs/programmers_guide/db_walkthrough.MD).</code>
 
-- If you are not using local **hiemdall** use `--bor.heimdall=<your heimdall url>` (else by default it will try to connect to `localhost:1317`)
+**Preprocessing**. For some operations, Erigon uses temporary files to preprocess data before inserting it into the main
+DB. That reduces write amplification and DB inserts are orders of magnitude quicker.
 
-  ```sh
-  turbo-bor --chain=mumbai --bor.heimdall=<your heimdall url> --datadir=<your_data_dir>
-  ```
+<code> 🔬 See our detailed ETL explanation [here](https://github.com/ledgerwatch/erigon-lib/blob/main/etl/README.md).</code>
 
-  Example if you want to connect to Mumbai use `--bor.heimdall=https://heimdall.api.matic.today`
+**Plain state**.
 
-## JSON-RPC daemon
+**Single accounts/state trie**. Erigon uses a single Merkle trie for both accounts and the storage.
 
-In TurboBor unlike Bor the RPC calls are extracted out of the main binary into a separate daemon. This daemon can use both local or
-remote DBs. That means, that this RPC daemon doesn't have to be running on the same machine as the main TurboBor binary or
+### Faster Initial Sync
+
+Erigon uses a rearchitected full sync algorithm from
+[Go-Ethereum](https://github.com/ethereum/go-ethereum) that is split into
+"stages".
+
+<code>🔬 See more detailed explanation in the [Staged Sync Readme](/eth/stagedsync/README.md)</code>
+
+It uses the same network primitives and is compatible with regular go-ethereum nodes that are using full sync, you do
+not need any special sync capabilities for Erigon to sync.
+
+When reimagining the full sync, with focus on batching data together and minimize DB overwrites. That makes it possible
+to sync Ethereum mainnet in under 2 days if you have a fast enough network connection and an SSD drive.
+
+Examples of stages are:
+
+- Downloading headers;
+
+- Downloading block bodies;
+
+- Recovering senders' addresses;
+
+- Executing blocks;
+
+- Validating root hashes and building intermediate hashes for the state Merkle trie;
+
+- [...]
+
+### JSON-RPC daemon
+
+In Erigon RPC calls are extracted out of the main binary into a separate daemon. This daemon can use both local or
+remote DBs. That means, that this RPC daemon doesn't have to be running on the same machine as the main Erigon binary or
 it can run from a snapshot of a database for read-only calls.
 
-See [RPC-Daemon docs](./cmd/rpcdaemon/README.md) for more details.
+<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
 
-### Build
+#### **For local DB**
 
-To build RPC daemon, run
-
-```sh
-make rpcdaemon
-```
-
-### For local DB
-
-This is only possible if RPC daemon runs on the same computer as TurboBor. This mode uses shared memory access to the
-database of TurboBor, which has better performance than accessing via TPC socket.
+This is only possible if RPC daemon runs on the same computer as Erigon. This mode uses shared memory access to the
+database of Erigon, which has better performance than accessing via TPC socket (see "For remote DB" section below).
 Provide both `--datadir` and `--private.api.addr` options:
 
 ```sh
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,web3,net,debug,trace,txpool,bor
+make erigon
+./build/bin/erigon --private.api.addr=localhost:9090
+make rpcdaemon
+./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
-### **For remote DB**
+#### **For remote DB**
 
-This works regardless of whether RPC daemon is on the same computer with TurboBor, or on a different one. They use TPC
-socket connection to pass data between them.
-
-To use this mode, you have to give `--private.api.addr=<private_ip>:9090` while starting TurboBor where `private_ip` is the IP Address of system in which the TurboBor is running.
-
-Run TurboBor in one terminal window
+This works regardless of whether RPC daemon is on the same computer with Erigon, or on a different one. They use TPC
+socket connection to pass data between them. To use this mode, run Erigon in one terminal window
 
 ```sh
-turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datadir=<your_data_dir> --private.api.addr=<private_ip>:9090
+make erigon
+./build/bin/erigon --private.api.addr=localhost:9090
+make rpcdaemon
+./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
-On other Terminal, run
+**gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+
+Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go)
+, [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):
+
+For a details on the implementation status of each
+command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
+
+### Run all components by docker-compose
+
+Next command starts: Erigon on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
+
+```sh
+make docker-compose
+# or
+XDG_DATA_HOME=/preferred/data/folder make docker-compose
+```
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
 and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
@@ -339,84 +373,61 @@ Core contributors (in alpabetical order of first names):
 
 - Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
 
-The daemon should respond with something like:
+- Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
 
-`INFO [date-time] HTTP endpoint opened url=localhost:8545...`
+Thanks to:
 
-### RPC Request
+- All contributors of Erigon
 
-You can now make RPC request using the following curl command:
+- All contributors of Go-Ethereum
 
-```sh
-curl localhost:8545 -X POST --data '{"jsonrpc":"2.0","method":"bor_getSnapshot","params":["0x400"],"id":1}' -H "Content-Type: application/json"
-```
+- Our special respect and graditude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
+  up the great job!
 
-## Maintenance
+Happy testing! 🥤
 
-### Rewinding Chain
+# Known issues
 
-- In case of any bad block or header the chain will rewind itself to the last known good state and will start syncing from there.
-- Still if you want to rewind a specific stage of the chain, You can use the [Integration](https://github.com/maticnetwork/turbo-bor/tree/master/cmd/integration) tool.
+### `htop` shows incorrect memory usage
 
-Build Integration tool using:
+Erigon's internal DB (MDBX) using `MemoryMap` - when OS does manage all `read, write, cache` operations instead of
+Application
+([linux](https://linux-kernel-labs.github.io/refs/heads/master/labs/memory_mapping.html)
+, [windows](https://docs.microsoft.com/en-us/windows/win32/memory/file-mapping))
 
-```sh
-make integration
-```
+`htop` on column `res` shows memory of "App + OS used to hold page cache for given App", but it's not informative,
+because if `htop` says that app using 90% of memory you still can run 3 more instances of app on the same machine -
+because most of that `90%` is "OS pages cache".  
+OS automatically free this cache any time it needs memory. Smaller "page cache size" may not impact performance of
+Erigon at all.
 
-To check current state of the chain
+Next tools show correct memory usage of Erigon:
 
-```sh
-./build/bin/integration print_stages --datadir=<your_datadir>
-```
+- `vmmap -summary PID | grep -i "Physical footprint"`. Without `grep` you can see details
+  - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
+    shows OS pages cache size.
+- `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
+  browser `localhost:3000`, credentials `admin/admin`)
+- `cat /proc/<PID>/smaps`
 
-To rewind state stages N block backwards
+Erigon uses ~4Gb of RAM during genesis sync and ~1Gb during normal work. OS pages cache can utilize unlimited amount of
+memory.
 
-```sh
-/build/bin/integration state_stages --datadir=<your_datadir> --unwind=N
-```
+**Warning:** Multiple instances of Erigon on same machine will touch Disk concurrently, it impacts performance - one of
+main Erigon optimisations: "reduce Disk random access".
+"Blocks Execution stage" still does much random reads - this is reason why it's slowest stage. We do not recommend run
+multiple genesis syncs on same Disk. If genesis sync passed, then it's fine to run multiple Erigon on same Disk.
 
-To rewind block bodies by N block backwards
+### Blocks Execution is slow on cloud-network-drives
 
-```sh
-./build/bin/integration stage_bodies --datadir=<your_datadir> --unwind=N
-```
+Please read https://github.com/ledgerwatch/erigon/issues/1516#issuecomment-811958891
+In short: network-disks are bad for blocks execution - because blocks execution reading data from db non-parallel
+non-batched way.
 
-To rewind block headers by N block backwards
+### Filesystem's background features are expensive
 
-```sh
-./build/bin/integration stage_headers --datadir=<your_datadir> --unwind=N
-```
+For example: btrfs's autodefrag option - may increase write IO 100x times
 
-You can find more examples in the [Integration](https://github.com/maticnetwork/turbo-bor/tree/master/cmd/integration) tool.
+### Gnome Tracker can kill Erigon
 
-### Checking Sync Status
-
-To check sync status you must have an RPC Daemon up and running, Then use the below command:
-
-```sh
-curl localhost:8545 -X POST --data '{"jsonrpc":"2.0","method":"eth_syncing","id":1}' -H "Content-Type: application/json"
-```
-
-If you get
-
-```
-{"jsonrpc":"2.0","id":1,"result":false}
-```
-
-It means that the chain is synced.
-
-OR
-
-It will give you something like this
-
-```
-{"jsonrpc":"2.0","id":1,"result":{"currentBlock":"0x0","highestBlock":"0x165b6ad","stages":[{"stage_name":"Headers","block_number":"0x165b6ad"},{"stage_name":"BlockHashes","block_number":"0x165b6ad"},{"stage_name":"Bodies","block_number":"0x165b6ad"},{"stage_name":"Senders","block_number":"0x165b6ad"},{"stage_name":"Execution","block_number":"0x112bc2c"},{"stage_name":"Translation","block_number":"0x0"},{"stage_name":"HashState","block_number":"0x0"},{"stage_name":"IntermediateHashes","block_number":"0x0"},{"stage_name":"AccountHistoryIndex","block_number":"0x0"},{"stage_name":"StorageHistoryIndex","block_number":"0x0"},{"stage_name":"LogIndex","block_number":"0x0"},{"stage_name":"CallTraces","block_number":"0x0"},{"stage_name":"TxLookup","block_number":"0x0"},{"stage_name":"TxPool","block_number":"0x0"},{"stage_name":"Finish","block_number":"0x0"}]}
-```
-
-where detail of each stage is given with the block number at which it is at.
-
-## Report Issues
-
-- Feel free to Report any issues, Create an issue on [GitHub](https://github.com/maticnetwork/turbo-bor/issues/new/choose)
-- Join Polygon community [on Discord](https://discord.gg/zdwkdvMNY2)
+[Gnome Tracker](https://wiki.gnome.org/Projects/Tracker) - detecting miners and kill them.
