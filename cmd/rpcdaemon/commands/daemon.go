@@ -92,11 +92,11 @@ func APIList(ctx context.Context, db kv.RoDB, borDb kv.RoDB,
 				Service:   DBAPI(dbImpl),
 				Version:   "1.0",
 			})
-		case "engine":
+		case "erigon":
 			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "engine",
+				Namespace: "erigon",
 				Public:    true,
-				Service:   EngineAPI(engineImpl),
+				Service:   ErigonAPI(erigonImpl),
 				Version:   "1.0",
 			})
 		case "starknet":
@@ -104,6 +104,13 @@ func APIList(ctx context.Context, db kv.RoDB, borDb kv.RoDB,
 				Namespace: "starknet",
 				Public:    true,
 				Service:   StarknetAPI(starknetImpl),
+				Version:   "1.0",
+			})
+		case "engine":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "bor",
+				Public:    true,
+				Service:   EngineAPI(engineImpl),
 				Version:   "1.0",
 			})
 		case "bor":
