@@ -334,7 +334,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
 	input1 := st.state.GetBalance(st.msg.From())
-	input2 := st.state.GetBalance(st.evm.Context.Coinbase)
+	input2 := st.state.GetBalance(st.evm.Context().Coinbase)
 	input1Big := input1.ToBig()
 	input2Big := input2.ToBig()
 
@@ -424,11 +424,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip.ToBig())
 	if london {
-		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context.BlockNumber))
-		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
+		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
 		st.state.AddBalance(burntContractAddress, burnAmount)
 	}
-	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
+	st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 	output1 := new(big.Int).SetBytes(input1Big.Bytes())
 	output2 := new(big.Int).SetBytes(input2Big.Bytes())
 
@@ -438,7 +438,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		st.state,
 
 		msg.From(),
-		st.evm.Context.Coinbase,
+		st.evm.Context().Coinbase,
 
 		amount,
 		input1Big,
