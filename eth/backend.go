@@ -218,7 +218,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		consensusConfig = &config.Aura
 	} else if chainConfig.Parlia != nil {
 		consensusConfig = &config.Parlia
-	}else if chainConfig.Bor != nil {
+	} else if chainConfig.Bor != nil {
 		consensusConfig = &config.Bor
 	} else {
 		consensusConfig = &config.Ethash
