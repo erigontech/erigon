@@ -67,8 +67,11 @@ import (
 //    the item last changed, but it is guaranteed to find correct element in the Transient mapping of part 2
 
 type Aggregator struct {
-	diffDir         string // Directory where the state diff files are stored
-	byEndBlock      *btree.BTree
+	diffDir         string              // Directory where the state diff files are stored
+	accountsFiles   *btree.BTree        // tree of account files, sorted by endBlock of each file
+	codeFiles       *btree.BTree        // tree of code files, sorted by endBlock of each file
+	storageFiles    *btree.BTree        // tree of storage files, sorted by endBlock of each file
+	commitmentFiles *btree.BTree        // tree of commitment files, sorted by endBlock of each file
 	unwindLimit     uint64              // How far the chain may unwind
 	aggregationStep uint64              // How many items (block, but later perhaps txs or changes) are required to form one state diff file
 	changesBtree    *btree.BTree        // btree of ChangesItem
@@ -469,7 +472,7 @@ func buildIndex(datPath, idxPath, tmpDir string, count int) (*compress.Decompres
 				return nil, nil, err
 			}
 			// Skip value
-			word, pos = g.Next(word[:0])
+			pos = g.Skip()
 		}
 		if err = rs.Build(); err != nil {
 			return nil, nil, err
@@ -617,7 +620,6 @@ func (c *Changes) produceChangeSets(datPath, idxPath string) error {
 		if err = c.rewind(); err != nil {
 			return fmt.Errorf("produceChangeSets rewind2: %w", err)
 		}
-		word := make([]byte, 0, 256)
 		var txKey = make([]byte, 8, 60)
 		var pos, prevPos uint64
 		var txNum uint64
@@ -626,7 +628,7 @@ func (c *Changes) produceChangeSets(datPath, idxPath string) error {
 			binary.BigEndian.PutUint64(txKey[:8], txNum)
 			for key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]); b && e == nil; key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]) {
 				txKey = append(txKey[:8], key...)
-				_, pos = g.Next(word[:0])
+				pos = g.Skip()
 				if err = rs.AddKey(txKey, prevPos); err != nil {
 					return fmt.Errorf("produceChangeSets AddKey: %w", e)
 				}
@@ -741,17 +743,10 @@ func (i *ChangesItem) Less(than btree.Item) bool {
 }
 
 type byEndBlockItem struct {
-	startBlock    uint64
-	endBlock      uint64
-	fileCount     int
-	accountsD     *compress.Decompressor
-	accountsIdx   *recsplit.Index
-	storageD      *compress.Decompressor
-	storageIdx    *recsplit.Index
-	codeD         *compress.Decompressor
-	codeIdx       *recsplit.Index
-	commitmentD   *compress.Decompressor
-	commitmentIdx *recsplit.Index
+	startBlock   uint64
+	endBlock     uint64
+	decompressor *compress.Decompressor
+	index        *recsplit.Index
 }
 
 func (i *byEndBlockItem) Less(than btree.Item) bool {
@@ -766,16 +761,19 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		diffDir:         diffDir,
 		unwindLimit:     unwindLimit,
 		aggregationStep: aggregationStep,
-		tracedKeys:      make(map[string]struct{}),
+		tracedKeys:      map[string]struct{}{},
 		keccak:          sha3.NewLegacyKeccak256(),
 		hph:             commitment.NewHexPatriciaHashed(length.Addr, nil, nil, nil),
+		accountsFiles:   btree.New(32),
+		codeFiles:       btree.New(32),
+		storageFiles:    btree.New(32),
+		commitmentFiles: btree.New(32),
 	}
-	byEndBlock := btree.New(32)
-	var closeBtree = true // It will be set to false in case of success at the end of the function
+	var closeStateFiles = true // It will be set to false in case of success at the end of the function
 	defer func() {
 		// Clean up all decompressor and indices upon error
-		if closeBtree {
-			closeFiles(byEndBlock)
+		if closeStateFiles {
+			a.Close()
 		}
 	}()
 	// Scan the diff directory and create the mapping of end blocks to files
@@ -806,79 +804,55 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 			log.Warn("File ignored by aggregator, startBlock > endBlock", "name", name)
 			continue
 		}
-		var item = &byEndBlockItem{fileCount: 1, startBlock: startBlock, endBlock: endBlock}
+		var tree *btree.BTree
+		switch subs[1] {
+		case "accounts":
+			tree = a.accountsFiles
+		case "storage":
+			tree = a.storageFiles
+		case "code":
+			tree = a.codeFiles
+		case "commitment":
+			tree = a.commitmentFiles
+		}
+		var item = &byEndBlockItem{startBlock: startBlock, endBlock: endBlock}
 		var foundI *byEndBlockItem
-		byEndBlock.AscendGreaterOrEqual(&byEndBlockItem{startBlock: endBlock, endBlock: endBlock}, func(i btree.Item) bool {
+		tree.AscendGreaterOrEqual(&byEndBlockItem{startBlock: endBlock, endBlock: endBlock}, func(i btree.Item) bool {
 			it := i.(*byEndBlockItem)
 			if it.endBlock == endBlock {
 				foundI = it
 			}
 			return false
 		})
-		if foundI == nil {
-			byEndBlock.ReplaceOrInsert(item)
-		} else if foundI.startBlock > startBlock {
-			byEndBlock.ReplaceOrInsert(item)
-		} else if foundI.startBlock == startBlock {
-			foundI.fileCount++
+		if foundI == nil || foundI.startBlock > startBlock {
+			tree.ReplaceOrInsert(item)
 		}
 	}
-	// Check for overlaps and holes while moving items out of temporary btree
-	a.byEndBlock = btree.New(32)
-	var minStart uint64 = math.MaxUint64
-	byEndBlock.Descend(func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
-		if item.startBlock < minStart {
-			if item.endBlock >= minStart {
-				err = fmt.Errorf("overlap of state files [%d-%d] with %d", item.startBlock, item.endBlock, minStart)
-				return false
-			}
-			if minStart != math.MaxUint64 && item.endBlock+1 != minStart {
-				err = fmt.Errorf("hole in state files [%d-%d]", item.endBlock, minStart)
-				return false
-			}
-			if item.fileCount != 8 {
-				err = fmt.Errorf("missing state files for interval [%d-%d]", item.startBlock, item.endBlock)
-				return false
-			}
-			minStart = item.startBlock
-			a.byEndBlock.ReplaceOrInsert(item)
-		}
-		return true
-	})
-	if err != nil {
+	// Check for overlaps and holes
+	if err := checkOverlaps("accounts", a.accountsFiles); err != nil {
 		return nil, err
 	}
-	a.byEndBlock.Ascend(func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
-		if item.accountsD, err = compress.NewDecompressor(path.Join(diffDir, fmt.Sprintf("accounts.%d-%d.dat", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.accountsIdx, err = recsplit.OpenIndex(path.Join(diffDir, fmt.Sprintf("accounts.%d-%d.idx", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.codeD, err = compress.NewDecompressor(path.Join(diffDir, fmt.Sprintf("code.%d-%d.dat", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.codeIdx, err = recsplit.OpenIndex(path.Join(diffDir, fmt.Sprintf("code.%d-%d.idx", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.storageD, err = compress.NewDecompressor(path.Join(diffDir, fmt.Sprintf("storage.%d-%d.dat", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.storageIdx, err = recsplit.OpenIndex(path.Join(diffDir, fmt.Sprintf("storage.%d-%d.idx", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.commitmentD, err = compress.NewDecompressor(path.Join(diffDir, fmt.Sprintf("commitment.%d-%d.dat", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		if item.commitmentIdx, err = recsplit.OpenIndex(path.Join(diffDir, fmt.Sprintf("commitment.%d-%d.idx", item.startBlock, item.endBlock))); err != nil {
-			return false
-		}
-		return true
-	})
-	if err != nil {
+	if err := checkOverlaps("storage", a.storageFiles); err != nil {
 		return nil, err
+	}
+	if err := checkOverlaps("code", a.codeFiles); err != nil {
+		return nil, err
+	}
+	if err := checkOverlaps("commitment", a.commitmentFiles); err != nil {
+		return nil, err
+	}
+	// Open decompressor and index files for all items in all trees
+	if err := openFiles("accounts", diffDir, a.accountsFiles); err != nil {
+		return nil, fmt.Errorf("opening accounts state files: %w", err)
+	}
+	if err := openFiles("storage", diffDir, a.storageFiles); err != nil {
+		return nil, fmt.Errorf("opening storage state files: %w", err)
+	}
+	if err := openFiles("code", diffDir, a.codeFiles); err != nil {
+		return nil, fmt.Errorf("opening code state files: %w", err)
+	}
+	if err := openFiles("commitment", diffDir, a.commitmentFiles); err != nil {
+		return nil, fmt.Errorf("opening commitment state files: %w", err)
 	}
 	a.changesBtree = btree.New(32)
 	re = regexp.MustCompile(`(accounts|storage|code|commitment).(keys|before|after).([0-9]+)-([0-9]+).chg`)
@@ -922,7 +896,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		}
 	}
 	// Check for holes in change files
-	minStart = math.MaxUint64
+	minStart := uint64(math.MaxUint64)
 	a.changesBtree.Descend(func(i btree.Item) bool {
 		item := i.(*ChangesItem)
 		if item.startBlock < minStart {
@@ -948,13 +922,19 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 	if err != nil {
 		return nil, err
 	}
-	if lastStateI := a.byEndBlock.Max(); lastStateI != nil {
-		item := lastStateI.(*byEndBlockItem)
-		if minStart != math.MaxUint64 && item.endBlock+1 != minStart {
-			return nil, fmt.Errorf("hole or overlap between state files and change files [%d-%d]", item.endBlock, minStart)
-		}
+	if err = checkOverlapWithMinStart("accounts", a.accountsFiles, minStart); err != nil {
+		return nil, err
 	}
-	closeBtree = false
+	if err = checkOverlapWithMinStart("storage", a.storageFiles, minStart); err != nil {
+		return nil, err
+	}
+	if err = checkOverlapWithMinStart("code", a.codeFiles, minStart); err != nil {
+		return nil, err
+	}
+	if err = checkOverlapWithMinStart("commitment", a.commitmentFiles, minStart); err != nil {
+		return nil, err
+	}
+	closeStateFiles = false
 	return a, nil
 }
 
@@ -962,58 +942,88 @@ func (a *Aggregator) GenerateChangesets(on bool) {
 	a.changesets = on
 }
 
-func closeFiles(byEndBlock *btree.BTree) {
-	byEndBlock.Ascend(func(i btree.Item) bool {
+func checkOverlaps(treeName string, tree *btree.BTree) error {
+	var minStart uint64 = math.MaxUint64
+	var err error
+	tree.Descend(func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
-		if item.accountsD != nil {
-			item.accountsD.Close()
+		if item.startBlock < minStart {
+			if item.endBlock >= minStart {
+				err = fmt.Errorf("overlap of %s state files [%d-%d] with %d", treeName, item.startBlock, item.endBlock, minStart)
+				return false
+			}
+			if minStart != math.MaxUint64 && item.endBlock+1 != minStart {
+				err = fmt.Errorf("hole in %s state files [%d-%d]", treeName, item.endBlock, minStart)
+				return false
+			}
+			minStart = item.startBlock
 		}
-		if item.accountsIdx != nil {
-			item.accountsIdx.Close()
+		return true
+	})
+	return err
+}
+
+func openFiles(treeName string, diffDir string, tree *btree.BTree) error {
+	var err error
+	tree.Ascend(func(i btree.Item) bool {
+		item := i.(*byEndBlockItem)
+		if item.decompressor, err = compress.NewDecompressor(path.Join(diffDir, fmt.Sprintf("%s.%d-%d.dat", treeName, item.startBlock, item.endBlock))); err != nil {
+			return false
 		}
-		if item.storageD != nil {
-			item.storageD.Close()
+		if item.index, err = recsplit.OpenIndex(path.Join(diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, item.startBlock, item.endBlock))); err != nil {
+			return false
 		}
-		if item.storageIdx != nil {
-			item.storageIdx.Close()
+		return true
+	})
+	return err
+}
+
+func closeFiles(tree *btree.BTree) {
+	tree.Ascend(func(i btree.Item) bool {
+		item := i.(*byEndBlockItem)
+		if item.decompressor != nil {
+			item.decompressor.Close()
 		}
-		if item.codeD != nil {
-			item.codeD.Close()
-		}
-		if item.codeIdx != nil {
-			item.codeIdx.Close()
-		}
-		if item.commitmentD != nil {
-			item.commitmentD.Close()
-		}
-		if item.commitmentIdx != nil {
-			item.commitmentIdx.Close()
+		if item.index != nil {
+			item.index.Close()
 		}
 		return true
 	})
 }
 
 func (a *Aggregator) Close() {
-	closeFiles(a.byEndBlock)
+	closeFiles(a.accountsFiles)
+	closeFiles(a.codeFiles)
+	closeFiles(a.storageFiles)
+	closeFiles(a.commitmentFiles)
+}
+
+func checkOverlapWithMinStart(treeName string, tree *btree.BTree, minStart uint64) error {
+	if lastStateI := tree.Max(); lastStateI != nil {
+		item := lastStateI.(*byEndBlockItem)
+		if minStart != math.MaxUint64 && item.endBlock+1 != minStart {
+			return fmt.Errorf("hole or overlap between %s state files and change files [%d-%d]", treeName, item.endBlock, minStart)
+		}
+	}
+	return nil
 }
 
 func (a *Aggregator) readAccount(blockNum uint64, addr []byte, trace bool) []byte {
 	var val []byte
-	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
+	a.accountsFiles.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if trace {
 			fmt.Printf("readAccount %x: search in file [%d-%d]\n", addr, item.startBlock, item.endBlock)
 		}
-		if item.accountsIdx.Empty() {
+		if item.index.Empty() {
 			return true
 		}
-		reader := recsplit.NewIndexReader(item.accountsIdx)
+		reader := recsplit.NewIndexReader(item.index)
 		offset := reader.Lookup(addr)
-		g := item.accountsD.MakeGetter() // TODO Cache in the reader
+		g := item.decompressor.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ := g.Next(nil) // Add special function that just checks the key
-			if bytes.Equal(key, addr) {
+			if keyMatch, _ := g.Match(addr); keyMatch {
 				val, _ = g.Next(nil)
 				if trace {
 					fmt.Printf("readAccount %x: found [%x] in file [%d-%d]\n", addr, val, item.startBlock, item.endBlock)
@@ -1031,21 +1041,20 @@ func (a *Aggregator) readAccount(blockNum uint64, addr []byte, trace bool) []byt
 
 func (a *Aggregator) readCode(blockNum uint64, addr []byte, trace bool) []byte {
 	var val []byte
-	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
+	a.codeFiles.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if trace {
 			fmt.Printf("readCode %x: search in file [%d-%d]\n", addr, item.startBlock, item.endBlock)
 		}
-		if item.codeIdx.Empty() {
+		if item.index.Empty() {
 			return true
 		}
-		reader := recsplit.NewIndexReader(item.codeIdx)
+		reader := recsplit.NewIndexReader(item.index)
 		offset := reader.Lookup(addr)
-		g := item.codeD.MakeGetter() // TODO Cache in the reader
+		g := item.decompressor.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ := g.Next(nil) // Add special function that just checks the key
-			if bytes.Equal(key, addr) {
+			if keyMatch, _ := g.Match(addr); keyMatch {
 				val, _ = g.Next(nil)
 				if trace {
 					fmt.Printf("readCode %x: found [%x] in file [%d-%d]\n", addr, val, item.startBlock, item.endBlock)
@@ -1063,21 +1072,20 @@ func (a *Aggregator) readCode(blockNum uint64, addr []byte, trace bool) []byte {
 
 func (a *Aggregator) readStorage(blockNum uint64, filekey []byte, trace bool) []byte {
 	var val []byte
-	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
+	a.storageFiles.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if trace {
 			fmt.Printf("readStorage %x: search in file [%d-%d]\n", filekey, item.startBlock, item.endBlock)
 		}
-		if item.storageIdx.Empty() {
+		if item.index.Empty() {
 			return true
 		}
-		reader := recsplit.NewIndexReader(item.storageIdx)
+		reader := recsplit.NewIndexReader(item.index)
 		offset := reader.Lookup(filekey)
-		g := item.storageD.MakeGetter() // TODO Cache in the reader
+		g := item.decompressor.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ := g.Next(nil) // Add special function that just checks the key
-			if bytes.Equal(key, filekey) {
+			if keyMatch, _ := g.Match(filekey); keyMatch {
 				val, _ = g.Next(nil)
 				if trace {
 					fmt.Printf("readStorage %x: found [%x] in file [%d-%d]\n", filekey, val, item.startBlock, item.endBlock)
@@ -1095,21 +1103,20 @@ func (a *Aggregator) readStorage(blockNum uint64, filekey []byte, trace bool) []
 
 func (a *Aggregator) readBranchNode(blockNum uint64, filekey []byte, trace bool) []byte {
 	var val []byte
-	a.byEndBlock.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
+	a.commitmentFiles.DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if trace {
 			fmt.Printf("readBranchNode %x: search in file [%d-%d]\n", filekey, item.startBlock, item.endBlock)
 		}
-		if item.commitmentIdx.Empty() {
+		if item.index.Empty() {
 			return true
 		}
-		reader := recsplit.NewIndexReader(item.commitmentIdx)
+		reader := recsplit.NewIndexReader(item.index)
 		offset := reader.Lookup(filekey)
-		g := item.commitmentD.MakeGetter() // TODO Cache in the reader
+		g := item.decompressor.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ := g.Next(nil) // Add special function that just checks the key
-			if bytes.Equal(key, filekey) {
+			if keyMatch, _ := g.Match(filekey); keyMatch {
 				val, _ = g.Next(nil)
 				if trace {
 					fmt.Printf("readBranchNode %x: found [%x] in file [%d-%d]\n", filekey, val, item.startBlock, item.endBlock)
@@ -1806,21 +1813,20 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) error {
 	if k != nil && bytes.HasPrefix(k, addr) {
 		heap.Push(&cp, &CursorItem{file: false, key: common.Copy(k), val: common.Copy(v), c: c, endBlock: w.blockNum})
 	}
-	w.a.byEndBlock.Ascend(func(i btree.Item) bool {
+	w.a.storageFiles.Ascend(func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
-		if item.storageIdx.Empty() {
+		if item.index.Empty() {
 			return true
 		}
-		reader := recsplit.NewIndexReader(item.storageIdx)
+		reader := recsplit.NewIndexReader(item.index)
 		offset := reader.Lookup(addr)
-		g := item.storageD.MakeGetter() // TODO Cache in the reader
+		g := item.decompressor.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		if g.HasNext() {
-			key, _ := g.Next(nil) // Add special function that just checks the key
-			if !bytes.Equal(key, addr) {
+			if keyMatch, _ := g.Match(addr); !keyMatch {
 				return true
 			}
-			g.Next(nil)
+			g.Skip()
 		}
 		if g.HasNext() {
 			key, _ := g.Next(nil)
@@ -1925,6 +1931,81 @@ func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int
 	return nil
 }
 
+func (a *Aggregator) computeAggregation(treeName string, tree *btree.BTree, blockFrom, blockTo uint64, lastItem *byEndBlockItem) (*byEndBlockItem, error) {
+	toAggregate := []*byEndBlockItem{lastItem}
+	lastStart := blockFrom
+	nextSize := blockTo - blockFrom + 1
+	nextEnd := blockFrom - 1
+	nextStart := nextEnd - nextSize + 1
+	var nextI *byEndBlockItem
+	tree.AscendGreaterOrEqual(&byEndBlockItem{startBlock: nextEnd, endBlock: nextEnd}, func(i btree.Item) bool {
+		item := i.(*byEndBlockItem)
+		if item.endBlock == nextEnd {
+			nextI = item
+		}
+		return false
+	})
+	for nextI != nil {
+		if nextI.startBlock != nextStart {
+			break
+		}
+		lastStart = nextStart
+		toAggregate = append(toAggregate, nextI)
+		nextSize *= 2
+		nextEnd = nextStart - 1
+		nextStart = nextEnd - nextSize + 1
+		nextI = nil
+		tree.AscendGreaterOrEqual(&byEndBlockItem{startBlock: nextEnd, endBlock: nextEnd}, func(i btree.Item) bool {
+			item := i.(*byEndBlockItem)
+			if item.endBlock == nextEnd {
+				nextI = item
+			}
+			return false
+		})
+	}
+	if len(toAggregate) == 1 {
+		return nil, nil // Nothinig to aggregate
+	}
+	var item2 = &byEndBlockItem{startBlock: lastStart, endBlock: blockTo}
+	var cp CursorHeap
+	heap.Init(&cp)
+	for _, ag := range toAggregate {
+		g := ag.decompressor.MakeGetter()
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			val, _ := g.Next(nil)
+			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
+		}
+	}
+	var err error
+	if item2.decompressor, item2.index, err = a.mergeIntoStateFile(&cp, 0, treeName, lastStart, blockTo, a.diffDir); err != nil {
+		return nil, fmt.Errorf("mergeIntoStateFile accounts [%d-%d]: %w", lastStart, blockTo, err)
+	}
+	for _, ag := range toAggregate {
+		tree.Delete(ag)
+	}
+	// Close all the memory maps etc
+	for _, ag := range toAggregate {
+		if err = ag.index.Close(); err != nil {
+			return nil, err
+		}
+		if err = ag.decompressor.Close(); err != nil {
+			return nil, err
+		}
+	}
+	// Delete files
+	// TODO: in a non-test version, this is delayed to allow other participants to roll over to the next file
+	for _, ag := range toAggregate {
+		if err = os.Remove(path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat", treeName, ag.startBlock, ag.endBlock))); err != nil {
+			return nil, err
+		}
+		if err = os.Remove(path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, ag.startBlock, ag.endBlock))); err != nil {
+			return nil, err
+		}
+	}
+	return item2, nil
+}
+
 func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	log.Info("Aggregation", "from", blockFrom, "to", blockTo)
 	t := time.Now()
@@ -1942,17 +2023,20 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	storageChanges.Init("storage", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
 	commChanges.Init("commitment", w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
 	var err error
-	var item1 = &byEndBlockItem{fileCount: 8, startBlock: blockFrom, endBlock: blockTo}
-	if item1.accountsD, item1.accountsIdx, err = accountChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateAccounts, w.a.changesets); err != nil {
+	var accountsItem = &byEndBlockItem{startBlock: blockFrom, endBlock: blockTo}
+	if accountsItem.decompressor, accountsItem.index, err = accountChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateAccounts, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate accountsChanges: %w", err)
 	}
-	if item1.codeD, item1.codeIdx, err = codeChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCode, w.a.changesets); err != nil {
+	var codeItem = &byEndBlockItem{startBlock: blockFrom, endBlock: blockTo}
+	if codeItem.decompressor, codeItem.index, err = codeChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCode, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate codeChanges: %w", err)
 	}
-	if item1.storageD, item1.storageIdx, err = storageChanges.aggregate(blockFrom, blockTo, 20, w.tx, kv.StateStorage, w.a.changesets); err != nil {
+	var storageItem = &byEndBlockItem{startBlock: blockFrom, endBlock: blockTo}
+	if storageItem.decompressor, storageItem.index, err = storageChanges.aggregate(blockFrom, blockTo, 20, w.tx, kv.StateStorage, w.a.changesets); err != nil {
 		return fmt.Errorf("aggregate storageChanges: %w", err)
 	}
-	if item1.commitmentD, item1.commitmentIdx, err = commChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCommitment, false /* changesets */); err != nil {
+	var commitmentItem = &byEndBlockItem{startBlock: blockFrom, endBlock: blockTo}
+	if commitmentItem.decompressor, commitmentItem.index, err = commChanges.aggregate(blockFrom, blockTo, 0, w.tx, kv.StateCommitment, false /* changesets */); err != nil {
 		return fmt.Errorf("aggregate commitmentChanges: %w", err)
 	}
 	if err = accountChanges.closeFiles(); err != nil {
@@ -1979,162 +2063,38 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	if err = commChanges.deleteFiles(); err != nil {
 		return err
 	}
-	w.a.byEndBlock.ReplaceOrInsert(item1)
+	w.a.accountsFiles.ReplaceOrInsert(accountsItem)
+	w.a.codeFiles.ReplaceOrInsert(codeItem)
+	w.a.storageFiles.ReplaceOrInsert(storageItem)
+	w.a.commitmentFiles.ReplaceOrInsert(commitmentItem)
 	// Now aggregate state files
-	var toAggregate []*byEndBlockItem
-	toAggregate = append(toAggregate, item1)
-	lastStart := blockFrom
-	nextSize := blockTo - blockFrom + 1
-	nextEnd := blockFrom - 1
-	nextStart := nextEnd - nextSize + 1
-	var nextI *byEndBlockItem
-	w.a.byEndBlock.AscendGreaterOrEqual(&byEndBlockItem{startBlock: nextEnd, endBlock: nextEnd}, func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
-		if item.endBlock == nextEnd {
-			nextI = item
-		}
-		return false
-	})
-	for nextI != nil {
-		if nextI.startBlock != nextStart {
-			break
-		}
-		lastStart = nextStart
-		toAggregate = append(toAggregate, nextI)
-		nextSize *= 2
-		nextEnd = nextStart - 1
-		nextStart = nextEnd - nextSize + 1
-		nextI = nil
-		w.a.byEndBlock.AscendGreaterOrEqual(&byEndBlockItem{startBlock: nextEnd, endBlock: nextEnd}, func(i btree.Item) bool {
-			item := i.(*byEndBlockItem)
-			if item.endBlock == nextEnd {
-				nextI = item
-			}
-			return false
-		})
+	var accountsItem2, codeItem2, storageItem2, commitmentItem2 *byEndBlockItem
+	if accountsItem2, err = w.a.computeAggregation("accounts", w.a.accountsFiles, blockFrom, blockTo, accountsItem); err != nil {
+		return err
 	}
-	if len(toAggregate) == 1 {
-		// Nothing to aggregate yet
-		log.Info("Finished aggregation", "time", time.Since(t))
-		return nil
+	if codeItem2, err = w.a.computeAggregation("code", w.a.codeFiles, blockFrom, blockTo, codeItem); err != nil {
+		return err
 	}
-	log.Info("Finished aggregation", "time", time.Since(t), "now merging from", lastStart, "to", blockTo)
-	t = time.Now()
-	var item2 = &byEndBlockItem{fileCount: 6, startBlock: lastStart, endBlock: blockTo}
-	var cp CursorHeap
-	heap.Init(&cp)
-	for _, ag := range toAggregate {
-		g := ag.accountsD.MakeGetter()
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			val, _ := g.Next(nil)
-			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
-		}
+	if storageItem2, err = w.a.computeAggregation("storage", w.a.storageFiles, blockFrom, blockTo, storageItem); err != nil {
+		return err
 	}
-	if item2.accountsD, item2.accountsIdx, err = w.a.mergeIntoStateFile(&cp, 0, "accounts", lastStart, blockTo, w.a.diffDir); err != nil {
-		return fmt.Errorf("mergeIntoStateFile accounts [%d-%d]: %w", lastStart, blockTo, err)
+	if commitmentItem2, err = w.a.computeAggregation("commitment", w.a.commitmentFiles, blockFrom, blockTo, commitmentItem); err != nil {
+		return err
 	}
-	cp = cp[:0]
-	heap.Init(&cp)
-	for _, ag := range toAggregate {
-		g := ag.codeD.MakeGetter()
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			val, _ := g.Next(nil)
-			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
-		}
+	if accountsItem2 != nil {
+		w.a.accountsFiles.ReplaceOrInsert(accountsItem2)
 	}
-	if item2.codeD, item2.codeIdx, err = w.a.mergeIntoStateFile(&cp, 0, "code", lastStart, blockTo, w.a.diffDir); err != nil {
-		return fmt.Errorf("mergeIntoStateFile code [%d-%d]: %w", lastStart, blockTo, err)
+	if codeItem2 != nil {
+		w.a.codeFiles.ReplaceOrInsert(codeItem2)
 	}
-	cp = cp[:0]
-	heap.Init(&cp)
-	for _, ag := range toAggregate {
-		g := ag.storageD.MakeGetter()
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			val, _ := g.Next(nil)
-			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
-		}
+	if storageItem2 != nil {
+		w.a.storageFiles.ReplaceOrInsert(storageItem2)
 	}
-	if item2.storageD, item2.storageIdx, err = w.a.mergeIntoStateFile(&cp, 20, "storage", lastStart, blockTo, w.a.diffDir); err != nil {
-		return fmt.Errorf("mergeIntoStateFile storage [%d-%d]: %w", lastStart, blockTo, err)
-	}
-	cp = cp[:0]
-	heap.Init(&cp)
-	for _, ag := range toAggregate {
-		g := ag.commitmentD.MakeGetter()
-		if g.HasNext() {
-			key, _ := g.Next(nil)
-			val, _ := g.Next(nil)
-			heap.Push(&cp, &CursorItem{file: true, dg: g, key: key, val: val, endBlock: ag.endBlock})
-		}
-	}
-	if item2.commitmentD, item2.commitmentIdx, err = w.a.mergeIntoStateFile(&cp, 20, "commitment", lastStart, blockTo, w.a.diffDir); err != nil {
-		return fmt.Errorf("mergeIntoStateFile commitment [%d-%d]: %w", lastStart, blockTo, err)
-	}
-	// Remove all items in toAggregate and insert item2 instead
-	w.a.byEndBlock.ReplaceOrInsert(item2)
-	for _, ag := range toAggregate {
-		w.a.byEndBlock.Delete(ag)
-	}
-	// Close all the memory maps etc
-	for _, ag := range toAggregate {
-		if err = ag.accountsIdx.Close(); err != nil {
-			return err
-		}
-		if err = ag.accountsD.Close(); err != nil {
-			return err
-		}
-		if err = ag.codeIdx.Close(); err != nil {
-			return err
-		}
-		if err = ag.codeD.Close(); err != nil {
-			return err
-		}
-		if err = ag.storageIdx.Close(); err != nil {
-			return err
-		}
-		if err = ag.storageD.Close(); err != nil {
-			return err
-		}
-		if err = ag.commitmentIdx.Close(); err != nil {
-			return err
-		}
-		if err = ag.commitmentD.Close(); err != nil {
-			return err
-		}
-	}
-	// Delete files
-	// TODO: in a non-test version, this is delayed to allow other participants to roll over to the next file
-	for _, ag := range toAggregate {
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("accounts.%d-%d.dat", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("accounts.%d-%d.idx", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("code.%d-%d.dat", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("code.%d-%d.idx", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("storage.%d-%d.dat", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("storage.%d-%d.idx", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("commitment.%d-%d.dat", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
-		if err = os.Remove(path.Join(w.a.diffDir, fmt.Sprintf("commitment.%d-%d.idx", ag.startBlock, ag.endBlock))); err != nil {
-			return err
-		}
+	if commitmentItem2 != nil {
+		w.a.commitmentFiles.ReplaceOrInsert(commitmentItem2)
 	}
 	w.a.changesBtree.Delete(i)
-	log.Info("Finished merging", "time", time.Since(t))
+	log.Info("Finished aggregation", "time", time.Since(t))
 	return nil
 }
 
