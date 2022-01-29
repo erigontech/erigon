@@ -1,4 +1,4 @@
-Integration - tool to run Turbo-bor stages in custom way: run/reset single stage, run all stages but reorg every X blocks,
+Integration - tool to run Erigon stages in custom way: run/reset single stage, run all stages but reorg every X blocks,
 etc...
 
 ## Examples
@@ -9,11 +9,11 @@ All commands require parameter `--datadir=<datadir>` - I will skip it for readab
 integration --help
 integration print_stages
 
-# Run single stage 
-integration stage_senders 
-integration stage_exec  
+# Run single stage
+integration stage_senders
+integration stage_exec
 integration stage_exec --block=1_000_000 # stop at 1M block
-integration stage_hash_state 
+integration stage_hash_state
 integration stage_trie
 integration stage_history
 integration stage_tx_lookup
@@ -21,18 +21,18 @@ integration stage_tx_lookup
 # Unwind single stage 10 blocks backward
 integration stage_exec --unwind=10
 
-# Drop data of single stage 
-integration stage_exec --reset     
+# Drop data of single stage
+integration stage_exec --reset
 integration stage_history --reset
 
 # Unwind single stage N blocks backward
-integration stage_exec --unwind=N 
+integration stage_exec --unwind=N
 integration stage_history --unwind=N
 
 # Run stage prune to block N
-integration stage_exec --prune.to=N     
+integration stage_exec --prune.to=N
 integration stage_history --prune.to=N
-... 
+...
 
 # hack which allows to force clear unwind stack of all stages
 clear_unwind_stack
@@ -68,5 +68,5 @@ For example:
 make all
 ./build/bin/integration stage_hash_state --datadir=<datadir> --reset
 ./build/bin/integration stage_trie --datadir=<datadir> --reset
-# Then run Turbo-bor as usually. It will take 2-3 hours to re-calculate dropped db tables
+# Then run Erigon as usually. It will take 2-3 hours to re-calculate dropped db tables
 ```
