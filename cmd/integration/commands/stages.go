@@ -1039,10 +1039,10 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
-	case params.MumbaiChainName:
+	case networkname.MumbaiChainName:
 		chainConfig = params.MumbaiChainConfig
 		genesis = core.DefaultMumbaiGenesisBlock()
-	case params.BorMainnetChainName:
+	case networkname.BorMainnetChainName:
 		chainConfig = params.BorMainnetChainConfig
 		genesis = core.DefaultBorMainnetGenesisBlock()
 	}
@@ -1102,12 +1102,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
 		c.DBPath = path.Join(datadir, "clique/db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify,"", true, datadir)
 	} else if chainConfig.Parlia != nil {
 		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}
