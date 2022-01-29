@@ -633,7 +633,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 }
 
 func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
-	return hd.engine.VerifyHeader(hd.headerReader, header, true /* seal */)
+	return hd.engine.VerifyHeader(hd.headerReader, header, true, nil)
 }
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
