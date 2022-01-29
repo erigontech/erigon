@@ -26,11 +26,11 @@ type Snapshot struct {
 const BorSeparate = "BorSeparate"
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
-type signersAscending []common.Address
+// type signersAscending []common.Address
 
-func (s signersAscending) Len() int           { return len(s) }
-func (s signersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
-func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+// func (s signersAscending) Len() int           { return len(s) }
+// func (s signersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
+// func (s signersAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent signers, so only ever use if for
@@ -130,7 +130,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		number := header.Number.Uint64()
 
 		// Delete the oldest signer from the recent list to allow it signing again
-		if number >= s.config.Sprint && number-s.config.Sprint >= 0 {
+		if number >= s.config.Sprint {
 			delete(snap.Recents, number-s.config.Sprint)
 		}
 
@@ -206,7 +206,7 @@ func (s *Snapshot) signers() []common.Address {
 // Difficulty returns the difficulty for a particular signer at the current snapshot number
 func (s *Snapshot) Difficulty(signer common.Address) uint64 {
 	// if signer is empty
-	if bytes.Compare(signer.Bytes(), common.Address{}.Bytes()) == 0 {
+	if bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
 		return 1
 	}
 

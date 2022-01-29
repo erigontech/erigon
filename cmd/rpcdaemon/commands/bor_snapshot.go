@@ -195,7 +195,7 @@ func (api *BorImpl) GetCurrentValidators() ([]*bor.Validator, error) {
 func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	length := uint64(end - start + 1)
 	if length > bor.MaxCheckpointLength {
-		return "", &bor.MaxCheckpointLengthExceededError{start, end}
+		return "", &bor.MaxCheckpointLengthExceededError{Start: start, End: end}
 	}
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
@@ -206,11 +206,11 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	header := rawdb.ReadCurrentHeader(tx)
 	var currentHeaderNumber uint64 = 0
 	if header == nil {
-		return "", &bor.InvalidStartEndBlockError{start, end, currentHeaderNumber}
+		return "", &bor.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	currentHeaderNumber = header.Number.Uint64()
 	if start > end || end > currentHeaderNumber {
-		return "", &bor.InvalidStartEndBlockError{start, end, currentHeaderNumber}
+		return "", &bor.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	blockHeaders := make([]*types.Header, end-start+1)
 	for number := start; number <= end; number++ {
@@ -263,11 +263,11 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error)
 	proposer := s.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
 	if proposerIndex == -1 {
-		return -1, &bor.UnauthorizedProposerError{s.Number, proposer.Bytes()}
+		return -1, &bor.UnauthorizedProposerError{Number: s.Number, Proposer: proposer.Bytes()}
 	}
 	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
 	if signerIndex == -1 {
-		return -1, &bor.UnauthorizedSignerError{s.Number, signer.Bytes()}
+		return -1, &bor.UnauthorizedSignerError{Number: s.Number, Signer: signer.Bytes()}
 	}
 
 	tempIndex := signerIndex
@@ -311,7 +311,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		number := header.Number.Uint64()
 
 		// Delete the oldest signer from the recent list to allow it signing again
-		if number >= s.config.Sprint && number-s.config.Sprint >= 0 {
+		if number >= s.config.Sprint {
 			delete(snap.Recents, number-s.config.Sprint)
 		}
 
@@ -323,7 +323,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 
 		// check if signer is in validator set
 		if !snap.ValidatorSet.HasAddress(signer.Bytes()) {
-			return nil, &bor.UnauthorizedSignerError{number, signer.Bytes()}
+			return nil, &bor.UnauthorizedSignerError{Number: number, Signer: signer.Bytes()}
 		}
 
 		if _, err = snap.GetSignerSuccessionNumber(signer); err != nil {

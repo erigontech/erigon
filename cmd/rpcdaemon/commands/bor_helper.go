@@ -115,7 +115,7 @@ func validateHeaderExtraField(extraBytes []byte) error {
 // validatorContains checks for a validator in given validator set
 func validatorContains(a []*bor.Validator, x *bor.Validator) (*bor.Validator, bool) {
 	for _, n := range a {
-		if bytes.Compare(n.Address.Bytes(), x.Address.Bytes()) == 0 {
+		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
 			return n, true
 		}
 	}

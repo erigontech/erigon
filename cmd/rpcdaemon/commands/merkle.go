@@ -32,7 +32,7 @@ func convertTo32(input []byte) (output [32]byte, err error) {
 	if l > 32 || l == 0 {
 		return
 	}
-	copy(output[32-l:], input[:])
+	copy(output[32-l:], input)
 	return
 }
 

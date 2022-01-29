@@ -527,7 +527,7 @@ func (vals *ValidatorSet) applyRemovals(deletes []*Validator) {
 // The 'allowDeletes' flag is set to false by NewValidatorSet() and to true by UpdateWithChangeSet().
 func (vals *ValidatorSet) updateWithChangeSet(changes []*Validator, allowDeletes bool) error {
 
-	if len(changes) <= 0 {
+	if len(changes) < 1 {
 		return nil
 	}
 
@@ -654,9 +654,7 @@ func (valz ValidatorsByAddress) Less(i, j int) bool {
 }
 
 func (valz ValidatorsByAddress) Swap(i, j int) {
-	it := valz[i]
-	valz[i] = valz[j]
-	valz[j] = it
+	valz[i], valz[j] = valz[j], valz[i]
 }
 
 ///////////////////////////////////////////////////////////////////////////////
