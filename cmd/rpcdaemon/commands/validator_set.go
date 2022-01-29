@@ -272,6 +272,7 @@ func (vals *ValidatorSet) updateTotalVotingPower() error {
 	return nil
 }
 
+
 // TotalVotingPower returns the sum of the voting powers of all validators.
 // It recomputes the total voting power if required.
 func (vals *ValidatorSet) TotalVotingPower() int64 {
