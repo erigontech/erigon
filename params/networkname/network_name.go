@@ -13,4 +13,6 @@ const (
 	BSCChainName     = "bsc"
 	ChapelChainName  = "chapel"
 	RialtoChainName  = "rialto"
+	MumbaiChainName     = "mumbai"
+	BorMainnetChainName = "bor-mainnet"
 )
