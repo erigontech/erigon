@@ -258,13 +258,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
-	if blockNum == nil {
+	if blockNum == 0 {
 		var blocN uint64
 		borTx, blockHash, blocN, _ = rawdb.ReadBorTransaction(tx, hash)
 		if borTx == nil {
 			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
-		blockNum = &blocN
+		blockNum = blocN
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -274,46 +274,43 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if block == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
-	var txnIndex uint64
-	var txn types.Transaction
-	for i, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
-			txn = transaction
-			txnIndex = uint64(i)
-			break
-		}
-	}
-	if txn == nil {
-		return nil, nil
-	}
 
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 	if borTx != nil {
-		receipt := rawdb.ReadBorReceipt(tx, blockHash, *blockNumber)
+		receipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
 		return marshalReceipt(receipt, *borTx, cc, block, hash), nil
 	} else {
-		var txIndex uint64
-		for idx, txn := range block.Transactions() {
-			if txn.Hash() == hash {
-				txIndex = uint64(idx)
+		var txnIndex uint64
+		var txn types.Transaction
+		for idx, transaction := range block.Transactions() {
+			if transaction.Hash() == hash {
+				txn = transaction
+				txnIndex = uint64(idx)
 				break
 			}
 		}
 
-	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
-	if err != nil {
-		return nil, fmt.Errorf("getReceipts error: %w", err)
+		if txn == nil {
+			return nil, nil
+		}
+
+		receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
+		if err != nil {
+			return nil, fmt.Errorf("getReceipts error: %w", err)
+		}
+		if len(receipts) <= int(txnIndex) {
+			return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
+		}
+		return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, hash), nil
+
 	}
-	if len(receipts) <= int(txnIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
-	}
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block), nil
 }
 
 // GetBlockReceipts - receipts for individual block
+// func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
 func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
