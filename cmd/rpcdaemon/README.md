@@ -2,16 +2,24 @@
 - [Getting Started](#getting-started)
   - [Running locally](#running-locally)
   - [Running remotely](#running-remotely)
+  - [Healthcheck](#healthcheck)
   - [Testing](#testing)
 - [FAQ](#faq)
+  - [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
   - [RPC Implementation Status](#rpc-implementation-status)
+  - [Securing the communication between RPC daemon and Erigon instance via TLS and authentication](#securing-the-communication-between-rpc-daemon-and-erigon-instance-via-tls-and-authentication)
+  - [Ethstats](#ethstats)
+  - [Allowing only specific methods (Allowlist)](#allowing-only-specific-methods--allowlist-)
+  - [Trace transactions progress](#trace-transactions-progress)
   - [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
   - [Server load too high](#server-load-too-high)
   - [Faster Batch requests](#faster-batch-requests)
+- [For Developers](#for-developers)
+  - [Code generation](#code-generation)
 
 ## Introduction
 
-TurboBor's `rpcdaemon` runs in its own seperate process.
+Erigon's `rpcdaemon` runs in its own seperate process.
 
 This brings many benefits including easier development, the ability to run multiple daemons at once, and the ability to
 run the daemon remotely. It is possible to run the daemon locally as well (read-only) if both processes have access to
@@ -19,7 +27,7 @@ the data folder.
 
 ## Getting Started
 
-The `rpcdaemon` gets built as part of the main `turbo` build process, but you can build it directly with this command:
+The `rpcdaemon` gets built as part of the main `erigon` build process, but you can build it directly with this command:
 
 ```[bash]
 make rpcdaemon
@@ -27,9 +35,8 @@ make rpcdaemon
 
 ### Running locally
 
-This is only possible if RPC daemon runs on the same computer as TurboBor. This mode uses shared memory access to the
-database of TurboBor, which has better performance than accessing via TPC socket.
-Provide both `--datadir` and `--private.api.addr` options:
+Run `rpcdaemon` on same computer with Erigon. It's default option because it using Shared Memory access to Erigon's db -
+it's much faster than TCP access. Provide both `--datadir` and `--private.api.addr` flags:
 
 ```[bash]
 make erigon
@@ -38,10 +45,11 @@ make rpcdaemon
 ./build/bin/rpcdaemon --datadir=<your_data_dir> --txpool.api.addr=localhost:9090 --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
+Note that we've also specified which RPC namespaces to enable in the above command by `--http.api` flag.
+
 ### Running remotely
 
-This works regardless of whether RPC daemon is on the same computer with TurboBor, or on a different one. They use TPC
-socket connection to pass data between them.
+To start the daemon remotely - just don't set `--datadir` flag:
 
 ```[bash]
 make erigon
@@ -50,13 +58,11 @@ make rpcdaemon
 ./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --txpool.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
-Run TurboBor in one terminal window
+The daemon should respond with something like:
 
-```sh
-turbo-bor --chain=mumbai --bor.heimdall=https://heimdall.api.matic.today --datadir=<your_data_dir> --private.api.addr=<private_ip>:9090
+```[bash]
+INFO [date-time] HTTP endpoint opened url=localhost:8545...
 ```
-
-On other Terminal, run
 
 When RPC daemon runs remotely, by default it maintains a state cache, which is updated every time when Erigon imports a
 new block. When state cache is reasonably warm, it allows such remote RPC daemon to execute queries related to `latest`
@@ -81,9 +87,25 @@ Configuration of the health check is sent as POST body of the method.
 }
 ```
 
-The daemon should respond with something like:
+Not adding a check disables that.
 
-`INFO [date-time] HTTP endpoint opened url=localhost:8545...`
+**`min_peer_count`** -- checks for mimimum of healthy node peers. Requires
+`net` namespace to be listed in `http.api`.
+
+**`known_block`** -- sets up the block that node has to know about. Requires
+`eth` namespace to be listed in `http.api`.
+
+Example request
+`http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'`
+Example response
+
+```
+{
+    "check_block": "HEALTHY",
+    "healthcheck_query": "HEALTHY",
+    "min_peer_count": "HEALTHY"
+}
+```
 
 ### Testing
 
@@ -96,7 +118,7 @@ Try `eth_blockNumber` for example. In a third terminal window enter this command
 curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":1}' localhost:8545
 ```
 
-This should return something along the lines of this (depending on how far your node has synced):
+This should return something along the lines of this (depending on how far your Erigon node has synced):
 
 ```[bash]
 {
@@ -106,56 +128,32 @@ This should return something along the lines of this (depending on how far your 
 }
 ```
 
-You can also use similar command to test the `bor` namespace methods. Methods in this namespace provides bor consensus specific info like snapshot, signers, validator info, etc. For example:
-
-```[bash]
-curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "bor_getSnapshot", "params": ["0x400"], "id":1}' localhost:8545
-```
-
-This should return something like this:
-
-```[bash]
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "number": 1024,
-    "hash": "0xb976c3964fc461faa40745cb0a2d560bd8db5793e22fd1b63dc7e32c7455c21d",
-    "validatorSet": {
-      "validators": [
-        {
-          "ID": 0,
-          "signer": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
-          "power": 10000,
-          "accum": -30000
-        },
-        ...
-      ],
-      "proposer": {
-        "ID": 0,
-        "signer": "0xbe188d6641e8b680743a4815dfa0f6208038960f",
-        "power": 10000,
-        "accum": -30000
-      }
-    },
-    "recents": {
-      "961": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
-      "962": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
-      ...
-      "1023": "0x928ed6a3e94437bbd316ccad78479f1d163a6a8c",
-      "1024": "0xbe188d6641e8b680743a4815dfa0f6208038960f"
-    }
-  }
-}
-```
+Also, there
+are [extensive instructions for using Postman](https://github.com/ledgerwatch/erigon/wiki/Using-Postman-to-Test-TurboGeth-RPC)
+to test the RPC.
 
 ## FAQ
+
+### Relations between prune options and RPC methods
+
+Next options available (by `--prune` flag):
+
+```
+* h - prune history (ChangeSets, HistoryIndices - used to access historical state)
+* r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
+* t - prune tx lookup (used to get transaction by hash)
+* c - prune call traces (used by trace_* methods)
+```
+
+By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
+
+Some methods, if not found historical data in DB, can fallback to old blocks re-execution - but it require `h`.
 
 ### RPC Implementation Status
 
 Label "remote" means: `--private.api.addr` flag is required.
 
-The following table shows the current implementation status of TurboBor's RPC daemon.
+The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                |
 | ------------------------------------------ | ------- | ------------------------------------ |
