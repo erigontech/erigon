@@ -280,7 +280,7 @@ func ExecuteBlockEphemerally(
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.ReceiptHash() {
-			return nil, nil,  fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
