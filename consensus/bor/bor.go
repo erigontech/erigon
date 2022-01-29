@@ -605,9 +605,9 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, syscall consensus.SystemCall) error {
+func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	// Update sysCall
-	c.sysCall = syscall
+	// c.sysCall = syscall
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -673,7 +673,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall)( types.Transactions, types.Receipts, error) {
 
 	// Update sysCall
 	c.sysCall = syscall
@@ -685,7 +685,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 		// check and commit span
 		if err := c.checkAndCommitSpan(state, header, cx); err != nil {
 			log.Error("Error while committing span", "error", err)
-			return err
+			return nil, types.Receipts{}, err
 		}
 
 		if !c.WithoutHeimdall {
@@ -693,14 +693,14 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 			_, err = c.CommitStates(state, header, cx)
 			if err != nil {
 				log.Error("Error while committing states", "error", err)
-				return err
+				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		log.Error("Error changing contract code", "error", err)
-		return err
+		return nil, types.Receipts{}, err
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -710,7 +710,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 	// Set state sync data to blockchain
 	// bc := chain.(*core.BlockChain)
 	// bc.SetStateSync(stateSyncData)
-	return nil
+	return nil, types.Receipts{}, nil
 }
 
 func decodeGenesisAlloc(i interface{}) (core.GenesisAlloc, error) {
@@ -743,8 +743,8 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
+func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
 
 	// Update sysCall
@@ -758,7 +758,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 		err := c.checkAndCommitSpan(state, header, cx)
 		if err != nil {
 			log.Error("Error while committing span", "error", err)
-			return nil, err
+			return nil, nil, types.Receipts{}, err
 		}
 
 		if !c.WithoutHeimdall {
@@ -766,14 +766,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 			_, err = c.CommitStates(state, header, cx)
 			if err != nil {
 				log.Error("Error while committing states", "error", err)
-				return nil, err
+				return nil, nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
 		log.Error("Error changing contract code", "error", err)
-		return nil, err
+		return nil, nil, types.Receipts{}, err
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -788,7 +788,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 	// bc.SetStateSync(stateSyncData)
 
 	// return the final block for sealing
-	return block, nil
+	return block, nil, types.Receipts{}, nil
 }
 
 func (c *Bor) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []rlp.RawValue {
