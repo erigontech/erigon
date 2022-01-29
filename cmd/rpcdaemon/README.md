@@ -282,13 +282,177 @@ The following table shows the current implementation status of Erigon's RPC daem
 
 This table is constantly updated. Please visit again.
 
+### Securing the communication between RPC daemon and Erigon instance via TLS and authentication
+
+In some cases, it is useful to run Erigon nodes in a different network (for example, in a Public cloud), but RPC daemon
+locally. To ensure the integrity of communication and access control to the Erigon node, TLS authentication can be
+enabled. On the high level, the process consists of these steps (this process needs to be done for any "cluster" of
+Erigon and RPC daemon nodes that are supposed to work together):
+
+1. Generate key pair for the Certificate Authority (CA). The private key of CA will be used to authorise new Erigon
+   instances as well as new RPC daemon instances, so that they can mutually authenticate.
+2. Create CA certificate file that needs to be deployed on any Erigon instance and any RPC daemon. This CA cerf file is
+   used as a "root of trust", whatever is in it, will be trusted by the participants when they authenticate their
+   counterparts.
+3. For each Erigon instance and each RPC daemon instance, generate a key pair. If you are lazy, you can generate one
+   pair for all Erigon nodes, and one pair for all RPC daemons, and copy these keys around.
+4. Using the CA private key, create cerificate file for each public key generated on the previous step. This
+   effectively "inducts" these keys into the "cluster of trust".
+5. On each instance, deploy 3 files - CA certificate, instance key, and certificate signed by CA for this instance key.
+
+Following is the detailed description of how it can be done using `openssl` suite of tools.
+
+Generate CA key pair using Elliptic Curve (as opposed to RSA). The generated CA key will be in the file `CA-key.pem`.
+Access to this file will allow anyone to later include any new instance key pair into the "cluster of trust", so keep it
+secure.
+
+```
+openssl ecparam -name prime256v1 -genkey -noout -out CA-key.pem
+```
+
+Create CA self-signed certificate (this command will ask questions, answers aren't important for now). The file created
+by this command is `CA-cert.pem`
+
+```
+openssl req -x509 -new -nodes -key CA-key.pem -sha256 -days 3650 -out CA-cert.pem
+```
+
+For Erigon node, generate a key pair:
+
+```
+openssl ecparam -name prime256v1 -genkey -noout -out erigon-key.pem
+```
+
+Also, generate one for the RPC daemon:
+
+```
+openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
+```
+
+Now create certificate signing request for Erigon key pair:
+
+```
+openssl req -new -key erigon-key.pem -out erigon.csr
+```
+
+And from this request, produce the certificate (signed by CA), proving that this key is now part of the "cluster of
+trust"
+
+```
+openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
+```
+
+Then, produce the certificate signing request for RPC daemon key pair:
+
+```
+openssl req -new -key RPC-key.pem -out RPC.csr
+```
+
+And from this request, produce the certificate (signed by CA), proving that this key is now part of the "cluster of
+trust"
+
+```
+openssl x509 -req -in RPC.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out RPC.crt -days 3650 -sha256
+```
+
+When this is all done, these three files need to be placed on the machine where Erigon is running: `CA-cert.pem`
+, `erigon-key.pem`, `erigon.crt`. And Erigon needs to be run with these extra options:
+
+```
+--tls --tls.cacert CA-cert.pem --tls.key erigon-key.pem --tls.cert erigon.crt
+```
+
+On the RPC daemon machine, these three files need to be placed: `CA-cert.pem`, `RPC-key.pem`, and `RPC.crt`. And RPC
+daemon needs to be started with these extra options:
+
+```
+--tls.key RPC-key.pem --tls.cacert CA-cert.pem --tls.cert RPC.crt
+```
+
+**WARNING** Normally, the "client side" (which in our case is RPC daemon), verifies that the host name of the server
+matches the "Common Name" attribute of the "server" cerificate. At this stage, this verification is turned off, and it
+will be turned on again once we have updated the instruction above on how to properly generate cerificates with "Common
+Name".
+
+When running Erigon instance in the Google Cloud, for example, you need to specify the **Internal IP** in
+the `--private.api.addr` option. And, you will need to open the firewall on the port you are using, to that connection
+to the Erigon instances can be made.
+
+### Ethstats
+
+This version of the RPC daemon is compatible with [ethstats-client](https://github.com/goerli/ethstats-client).
+
+To run ethstats, run the RPC daemon remotely and open some of the APIs.
+
+`./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=net,eth,web3`
+
+Then update your `app.json` for ethstats-client like that:
+
+```json
+[
+  {
+    "name": "ethstats",
+    "script": "app.js",
+    "log_date_format": "YYYY-MM-DD HH:mm Z",
+    "merge_logs": false,
+    "watch": false,
+    "max_restarts": 10,
+    "exec_interpreter": "node",
+    "exec_mode": "fork_mode",
+    "env": {
+      "NODE_ENV": "production",
+      "RPC_HOST": "localhost",
+      "RPC_PORT": "8545",
+      "LISTENING_PORT": "30303",
+      "INSTANCE_NAME": "Erigon node",
+      "CONTACT_DETAILS": <your twitter handle>,
+      "WS_SERVER": "wss://ethstats.net/api",
+      "WS_SECRET": <put your secret key here>,
+      "VERBOSITY": 2
+    }
+  }
+]
+```
+
+Run ethstats-client through pm2 as usual.
+
+You will see these warnings in the RPC daemon output, but they are expected
+
+```
+WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59753 method=eth_newBlockFilter reqid=5 t="21.194µs" err="the method eth_newBlockFilter does not exist/is not available"
+WARN [11-05|09:03:47.911] Served                                   conn=127.0.0.1:59754 method=eth_newPendingTransactionFilter reqid=6 t="9.053µs"  err="the method eth_newPendingTransactionFilter does not exist/is not available"
+```
+
+### Allowing only specific methods (Allowlist)
+
+In some cases you might want to only allow certain methods in the namespaces and hide others. That is possible
+with `rpc.accessList` flag.
+
+1. Create a file, say, `rules.json`
+
+2. Add the following content
+
+```json
+{
+	"allow": ["net_version", "web3_eth_getBlockByHash"]
+}
+```
+
+3. Provide this file to the rpcdaemon using `--rpc.accessList` flag
+
+```
+> rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,debug,net,web3 --rpc.accessList=rules.json
+```
+
+Now only these two methods are available.
+
 ### Clients getting timeout, but server load is low
 
 In this case: increase default rate-limit - amount of requests server handle simultaneously - requests over this limit
 will wait. Increase it - if your 'hot data' is small or have much RAM or see "request timeout" while server load is low.
 
 ```
-turbo-bor --private.api.addr=localhost:9090 --private.api.ratelimit=1024
+./build/bin/erigon --private.api.addr=localhost:9090 --private.api.ratelimit=1024
 ```
 
 ### Server load too high
@@ -307,3 +471,10 @@ faster.
 
 Known Issue: if at least 1 request is "stremable" (has parameter of type \*jsoniter.Stream) - then whole batch will
 processed sequentially (on 1 goroutine).
+
+## For Developers
+
+### Code generation
+
+`go.mod` stores right version of generators, use `make grpc` to install it and generate code (it also installs protoc
+into ./build/bin folder).
