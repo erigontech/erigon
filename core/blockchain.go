@@ -280,7 +280,7 @@ func ExecuteBlockEphemerally(
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha := types.DeriveSha(receipts)
 		if receiptSha != block.ReceiptHash() {
-			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+			return nil, nil,  fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
@@ -353,7 +353,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	)
 	// res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	return res, nil
