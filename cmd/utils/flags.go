@@ -651,9 +651,9 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
-		case params.MumbaiChainName:
+		case networkname.MumbaiChainName:
 			urls = params.MumbaiBootnodes
-		case params.BorMainnetChainName:
+		case networkname.BorMainnetChainName:
 			urls = params.BorMainnetBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
@@ -696,9 +696,9 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
-		case params.MumbaiChainName:
+		case networkname.MumbaiChainName:
 			urls = params.MumbaiBootnodes
-		case params.BorMainnetChainName:
+		case networkname.BorMainnetChainName:
 			urls = params.BorMainnetBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
@@ -990,9 +990,9 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "kovan")
 	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
-	case params.MumbaiChainName:
+	case networkname.MumbaiChainName:
 		return filepath.Join(datadir, "mumbai")
-	case params.BorMainnetChainName:
+	case networkname.BorMainnetChainName:
 		return filepath.Join(datadir, "bor-mainnet")
 	default:
 		return datadir
@@ -1428,13 +1428,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 80001
 		}
 		cfg.Genesis = core.DefaultMumbaiGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, networkname.MumbaiGenesisHash)
+		SetDNSDiscoveryDefaults(cfg, params.MumbaiGenesisHash)
 	case networkname.BorMainnetChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 137
 		}
 		cfg.Genesis = core.DefaultBorMainnetGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, networkname.BorMainnetGenesisHash)
+		SetDNSDiscoveryDefaults(cfg, params.BorMainnetGenesisHash)
 	case networkname.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
