@@ -29,10 +29,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
