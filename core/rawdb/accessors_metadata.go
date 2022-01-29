@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
@@ -38,8 +37,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error
 	}
 	var config params.ChainConfig
 	if err := json.Unmarshal(data, &config); err != nil {
-		log.Warn("invalid chain config JSON: %x, %w", hash, err)
-		return nil, nil
+		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
 	return &config, nil
 }
