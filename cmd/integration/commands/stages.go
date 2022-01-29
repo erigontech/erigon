@@ -1104,7 +1104,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		c.DBPath = path.Join(datadir, "clique/db")
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify,"", true, datadir)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Parlia != nil {
 		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
