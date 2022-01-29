@@ -224,11 +224,6 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 	return nil, nil
 }
 
-// Forks is a data type to record a list of forks passed by this node
-type Forks struct {
-	GenesisHash common.Hash `json:"genesis"`
-	Forks       []uint64    `json:"forks"`
-}
 
 // Forks implements eth_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *APIImpl) Forks(ctx context.Context) (Forks, error) {
