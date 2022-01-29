@@ -513,7 +513,7 @@ func (c *AuRa) Author(header *types.Header) (common.Address, error) {
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
-func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
+func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool, _ consensus.SystemCall) error {
 	return nil
 }
 

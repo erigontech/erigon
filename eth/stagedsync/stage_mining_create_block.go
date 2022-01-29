@@ -5,9 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core/state"
 	"math/big"
 	"time"
+
+	"github.com/ledgerwatch/erigon/core/state"
 
 	mapset "github.com/deckarep/golang-set"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -19,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"

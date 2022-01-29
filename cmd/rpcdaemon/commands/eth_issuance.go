@@ -12,27 +12,12 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// BlockReward returns the block reward for this block
-// func (api *ErigonImpl) BlockReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-//	tx, err := api.db.Begin(ctx, ethdb.RO)
-//	if err != nil {
-//		return Issuance{}, err
-//	}
-//	defer tx.Rollback()
-//
-//	return api.rewardCalc(tx, blockNr, "block") // nolint goconst
-//}
-
-// UncleReward returns the uncle reward for this block
-// func (api *ErigonImpl) UncleReward(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {
-//	tx, err := api.db.Begin(ctx, ethdb.RO)
-//	if err != nil {
-//		return Issuance{}, err
-//	}
-//	defer tx.Rollback()
-//
-//	return api.rewardCalc(tx, blockNr, "uncle") // nolint goconst
-//}
+// Issuance structure to return information about issuance
+type Issuance struct {
+	BlockReward string `json:"blockReward,omitempty"`
+	UncleReward string `json:"uncleReward,omitempty"`
+	Issuance    string `json:"issuance,omitempty"`
+}
 
 // Issuance implements erigon_issuance. Returns the total issuance (block reward plus uncle reward) for the given block.
 func (api *ErigonImpl) WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error) {

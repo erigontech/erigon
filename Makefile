@@ -40,7 +40,7 @@ docker-compose:
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
-geth: erigon
+geth: turbo
 
 erigon: go-version git-submodules
 	@echo "Building Erigon"

@@ -33,6 +33,8 @@ type EthAPI interface {
 	GetBlockByHash(ctx context.Context, hash rpc.BlockNumberOrHash, fullTx bool) (map[string]interface{}, error)
 	GetBlockTransactionCountByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*hexutil.Uint, error)
 	GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error)
+	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
+	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
 
 	// Transaction related (see ./eth_txs.go)
 	GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error)
@@ -73,6 +75,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.Big, error)
+	Forks(ctx context.Context) (Forks, error)
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error)
@@ -91,6 +94,9 @@ type EthAPI interface {
 	GetWork(ctx context.Context) ([4]string, error)
 	SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error)
 	SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error)
+
+	// Issuance / reward related (see ./eth_issuance.go)
+	Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 
 	// Deprecated commands in eth_ (proposed file: ./eth_deprecated.go)
 	GetCompilers(_ context.Context) ([]string, error)

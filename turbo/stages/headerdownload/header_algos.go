@@ -23,7 +23,9 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -655,13 +657,19 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Header should be preverified, but not yet, try again later
 			break
 		}
+
+		stateReader := state.NewPlainStateReader(tx)
+		ibs := state.New(stateReader)
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
 			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
-			} else if err := hd.VerifyHeader(link.header); err != nil {
-				log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
+			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true, /* seal */
+				func(contract common.Address, data []byte) ([]byte, error) {
+					return core.SysCallContract(contract, data, *hd.headerReader.Config(), ibs, link.header, hd.engine)
+				}); err != nil {
+				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					linksInFuture = append(linksInFuture, link)

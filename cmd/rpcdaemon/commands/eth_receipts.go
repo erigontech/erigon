@@ -248,6 +248,8 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
+	var borTx *types.Transaction
+	var blockHash common.Hash
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -255,6 +257,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if !ok {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
+
+	if blockNum == nil {
+		var blocN uint64
+		borTx, blockHash, blocN, _ = rawdb.ReadBorTransaction(tx, hash)
+		if borTx == nil {
+			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		}
+		blockNum = &blocN
+	}
+
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -279,6 +291,18 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
+	if borTx != nil {
+		receipt := rawdb.ReadBorReceipt(tx, blockHash, *blockNumber)
+		return marshalReceipt(receipt, *borTx, cc, block, hash), nil
+	} else {
+		var txIndex uint64
+		for idx, txn := range block.Transactions() {
+			if txn.Hash() == hash {
+				txIndex = uint64(idx)
+				break
+			}
+		}
+
 	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
@@ -319,13 +343,13 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash()))
 	}
 
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block, hash common.Hash) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -343,7 +367,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		"transactionHash":   txn.Hash(),
+		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
 		"to":                txn.GetTo(),

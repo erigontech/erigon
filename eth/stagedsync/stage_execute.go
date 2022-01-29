@@ -129,6 +129,11 @@ func executeBlock(
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
+
+		if stateSyncReceipt != nil {
+			rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt)
+			rawdb.WriteBorTxLookupEntry(tx, block.Hash(), block.NumberU64())
+		}
 	}
 
 	if cfg.changeSetHook != nil {

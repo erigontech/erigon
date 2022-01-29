@@ -123,8 +123,25 @@ func CanTransfer(db vm.IntraBlockState, addr common.Address, amount *uint256.Int
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
+	// get inputs before
+	input1 := db.GetBalance(sender)
+	input2 := db.GetBalance(recipient)
+
+	input1Big := input1.ToBig()
+	input2Big := input2.ToBig()
+
 	if !bailout {
 		db.SubBalance(sender, amount)
 	}
 	db.AddBalance(recipient, amount)
+
+	// get outputs after
+	output1 := db.GetBalance(sender)
+	output2 := db.GetBalance(recipient)
+
+	output1Big := output1.ToBig()
+	output2Big := output2.ToBig()
+
+	// add transfer log
+	AddTransferLog(db, sender, recipient, amount.ToBig(), input1Big, input2Big, output1Big, output2Big)
 }

@@ -18,8 +18,10 @@ package core
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/consensus"
+	"math/big"
 	"math/bits"
+
+	"github.com/ledgerwatch/erigon/consensus"
 
 	"github.com/holiman/uint256"
 
@@ -331,6 +333,11 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	input1 := st.state.GetBalance(st.msg.From())
+	input2 := st.state.GetBalance(st.evm.Context.Coinbase)
+	input1Big := input1.ToBig()
+	input2Big := input2.ToBig()
+
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -415,6 +422,30 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	} else {
 		st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 	}
+	amount := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip.ToBig())
+	if london {
+		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context.BlockNumber))
+		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+		st.state.AddBalance(burntContractAddress, burnAmount)
+	}
+	st.state.AddBalance(st.evm.Context.Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
+	output1 := new(big.Int).SetBytes(input1Big.Bytes())
+	output2 := new(big.Int).SetBytes(input2Big.Bytes())
+
+	// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
+	// add transfer log
+	AddFeeTransferLog(
+		st.state,
+
+		msg.From(),
+		st.evm.Context.Coinbase,
+
+		amount,
+		input1Big,
+		input2Big,
+		output1.Sub(output1, amount),
+		output2.Add(output2, amount),
+	)
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
