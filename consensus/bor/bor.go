@@ -673,7 +673,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall)( types.Transactions, types.Receipts, error) {
+func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (types.Transactions, types.Receipts, error) {
 
 	// Update sysCall
 	c.sysCall = syscall
