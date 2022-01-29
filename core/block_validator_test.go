@@ -46,10 +46,10 @@ func TestHeaderVerification(t *testing.T) {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true, nil)
 			} else {
 				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true, nil)
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
@@ -83,10 +83,10 @@ func TestHeaderWithSealVerification(t *testing.T) {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true, nil)
 			} else {
 				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true, nil)
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
