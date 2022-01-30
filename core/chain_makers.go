@@ -112,6 +112,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64
 	}
 	b.ibs.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
 	contractHasTEVM := func(_ common.Hash) (bool, error) { return false, nil }
+	fmt.Println(b.ibs)
 	receipt, _, err := ApplyTransaction(b.config, getHeader, engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, contractHasTEVM)
 	if err != nil {
 		panic(err)

@@ -424,9 +424,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip.ToBig())
 	if london {
-		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
-		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
-		st.state.AddBalance(burntContractAddress, burnAmount)
+		if st.evm.ChainConfig().Bor != nil {
+			burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
+			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
+			st.state.AddBalance(burntContractAddress, burnAmount)
+		} else {
+			st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
+		}
 	}
 	st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 	output1 := new(big.Int).SetBytes(input1Big.Bytes())
