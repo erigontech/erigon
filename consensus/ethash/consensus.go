@@ -91,6 +91,11 @@ var (
 	errInvalidPoW        = errors.New("invalid proof-of-work")
 )
 
+// Type returns underlying consensus engine
+func (ethash *Ethash) Type() params.ConsensusType {
+	return params.EtHashConsensus
+}
+
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
 func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {

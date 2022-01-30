@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
@@ -59,9 +60,17 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 			return false, nil
 		}
 	}
+
+	var transferFunc vm.TransferFunc
+	if engine != nil && engine.Type() == params.BorConsensus {
+		transferFunc = BorTransfer
+	} else {
+		transferFunc = Transfer
+	}
+
 	return vm.BlockContext{
 		CanTransfer:     CanTransfer,
-		Transfer:        Transfer,
+		Transfer:        transferFunc,
 		GetHash:         GetHashFn(header, getHeader),
 		Coinbase:        beneficiary,
 		BlockNumber:     header.Number.Uint64(),
@@ -123,6 +132,14 @@ func CanTransfer(db vm.IntraBlockState, addr common.Address, amount *uint256.Int
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
+	if !bailout {
+		db.SubBalance(sender, amount)
+	}
+	db.AddBalance(recipient, amount)
+}
+
+// BorTransfer transfer in Bor
+func BorTransfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
 	// get inputs before
 	input1 := db.GetBalance(sender)
 	input2 := db.GetBalance(recipient)

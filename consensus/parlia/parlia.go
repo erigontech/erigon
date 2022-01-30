@@ -281,6 +281,11 @@ func New(
 	return c
 }
 
+// Type returns underlying consensus engine
+func (p *Parlia) Type() params.ConsensusType {
+	return params.ParliaConsensus
+}
+
 // Author retrieves the Ethereum address of the account that minted the given
 // block, which may be different from the header's coinbase if a consensus
 // engine is based on signatures.

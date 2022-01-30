@@ -501,6 +501,11 @@ func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, b
 	return info.TransitionStep + stepDiff, info.TransitionTimestamp + timeDiff, true
 }
 
+// Type returns underlying consensus engine
+func (c *AuRa) Type() params.ConsensusType {
+	return params.AuRaConsensus
+}
+
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *AuRa) Author(header *types.Header) (common.Address, error) {

@@ -54,6 +54,11 @@ func New(eth1Engine consensus.Engine) *Serenity {
 	return &Serenity{eth1Engine: eth1Engine}
 }
 
+// Type returns underlying consensus engine
+func (s *Serenity) Type() params.ConsensusType {
+	return s.eth1Engine.Type()
+}
+
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 func (s *Serenity) Author(header *types.Header) (common.Address, error) {

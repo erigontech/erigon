@@ -135,6 +135,7 @@ type Engine interface {
 	// APIs returns the RPC APIs this consensus engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API
 
+	Type() params.ConsensusType
 	// Close terminates any background threads maintained by the consensus engine.
 	Close() error
 }

@@ -273,6 +273,11 @@ func New(
 	return c
 }
 
+// Type returns underlying consensus engine
+func (c *Bor) Type() params.ConsensusType {
+	return params.BorConsensus
+}
+
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *Bor) Author(header *types.Header) (common.Address, error) {
