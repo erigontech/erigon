@@ -8,37 +8,39 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
 
 - [System Requirements](#system-requirements)
 - [Usage](#usage)
-
-  - [Getting Started](#getting-started)
-  - [Testnets](#testnets)
-  - [Mining](#mining)
-  - [Windows](#windows)
-  - [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
-  - [Beacon Chain](#beacon-chain)
-  - [Dev Chain](#dev-chain)
+    + [Getting Started](#getting-started)
+    + [Testnets](#testnets)
+    + [Mining](#mining)
+    + [Windows](#windows)
+    + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
+    + [Beacon Chain](#beacon-chain)
+    + [Dev Chain](#dev-chain)
 
 - [Key features](#key-features)
-  - [More Efficient State Storage](#more-efficient-state-storage)
-  - [Faster Initial Sync](#faster-initial-sync)
-  - [JSON-RPC daemon](#json-rpc-daemon)
-  - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-  - [Grafana dashboard](#grafana-dashboard)
+    + [More Efficient State Storage](#more-efficient-state-storage)
+    + [Faster Initial Sync](#faster-initial-sync)
+    + [JSON-RPC daemon](#json-rpc-daemon)
+    + [Run all components by docker-compose](#run-all-components-by-docker-compose)
+    + [Grafana dashboard](#grafana-dashboard)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
-  - [Erigon Discord Server](#erigon-discord-server)
-  - [Reporting security issues/concerns](#reporting-security-issues-concerns)
-  - [Team](#team)
+    + [Erigon Discord Server](#erigon-discord-server)
+    + [Reporting security issues/concerns](#reporting-security-issues-concerns)
+    + [Team](#team)
 - [Known issues](#known-issues)
-  - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
+    + [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
 
 <!--te-->
+
 
 NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 
 **Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
 
-# System Requirements
+
+System Requirements
+===================
 
 Recommend 2Tb storage space on a single partition: 1.6Tb state, 200GB temp files (can symlink or mount
 folder `<datadir>/etl-tmp` to another disk).
@@ -47,7 +49,8 @@ RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/
 
 <code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
 
-# Usage
+Usage
+=====
 
 ### Getting Started
 
@@ -62,7 +65,7 @@ make erigon
 
 There is an optional stage that can be enabled through flags:
 
-- `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to use `erigon_watchTheBurn`.
+* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to use `erigon_watchTheBurn`.
 
 ### Testnets
 
@@ -84,18 +87,18 @@ the chain in `--chain`.
 
 Support only remote-miners.
 
-- To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
-- Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
+* To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
+* Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
   , `--miner.gastarget`
-- RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-- RPCDaemon supports websocket methods: newPendingTransaction
-- TODO:
-  - we don't broadcast mined blocks to p2p-network
-    yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
-  - eth_newPendingTransactionFilter
-  - eth_newBlockFilter
-  - eth_newFilter
-  - websocket Logs
+* RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
+* RPCDaemon supports websocket methods: newPendingTransaction
+* TODO:
+    + we don't broadcast mined blocks to p2p-network
+      yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
+    + eth_newPendingTransactionFilter
+    + eth_newBlockFilter
+    + eth_newFilter
+    + websocket Logs
 
 <code> 🔬 Detailed mining explanation is [here](/docs/mining.md).</code>
 
@@ -103,19 +106,18 @@ Support only remote-miners.
 
 Windows users may run erigon in 3 possible ways:
 
-- Build executable binaries natively for Windows using provided `wmake.ps1` PowerShell script. Usage syntax is the same
+* Build executable binaries natively for Windows using provided `wmake.ps1` PowerShell script. Usage syntax is the same
   as `make` command so you have to run `.\wmake.ps1 [-target] <targetname>`. Example: `.\wmake.ps1 erigon` builds erigon
   executable. All binaries are placed in `.\build\bin\` subfolder. There are some requirements for a successful native
   build on windows :
-
-  - [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
-    likely you already have it
-  - [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
-  - GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
-    following point)
-  - If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
-    then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
-    to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
+    * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
+      likely you already have it
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
+    * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
+      following point)
+    * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
+      then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
+      to install the following components : `cmake`, `make`, `mingw` by `choco install cmake make mingw`.
 
   **Important note about Anti-Viruses**
   During MinGW's compiler detection phase some temporary executables are generated to test compiler capabilities. It's
@@ -126,9 +128,9 @@ Windows users may run erigon in 3 possible ways:
   for `build\bin\mdbx\CMakeFiles` sub-folder of the cloned repo or you can run erigon using the following other two
   options
 
-- Use Docker : see [docker-compose.yml](./docker-compose.yml)
+* Use Docker :  see [docker-compose.yml](./docker-compose.yml)
 
-- Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
+* Use WSL (Windows Subsystem for Linux) **strictly on version 2**. Under this option you can build Erigon just as you
   would on a regular Linux distribution. You can point your data also to any of the mounted Windows partitions (
   eg. `/mnt/c/[...]`, `/mnt/d/[...]` etc) but in such case be advised performance is impacted: this is due to the fact
   those mount points use `DrvFS` which is a [network file system](#blocks-execution-is-slow-on-cloud-network-drives)
@@ -143,7 +145,7 @@ Windows users may run erigon in 3 possible ways:
 
 Erigon can be used as an execution-layer for beacon chain consensus clients (Eth2). Default configuration is ok. Eth2
 relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
-are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
+ are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
 
 You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
 
@@ -154,12 +156,13 @@ Once the JSON-RPC daemon is running, all you need to do is point your beacon cha
 where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
+    
 
 ### Dev Chain
-
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
 
-# Key features
+Key features
+============ 
 
 <code>🔬 See more
 detailed [overview of functionality and current limitations](https://ledgerwatch.github.io/turbo_geth_release.html). It
@@ -196,17 +199,17 @@ to sync Ethereum mainnet in under 2 days if you have a fast enough network conne
 
 Examples of stages are:
 
-- Downloading headers;
+* Downloading headers;
 
-- Downloading block bodies;
+* Downloading block bodies;
 
-- Recovering senders' addresses;
+* Recovering senders' addresses;
 
-- Executing blocks;
+* Executing blocks;
 
-- Validating root hashes and building intermediate hashes for the state Merkle trie;
+* Validating root hashes and building intermediate hashes for the state Merkle trie;
 
-- [...]
+* [...]
 
 ### JSON-RPC daemon
 
@@ -273,7 +276,8 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
 
-# FAQ
+FAQ
+================
 
 ### How much RAM do I need
 
@@ -287,41 +291,41 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 #### `erigon` ports
 
-| Port  | Protocol  |     Purpose      | Expose  |
-| :---: | :-------: | :--------------: | :-----: |
-| 30303 | TCP & UDP |  eth/66 peering  | Public  |
-| 9090  |    TCP    | gRPC Connections | Private |
+|  Port |  Protocol |      Purpose     |  Expose |
+|:-----:|:---------:|:----------------:|:-------:|
+| 30303 | TCP & UDP |  eth/66 peering  |  Public |
+|  9090 |    TCP    | gRPC Connections | Private |
 
 Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 
 #### `rpcdaemon` ports
 
-|  Port   |  Protocol   |       Purpose       |  Expose   |
-| :-----: | :---------: | :-----------------: | :-------: |
-|  8545   |     TCP     |  HTTP & WebSockets  |  Private  |
-| :-----: | :---------: | :-----------------: | :-------: |
-|  8550   |     TCP     |        HTTP         |  Private  |
+|  Port |  Protocol |      Purpose      |  Expose |
+|:-----:|:---------:|:-----------------:|:-------:|
+|  8545 |    TCP    | HTTP & WebSockets | Private |
+|:-----:|:---------:|:-----------------:|:-------:|
+|  8550 |    TCP    |       HTTP        | Private |
 
 Typically 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
 Typically 8550 is exposed only internally for the engineApi JSON-RPC queries
 
 #### `sentry` ports
 
-| Port  | Protocol  |     Purpose      | Expose  |
-| :---: | :-------: | :--------------: | :-----: |
-| 30303 | TCP & UDP |     Peering      | Public  |
-| 9091  |    TCP    | gRPC Connections | Private |
+|  Port |  Protocol |      Purpose     |  Expose |
+|:-----:|:---------:|:----------------:|:-------:|
+| 30303 | TCP & UDP |      Peering     |  Public |
+|  9091 |    TCP    | gRPC Connections | Private |
 
 Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port
 9091 is for internal gRCP connections (e.g erigon -> sentry)
 
 #### Other ports
 
-| Port | Protocol | Purpose | Expose  |
-| :--: | :------: | :-----: | :-----: |
-| 6060 |   TCP    |  pprof  | Private |
-| 6060 |   TCP    | metrics | Private |
+| Port | Protocol | Purpose |  Expose |
+|:----:|:--------:|:-------:|:-------:|
+| 6060 |    TCP   |  pprof  | Private |
+| 6060 |    TCP   | metrics | Private |
 
 Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
@@ -332,15 +336,15 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`
 - Get CPU profiling: add `--pprof flag`
-  run `go tool pprof -png http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
+  run `go tool pprof -png  http://127.0.0.1:6060/debug/pprof/profile\?seconds\=20 > cpu.png`
 - Get RAM profiling: add `--pprof flag`
-  run `go tool pprof -inuse_space -png http://127.0.0.1:6060/debug/pprof/heap > mem.png`
-
+  run `go tool pprof -inuse_space -png  http://127.0.0.1:6060/debug/pprof/heap > mem.png`
+    
 ### How to run local devnet?
-
 <code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
 
-# Getting in touch
+Getting in touch
+================
 
 ### Erigon Discord Server
 
@@ -355,38 +359,39 @@ Send an email to `security [at] torquem.ch`.
 
 Core contributors (in alpabetical order of first names):
 
-- Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
+* Alex Sharov ([AskAlexSharov](https://twitter.com/AskAlexSharov))
 
-- Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
+* Alexey Akhunov ([@realLedgerwatch](https://twitter.com/realLedgerwatch))
 
-- Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
+* Andrea Lanfranchi([@AndreaLanfranchi](https://github.com/AndreaLanfranchi))
 
-- Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
+* Andrew Ashikhmin ([yperbasis](https://github.com/yperbasis))
 
-- Artem Vorotnikov ([vorot93](https://github.com/vorot93))
+* Artem Vorotnikov ([vorot93](https://github.com/vorot93))
 
-- Boris Petrov ([b00ris](https://github.com/b00ris))
+* Boris Petrov ([b00ris](https://github.com/b00ris))
 
-- Eugene Danilenko ([JekaMas](https://github.com/JekaMas))
+* Eugene Danilenko ([JekaMas](https://github.com/JekaMas))
 
-- Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
+* Igor Mandrigin ([@mandrigin](https://twitter.com/mandrigin))
 
-- Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
+* Giulio Rebuffo ([Giulio2002](https://github.com/Giulio2002))
 
-- Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
+* Thomas Jay Rush ([@tjayrush](https://twitter.com/tjayrush))
 
 Thanks to:
 
-- All contributors of Erigon
+* All contributors of Erigon
 
-- All contributors of Go-Ethereum
+* All contributors of Go-Ethereum
 
-- Our special respect and graditude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
+* Our special respect and graditude is to the core team of [Go-Ethereum](https://github.com/ethereum/go-ethereum). Keep
   up the great job!
 
 Happy testing! 🥤
 
-# Known issues
+Known issues
+============
 
 ### `htop` shows incorrect memory usage
 
@@ -404,8 +409,8 @@ Erigon at all.
 Next tools show correct memory usage of Erigon:
 
 - `vmmap -summary PID | grep -i "Physical footprint"`. Without `grep` you can see details
-  - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
-    shows OS pages cache size.
+    - `section MALLOC ZONE column Resident Size` shows App memory usage, `section REGION TYPE column Resident Size`
+      shows OS pages cache size.
 - `Prometheus` dashboard shows memory of Go app without OS pages cache (`make prometheus`, open in
   browser `localhost:3000`, credentials `admin/admin`)
 - `cat /proc/<PID>/smaps`
