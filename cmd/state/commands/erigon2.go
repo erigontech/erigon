@@ -10,10 +10,13 @@ import (
 	"os/signal"
 	"path"
 	"syscall"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -53,6 +56,10 @@ var erigon2Cmd = &cobra.Command{
 		return Erigon2(genesis, logger)
 	},
 }
+
+const (
+	logInterval = 30 * time.Second
+)
 
 func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
@@ -106,6 +113,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
+	defer agg.Close()
 	agg.GenerateChangesets(changesets)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
@@ -155,7 +163,31 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	}
 	var txNum uint64 = 1
 	trace := false
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	prevBlock := blockNum
+	prevTime := time.Now()
 	for !interrupt {
+		select {
+		default:
+		case <-logEvery.C:
+			aStats := agg.Stats()
+			totalFiles := aStats.AccountsCount + aStats.CodeCount + aStats.StorageCount + aStats.CommitmentCount
+			totalDatSize := aStats.AccountsDatSize + aStats.CodeDatSize + aStats.StorageDatSize + aStats.CommitmentDatSize
+			totalIdxSize := aStats.AccountsIdxSize + aStats.CodeIdxSize + aStats.StorageIdxSize + aStats.CommitmentIdxSize
+			currentTime := time.Now()
+			interval := currentTime.Sub(prevTime)
+			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
+			prevBlock = blockNum
+			prevTime = currentTime
+			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
+				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
+				"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
+				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
+				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
+				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+			)
+		}
 		blockNum++
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
@@ -211,7 +243,18 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-		if interrupt || (blockNum+1)%uint64(commitmentFrequency) == 0 {
+		commit := interrupt
+		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
+			var spaceDirty uint64
+			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
+				return fmt.Errorf("retrieving spaceDirty: %w", err)
+			}
+			if spaceDirty >= 2*1024*1024*1024 {
+				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+				commit = true
+			}
+		}
+		if commit {
 			if err = rwTx.Commit(); err != nil {
 				return err
 			}
@@ -221,9 +264,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 				}
 			}
 		}
-		//if blockNum%1000 == 0 || blockNum >= 4157000 {
-		//	log.Info("Processed", "blocks", blockNum)
-		//}
 	}
 	if w != nil {
 		w.Close()
