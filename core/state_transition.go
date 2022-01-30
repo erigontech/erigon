@@ -433,18 +433,20 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 
 	// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 	// add transfer log
-	AddFeeTransferLog(
-		st.state,
+	if st.evm.ChainConfig().Bor != nil {
+		AddFeeTransferLog(
+			st.state,
 
-		msg.From(),
-		st.evm.Context().Coinbase,
+			msg.From(),
+			st.evm.Context().Coinbase,
 
-		amount,
-		input1Big,
-		input2Big,
-		output1.Sub(output1, amount),
-		output2.Add(output2, amount),
-	)
+			amount,
+			input1Big,
+			input2Big,
+			output1.Sub(output1, amount),
+			output2.Add(output2, amount),
+		)
+	}
 
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
