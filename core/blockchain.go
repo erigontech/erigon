@@ -301,31 +301,31 @@ func ExecuteBlockEphemerally(
 	}
 
 	var logs []*types.Log
- 	for _, receipt := range receipts {
- 		logs = append(logs, receipt.Logs...)
- 	}
+	for _, receipt := range receipts {
+		logs = append(logs, receipt.Logs...)
+	}
 
- 	blockLogs := ibs.Logs()
- 	var stateSyncReceipt *types.ReceiptForStorage
- 	if len(blockLogs) > 0 {
- 		var stateSyncLogs []*types.Log
- 		sort.SliceStable(blockLogs, func(i, j int) bool {
- 			return blockLogs[i].Index < blockLogs[j].Index
- 		})
+	blockLogs := ibs.Logs()
+	var stateSyncReceipt *types.ReceiptForStorage
+	if len(blockLogs) > 0 {
+		var stateSyncLogs []*types.Log
+		sort.SliceStable(blockLogs, func(i, j int) bool {
+			return blockLogs[i].Index < blockLogs[j].Index
+		})
 
- 		if len(blockLogs) > len(logs) {
- 			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
+		if len(blockLogs) > len(logs) {
+			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
- 			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
+			types.DeriveFieldsForBorLogs(stateSyncLogs, block.Hash(), block.NumberU64(), uint(len(receipts)), uint(len(logs)))
 
- 			stateSyncReceipt = &types.ReceiptForStorage{
- 				Status: types.ReceiptStatusSuccessful, // make receipt status successful
- 				Logs:   stateSyncLogs,
- 			}
- 		}
- 	}
+			stateSyncReceipt = &types.ReceiptForStorage{
+				Status: types.ReceiptStatusSuccessful, // make receipt status successful
+				Logs:   stateSyncLogs,
+			}
+		}
+	}
 
-	 return receipts, stateSyncReceipt, nil
+	return receipts, stateSyncReceipt, nil
 }
 
 func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
