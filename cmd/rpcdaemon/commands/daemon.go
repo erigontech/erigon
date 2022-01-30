@@ -108,7 +108,7 @@ func APIList(ctx context.Context, db kv.RoDB, borDb kv.RoDB,
 			})
 		case "engine":
 			defaultAPIList = append(defaultAPIList, rpc.API{
-				Namespace: "bor",
+				Namespace: "engine",
 				Public:    true,
 				Service:   EngineAPI(engineImpl),
 				Version:   "1.0",

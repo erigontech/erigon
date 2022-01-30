@@ -307,7 +307,7 @@ func ExecuteBlockEphemerally(
 
 	blockLogs := ibs.Logs()
 	var stateSyncReceipt *types.ReceiptForStorage
-	if len(blockLogs) > 0 {
+	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
 		var stateSyncLogs []*types.Log
 		sort.SliceStable(blockLogs, func(i, j int) bool {
 			return blockLogs[i].Index < blockLogs[j].Index

@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -222,21 +221,4 @@ func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash common.Has
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return nil, nil
-}
-
-// Forks implements eth_forks. Returns the genesis block hash and a sorted list of all forks block numbers
-func (api *APIImpl) Forks(ctx context.Context) (Forks, error) {
-	tx, err := api.db.BeginRo(ctx)
-	if err != nil {
-		return Forks{}, err
-	}
-	defer tx.Rollback()
-
-	chainConfig, genesis, err := api.chainConfigWithGenesis(tx)
-	if err != nil {
-		return Forks{}, err
-	}
-	forksBlocks := forkid.GatherForks(chainConfig)
-
-	return Forks{genesis.Hash(), forksBlocks}, nil
 }

@@ -35,6 +35,7 @@ const (
 	EtHashConsensus ConsensusType = "ethash"
 	CliqueConsensus ConsensusType = "clique"
 	ParliaConsensus ConsensusType = "parlia"
+	BorConsensus    ConsensusType = "bor"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -409,6 +410,7 @@ var (
 
 	MumbaiChainConfig = &ChainConfig{
 		ChainName:           networkname.MumbaiChainName,
+		Consensus:           BorConsensus,
 		ChainID:             big.NewInt(80001),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -451,6 +453,7 @@ var (
 
 	BorMainnetChainConfig = &ChainConfig{
 		ChainName:           networkname.BorMainnetChainName,
+		Consensus:           BorConsensus,
 		ChainID:             big.NewInt(137),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,

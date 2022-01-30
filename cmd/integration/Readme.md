@@ -68,5 +68,5 @@ For example:
 make all
 ./build/bin/integration stage_hash_state --datadir=<datadir> --reset
 ./build/bin/integration stage_trie --datadir=<datadir> --reset
-# Then run Erigon as usually. It will take 2-3 hours to re-calculate dropped db tables
+# Then run TurobGeth as usually. It will take 2-3 hours to re-calculate dropped db tables
 ```
