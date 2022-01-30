@@ -247,11 +247,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | txpool_content                             | Yes     | `remote`                                   |
 | txpool_status                              | Yes     | `remote`                                   |
 |                                            |         |                                            |
-| eth_getCompilers                           | No      | deprecated                                 |
-| eth_compileLLL                             | No      | deprecated                                 |
-| eth_compileSolidity                        | No      | deprecated                                 |
-| eth_compileSerpent                         | No      | deprecated                                 |
-|                                            |         |                                            |
 | db_putString                               | No      | deprecated                                 |
 | db_getString                               | No      | deprecated                                 |
 | db_putHex                                  | No      | deprecated                                 |
