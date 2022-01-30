@@ -131,9 +131,9 @@ func (api *APIImpl) Issuance(ctx context.Context, blockNr rpc.BlockNumber) (Issu
 
 	var ret Issuance
 	ret.BlockReward = (*hexutil.Big)(minerReward.ToBig())
-	ret.Issuance = (*hexutil.Big) (issuance.ToBig())
+	ret.Issuance = (*hexutil.Big)(issuance.ToBig())
 	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = (*hexutil.Big) (issuance.ToBig())
+	ret.UncleReward = (*hexutil.Big)(issuance.ToBig())
 	return ret, nil
 }
 
@@ -144,6 +144,7 @@ func (api *APIImpl) getBlockByRPCNumber(tx kv.Tx, blockNr rpc.BlockNumber) (*typ
 	}
 	return api.blockByNumberWithSenders(tx, blockNum)
 }
+
 // Issuance structure to return information about issuance
 type Issuance struct {
 	BlockReward *hexutil.Big `json:"blockReward"` // Block reward for given block
