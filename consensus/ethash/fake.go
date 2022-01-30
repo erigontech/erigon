@@ -55,22 +55,6 @@ func newFakeEth(mode Mode) Ethash {
 	}
 }
 
-func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	for i, header := range headers {
-
-		if err := f.Ethash.VerifyHeader(chain, header, false, nil); err != nil {
-			return err
-		}
-
-		if seals[i] {
-			if err := f.VerifySeal(chain, header); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool, sysCall consensus.SystemCall) error {
 	err := f.Ethash.VerifyHeader(chain, header, false, sysCall)
 	if err != nil {

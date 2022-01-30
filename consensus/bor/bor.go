@@ -285,21 +285,6 @@ func (c *Bor) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	return c.verifyHeader(chain, header, nil)
 }
 
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
-// method returns a quit channel to abort the operations and a results channel to
-// retrieve the async verifications (the order is that of the input slice).
-func (c *Bor) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
-	if len(headers) == 0 {
-		return nil
-	}
-	for i, header := range headers {
-		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // verifyHeader checks whether a header conforms to the consensus rules.The
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying

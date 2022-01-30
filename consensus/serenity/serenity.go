@@ -82,17 +82,6 @@ func (s *Serenity) VerifyHeader(chain consensus.ChainHeaderReader, header *types
 	return s.verifyHeader(chain, header, parent)
 }
 
-// VerifyHeader checks whether a bunch of headers conforms to the consensus rules of the
-// stock Ethereum serenity engine.
-func (s *Serenity) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	for _, header := range headers {
-		if err := s.VerifyHeader(chain, header, false, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
