@@ -217,10 +217,10 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 		blockHeaders[number-start], _ = getHeaderByNumber(rpc.BlockNumber(number), api, tx)
 	}
 
-	headers := make([][32]byte, nextPowerOfTwo(length))
+	headers := make([][32]byte, bor.NextPowerOfTwo(length))
 	for i := 0; i < len(blockHeaders); i++ {
 		blockHeader := blockHeaders[i]
-		header := crypto.Keccak256(appendBytes32(
+		header := crypto.Keccak256(bor.AppendBytes32(
 			blockHeader.Number.Bytes(),
 			new(big.Int).SetUint64(blockHeader.Time).Bytes(),
 			blockHeader.TxHash.Bytes(),
@@ -232,7 +232,7 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 		headers[i] = arr
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
-	if err := tree.Generate(convert(headers), sha3.NewLegacyKeccak256()); err != nil {
+	if err := tree.Generate(bor.Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
 		return "", err
 	}
 	root := hex.EncodeToString(tree.Root().Hash)
