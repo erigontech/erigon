@@ -1,6 +1,8 @@
 package rawdb
 
 import (
+	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -117,43 +119,51 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 
 // ReadBorTransactionWithBlockHash retrieves a specific bor (fake) transaction by tx hash and block hash, along with
 // its added positional metadata.
-func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64) {
-	blockNumber := ReadBorTxLookupEntry(db, txHash)
+func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+	blockNumber, err := ReadBorTxLookupEntry(db, txHash)
+
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
+
 	if blockNumber == nil {
-		return nil, common.Hash{}, 0, 0
+		return nil, common.Hash{}, 0, 0, nil
 	}
 
 	body, _, _ := ReadBody(db, blockHash, *blockNumber)
 	if body == nil {
-		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
-		return nil, common.Hash{}, 0, 0
+		return nil, common.Hash{}, 0, 0, fmt.Errorf("transaction referenced missing number {%d} hash {%s}", blockNumber, blockHash)
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
-	return &tx, blockHash, *blockNumber, uint64(len(body.Transactions))
+	return &tx, blockHash, *blockNumber, uint64(len(body.Transactions)), nil
 }
 
 // ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
 // its added positional metadata.
-func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64) {
-	blockNumber := ReadBorTxLookupEntry(db, hash)
+func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+	blockNumber, err := ReadBorTxLookupEntry(db, hash)
+
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, err
+	}
+
 	if blockNumber == nil {
-		return nil, common.Hash{}, 0, 0
+		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
 	}
 
 	blockHash, _ := ReadCanonicalHash(db, *blockNumber)
 	if blockHash == (common.Hash{}) {
-		return nil, common.Hash{}, 0, 0
+		return nil, common.Hash{}, 0, 0, errors.New("missing block hash")
 	}
 
 	body, _, _ := ReadBody(db, blockHash, *blockNumber)
 	if body == nil {
-		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
-		return nil, common.Hash{}, 0, 0
+		return nil, common.Hash{}, 0, 0, fmt.Errorf("transaction referenced missing number {%d} hash {%s}", blockNumber, blockHash)
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
-	return &tx, blockHash, *blockNumber, uint64(len(body.Transactions))
+	return &tx, blockHash, *blockNumber, uint64(len(body.Transactions)), nil
 }
 
 //
@@ -162,14 +172,19 @@ func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.
 
 // ReadBorTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the bor transaction or bor receipt using tx hash.
-func ReadBorTxLookupEntry(db kv.Tx, txHash common.Hash) *uint64 {
-	data, _ := db.GetOne(kv.BorTxLookup, borTxLookupKey(txHash))
+func ReadBorTxLookupEntry(db kv.Tx, txHash common.Hash) (*uint64, error) {
+	data, err := db.GetOne(kv.BorTxLookup, borTxLookupKey(txHash))
+
+	if err != nil {
+		return nil, err
+	}
+
 	if len(data) == 0 {
-		return nil
+		return nil, errors.New("no data found")
 	}
 
 	number := new(big.Int).SetBytes(data).Uint64()
-	return &number
+	return &number, nil
 }
 
 // WriteBorTxLookupEntry stores a positional metadata for bor transaction using block hash and block number

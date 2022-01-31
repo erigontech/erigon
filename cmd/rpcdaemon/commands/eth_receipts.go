@@ -260,7 +260,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 
 	if blockNum == 0 {
 		var blocN uint64
-		borTx, blockHash, blocN, _ = rawdb.ReadBorTransaction(tx, hash)
+		borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
+		if err != nil {
+			return nil, err
+		}
 		if borTx == nil {
 			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
