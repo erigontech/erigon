@@ -160,10 +160,14 @@ func HeadersPOS(
 
 	cfg.hd.ClearPendingPayloadStatus()
 
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+
+	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber)
+
 	if forkChoiceInsteadOfNewPayload {
-		handleForkChoice(cfg, &forkChoiceMessage)
+		handleForkChoice(&forkChoiceMessage, s, u, tx, cfg, headerInserter)
 	} else {
-		if err := handleNewPayload(s, ctx, tx, cfg, &payloadMessage); err != nil {
+		if err := handleNewPayload(&payloadMessage, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
 		}
 	}
@@ -178,19 +182,53 @@ func HeadersPOS(
 }
 
 func handleForkChoice(
-	cfg HeadersCfg,
 	forkChoiceMessage *privateapi.ForkChoiceMessage,
-) {
-	// TODO(yperbasis): implement properly
-	cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+	s *StageState,
+	u Unwinder,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	headerInserter *headerdownload.HeaderInserter,
+) error {
+	header, err := rawdb.ReadHeaderByHash(tx, forkChoiceMessage.HeadBlockHash)
+	if err != nil {
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		return err
+	}
+
+	if header == nil {
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+		// TODO(yperbasis): do the sync and switch to the new chain
+	} else {
+		cfg.hd.SetPendingPayloadStatus(forkChoiceMessage.HeadBlockHash)
+
+		parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+		if err != nil {
+			return err
+		}
+
+		forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
+		if err != nil {
+			return err
+		}
+
+		u.UnwindTo(forkingPoint, common.Hash{})
+
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		return fixCanonicalChain(s.LogPrefix(), logEvery, header.Number.Uint64(), forkChoiceMessage.HeadBlockHash, tx, cfg.blockReader)
+	}
+
+	return nil
 }
 
 func handleNewPayload(
+	payloadMessage *privateapi.PayloadMessage,
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	payloadMessage *privateapi.PayloadMessage,
+	headerInserter *headerdownload.HeaderInserter,
 ) error {
 	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
@@ -204,7 +242,7 @@ func handleNewPayload(
 		return err
 	}
 
-	if headerHash == existingHash {
+	if existingHash != (common.Hash{}) && headerHash == existingHash {
 		// previously received valid header
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_VALID,
@@ -212,10 +250,6 @@ func handleNewPayload(
 		}
 		return nil
 	}
-
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
-
-	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber)
 
 	// If we have the parent then we can move on with the stagedsync
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
@@ -241,6 +275,7 @@ func handleNewPayload(
 		// Note an inconsistency here:
 		// We insert raw bodies immediately and skip stage 3. (Stage 2 will not be skipped.)
 		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
+		// TODO(yperbasis): Or use turbo/stages/bodydownload/prefetched_blocks.go ?
 		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
 			return err
 		}
