@@ -47,7 +47,7 @@ func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
-	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 256, "how many blocks to skip between calculating commitment")
+	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -235,14 +235,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 				return err
 			}
 			if !bytes.Equal(rootHash, b.Header().Root[:]) {
-				if trace || interrupt {
-					return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
-				} else {
-					blockNum--
-					trace = true
-				}
-				rwTx.Rollback()
-				continue
+				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
 			}
 		}
 		if err = w.Aggregate(trace); err != nil {
