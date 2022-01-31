@@ -7,7 +7,7 @@ GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
 GIT_TAG    ?= $(shell git describe --tags `git rev-list --tags="v*" --max-count=1`)
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
+CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
@@ -48,45 +48,45 @@ erigon: go-version git-submodules
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
-hack:
+hack: git-submodules
 	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
 	@echo "Run \"$(GOBIN)/hack\" to launch hack."
 
-rpctest:
+rpctest: git-submodules
 	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
 	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
 
-state:
+state: git-submodules
 	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
 	@echo "Run \"$(GOBIN)/state\" to launch state."
 
 
-pics:
+pics: git-submodules
 	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
-rpcdaemon:
+rpcdaemon: git-submodules
 	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
-txpool:
+txpool: git-submodules
 	$(GOBUILD) -o $(GOBIN)/txpool ./cmd/txpool
 	@echo "Run \"$(GOBIN)/txpool\" to launch txpool."
 
-integration:
+integration: git-submodules
 	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
 	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
 
-sentry:
+sentry: git-submodules
 	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
 	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
 	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
-cons:
+cons: git-submodules
 	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
 	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
 
-evm:
+evm: git-submodules
 	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
 	@echo "Run \"$(GOBIN)/evm\" to run EVM"
 
@@ -94,7 +94,7 @@ downloader: git-submodules
 	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
 	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
 
-devnettest:
+devnettest: git-submodules
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
 	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
 
