@@ -115,7 +115,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, 90000, aggregationStep)
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
