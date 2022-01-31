@@ -55,7 +55,12 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	if txn == nil {
 		var borTx *types.Transaction
-		borTx, _, _, _ = rawdb.ReadBorTransaction(tx, hash)
+		borTx, _, _, _ , err = rawdb.ReadBorTransaction(tx, hash)
+
+		if err != nil{
+			return err
+		}
+
 		if borTx != nil {
 			return nil
 		}
