@@ -132,8 +132,12 @@ func executeBlock(
 		}
 
 		if stateSyncReceipt != nil {
-			rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt)
-			rawdb.WriteBorTxLookupEntry(tx, block.Hash(), block.NumberU64())
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
+				return err
+			}
+			if err := rawdb.WriteBorTxLookupEntry(tx, block.Hash(), block.NumberU64()); err != nil {
+				return err
+			}
 		}
 	}
 

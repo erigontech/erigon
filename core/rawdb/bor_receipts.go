@@ -91,17 +91,19 @@ func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 }
 
 // WriteBorReceipt stores all the bor receipt belonging to a block.
-func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage) {
+func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.ReceiptForStorage) error {
 	// Convert the bor receipt into their storage form and serialize them
 	bytes, err := rlp.EncodeToBytes(borReceipt)
 	if err != nil {
-		log.Crit("Failed to encode bor receipt", "err", err)
+		return err
 	}
 
 	// Store the flattened receipt slice
-	if err := tx.Put(kv.BorReceipts, borReceiptKey(number, hash), bytes); err != nil {
-		log.Crit("Failed to store bor receipt", "err", err)
+	if err := tx.Append(kv.BorReceipts, borReceiptKey(number, hash), bytes); err != nil {
+		return err
 	}
+
+	return nil
 }
 
 // DeleteBorReceipt removes receipt data associated with a block hash.
@@ -171,22 +173,28 @@ func ReadBorTxLookupEntry(db kv.Tx, txHash common.Hash) *uint64 {
 }
 
 // WriteBorTxLookupEntry stores a positional metadata for bor transaction using block hash and block number
-func WriteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) {
+func WriteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
 	txHash := types.GetDerivedBorTxHash(borReceiptKey(number, hash))
-	if err := db.Put(kv.BorTxLookup, borTxLookupKey(txHash), big.NewInt(0).SetUint64(number).Bytes()); err != nil {
-		log.Crit("Failed to store bor transaction lookup entry", "err", err)
+	if err := db.Append(kv.BorTxLookup, borTxLookupKey(txHash), big.NewInt(0).SetUint64(number).Bytes()); err != nil {
+		return err
 	}
+	return nil
 }
 
 // DeleteBorTxLookupEntry removes bor transaction data associated with block hash and block number
-func DeleteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) {
+func DeleteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
 	txHash := types.GetDerivedBorTxHash(borReceiptKey(number, hash))
-	DeleteBorTxLookupEntryByTxHash(db, txHash)
+	if err := DeleteBorTxLookupEntryByTxHash(db, txHash); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // DeleteBorTxLookupEntryByTxHash removes bor transaction data associated with a bor tx hash.
-func DeleteBorTxLookupEntryByTxHash(db kv.RwTx, txHash common.Hash) {
+func DeleteBorTxLookupEntryByTxHash(db kv.RwTx, txHash common.Hash) error {
 	if err := db.Delete(kv.BorTxLookup, borTxLookupKey(txHash), nil); err != nil {
-		log.Crit("Failed to delete bor transaction lookup entry", "err", err)
+		return err
 	}
+	return nil
 }
