@@ -2,7 +2,6 @@ package snapshothashes
 
 import (
 	_ "embed"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -89,6 +88,6 @@ func KnownConfig(networkName string) *Config {
 	case networkname.BSCChainName:
 		return BscChainSnapshotConfig
 	default:
-		panic(fmt.Sprintf("snapshot sync not supported yet for network: %s", networkName))
+		return newConfig(Preverified{})
 	}
 }
