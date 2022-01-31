@@ -23,7 +23,9 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -630,15 +632,18 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
-func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
-	return hd.engine.VerifyHeader(hd.headerReader, header, true, nil)
+func (hd *HeaderDownload) VerifyHeader(header *types.Header, tx kv.Getter) error {
+	stateReader := state.NewPlainStateReader(tx)
+	return hd.engine.VerifyHeader(hd.headerReader, header, true, func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, *hd.headerReader.Config(), state.New(stateReader), header, hd.engine)
+	})
 }
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, tx kv.RwTx, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
@@ -669,7 +674,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		if !link.preverified {
 			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
-			} else if err := hd.VerifyHeader(link.header); err != nil {
+			} else if err := hd.VerifyHeader(link.header, tx); err != nil {
 				log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later

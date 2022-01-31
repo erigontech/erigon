@@ -185,7 +185,7 @@ func HeadersPOS(
 		return err
 	}
 	if parent != nil {
-		if err := cfg.hd.VerifyHeader(header); err != nil {
+		if err := cfg.hd.VerifyHeader(header, tx); err != nil {
 			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 			cfg.hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
 				Status:          privateapi.Invalid,
@@ -287,7 +287,7 @@ func HeadersPOS(
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}
-		if err := cfg.hd.VerifyHeader(&h); err != nil {
+		if err := cfg.hd.VerifyHeader(&h, tx); err != nil {
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
 			return err
 		}
@@ -302,7 +302,7 @@ func HeadersPOS(
 		return err
 	}
 
-	if err := cfg.hd.VerifyHeader(header); err != nil {
+	if err := cfg.hd.VerifyHeader(header, tx); err != nil {
 		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", err)
 		return nil
 	}
@@ -442,7 +442,7 @@ Loop:
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, tx, logPrefix, logEvery.C); err != nil {
 			return err
 		}
 
