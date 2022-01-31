@@ -32,6 +32,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	aggregationStep     = 15625                  /* this is 500'000 / 32 */
+	unwindLimit         = 90000                  /* how it is in geth */
+	dirtySpaceThreshold = 2 * 1024 * 1024 * 1024 /* threshold of dirty space in MDBX transaction that triggers a commit */
+)
+
 var (
 	commitmentFrequency int // How many blocks to skip between calculating commitment
 	changesets          bool
@@ -49,8 +55,8 @@ var erigon2Cmd = &cobra.Command{
 	Use:   "erigon2",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if commitmentFrequency < 1 || commitmentFrequency > 4096 {
-			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than 4096: %d", commitmentFrequency)
+		if commitmentFrequency < 1 || commitmentFrequency > aggregationStep {
+			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than %d: %d", commitmentFrequency, aggregationStep)
 		}
 		logger := log.New()
 		return Erigon2(genesis, logger)
@@ -109,7 +115,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, 90000, 4096)
+	agg, err3 := aggregator.NewAggregator(aggPath, 90000, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -249,7 +255,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
 				return fmt.Errorf("retrieving spaceDirty: %w", err)
 			}
-			if spaceDirty >= 2*1024*1024*1024 {
+			if spaceDirty >= dirtySpaceThreshold {
 				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 				commit = true
 			}
