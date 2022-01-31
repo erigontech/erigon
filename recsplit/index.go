@@ -50,6 +50,7 @@ type Index struct {
 	salt               uint32
 	startSeed          []uint64
 	golombRice         []uint32
+	size               int64
 }
 
 func MustOpen(indexFile string) *Index {
@@ -73,11 +74,11 @@ func OpenIndex(indexFile string) (*Index, error) {
 	if stat, err = idx.f.Stat(); err != nil {
 		return nil, err
 	}
-	size := int(stat.Size())
-	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, size); err != nil {
+	idx.size = stat.Size()
+	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
 		return nil, err
 	}
-	idx.data = idx.mmapHandle1[:size]
+	idx.data = idx.mmapHandle1[:idx.size]
 	// Read number of keys and bytes per record
 	idx.baseDataID = binary.BigEndian.Uint64(idx.data[:8])
 	idx.keyCount = binary.BigEndian.Uint64(idx.data[8:16])
@@ -136,6 +137,10 @@ func OpenIndex(indexFile string) (*Index, error) {
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
 	return idx, nil
+}
+
+func (idx *Index) Size() int64 {
+	return idx.size
 }
 
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }

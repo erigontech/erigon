@@ -193,7 +193,6 @@ func TestLoopAggregator(t *testing.T) {
 		}
 	}
 	tx.Rollback()
-	a.Close()
 }
 
 func TestRecreateAccountWithStorage(t *testing.T) {

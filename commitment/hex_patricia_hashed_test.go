@@ -42,6 +42,12 @@ func NewMockState() *MockState {
 	}
 }
 
+func (ms MockState) lockFn() {
+}
+
+func (ms MockState) unlockFn() {
+}
+
 func (ms MockState) branchFn(prefix []byte) ([]byte, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		return exBytes, nil
@@ -49,24 +55,24 @@ func (ms MockState) branchFn(prefix []byte) ([]byte, error) {
 	return nil, nil
 }
 
-func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
+func (ms MockState) accountFn(plainKey []byte, cell *Cell) ([]byte, error) {
 	exBytes, ok := ms.sm[string(plainKey)]
 	if !ok {
-		return fmt.Errorf("accountFn not found key [%x]", plainKey)
+		return nil, fmt.Errorf("accountFn not found key [%x]", plainKey)
 	}
 	var ex Update
 	pos, err := ex.decode(exBytes, 0)
 	if err != nil {
-		return fmt.Errorf("accountFn decode existing [%x], bytes: [%x]: %w", plainKey, exBytes, err)
+		return nil, fmt.Errorf("accountFn decode existing [%x], bytes: [%x]: %w", plainKey, exBytes, err)
 	}
 	if pos != len(exBytes) {
-		return fmt.Errorf("accountFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		return nil, fmt.Errorf("accountFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
 	}
 	if ex.Flags&STORAGE_UPDATE != 0 {
-		return fmt.Errorf("accountFn reading storage item for key [%x]", plainKey)
+		return nil, fmt.Errorf("accountFn reading storage item for key [%x]", plainKey)
 	}
 	if ex.Flags&DELETE_UPDATE != 0 {
-		return fmt.Errorf("accountFn reading deleted account for key [%x]", plainKey)
+		return nil, fmt.Errorf("accountFn reading deleted account for key [%x]", plainKey)
 	}
 	if ex.Flags&BALANCE_UPDATE != 0 {
 		cell.Balance.Set(&ex.Balance)
@@ -83,40 +89,40 @@ func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
 	} else {
 		cell.CodeHash = [32]byte{}
 	}
-	return nil
+	return plainKey, nil
 }
 
-func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
+func (ms MockState) storageFn(plainKey []byte, cell *Cell) ([]byte, error) {
 	exBytes, ok := ms.sm[string(plainKey)]
 	if !ok {
-		return fmt.Errorf("storageFn not found key [%x]", plainKey)
+		return nil, fmt.Errorf("storageFn not found key [%x]", plainKey)
 	}
 	var ex Update
 	pos, err := ex.decode(exBytes, 0)
 	if err != nil {
-		return fmt.Errorf("storageFn decode existing [%x], bytes: [%x]: %w", plainKey, exBytes, err)
+		return nil, fmt.Errorf("storageFn decode existing [%x], bytes: [%x]: %w", plainKey, exBytes, err)
 	}
 	if pos != len(exBytes) {
-		return fmt.Errorf("storageFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
+		return nil, fmt.Errorf("storageFn key [%x] leftover bytes in [%x], comsumed %x", plainKey, exBytes, pos)
 	}
 	if ex.Flags&BALANCE_UPDATE != 0 {
-		return fmt.Errorf("storageFn reading balance for key [%x]", plainKey)
+		return nil, fmt.Errorf("storageFn reading balance for key [%x]", plainKey)
 	}
 	if ex.Flags&NONCE_UPDATE != 0 {
-		return fmt.Errorf("storageFn reading nonce for key [%x]", plainKey)
+		return nil, fmt.Errorf("storageFn reading nonce for key [%x]", plainKey)
 	}
 	if ex.Flags&CODE_UPDATE != 0 {
-		return fmt.Errorf("storageFn reading codeHash for key [%x]", plainKey)
+		return nil, fmt.Errorf("storageFn reading codeHash for key [%x]", plainKey)
 	}
 	if ex.Flags&DELETE_UPDATE != 0 {
-		return fmt.Errorf("storageFn reading deleted item for key [%x]", plainKey)
+		return nil, fmt.Errorf("storageFn reading deleted item for key [%x]", plainKey)
 	}
 	if ex.Flags&STORAGE_UPDATE != 0 {
 		copy(cell.Storage[:], ex.CodeHashOrStorage[:])
 	} else {
 		cell.Storage = [32]byte{}
 	}
-	return nil
+	return plainKey, nil
 }
 
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {
@@ -371,7 +377,7 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 
 func TestEmptyState(t *testing.T) {
 	ms := NewMockState()
-	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
+	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn, ms.lockFn, ms.unlockFn)
 	hph.SetTrace(false)
 	plainKeys, hashedKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).

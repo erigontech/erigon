@@ -37,6 +37,7 @@ type Decompressor struct {
 	posDict        Dictionary
 	wordsStart     uint64 // Offset of whether the superstrings actually start
 	count          uint64
+	size           int64
 }
 
 func NewDecompressor(compressedFile string) (*Decompressor, error) {
@@ -52,14 +53,14 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	if stat, err = d.f.Stat(); err != nil {
 		return nil, err
 	}
-	size := int(stat.Size())
-	if size < 24 {
+	d.size = stat.Size()
+	if d.size < 24 {
 		return nil, fmt.Errorf("compressed file is too short")
 	}
-	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, size); err != nil {
+	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
-	d.data = d.mmapHandle1[:size]
+	d.data = d.mmapHandle1[:d.size]
 	d.count = binary.BigEndian.Uint64(d.data[:8])
 	dictSize := binary.BigEndian.Uint64(d.data[8:16])
 	d.dict.rootOffset = binary.BigEndian.Uint64(d.data[16:24])
@@ -72,6 +73,10 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	d.posDict.data = d.data[pos+24 : pos+24+dictSize]
 	d.wordsStart = pos + 24 + dictSize
 	return d, nil
+}
+
+func (d *Decompressor) Size() int64 {
+	return d.size
 }
 
 func (d *Decompressor) Close() error {
