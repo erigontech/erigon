@@ -190,7 +190,7 @@ func ReadBorTxLookupEntry(db kv.Tx, txHash common.Hash) (*uint64, error) {
 // WriteBorTxLookupEntry stores a positional metadata for bor transaction using block hash and block number
 func WriteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
 	txHash := types.GetDerivedBorTxHash(borReceiptKey(number, hash))
-	if err := db.Append(kv.BorTxLookup, borTxLookupKey(txHash), big.NewInt(0).SetUint64(number).Bytes()); err != nil {
+	if err := db.Put(kv.BorTxLookup, borTxLookupKey(txHash), big.NewInt(0).SetUint64(number).Bytes()); err != nil {
 		return err
 	}
 	return nil
