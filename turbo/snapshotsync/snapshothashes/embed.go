@@ -2,6 +2,7 @@ package snapshothashes
 
 import (
 	_ "embed"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -81,6 +82,6 @@ func KnownConfig(networkName string) *Config {
 	case networkname.GoerliChainName:
 		return GoerliChainSnapshotConfig
 	default:
-		return nil
+		panic(fmt.Sprintf("snapshot sync not supported yet for network: %s", networkName))
 	}
 }
