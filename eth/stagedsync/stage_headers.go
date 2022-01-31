@@ -913,8 +913,8 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		} else if reply.Completed {
 			break
 		} else {
-			readiness := int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
-			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%d%%", readiness))
+			readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
+			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness))
 		}
 		time.Sleep(10 * time.Second)
 	}

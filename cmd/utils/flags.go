@@ -550,7 +550,7 @@ var (
 	}
 	SnapshotRetireFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapshotRetire,
-		Usage: "Delete(!) old blocks from DB, by move them to snapshots",
+		Usage: "Delete(!) old blocks from DB, by moving them to snapshots",
 	}
 	DbPageSizeFlag = cli.Uint64Flag{
 		Name:  "db.pagesize",
