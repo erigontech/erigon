@@ -2,7 +2,9 @@
 
 Service to seed/download historical data (immutable .seg files)
 
-## Start Erigon in snapshot sync mode
+## Start Erigon in snapshot sync mode 
+
+Only Mainnet, Goerli and BSC networks are supported now.
 
 ```shell
 make erigon downloader 
