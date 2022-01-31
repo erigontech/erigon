@@ -32,7 +32,7 @@ type adapterLogger struct{}
 func (b adapterLogger) Log(msg lg.Msg) {
 	lvl, ok := msg.GetLevel()
 	if !ok {
-		lvl = lg.Info
+		lvl = lg.Debug
 	}
 
 	switch lvl {
