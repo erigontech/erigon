@@ -888,6 +888,74 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 	return unfolding
 }
 
+func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) error {
+	hph.lockFn()
+	defer hph.unlockFn()
+	branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+	if err != nil {
+		return err
+	}
+	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
+		// Special case - empty or deleted root
+		hph.rootChecked = true
+		return nil
+	}
+	if len(branchData) == 0 {
+		fmt.Printf("branchData empty for [%x]\n", hph.currentKey[:hph.currentKeyLen])
+	}
+	pos := 0
+	partBitmap := binary.BigEndian.Uint16(branchData[pos:])
+	pos += 2
+	hph.beforeBitmap[row] = partBitmap
+	if deleted {
+		hph.delBitmap[row] = partBitmap
+	}
+	// Next, for each part, we have bitmap of fields
+	partCount := bits.OnesCount16(partBitmap)
+	fieldsPos := pos
+	pos += (partCount + 1) / 2 // 1 bytes per two parts
+	// Loop iterating over the set bits of modMask
+	for bitset, j := partBitmap, 0; bitset != 0; j++ {
+		bit := bitset & -bitset
+		nibble := bits.TrailingZeros16(bit)
+		cell := &hph.grid[row][nibble]
+		fieldBits := branchData[fieldsPos+j/2]
+		if j%2 == 1 {
+			fieldBits >>= 4
+		}
+		if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
+			return err
+		}
+		if hph.trace {
+			fmt.Printf("cell (%d, %x) depth=%d, hash=[%x], a=[%x], s=[%x], ex=[%x]\n", row, nibble, depth, cell.h[:cell.hl], cell.apk[:cell.apl], cell.spk[:cell.spl], cell.extension[:cell.extLen])
+		}
+		if cell.apl > 0 {
+			var k []byte
+			if k, err = hph.accountFn(cell.apk[:cell.apl], cell); err != nil {
+				return err
+			}
+			cell.apl = len(k)
+			copy(cell.apk[:], k)
+			if hph.trace {
+				fmt.Printf("accountFn[%x] return balance=%d, nonce=%d\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce)
+			}
+		}
+		if cell.spl > 0 {
+			var k []byte
+			if k, err = hph.storageFn(cell.spk[:cell.spl], cell); err != nil {
+				return err
+			}
+			cell.spl = len(k)
+			copy(cell.spk[:], k)
+		}
+		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.hashBuf[:length.Hash], hph.accountKeyLen); err != nil {
+			return err
+		}
+		bitset ^= bit
+	}
+	return nil
+}
+
 func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	if hph.trace {
 		fmt.Printf("unfold %d: activeRows: %d\n", unfolding, hph.activeRows)
@@ -927,76 +995,9 @@ func (hph *HexPatriciaHashed) unfold(hashedKey []byte, unfolding int) error {
 	hph.delBitmap[row] = 0
 	if upCell.downHashedLen == 0 {
 		depth = upDepth + 1
-		hph.lockFn()
-		branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
-		if err != nil {
-			hph.unlockFn()
+		if err := hph.unfoldBranchNode(row, deleted, depth); err != nil {
 			return err
 		}
-		if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
-			// Special case - empty or deleted root
-			hph.unlockFn()
-			hph.rootChecked = true
-			return nil
-		}
-		if len(branchData) == 0 {
-			fmt.Printf("branchData empty for [%x]\n", hph.currentKey[:hph.currentKeyLen])
-		}
-		pos := 0
-		partBitmap := binary.BigEndian.Uint16(branchData[pos:])
-		pos += 2
-		hph.beforeBitmap[row] = partBitmap
-		if deleted {
-			hph.delBitmap[row] = partBitmap
-		}
-		// Next, for each part, we have bitmap of fields
-		partCount := bits.OnesCount16(partBitmap)
-		fieldsPos := pos
-		pos += (partCount + 1) / 2 // 1 bytes per two parts
-		// Loop iterating over the set bits of modMask
-		for bitset, j := partBitmap, 0; bitset != 0; j++ {
-			bit := bitset & -bitset
-			nibble := bits.TrailingZeros16(bit)
-			cell := &hph.grid[row][nibble]
-			fieldBits := branchData[fieldsPos+j/2]
-			if j%2 == 1 {
-				fieldBits >>= 4
-			}
-			if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
-				hph.unlockFn()
-				return err
-			}
-			if hph.trace {
-				fmt.Printf("cell (%d, %x) depth=%d, hash=[%x], a=[%x], s=[%x], ex=[%x]\n", row, nibble, depth, cell.h[:cell.hl], cell.apk[:cell.apl], cell.spk[:cell.spl], cell.extension[:cell.extLen])
-			}
-			if cell.apl > 0 {
-				var k []byte
-				if k, err = hph.accountFn(cell.apk[:cell.apl], cell); err != nil {
-					hph.unlockFn()
-					return err
-				}
-				cell.apl = len(k)
-				copy(cell.apk[:], k)
-				if hph.trace {
-					fmt.Printf("accountFn[%x] return balance=%d, nonce=%d\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce)
-				}
-			}
-			if cell.spl > 0 {
-				var k []byte
-				if k, err = hph.storageFn(cell.spk[:cell.spl], cell); err != nil {
-					hph.unlockFn()
-					return err
-				}
-				cell.spl = len(k)
-				copy(cell.spk[:], k)
-			}
-			if err = cell.deriveHashedKeys(depth, hph.keccak, hph.hashBuf[:length.Hash], hph.accountKeyLen); err != nil {
-				hph.unlockFn()
-				return err
-			}
-			bitset ^= bit
-		}
-		hph.unlockFn()
 	} else if upCell.downHashedLen >= unfolding {
 		depth = upDepth + unfolding
 		nibble := upCell.downHashedKey[unfolding-1]

@@ -960,13 +960,44 @@ type AggregationTask struct {
 	blockTo        uint64
 }
 
-func removeLocked(tree **btree.BTree, lock sync.Locker, toRemove []*byEndBlockItem, toAdd *byEndBlockItem) {
-	lock.Lock()
-	defer lock.Unlock()
-	for _, ag := range toRemove {
-		(*tree).Delete(ag)
+func (a *Aggregator) removeLocked(
+	accountsToRemove []*byEndBlockItem, accountsItem *byEndBlockItem,
+	codeToRemove []*byEndBlockItem, codeItem *byEndBlockItem,
+	storageToRemove []*byEndBlockItem, storageItem *byEndBlockItem,
+	commitmentToRemove []*byEndBlockItem, commitmentItem *byEndBlockItem,
+) {
+	a.accountsFilesLock.Lock()
+	defer a.accountsFilesLock.Unlock()
+	a.codeFilesLock.Lock()
+	defer a.codeFilesLock.Unlock()
+	a.storageFilesLock.Lock()
+	defer a.storageFilesLock.Unlock()
+	a.commFilesLock.Lock()
+	defer a.commFilesLock.Unlock()
+	if len(accountsToRemove) > 1 {
+		for _, ag := range accountsToRemove {
+			a.accountsFiles.Delete(ag)
+		}
+		a.accountsFiles.ReplaceOrInsert(accountsItem)
 	}
-	(*tree).ReplaceOrInsert(toAdd)
+	if len(codeToRemove) > 1 {
+		for _, ag := range codeToRemove {
+			a.codeFiles.Delete(ag)
+		}
+		a.codeFiles.ReplaceOrInsert(codeItem)
+	}
+	if len(storageToRemove) > 1 {
+		for _, ag := range storageToRemove {
+			a.storageFiles.Delete(ag)
+		}
+		a.storageFiles.ReplaceOrInsert(storageItem)
+	}
+	if len(commitmentToRemove) > 1 {
+		for _, ag := range commitmentToRemove {
+			a.commitmentFiles.Delete(ag)
+		}
+		a.commitmentFiles.ReplaceOrInsert(commitmentItem)
+	}
 }
 
 func removeFiles(treeName string, diffDir string, toRemove []*byEndBlockItem) error {
@@ -1172,7 +1203,6 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 			if g.HasNext() {
 				if keyMatch, _ := g.Match(apkBuf); keyMatch {
 					apk = encodeU64(offset, []byte{byte(j - 1)})
-					//fmt.Fprintf(os.Stderr, "encoding apkBuf [%x] into fileI %d, offset %d = [%x], file [%d-%d]\n", apkBuf, j-1, offset, apk, item.startBlock, item.endBlock)
 					break
 				}
 			}
@@ -1204,7 +1234,6 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 			if g.HasNext() {
 				if keyMatch, _ := g.Match(spkBuf); keyMatch {
 					spk = encodeU64(offset, []byte{byte(j - 1)})
-					//fmt.Fprintf(os.Stderr, "encoding spkBuf [%x] into fileI %d, offset %d = [%x], file [%d-%d]\n", spkBuf, j-1, offset, spk, item.startBlock, item.endBlock)
 					break
 				}
 			}
@@ -1290,27 +1319,22 @@ func (a *Aggregator) backgroundMerge() {
 			}
 		}
 		// Switch aggregator to new state files, close and remove old files
+		a.removeLocked(accountsToRemove, newAccountsItem, codeToRemove, newCodeItem, storageToRemove, newStorageItem, commitmentToRemove, newCommitmentItem)
 		if len(accountsToRemove) > 1 {
-			removeLocked(&a.accountsFiles, &a.accountsFilesLock, accountsToRemove, newAccountsItem)
 			removeFiles("accounts", a.diffDir, accountsToRemove)
 		}
 		if len(codeToRemove) > 1 {
-			removeLocked(&a.codeFiles, &a.codeFilesLock, codeToRemove, newCodeItem)
 			removeFiles("code", a.diffDir, codeToRemove)
 		}
 		if len(storageToRemove) > 1 {
-			removeLocked(&a.storageFiles, &a.storageFilesLock, storageToRemove, newStorageItem)
 			removeFiles("storage", a.diffDir, storageToRemove)
 		}
 		if len(commitmentToRemove) > 1 {
-			removeLocked(&a.commitmentFiles, &a.commFilesLock, commitmentToRemove, newCommitmentItem)
 			removeFiles("commitment", a.diffDir, commitmentToRemove)
 		}
-		if len(accountsToRemove) > 1 {
-			mergeTime := time.Since(t)
-			if mergeTime > time.Minute {
-				log.Info("Long merge", "from", blockFrom, "to", blockTo, "files", len(accountsToRemove), "time", time.Since(t))
-			}
+		mergeTime := time.Since(t)
+		if mergeTime > time.Minute {
+			log.Info("Long merge", "from", blockFrom, "to", blockTo, "files", len(accountsToRemove)-1+len(codeToRemove)-1+len(storageToRemove)-1+len(commitmentToRemove)-1, "time", time.Since(t))
 		}
 	}
 }
@@ -1447,7 +1471,6 @@ func readByOffset(treeName string, tree **btree.BTree, fileI int, offset uint64)
 			return true
 		}
 		item := i.(*byEndBlockItem)
-		//fmt.Fprintf(os.Stderr, "found in file [%d-%d]\n", item.startBlock, item.endBlock)
 		g := item.decompressor.MakeGetter() // TODO Cache in the reader
 		g.Reset(offset)
 		key, _ = g.Next(nil)
@@ -1619,6 +1642,7 @@ func (i *CommitmentItem) Less(than btree.Item) bool {
 
 func (w *Writer) lockFn() {
 	w.a.accountsFilesLock.RLock()
+	w.a.codeFilesLock.RLock()
 	w.a.storageFilesLock.RLock()
 	w.a.commFilesLock.RLock()
 }
@@ -1626,6 +1650,7 @@ func (w *Writer) lockFn() {
 func (w *Writer) unlockFn() {
 	w.a.commFilesLock.RUnlock()
 	w.a.storageFilesLock.RUnlock()
+	w.a.codeFilesLock.RUnlock()
 	w.a.accountsFilesLock.RUnlock()
 }
 
@@ -1659,23 +1684,22 @@ func (w *Writer) accountFn(plainKey []byte, cell *commitment.Cell) ([]byte, erro
 	var enc []byte
 	var v []byte
 	var err error
-	if len(plainKey) != length.Addr {
+	if len(plainKey) != length.Addr { // Accessing account key and value via "thin reference" to the state file and offset
 		fileI := int(plainKey[0])
 		offset := decodeU64(plainKey[1:])
-		//fmt.Fprintf(os.Stderr, "accountFn, plainKey [%x], fileI %d, offset %d\n", plainKey, fileI, offset)
-		plainKey, _ = readByOffset("accounts", &w.a.accountsFiles, fileI, offset)
-		//fmt.Fprintf(os.Stderr, "retrived [%x]\n", plainKey)
-	}
-	// Look in the summary table first
-	if v, err = w.tx.GetOne(kv.StateAccounts, plainKey); err != nil {
-		return nil, err
-	}
-	if v != nil {
-		// First 4 bytes is the number of 1-block state diffs containing the key
-		enc = v[4:]
-	} else {
-		// Look in the files
-		enc = readFromFiles("accounts", &w.a.accountsFiles, nil /* lock */, w.blockNum, plainKey, false /* trace */)
+		plainKey, enc = readByOffset("accounts", &w.a.accountsFiles, fileI, offset)
+	} else { // Full account key is provided, search as usual
+		// Look in the summary table first
+		if v, err = w.tx.GetOne(kv.StateAccounts, plainKey); err != nil {
+			return nil, err
+		}
+		if v != nil {
+			// First 4 bytes is the number of 1-block state diffs containing the key
+			enc = v[4:]
+		} else {
+			// Look in the files
+			enc = readFromFiles("accounts", &w.a.accountsFiles, nil /* lock */, w.blockNum, plainKey, false /* trace */)
+		}
 	}
 	cell.Nonce = 0
 	cell.Balance.Clear()
@@ -1695,7 +1719,6 @@ func (w *Writer) accountFn(plainKey []byte, cell *commitment.Cell) ([]byte, erro
 			cell.Balance.SetBytes(enc[pos : pos+balanceBytes])
 		}
 	}
-
 	v, err = w.tx.GetOne(kv.StateCode, plainKey)
 	if err != nil {
 		return nil, err
@@ -1705,7 +1728,7 @@ func (w *Writer) accountFn(plainKey []byte, cell *commitment.Cell) ([]byte, erro
 		enc = v[4:]
 	} else {
 		// Look in the files
-		enc = readFromFiles("code", &w.a.codeFiles, w.a.codeFilesLock.RLocker(), w.blockNum, plainKey, false /* trace */)
+		enc = readFromFiles("code", &w.a.codeFiles, nil /* lock */, w.blockNum, plainKey, false /* trace */)
 	}
 	if len(enc) > 0 {
 		w.a.keccak.Reset()
@@ -1719,23 +1742,22 @@ func (w *Writer) storageFn(plainKey []byte, cell *commitment.Cell) ([]byte, erro
 	var enc []byte
 	var v []byte
 	var err error
-	if len(plainKey) != length.Addr+length.Hash {
+	if len(plainKey) != length.Addr+length.Hash { // Accessing storage key and value via "thin reference" to the state file and offset
 		fileI := int(plainKey[0])
 		offset := decodeU64(plainKey[1:])
-		//fmt.Fprintf(os.Stderr, "storageFn, plainKey [%x], fileI %d, offset %d\n", plainKey, fileI, offset)
-		plainKey, _ = readByOffset("storage", &w.a.storageFiles, fileI, offset)
-		//fmt.Fprintf(os.Stderr, "retrived [%x]\n", plainKey)
-	}
-	// Look in the summary table first
-	if v, err = w.tx.GetOne(kv.StateStorage, plainKey); err != nil {
-		return nil, err
-	}
-	if v != nil {
-		// First 4 bytes is the number of 1-block state diffs containing the key
-		enc = v[4:]
-	} else {
-		// Look in the files
-		enc = readFromFiles("storage", &w.a.storageFiles, nil /* lock */, w.blockNum, plainKey, false /* trace */)
+		plainKey, enc = readByOffset("storage", &w.a.storageFiles, fileI, offset)
+	} else { // Full storage key is provided, search as usual
+		// Look in the summary table first
+		if v, err = w.tx.GetOne(kv.StateStorage, plainKey); err != nil {
+			return nil, err
+		}
+		if v != nil {
+			// First 4 bytes is the number of 1-block state diffs containing the key
+			enc = v[4:]
+		} else {
+			// Look in the files
+			enc = readFromFiles("storage", &w.a.storageFiles, nil /* lock */, w.blockNum, plainKey, false /* trace */)
+		}
 	}
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
