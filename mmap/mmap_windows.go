@@ -50,6 +50,14 @@ func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 	return mmapHandle2[:size], mmapHandle2, nil
 }
 
+func MadviseSequential(mmapHandle1 []byte) error {
+	return nil
+}
+
+func MadviseRandom(mmapHandle1 []byte) error {
+	return nil
+}
+
 func Munmap(_ []byte, mmapHandle2 *[MaxMapSize]byte) error {
 	if mmapHandle2 == nil {
 		return nil

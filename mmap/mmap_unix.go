@@ -48,6 +48,24 @@ func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 	return mmapHandle1, mmapHandle2, nil
 }
 
+func MadviseSequential(mmapHandle1 []byte) error {
+	err := unix.Madvise(mmapHandle1, syscall.MADV_SEQUENTIAL)
+	if err != nil && err != syscall.ENOSYS {
+		// Ignore not implemented error in kernel because it still works.
+		return fmt.Errorf("madvise: %s", err)
+	}
+	return nil
+}
+
+func MadviseRandom(mmapHandle1 []byte) error {
+	err := unix.Madvise(mmapHandle1, syscall.MADV_RANDOM)
+	if err != nil && err != syscall.ENOSYS {
+		// Ignore not implemented error in kernel because it still works.
+		return fmt.Errorf("madvise: %s", err)
+	}
+	return nil
+}
+
 // munmap unmaps a DB's data file from memory.
 func Munmap(mmapHandle1 []byte, _ *[MaxMapSize]byte) error {
 	// Ignore the unmap if we have no mapped data.
