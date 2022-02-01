@@ -33,6 +33,10 @@ Loop:
 				continue Loop
 			}
 		}
+		//skip unsecure protocols
+		if strings.HasPrefix(tracker, "ws://") || strings.HasPrefix(tracker, "http://") {
+			continue
+		}
 		res = append(res, tracker)
 	}
 	return res
