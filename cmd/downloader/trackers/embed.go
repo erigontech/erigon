@@ -7,23 +7,23 @@ import (
 
 //go:embed trackerslist/trackers_best.txt
 var best string
-var Best = strings.Split(best, "\n\n")
+var Best = first10(strings.Split(best, "\n\n"))
 
 //go:embed trackerslist/trackers_all_https.txt
 var https string
-var Https = withoutBest(strings.Split(https, "\n\n"))
+var Https = first10(withoutBest(strings.Split(https, "\n\n")))
 
 //go:embed trackerslist/trackers_all_http.txt
 var http string
-var Http = withoutBest(strings.Split(http, "\n\n"))
+var Http = first10(withoutBest(strings.Split(http, "\n\n")))
 
 //go:embed trackerslist/trackers_all_udp.txt
 var udp string
-var Udp = withoutBest(strings.Split(udp, "\n\n"))
+var Udp = first10(withoutBest(strings.Split(udp, "\n\n")))
 
 //go:embed trackerslist/trackers_all_ws.txt
 var ws string
-var Ws = withoutBest(strings.Split(ws, "\n\n"))
+var Ws = first10(withoutBest(strings.Split(ws, "\n\n")))
 
 func withoutBest(in []string) (res []string) {
 Loop:
@@ -32,6 +32,15 @@ Loop:
 			if tracker == bestItem {
 				continue Loop
 			}
+		}
+		res = append(res, tracker)
+	}
+	return res
+}
+func first10(in []string) (res []string) {
+	for i, tracker := range in {
+		if i >= 10 {
+			break
 		}
 		res = append(res, tracker)
 	}
