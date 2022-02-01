@@ -13,10 +13,6 @@ var Best = first10(strings.Split(best, "\n\n"))
 var https string
 var Https = first10(withoutBest(strings.Split(https, "\n\n")))
 
-//go:embed trackerslist/trackers_all_http.txt
-var http string
-var Http = first10(withoutBest(strings.Split(http, "\n\n")))
-
 //go:embed trackerslist/trackers_all_udp.txt
 var udp string
 var Udp = first10(withoutBest(strings.Split(udp, "\n\n")))
