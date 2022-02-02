@@ -33,6 +33,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+// The number of blocks we should be able to re-org sub-second on commodity hardware.
+// See https://hackmd.io/TdJtNs0dS56q-In8h-ShSg
+const ShortPoSReorgThresholdBlocks = 10
+
 type HeadersCfg struct {
 	db                    kv.RwDB
 	hd                    *headerdownload.HeaderDownload
@@ -199,16 +203,24 @@ func handleForkChoice(
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		// TODO(yperbasis): do the sync and switch to the new chain
 	} else {
-		cfg.hd.SetPendingPayloadStatus(forkChoiceMessage.HeadBlockHash)
-
 		parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 		if err != nil {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 			return err
 		}
 
 		forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
 		if err != nil {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 			return err
+		}
+
+		if header.Number.Uint64()-forkingPoint <= ShortPoSReorgThresholdBlocks {
+			// Short range re-org
+			cfg.hd.SetPendingPayloadStatus(forkChoiceMessage.HeadBlockHash)
+		} else {
+			// Long range re-org
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 
 		u.UnwindTo(forkingPoint, common.Hash{})
