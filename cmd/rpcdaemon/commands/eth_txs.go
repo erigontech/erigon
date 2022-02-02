@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -159,9 +158,9 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
-	txs := block.Transactions()
+	txs := block.Transactions() // not error
 	if uint64(txIndex) >= uint64(len(txs)) {
-		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
+		return nil, nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -211,7 +210,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 
 	txs := block.Transactions()
 	if uint64(txIndex) >= uint64(len(txs)) {
-		return nil, fmt.Errorf("txIndex (%d) out of range (nTxs: %d)", uint64(txIndex), uint64(len(txs)))
+		return nil, nil // not error
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
