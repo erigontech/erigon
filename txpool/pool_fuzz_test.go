@@ -35,6 +35,7 @@ func init() {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 }
 
+/*
 func FuzzTwoQueue(f *testing.F) {
 	f.Add([]uint8{0b1000, 0b0101, 0b0111})
 	f.Add([]uint8{0b0101, 0b1110, 0b1101, 0b0001})
@@ -44,7 +45,7 @@ func FuzzTwoQueue(f *testing.F) {
 		{
 			sub := NewPendingSubPool(PendingSubPool, 1024)
 			for _, i := range in {
-				sub.UnsafeAdd(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
+				sub.Add(&metaTx{subPool: SubPoolMarker(i & 0b1111), Tx: &TxSlot{nonce: 1, value: *uint256.NewInt(1)}})
 			}
 			sub.EnforceWorstInvariants()
 			sub.EnforceBestInvariants()
@@ -53,12 +54,12 @@ func FuzzTwoQueue(f *testing.F) {
 			assert.Equal(len(in), sub.Len())
 
 			var prevBest *uint8
-			for i := range sub.best {
-				current := uint8(sub.best[i].subPool)
+			for i := range sub.best.ms {
+				current := uint8(sub.best.ms[i].subPool)
 				if prevBest != nil {
 					assert.LessOrEqual(current, *prevBest)
 				}
-				assert.Equal(i, sub.best[i].bestIndex)
+				assert.Equal(i, sub.best.ms[i].bestIndex)
 				prevBest = &current
 			}
 		}
@@ -71,11 +72,11 @@ func FuzzTwoQueue(f *testing.F) {
 			assert.Equal(len(in), sub.worst.Len())
 			assert.Equal(len(in), sub.Len())
 
-			for i := range *sub.best {
-				assert.Equal(i, (*sub.best)[i].bestIndex)
+			for i := range sub.best.ms {
+				assert.Equal(i, (sub.best.ms)[i].bestIndex)
 			}
-			for i := range *sub.worst {
-				assert.Equal(i, (*sub.worst)[i].worstIndex)
+			for i := range sub.worst.ms {
+				assert.Equal(i, (sub.worst.ms)[i].worstIndex)
 			}
 
 			var prevBest *uint8
@@ -118,7 +119,7 @@ func FuzzTwoQueue(f *testing.F) {
 		}
 	})
 }
-
+*/
 func u64Slice(in []byte) ([]uint64, bool) {
 	if len(in) < 8 {
 		return nil, false
@@ -204,7 +205,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 			feeCap: feeCap[i%len(feeCap)],
 		}
 		txRlp := fakeRlpTx(txs.txs[i], senders.At(i%senders.Len()))
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.txs[i], nil)
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.txs[i], nil, false)
 		if err != nil {
 			panic(err)
 		}
@@ -249,7 +250,7 @@ func fakeRlpTx(slot *TxSlot, data []byte) []byte {
 
 func iterateSubPoolUnordered(subPool *SubPool, f func(tx *metaTx)) {
 	for i := 0; i < subPool.best.Len(); i++ {
-		f((*subPool.best)[i])
+		f((subPool.best.ms)[i])
 	}
 }
 
@@ -308,7 +309,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		assert.NoError(err)
 		pool.senders.senderIDs = senderIDs
 		for addr, id := range senderIDs {
-			pool.senders.senderID2Addr[id] = addr
+			pool.senders.senderID2Addr[id] = []byte(addr)
 		}
 		pool.senders.senderID = uint64(len(senderIDs))
 		check := func(unwindTxs, minedTxs TxSlots, msg string) {
@@ -320,7 +321,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			if worst != nil && worst.subPool < 0b1110 {
 				t.Fatalf("pending worst too small %b", worst.subPool)
 			}
-			for _, tx := range pending.best {
+			for _, tx := range pending.best.ms {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
 					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg, i.senderID)
@@ -418,9 +419,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			if queued.Len() > 3 {
 				// Less func must be transitive (choose 3 semi-random elements)
 				i := queued.Len() - 1
-				a, b, c := (*queued.best)[i], (*queued.best)[i-1], (*queued.best)[i-2]
-				if a.Less(b) && b.Less(c) {
-					assert.True(a.Less(c))
+				if queued.best.Less(i, i-1) && queued.best.Less(i-1, i-2) {
+					assert.True(queued.best.Less(i, i-2))
 				}
 			}
 		}
@@ -557,8 +557,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 }
 
 func copyHashes(p *PendingPool) (hashes Hashes) {
-	for i := range p.best {
-		hashes = append(hashes, p.best[i].Tx.IdHash[:]...)
+	for i := range p.best.ms {
+		hashes = append(hashes, p.best.ms[i].Tx.IdHash[:]...)
 	}
 	return hashes
 }

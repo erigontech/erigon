@@ -82,8 +82,9 @@ func FuzzRecSplit(f *testing.F) {
 		idx := MustOpen(indexFile)
 		bitCount := (count + 63) / 64
 		bits := make([]uint64, bitCount)
+		reader := NewIndexReader(idx)
 		for i = 0; i < len(in)-l; i += l {
-			off = idx.Lookup(in[i : i+l])
+			off = reader.Lookup(in[i : i+l])
 			if int(off) >= count {
 				t.Errorf("off %d >= count %d", off, count)
 			}
