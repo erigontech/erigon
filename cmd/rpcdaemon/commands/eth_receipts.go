@@ -253,7 +253,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	var blockNum uint64
 	var ok bool
 
-	if api._chainConfig.Bor != nil {
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil{
+		return nil, err
+	}
+
+	if chainConfig.Bor != nil {
 		if blockNum == 0 {
 			var blocN uint64
 			borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
