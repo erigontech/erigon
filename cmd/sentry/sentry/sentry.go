@@ -62,7 +62,7 @@ type PeerInfo struct {
 }
 
 func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
-	p := &PeerInfo{peer: peer, rw: rw, removed: make(chan struct{}), tasks: make(chan func(), 32)}
+	p := &PeerInfo{peer: peer, rw: rw, removed: make(chan struct{}), tasks: make(chan func(), 16)}
 	go func() { // each peer has own worker, then slow
 		for f := range p.tasks {
 			f()
@@ -128,7 +128,9 @@ func (pi *PeerInfo) Async(f func()) {
 	select {
 	case <-pi.removed: // noop if peer removed
 	case pi.tasks <- f:
-		fmt.Printf("check: %d, %d\n", len(pi.tasks), cap(pi.tasks))
+		if len(pi.tasks) > cap(pi.tasks)/2 {
+			fmt.Printf("check: %d, %d\n", len(pi.tasks), cap(pi.tasks))
+		}
 		if len(pi.tasks) == cap(pi.tasks) { // if channel full - loose old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
 				select {
@@ -136,7 +138,8 @@ func (pi *PeerInfo) Async(f func()) {
 				default:
 				}
 			}
-			fmt.Printf("lost some messages\n")
+
+			log.Debug("slow peer, drop its old requests", "name", pi.peer.Name())
 		}
 	}
 }
