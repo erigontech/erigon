@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
-	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
 
@@ -609,15 +608,17 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			}
 			prevTxID = id
 			if len(senders) > 0 {
+				fmt.Printf("with Senders\n")
 				parseCtx.WithSender(true)
 			}
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
 				return err
 			}
+			fmt.Printf("sender: %d, %d, %x\n", blockNum, len(senders), sender)
 			if len(senders) > 0 {
 				sender = senders[j]
 			}
-			fmt.Printf("sender: %d, %x\n", blockNum, sender)
+
 			valueBuf = valueBuf[:0]
 			valueBuf = append(valueBuf, slot.IdHash[:1]...)
 			valueBuf = append(valueBuf, sender[:]...)
