@@ -58,7 +58,10 @@ type PeerInfo struct {
 
 	removed    chan struct{} // close this channel on remove
 	removeOnce sync.Once
-	tasks      chan func()
+	// each peer has own worker (goroutine) - all funcs from this queue will execute on this worker
+	// if this queue is full (means peer is slow) - old messages will be dropped
+	// channel closed on peer remove
+	tasks chan func()
 }
 
 func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
@@ -128,8 +131,8 @@ func (pi *PeerInfo) Async(f func()) {
 	select {
 	case <-pi.removed: // noop if peer removed
 	case pi.tasks <- f:
-		if len(pi.tasks) > cap(pi.tasks)/2 {
-			fmt.Printf("check: %d, %d\n", len(pi.tasks), cap(pi.tasks))
+		if len(pi.tasks) > cap(pi.tasks)-1 { // if channel full - loose old messages
+			fmt.Printf("alex: %d, %s\n", len(pi.tasks), pi.ID().String()[:4])
 		}
 		if len(pi.tasks) == cap(pi.tasks) { // if channel full - loose old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
@@ -138,7 +141,6 @@ func (pi *PeerInfo) Async(f func()) {
 				default:
 				}
 			}
-
 			log.Debug("slow peer, drop its old requests", "name", pi.peer.Name())
 		}
 	}
