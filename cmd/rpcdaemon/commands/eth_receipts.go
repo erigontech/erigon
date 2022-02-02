@@ -254,7 +254,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	var ok bool
 
 	chainConfig, err := api.chainConfig(tx)
-	if err != nil{
+	if err != nil {
 		return nil, err
 	}
 
