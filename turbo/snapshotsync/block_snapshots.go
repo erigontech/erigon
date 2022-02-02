@@ -612,7 +612,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
 				return err
 			}
-			fmt.Printf("sender: %d, %d, %x\n", blockNum, len(senders), sender)
 			if len(senders) > 0 {
 				sender = senders[j]
 			}
