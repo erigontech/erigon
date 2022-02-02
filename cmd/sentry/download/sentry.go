@@ -74,6 +74,10 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	return p
 }
 
+func (pi *PeerInfo) ID() enode.ID {
+	return pi.peer.ID()
+}
+
 // AddDeadline adds given deadline to the list of deadlines
 // Deadlines must be added in the chronological order for the function
 // ClearDeadlines to work correctly (it uses binary search)
@@ -745,7 +749,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 			break
 		}
 		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-		reply.Peers = []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}
+		reply.Peers = []*proto_types.H512{gointerfaces.ConvertBytesToH512([]byte(peerID))}
 	}
 	return reply, lastErr
 }
@@ -771,8 +775,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	}
 
 	ss.writePeer("sendMessageById", peerInfo, msgcode, inreq.Data.Data, 0)
-	reply.Peers = []*proto_types.H256{inreq.PeerId}
-	return reply, nil
+	return &proto_sentry.SentPeers{Peers: []*proto_types.H512{inreq.PeerId}}, nil
 }
 
 func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *proto_sentry.SendMessageToRandomPeersRequest) (*proto_sentry.SentPeers, error) {
