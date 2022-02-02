@@ -158,9 +158,9 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
 
-	txs := block.Transactions() // not error
+	txs := block.Transactions()
 	if uint64(txIndex) >= uint64(len(txs)) {
-		return nil, nil
+		return nil, nil // not error
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
