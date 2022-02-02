@@ -270,20 +270,28 @@ func handleNewPayload(
 		return err
 	}
 
-	shouldSaveBody := false
+	success := false
 	if parent != nil {
-		shouldSaveBody, err = verifyAndSavePoSHeader(s, tx, cfg, header, headerInserter)
+		success, err = verifyAndSavePoSHeader(s, tx, cfg, header, headerInserter)
 		if err != nil {
 			return err
 		}
 	} else {
-		shouldSaveBody, err = downloadMissingPoSHeaders(s, ctx, tx, cfg, header, headerInserter)
+		success, err = downloadMissingPoSHeaders(s, ctx, tx, cfg, header, headerInserter)
 		if err != nil {
 			return err
 		}
+		if success {
+			if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
+				log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+				success = false
+			} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
+				return err
+			}
+		}
 	}
 
-	if shouldSaveBody {
+	if success {
 		// Note an inconsistency here:
 		// We insert raw bodies immediately and skip stage 3. (Stage 2 will not be skipped.)
 		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
@@ -302,7 +310,7 @@ func verifyAndSavePoSHeader(
 	cfg HeadersCfg,
 	header *types.Header,
 	headerInserter *headerdownload.HeaderInserter,
-) (shouldSaveBody bool, err error) {
+) (success bool, err error) {
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
@@ -355,7 +363,7 @@ func verifyAndSavePoSHeader(
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
 	}
 
-	shouldSaveBody = true
+	success = true
 	return
 }
 
@@ -366,7 +374,7 @@ func downloadMissingPoSHeaders(
 	cfg HeadersCfg,
 	header *types.Header,
 	headerInserter *headerdownload.HeaderInserter,
-) (shouldSaveBody bool, err error) {
+) (success bool, err error) {
 	cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 
 	cfg.hd.SetPOSSync(true)
@@ -376,7 +384,6 @@ func downloadMissingPoSHeaders(
 	}
 
 	headerNumber := header.Number.Uint64()
-	headerHash := header.Hash()
 
 	cfg.hd.SetProcessed(headerNumber)
 	cfg.hd.SetExpectedHash(header.ParentHash)
@@ -459,17 +466,7 @@ func downloadMissingPoSHeaders(
 		return
 	}
 
-	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
-		return
-	}
-
-	err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
-	if err != nil {
-		return
-	}
-
-	shouldSaveBody = true
+	success = true
 	return
 }
 
