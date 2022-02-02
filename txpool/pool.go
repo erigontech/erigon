@@ -457,7 +457,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	if p.promoted.Len() > 0 {
 		select {
-		case p.newPendingTxs <- p.promoted.DedupCopy():
+		case p.newPendingTxs <- common.Copy(p.promoted):
 		default:
 		}
 	}
@@ -515,7 +515,7 @@ func (p *TxPool) processRemoteTxs(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case p.newPendingTxs <- p.promoted.DedupCopy():
+		case p.newPendingTxs <- common.Copy(p.promoted):
 		default:
 		}
 	}
@@ -840,7 +840,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 	}
 	if p.promoted.Len() > 0 {
 		select {
-		case p.newPendingTxs <- p.promoted.DedupCopy():
+		case p.newPendingTxs <- common.Copy(p.promoted):
 		default:
 		}
 	}
@@ -1282,11 +1282,6 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
-	localTxHashes := make(Hashes, 0, 128)
-	localTxRlps := make([][]byte, 0, 4)
-	remoteTxHashes := make(Hashes, 0, 128)
-	remoteTxRlps := make([][]byte, 0, 4)
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -1325,40 +1320,57 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			}
 		case h := <-newTxs:
 			go func() {
-				t := time.Now()
+				for i := 0; i < 16; i++ { // drain more events from channel, then merge and dedup them
+					select {
+					case a := <-newTxs:
+						h = append(h, a...)
+						continue
+					default:
+					}
+					break
+				}
+				if h.Len() == 0 {
+					return
+				}
+				defer propagateNewTxsTimer.UpdateDuration(time.Now())
+
+				h = h.DedupCopy()
 
 				notifyMiningAboutNewSlots()
-				localTxHashes = localTxHashes[:0]
-				localTxRlps = localTxRlps[:0]
-				remoteTxHashes = remoteTxHashes[:0]
-				remoteTxRlps = remoteTxRlps[:0]
-				if h.Len() > 0 {
-					if err := db.View(ctx, func(tx kv.Tx) error {
-						slotsRlp := make([][]byte, 0, h.Len())
-						for i := 0; i < h.Len(); i++ {
-							hash := h.At(i)
-							slotRlp, err := p.GetRlp(tx, hash)
-							if err != nil {
-								return err
-							}
-							if len(slotRlp) > 0 {
-								// Empty rlp can happen if a transaction we want to broadcase has just been mined, for example
-								slotsRlp = append(slotsRlp, slotRlp)
-								if p.IsLocal(h.At(i)) {
-									localTxHashes = append(localTxHashes, hash...)
-									localTxRlps = append(localTxRlps, slotRlp)
-								} else {
-									remoteTxHashes = append(localTxHashes, hash...)
-									remoteTxRlps = append(remoteTxRlps, slotRlp)
-								}
-							}
+
+				var localTxHashes Hashes
+				var localTxRlps [][]byte
+				var remoteTxHashes Hashes
+				var remoteTxRlps [][]byte
+				slotsRlp := make([][]byte, 0, h.Len())
+
+				if err := db.View(ctx, func(tx kv.Tx) error {
+					for i := 0; i < h.Len(); i++ {
+						hash := h.At(i)
+						slotRlp, err := p.GetRlp(tx, hash)
+						if err != nil {
+							return err
 						}
-						newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
-						return nil
-					}); err != nil {
-						log.Error("[txpool] send new slots by grpc", "err", err)
+						if len(slotRlp) == 0 {
+							continue
+						}
+
+						// Empty rlp can happen if a transaction we want to broadcase has just been mined, for example
+						slotsRlp = append(slotsRlp, slotRlp)
+						if p.IsLocal(hash) {
+							localTxHashes = append(localTxHashes, hash...)
+							localTxRlps = append(localTxRlps, slotRlp)
+						} else {
+							remoteTxHashes = append(localTxHashes, hash...)
+							remoteTxRlps = append(remoteTxRlps, slotRlp)
+						}
 					}
+					return nil
+				}); err != nil {
+					log.Error("[txpool] collect info to propagate", "err", err)
+					return
 				}
+				newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
 
 				// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
 				txSentTo := send.BroadcastPooledTxs(localTxRlps)
@@ -1369,7 +1381,6 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				}
 				send.BroadcastPooledTxs(remoteTxRlps)
 				send.AnnouncePooledTxs(remoteTxHashes)
-				propagateNewTxsTimer.UpdateDuration(t)
 			}()
 		case <-syncToNewPeersEvery.C: // new peer
 			newPeers := p.recentlyConnectedPeers.GetAndClean()
@@ -1377,8 +1388,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				continue
 			}
 			t := time.Now()
-			remoteTxHashes = p.AppendAllHashes(remoteTxHashes[:0])
-			send.PropagatePooledTxsToPeersList(newPeers, remoteTxHashes)
+			var hashes Hashes
+			hashes = p.AppendAllHashes(hashes[:0])
+			go send.PropagatePooledTxsToPeersList(newPeers, hashes)
 			propagateToNewPeerTimer.UpdateDuration(t)
 		}
 	}
