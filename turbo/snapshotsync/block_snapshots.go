@@ -608,16 +608,15 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
-			if len(senders) > 0 {
-				parseCtx.WithSender(true)
-			}
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+			parseCtx.WithSender(len(senders) == 0)
+			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
 				return err
 			}
+			fmt.Printf("sender: %d, %d, %x\n", blockNum, len(senders), sender)
 			if len(senders) > 0 {
 				sender = senders[j]
 			}
-			_ = sender
+
 			valueBuf = valueBuf[:0]
 			valueBuf = append(valueBuf, slot.IdHash[:1]...)
 			valueBuf = append(valueBuf, sender[:]...)
