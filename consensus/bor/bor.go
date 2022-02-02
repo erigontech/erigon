@@ -722,7 +722,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 				return fmt.Errorf("failed to decode genesis alloc: %v", err)
 			}
 			for addr, account := range allocs {
-				log.Info("change contract code", "address", addr)
+				log.Trace("change contract code", "address", addr)
 				state.SetCode(addr, account.Code)
 			}
 		}
@@ -808,7 +808,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if c.config.CalculatePeriod(number) == 0 && len(block.Transactions()) == 0 {
-		log.Info("Sealing paused, waiting for transactions")
+		log.Trace("Sealing paused, waiting for transactions")
 		return nil
 	}
 	// Don't hold the signer fields for the entire sealing procedure
@@ -853,14 +853,14 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 			return
 		case <-time.After(delay):
 			if wiggle > 0 {
-				log.Info(
+				log.Trace(
 					"Sealing out-of-turn",
 					"number", number,
 					"wiggle", common.PrettyDuration(wiggle),
 					"in-turn-signer", snap.ValidatorSet.GetProposer().Address.Hex(),
 				)
 			}
-			log.Info(
+			log.Trace(
 				"Sealing successful",
 				"number", number,
 				"delay", delay,
@@ -1125,7 +1125,7 @@ func (c *Bor) CommitStates(
 
 	to := time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.Sprint).Time), 0)
 	lastStateID := _lastStateID.Uint64()
-	log.Info(
+	log.Trace(
 		"Fetching state updates from Heimdall",
 		"fromID", lastStateID+1,
 		"to", to.Format(time.RFC3339))
