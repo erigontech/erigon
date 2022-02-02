@@ -131,7 +131,7 @@ func (pi *PeerInfo) Async(f func()) {
 	select {
 	case <-pi.removed: // noop if peer removed
 	case pi.tasks <- f:
-		if len(pi.tasks) > cap(pi.tasks)-1 { // if channel full - loose old messages
+		if len(pi.tasks) > cap(pi.tasks)-3 { // if channel full - loose old messages
 			fmt.Printf("alex: %d, %s\n", len(pi.tasks), pi.ID().String()[:4])
 		}
 		if len(pi.tasks) == cap(pi.tasks) { // if channel full - loose old messages
