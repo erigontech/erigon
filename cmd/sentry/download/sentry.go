@@ -797,9 +797,10 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	sendToAmount := int(math.Sqrt(float64(amount)))
 	i := 0
 	var lastErr error
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		ss.writePeer("sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
-		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerInfo.ID()))
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		i++
 		return i < sendToAmount
 	})
@@ -815,9 +816,10 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	}
 
 	var lastErr error
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+	reply := &proto_sentry.SentPeers{Peers: []*proto_types.H512{}}
+	ss.rangePeers(func(peerID string, peerInfo *PeerInfo) bool {
 		ss.writePeer("SendMessageToAll", peerInfo, msgcode, req.Data, 0)
-		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerInfo.ID()))
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertBytesToH512([]byte(peerID)))
 		return true
 	})
 	return reply, lastErr
