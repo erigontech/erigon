@@ -15,8 +15,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -33,9 +31,8 @@ import (
 )
 
 const (
-	aggregationStep     = 15625                  /* this is 500'000 / 32 */
-	unwindLimit         = 90000                  /* how it is in geth */
-	dirtySpaceThreshold = 2 * 1024 * 1024 * 1024 /* threshold of dirty space in MDBX transaction that triggers a commit */
+	aggregationStep = 15625 /* this is 500'000 / 32 */
+	unwindLimit     = 90000 /* how it is in geth */
 )
 
 var (
@@ -87,21 +84,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "statedb")
-	if block == 0 {
-		if _, err = os.Stat(stateDbPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(stateDbPath); err != nil {
-			return err
-		}
-	}
-	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open()
-	if err2 != nil {
-		return err2
-	}
-	defer db.Close()
 	aggPath := path.Join(datadir, "aggregator")
 	if block == 0 {
 		if _, err = os.Stat(aggPath); err != nil {
@@ -127,22 +109,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	interrupt := false
 	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
-	var rwTx kv.RwTx
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
 	var rootHash []byte
 	if block == 0 {
-		if rwTx, err = db.BeginRw(ctx); err != nil {
-			return err
-		}
 		genBlock, genesisIbs, err4 := genesis.ToBlock()
 		if err4 != nil {
 			return err4
 		}
-		if err = w.Reset(rwTx, 0); err != nil {
+		if err = w.Reset(0); err != nil {
 			return err
 		}
 		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
@@ -160,12 +133,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
 			return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 		}
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
 	}
 	var txNum uint64 = 1
 	trace := false
@@ -207,8 +174,8 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if b == nil {
 			break
 		}
-		r := agg.MakeStateReader(rwTx, blockNum)
-		if err = w.Reset(rwTx, blockNum); err != nil {
+		r := agg.MakeStateReader(blockNum)
+		if err = w.Reset(blockNum); err != nil {
 			return err
 		}
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
@@ -240,28 +207,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if err = w.Aggregate(trace); err != nil {
 			return err
-		}
-		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-		commit := interrupt
-		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
-			var spaceDirty uint64
-			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-				return fmt.Errorf("retrieving spaceDirty: %w", err)
-			}
-			if spaceDirty >= dirtySpaceThreshold {
-				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-				commit = true
-			}
-		}
-		if commit {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-			if !interrupt {
-				if rwTx, err = db.BeginRw(ctx); err != nil {
-					return err
-				}
-			}
 		}
 	}
 	if w != nil {
@@ -336,10 +281,7 @@ func bytesToUint64(buf []byte) (x uint64) {
 }
 
 func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
-	if err != nil {
-		return nil, err
-	}
+	enc := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -375,10 +317,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 
 func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	trace := false
-	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
-	if err != nil {
-		return nil, err
-	}
+	enc := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
 	if enc == nil {
 		return nil, nil
 	}
@@ -386,19 +325,11 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 }
 
 func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
-	if err != nil {
-		return nil, err
-	}
-	return enc, nil
+	return rw.r.ReadAccountCode(address.Bytes(), false /* trace */), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
-	if err != nil {
-		return 0, err
-	}
-	return len(enc), nil
+	return rw.r.ReadAccountCodeSize(address.Bytes(), false /* trace */), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64, error) {
@@ -468,23 +399,17 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 			inc >>= 8
 		}
 	}
-	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
-		return err
-	}
+	ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */)
 	return nil
 }
 
 func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */); err != nil {
-		return err
-	}
+	ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */)
 	return nil
 }
 
 func (ww *WriterWrapper) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
-		return err
-	}
+	ww.w.DeleteAccount(address.Bytes(), false /* trace */)
 	return nil
 }
 
@@ -493,9 +418,7 @@ func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation
 	if trace {
 		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
 	}
-	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace); err != nil {
-		return err
-	}
+	ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace)
 	return nil
 }
 
