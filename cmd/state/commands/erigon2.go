@@ -282,10 +282,7 @@ func bytesToUint64(buf []byte) (x uint64) {
 }
 
 func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
-	if err != nil {
-		return nil, err
-	}
+	enc := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -321,10 +318,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 
 func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	trace := false
-	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
-	if err != nil {
-		return nil, err
-	}
+	enc := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
 	if enc == nil {
 		return nil, nil
 	}
@@ -332,19 +326,11 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 }
 
 func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
-	if err != nil {
-		return nil, err
-	}
-	return enc, nil
+	return rw.r.ReadAccountCode(address.Bytes(), false /* trace */), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
-	if err != nil {
-		return 0, err
-	}
-	return len(enc), nil
+	return rw.r.ReadAccountCodeSize(address.Bytes(), false /* trace */), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64, error) {
@@ -414,23 +400,17 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 			inc >>= 8
 		}
 	}
-	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
-		return err
-	}
+	ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */)
 	return nil
 }
 
 func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */); err != nil {
-		return err
-	}
+	ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */)
 	return nil
 }
 
 func (ww *WriterWrapper) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
-		return err
-	}
+	ww.w.DeleteAccount(address.Bytes(), false /* trace */)
 	return nil
 }
 
@@ -439,9 +419,7 @@ func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation
 	if trace {
 		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
 	}
-	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace); err != nil {
-		return err
-	}
+	ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace)
 	return nil
 }
 
