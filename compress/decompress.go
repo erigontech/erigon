@@ -217,6 +217,9 @@ func (d *Decompressor) MakeGetter() *Getter {
 
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
+	g.offset = 0
+	g.mask = 0
+	g.b = 0
 }
 
 func (g *Getter) HasNext() bool {
