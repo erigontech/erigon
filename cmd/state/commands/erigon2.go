@@ -31,9 +31,8 @@ import (
 )
 
 const (
-	aggregationStep     = 15625                  /* this is 500'000 / 32 */
-	unwindLimit         = 90000                  /* how it is in geth */
-	dirtySpaceThreshold = 2 * 1024 * 1024 * 1024 /* threshold of dirty space in MDBX transaction that triggers a commit */
+	aggregationStep = 15625 /* this is 500'000 / 32 */
+	unwindLimit     = 90000 /* how it is in geth */
 )
 
 var (
