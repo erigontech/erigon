@@ -15,8 +15,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -87,21 +85,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "statedb")
-	if block == 0 {
-		if _, err = os.Stat(stateDbPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(stateDbPath); err != nil {
-			return err
-		}
-	}
-	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open()
-	if err2 != nil {
-		return err2
-	}
-	defer db.Close()
 	aggPath := path.Join(datadir, "aggregator")
 	if block == 0 {
 		if _, err = os.Stat(aggPath); err != nil {
@@ -127,22 +110,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	interrupt := false
 	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
-	var rwTx kv.RwTx
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
 	var rootHash []byte
 	if block == 0 {
-		if rwTx, err = db.BeginRw(ctx); err != nil {
-			return err
-		}
 		genBlock, genesisIbs, err4 := genesis.ToBlock()
 		if err4 != nil {
 			return err4
 		}
-		if err = w.Reset(rwTx, 0); err != nil {
+		if err = w.Reset(0); err != nil {
 			return err
 		}
 		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
@@ -160,12 +134,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
 			return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 		}
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
 	}
 	var txNum uint64 = 1
 	trace := false
@@ -207,8 +175,8 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if b == nil {
 			break
 		}
-		r := agg.MakeStateReader(rwTx, blockNum)
-		if err = w.Reset(rwTx, blockNum); err != nil {
+		r := agg.MakeStateReader(blockNum)
+		if err = w.Reset(blockNum); err != nil {
 			return err
 		}
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
@@ -240,28 +208,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if err = w.Aggregate(trace); err != nil {
 			return err
-		}
-		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-		commit := interrupt
-		if !commit && (blockNum+1)%uint64(commitmentFrequency) == 0 {
-			var spaceDirty uint64
-			if spaceDirty, _, err = rwTx.(*mdbx.MdbxTx).SpaceDirty(); err != nil {
-				return fmt.Errorf("retrieving spaceDirty: %w", err)
-			}
-			if spaceDirty >= dirtySpaceThreshold {
-				log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-				commit = true
-			}
-		}
-		if commit {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-			if !interrupt {
-				if rwTx, err = db.BeginRw(ctx); err != nil {
-					return err
-				}
-			}
 		}
 	}
 	if w != nil {
