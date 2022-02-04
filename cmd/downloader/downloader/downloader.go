@@ -130,8 +130,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			stats = calcStats(stats, interval, torrentClient)
 			if allComplete {
 				log.Info("[torrent] Seeding",
-					"upload/sec", common2.ByteCount(uint64(stats.readBytesPerSec)),
-					"download/sec", common2.ByteCount(uint64(stats.writeBytesPerSec)),
+					"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
+					"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 					"peers", stats.peersCount,
 					"torrents", stats.torrentsCount,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
@@ -139,8 +139,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info("[torrent] Downloading",
-				"upload", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
-				"download", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
+				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
+				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 				"peers", stats.peersCount,
 				"torrents", stats.torrentsCount,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
