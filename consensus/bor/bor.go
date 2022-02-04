@@ -285,8 +285,8 @@ func (c *Bor) Author(header *types.Header) (common.Address, error) {
 }
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
-func (c *Bor) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool, sysCall consensus.SystemCall) error {
-	c.sysCall = sysCall
+func (c *Bor) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
+
 	return c.verifyHeader(chain, header, nil)
 }
 
@@ -595,8 +595,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
-	// Update sysCall
-	// c.sysCall = syscall
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -665,7 +663,6 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (types.Transactions, types.Receipts, error) {
 
 	// Update sysCall
-	c.sysCall = syscall
 
 	var err error
 	headerNumber := header.Number.Uint64()
@@ -735,9 +732,6 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, types.Transactions, types.Receipts, error) {
 	// stateSyncData := []*types.StateSyncData{}
-
-	// Update sysCall
-	c.sysCall = syscall
 
 	headerNumber := header.Number.Uint64()
 	if headerNumber%c.config.Sprint == 0 {

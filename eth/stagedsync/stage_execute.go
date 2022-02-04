@@ -127,16 +127,15 @@ func executeBlock(
 	}
 
 	if writeReceipts {
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+			return err
+		}
 
 		if stateSyncReceipt != nil {
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return err
 			}
 			if err := rawdb.WriteBorTxLookupEntry(tx, block.Hash(), block.NumberU64()); err != nil {
-				return err
-			}
-		} else {
-			if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 				return err
 			}
 		}

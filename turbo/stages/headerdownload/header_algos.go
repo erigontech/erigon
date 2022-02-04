@@ -23,9 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -633,10 +631,8 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 }
 
 func (hd *HeaderDownload) VerifyHeader(header *types.Header, tx kv.Getter) error {
-	stateReader := state.NewPlainStateReader(tx)
-	return hd.engine.VerifyHeader(hd.headerReader, header, true, func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, *hd.headerReader.Config(), state.New(stateReader), header, hd.engine)
-	})
+	// stateReader := state.NewPlainStateReader(tx)
+	return hd.engine.VerifyHeader(hd.headerReader, header, true)
 }
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
