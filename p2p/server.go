@@ -400,6 +400,9 @@ func (srv *Server) Self() *enode.Node {
 func (srv *Server) Stop() {
 	srv.lock.Lock()
 	if !srv.running {
+		if srv.nodedb != nil {
+			srv.nodedb.Close()
+		}
 		srv.lock.Unlock()
 		return
 	}
@@ -408,6 +411,9 @@ func (srv *Server) Stop() {
 	if srv.listener != nil {
 		// this unblocks listener Accept
 		srv.listener.Close()
+	}
+	if srv.nodedb != nil {
+		srv.nodedb.Close()
 	}
 	srv.lock.Unlock()
 	srv.loopWG.Wait()
