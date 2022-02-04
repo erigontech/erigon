@@ -11,15 +11,15 @@ var Best = first10(secure(strings.Split(best, "\n\n")))
 
 //go:embed trackerslist/trackers_all_https.txt
 var https string
-var Https = first10(secure(withoutBest(strings.Split(https, "\n\n"))))
+var Https = first10(withoutBest(secure(strings.Split(https, "\n\n"))))
 
 //go:embed trackerslist/trackers_all_udp.txt
 var udp string
-var Udp = first10(secure(withoutBest(strings.Split(udp, "\n\n"))))
+var Udp = first10(withoutBest(secure(strings.Split(udp, "\n\n"))))
 
 //go:embed trackerslist/trackers_all_ws.txt
 var ws string
-var Ws = first10(secure(withoutBest(strings.Split(ws, "\n\n"))))
+var Ws = first10(withoutBest(secure(strings.Split(ws, "\n\n"))))
 
 func withoutBest(in []string) (res []string) {
 Loop:
