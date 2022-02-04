@@ -3,10 +3,11 @@ package rpcdaemontest
 import (
 	"context"
 	"encoding/binary"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"math/big"
 	"net"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
