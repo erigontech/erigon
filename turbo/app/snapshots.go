@@ -97,6 +97,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
+
 func doSnapshotCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
@@ -120,7 +121,6 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-
 func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string) error {
 	common.MustExist(snapshotDir)
 	chainConfig := tool.ChainConfigFromDB(chainDB)

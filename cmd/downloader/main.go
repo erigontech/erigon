@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"path/filepath"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -200,11 +201,13 @@ var printInfoHashes = &cobra.Command{
 	Use:     "info_hashes",
 	Example: "go run ./cmd/downloader info_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		snapshotsDir := path.Join(datadir, "snapshots")
+		snapshotDir := path.Join(datadir, "snapshots")
 		ctx := cmd.Context()
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			files, err := downloader.AllTorrentPaths(snapshotsDir)
+			removeChunksStorage(snapshotDir)
+
+			files, err := downloader.AllTorrentPaths(snapshotDir)
 			if err != nil {
 				return err
 			}
@@ -213,13 +216,13 @@ var printInfoHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotsDir); err != nil {
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 				return err
 			}
 		}
 
 		res := map[string]string{}
-		files, err := downloader.AllTorrentPaths(snapshotsDir)
+		files, err := downloader.AllTorrentPaths(snapshotDir)
 		if err != nil {
 			return err
 		}
@@ -249,6 +252,13 @@ var printInfoHashes = &cobra.Command{
 		fmt.Printf("%s\n", serialized)
 		return nil
 	},
+}
+
+func removeChunksStorage(snapshotDir string) {
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.bolt.db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-shm"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-wal"))
 }
 
 func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
