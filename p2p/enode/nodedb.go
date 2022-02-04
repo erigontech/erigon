@@ -28,9 +28,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/btree"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 
