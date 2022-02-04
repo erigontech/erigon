@@ -128,7 +128,6 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	var err error
 	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(1024 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
 	// The nodes contained in the cache correspond to a certain protocol version.

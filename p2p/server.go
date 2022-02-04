@@ -400,7 +400,9 @@ func (srv *Server) Self() *enode.Node {
 func (srv *Server) Stop() {
 	srv.lock.Lock()
 	if !srv.running {
-		srv.nodedb.Close()
+		if srv.nodedb != nil {
+			srv.nodedb.Close()
+		}
 		srv.lock.Unlock()
 		return
 	}
