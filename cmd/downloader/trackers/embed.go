@@ -45,9 +45,9 @@ func first10(in []string) (res []string) {
 func secure(in []string) (res []string) {
 	for _, tracker := range in {
 		//skip unsecure protocols
-		if strings.HasPrefix(tracker, "ws://") || strings.HasPrefix(tracker, "http://") {
-			continue
-		}
+		//if strings.HasPrefix(tracker, "ws://") || strings.HasPrefix(tracker, "http://") {
+		//	continue
+		//}
 		res = append(res, tracker)
 	}
 	return res

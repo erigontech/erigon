@@ -236,7 +236,6 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 			return err
 		}
 		mi.AnnounceList = Trackers
-		fmt.Printf("alex: %+v\n", Trackers)
 
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
 			return err
@@ -248,6 +247,7 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
 func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
+	fmt.Printf("alex: %+v\n", Trackers)
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	wg := &sync.WaitGroup{}
 	for _, infoHash := range preverifiedHashes {
