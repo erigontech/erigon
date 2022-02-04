@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-//go:embed trackerslist/trackers_best.txt
+//go:embed trackerslist/trackers_best_ip.txt
 var best string
 var Best = first10(secure(strings.Split(best, "\n\n")))
 
@@ -35,7 +35,7 @@ Loop:
 }
 func first10(in []string) (res []string) {
 	for i, tracker := range in {
-		if i >= 10 {
+		if i >= 20 {
 			break
 		}
 		res = append(res, tracker)
