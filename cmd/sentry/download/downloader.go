@@ -235,6 +235,7 @@ func RecvMessageLoop(ctx context.Context,
 				continue
 			}
 			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
+			time.Sleep(time.Second)
 			continue
 		}
 		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
@@ -243,6 +244,7 @@ func RecvMessageLoop(ctx context.Context,
 				time.Sleep(time.Second)
 				continue
 			}
+			time.Sleep(time.Second)
 			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
 			continue
 		}
