@@ -5,25 +5,25 @@ import (
 	"strings"
 )
 
-//go:embed trackerslist/trackers_best_ip.txt
+//go:embed trackerslist/trackers_best.txt
 var best string
-var Best = first5(secure(strings.Split(best, "\n\n")))
+var Best = first5(strings.Split(best, "\n\n"))
 
 //go:embed trackerslist/trackers_all_https.txt
 var https string
-var Https = first5(withoutBest(secure(strings.Split(https, "\n\n"))))
+var Https = first5(strings.Split(https, "\n\n"))
 
 //go:embed trackerslist/trackers_all_http.txt
 var http string
-var Http = first5(withoutBest(secure(strings.Split(https, "\n\n"))))
+var Http = first5(strings.Split(https, "\n\n"))
 
 //go:embed trackerslist/trackers_all_udp.txt
 var udp string
-var Udp = first5(withoutBest(secure(strings.Split(udp, "\n\n"))))
+var Udp = first5(strings.Split(udp, "\n\n"))
 
 //go:embed trackerslist/trackers_all_ws.txt
 var ws string
-var Ws = first5(withoutBest(secure(strings.Split(ws, "\n\n"))))
+var Ws = first5(strings.Split(ws, "\n\n"))
 
 func withoutBest(in []string) (res []string) {
 Loop:
@@ -42,16 +42,6 @@ func first5(in []string) (res []string) {
 		if i >= 5 {
 			break
 		}
-		res = append(res, tracker)
-	}
-	return res
-}
-func secure(in []string) (res []string) {
-	for _, tracker := range in {
-		//skip unsecure protocols
-		//if strings.HasPrefix(tracker, "ws://") || strings.HasPrefix(tracker, "http://") {
-		//	continue
-		//}
 		res = append(res, tracker)
 	}
 	return res
