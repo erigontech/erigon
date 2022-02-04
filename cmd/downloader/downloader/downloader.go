@@ -72,11 +72,12 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
 
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
-	torrentConfig.TorrentPeersHighWater = 10      // default: 500
-	torrentConfig.TorrentPeersLowWater = 10       // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = 10    // default: 25
-	torrentConfig.TotalHalfOpenConns = 10         // default: 100
+	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
+	torrentConfig.EstablishedConnsPerTorrent = 5 // default: 50
+	torrentConfig.TorrentPeersHighWater = 10     // default: 500
+	torrentConfig.TorrentPeersLowWater = 5       // default: 50
+	torrentConfig.HalfOpenConnsPerTorrent = 5    // default: 25
+	torrentConfig.TotalHalfOpenConns = 10        // default: 100
 
 	return torrentConfig
 }
