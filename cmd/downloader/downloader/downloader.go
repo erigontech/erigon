@@ -41,6 +41,7 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	if lg.Debug == verbosity {
 		torrentConfig.Debug = true
 	}
+	torrentConfig.Debug = true
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(lg.Debug)
 
 	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
