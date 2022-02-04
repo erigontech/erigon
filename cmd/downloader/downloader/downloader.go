@@ -138,6 +138,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info("[torrent] Downloading",
+				"progress", fmt.Sprintf("%.2f%%", stats.progress),
 				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 				"peers", stats.peersCount,
