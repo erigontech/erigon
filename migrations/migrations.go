@@ -14,8 +14,6 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-const MIN_MAJOR_VERSION = 3 // DB migrations before this number are removed - no way to migrate
-
 // migrations apply sequentially in order of this array, skips applied migrations
 // it allows - don't worry about merge conflicts and use switch branches
 // see also dbutils.Migrations - it stores context in which each transaction was exectured - useful for bug-reports
@@ -148,8 +146,9 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 					return fmt.Errorf("cannot downgrade minor DB version from %d.%d to %d.%d", major, minor, kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Major)
 				}
 			} else {
-				if major < MIN_MAJOR_VERSION {
-					return fmt.Errorf("cannot upgrade major DB version from %d, minimum allowed version of db to apply DB migrations is %d, use integration tool if you know what you are doing", major, MIN_MAJOR_VERSION)
+				// major < kv.DBSchemaVersion.Major
+				if kv.DBSchemaVersion.Major-major > 1 {
+					return fmt.Errorf("cannot upgrade major DB version for more than 1 version from %d to %d, use integration tool if you know what you are doing", major, kv.DBSchemaVersion.Major)
 				}
 			}
 		}
