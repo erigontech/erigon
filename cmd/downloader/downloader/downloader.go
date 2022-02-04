@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -240,7 +239,6 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
 func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	wg := &sync.WaitGroup{}
 	for _, infoHash := range preverifiedHashes {
 		if _, ok := torrentClient.Torrent(infoHash); ok {
 			continue
@@ -252,23 +250,18 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-
-		wg.Add(1)
-		go func(t *torrent.Torrent, infoHash metainfo.Hash) {
-			defer wg.Done()
-
-			select {
-			case <-ctx.Done():
-				t.Drop()
-				return
-			case <-t.GotInfo():
-				mi := t.Metainfo()
-				_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
-			}
-		}(t, infoHash)
 	}
 
-	wg.Wait()
+	for _, t := range torrentClient.Torrents() {
+		select {
+		case <-ctx.Done():
+			t.Drop()
+			return ctx.Err()
+		case <-t.GotInfo():
+			mi := t.Metainfo()
+			_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
+		}
+	}
 
 	return nil
 }
