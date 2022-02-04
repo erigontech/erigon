@@ -237,6 +237,7 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 		}
 		mi.AnnounceList = Trackers
 
+		fmt.Printf("alex: %s\n", mi.HashInfoBytes().String())
 		if _, err = torrentClient.AddTorrent(mi); err != nil {
 			return err
 		}
