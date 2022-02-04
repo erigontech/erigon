@@ -7,23 +7,23 @@ import (
 
 //go:embed trackerslist/trackers_best_ip.txt
 var best string
-var Best = first10(secure(strings.Split(best, "\n\n")))
+var Best = first5(secure(strings.Split(best, "\n\n")))
 
 //go:embed trackerslist/trackers_all_https.txt
 var https string
-var Https = first10(withoutBest(secure(strings.Split(https, "\n\n"))))
+var Https = first5(withoutBest(secure(strings.Split(https, "\n\n"))))
 
 //go:embed trackerslist/trackers_all_http.txt
 var http string
-var Http = first10(withoutBest(secure(strings.Split(https, "\n\n"))))
+var Http = first5(withoutBest(secure(strings.Split(https, "\n\n"))))
 
 //go:embed trackerslist/trackers_all_udp.txt
 var udp string
-var Udp = first10(withoutBest(secure(strings.Split(udp, "\n\n"))))
+var Udp = first5(withoutBest(secure(strings.Split(udp, "\n\n"))))
 
 //go:embed trackerslist/trackers_all_ws.txt
 var ws string
-var Ws = first10(withoutBest(secure(strings.Split(ws, "\n\n"))))
+var Ws = first5(withoutBest(secure(strings.Split(ws, "\n\n"))))
 
 func withoutBest(in []string) (res []string) {
 Loop:
@@ -37,9 +37,9 @@ Loop:
 	}
 	return res
 }
-func first10(in []string) (res []string) {
+func first5(in []string) (res []string) {
 	for i, tracker := range in {
-		if i >= 20 {
+		if i >= 5 {
 			break
 		}
 		res = append(res, tracker)
