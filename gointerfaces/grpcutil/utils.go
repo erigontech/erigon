@@ -13,9 +13,11 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 func TLS(tlsCACert, tlsCertFile, tlsKeyFile string) (credentials.TransportCredentials, error) {
@@ -111,4 +113,12 @@ func Connect(creds credentials.TransportCredentials, dialAddress string) (*grpc.
 	defer cancel()
 
 	return grpc.DialContext(ctx, dialAddress, dialOpts...)
+}
+
+func IsRetryLater(err error) bool {
+	if s, ok := status.FromError(err); ok {
+		code := s.Code()
+		return code == codes.Unavailable || code == codes.Canceled || code == codes.ResourceExhausted
+	}
+	return false
 }
