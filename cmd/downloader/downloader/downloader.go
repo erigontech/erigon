@@ -14,7 +14,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
 )
@@ -128,29 +127,23 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			runtime.ReadMemStats(&m)
-			alloc := common.StorageSize(m.Alloc)
-			sys := common.StorageSize(m.Sys)
-
 			stats = calcStats(stats, interval, torrentClient)
 			if allComplete {
-				log.Info(fmt.Sprintf(
-					"[torrent] Seeding: ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-					common2.ByteCount(uint64(stats.readBytesPerSec)),
-					common2.ByteCount(uint64(stats.writeBytesPerSec)),
-					stats.peersCount,
-					stats.torrentsCount,
-				), "alloc", alloc, "sys", sys)
+				log.Info("[torrent] Seeding",
+					"upload/sec", common2.ByteCount(uint64(stats.readBytesPerSec)),
+					"download/sec", common2.ByteCount(uint64(stats.writeBytesPerSec)),
+					"peers", stats.peersCount,
+					"torrents", stats.torrentsCount,
+					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				continue
 			}
 
-			log.Info(fmt.Sprintf(
-				"[torrent] Downloading: %.2f%%, ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-				stats.progress,
-				common2.ByteCount(uint64(stats.readBytesPerSec)),
-				common2.ByteCount(uint64(stats.writeBytesPerSec)),
-				stats.peersCount,
-				stats.torrentsCount,
-			), "alloc", alloc, "sys", sys)
+			log.Info("[torrent] Downloading",
+				"upload", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
+				"download", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
+				"peers", stats.peersCount,
+				"torrents", stats.torrentsCount,
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
 }
