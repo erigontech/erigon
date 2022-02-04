@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -14,7 +13,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
 )
@@ -72,12 +70,12 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
 
-	torrentConfig.EstablishedConnsPerTorrent = 10 // default: 50
-	torrentConfig.TorrentPeersHighWater = 10      // default: 500
-	torrentConfig.TorrentPeersLowWater = 10       // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = 10    // default: 25
-	torrentConfig.TotalHalfOpenConns = 10         // default: 100
-
+	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
+	torrentConfig.EstablishedConnsPerTorrent = 5 // default: 50
+	torrentConfig.TorrentPeersHighWater = 10     // default: 500
+	torrentConfig.TorrentPeersLowWater = 5       // default: 50
+	torrentConfig.HalfOpenConnsPerTorrent = 5    // default: 25
+	torrentConfig.TotalHalfOpenConns = 10        // default: 100
 	return torrentConfig
 }
 
@@ -128,29 +126,23 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			runtime.ReadMemStats(&m)
-			alloc := common.StorageSize(m.Alloc)
-			sys := common.StorageSize(m.Sys)
-
 			stats = calcStats(stats, interval, torrentClient)
 			if allComplete {
-				log.Info(fmt.Sprintf(
-					"[torrent] Seeding: ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-					common2.ByteCount(uint64(stats.readBytesPerSec)),
-					common2.ByteCount(uint64(stats.writeBytesPerSec)),
-					stats.peersCount,
-					stats.torrentsCount,
-				), "alloc", alloc, "sys", sys)
+				log.Info("[torrent] Seeding",
+					"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
+					"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
+					"peers", stats.peersCount,
+					"torrents", stats.torrentsCount,
+					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				continue
 			}
 
-			log.Info(fmt.Sprintf(
-				"[torrent] Downloading: %.2f%%, ↓%v/s ↑%v/s, peers: %d, torrents: %d",
-				stats.progress,
-				common2.ByteCount(uint64(stats.readBytesPerSec)),
-				common2.ByteCount(uint64(stats.writeBytesPerSec)),
-				stats.peersCount,
-				stats.torrentsCount,
-			), "alloc", alloc, "sys", sys)
+			log.Info("[torrent] Downloading",
+				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
+				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
+				"peers", stats.peersCount,
+				"torrents", stats.torrentsCount,
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
 }
@@ -247,7 +239,6 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
 func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	wg := &sync.WaitGroup{}
 	for _, infoHash := range preverifiedHashes {
 		if _, ok := torrentClient.Torrent(infoHash); ok {
 			continue
@@ -259,23 +250,18 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-
-		wg.Add(1)
-		go func(t *torrent.Torrent, infoHash metainfo.Hash) {
-			defer wg.Done()
-
-			select {
-			case <-ctx.Done():
-				t.Drop()
-				return
-			case <-t.GotInfo():
-				mi := t.Metainfo()
-				_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
-			}
-		}(t, infoHash)
 	}
 
-	wg.Wait()
+	for _, t := range torrentClient.Torrents() {
+		select {
+		case <-ctx.Done():
+			t.Drop()
+			return ctx.Err()
+		case <-t.GotInfo():
+			mi := t.Metainfo()
+			_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
+		}
+	}
 
 	return nil
 }
