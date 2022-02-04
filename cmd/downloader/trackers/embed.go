@@ -15,7 +15,7 @@ var Https = first5(strings.Split(https, "\n\n"))
 
 //go:embed trackerslist/trackers_all_http.txt
 var http string
-var Http = first5(strings.Split(https, "\n\n"))
+var Http = first5(strings.Split(http, "\n\n"))
 
 //go:embed trackerslist/trackers_all_udp.txt
 var udp string
