@@ -24,9 +24,9 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
-	//trackers.First(5,trackers.Udp),
-	//trackers.First(5, trackers.Https),
-	trackers.First(5, trackers.Best),
+	trackers.First(5, trackers.Udp),
+	trackers.First(5, trackers.Https),
+	//trackers.First(5, trackers.Best),
 	//trackers.First(5,trackers.Ws),
 }
 
