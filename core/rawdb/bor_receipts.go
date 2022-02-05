@@ -24,7 +24,7 @@ func borTxLookupKey(hash common.Hash) []byte {
 // HasBorReceipt verifies the existence of all block receipt belonging
 // to a block.
 func HasBorReceipts(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.Receipts, borReceiptKey(number)); !has || err != nil {
+	if has, err := db.Has(kv.BorReceipts, borReceiptKey(number)); !has || err != nil {
 		return false
 	}
 	return true
@@ -32,7 +32,7 @@ func HasBorReceipts(db kv.Has, hash common.Hash, number uint64) bool {
 
 // ReadBorReceiptRLP retrieves the block receipt belonging to a block in RLP encoding.
 func ReadBorReceiptRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
-	data, err := db.GetOne(kv.Receipts, borReceiptKey(number))
+	data, err := db.GetOne(kv.BorReceipts, borReceiptKey(number))
 	if err != nil {
 		log.Error("ReadBorReceiptRLP failed", "err", err)
 	}
@@ -97,11 +97,7 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 	}
 
 	// Store the flattened receipt slice
-	encodedNumber, err := rlp.EncodeToBytes(number)
-	if err != nil {
-		return err
-	}
-	if err := tx.Append(kv.Receipts, encodedNumber, bytes); err != nil {
+	if err := tx.Append(kv.BorReceipts, borReceiptKey(number), bytes); err != nil {
 		return err
 	}
 
@@ -112,7 +108,7 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	key := borReceiptKey(number)
 
-	if err := tx.Delete(kv.Receipts, key, nil); err != nil {
+	if err := tx.Delete(kv.BorReceipts, key, nil); err != nil {
 		log.Crit("Failed to delete bor receipt", "err", err)
 	}
 }
