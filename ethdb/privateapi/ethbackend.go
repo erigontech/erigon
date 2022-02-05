@@ -216,8 +216,8 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 		return nil, err
 	}
 	sendersBytes := make([]byte, 20*len(senders))
-	for i := range senders {
-		sendersBytes = append(sendersBytes, senders[i][:]...)
+	for i, sender := range senders {
+		copy(sendersBytes[i*20:], sender[:])
 	}
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
