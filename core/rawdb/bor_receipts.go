@@ -16,13 +16,10 @@ var (
 	// bor receipt key
 	borReceiptKey = types.BorReceiptKey
 
-	// borTxLookupPrefix + hash -> transaction/receipt lookup metadata
-	borTxLookupPrefix = []byte("matic-bor-tx-lookup-")
 )
 
-// borTxLookupKey = borTxLookupPrefix + bor tx hash
 func borTxLookupKey(hash common.Hash) []byte {
-	return append(borTxLookupPrefix, hash.Bytes()...)
+	return append(hash.Bytes(), hash.Bytes()...)
 }
 
 // HasBorReceipt verifies the existence of all block receipt belonging

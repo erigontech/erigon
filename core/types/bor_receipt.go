@@ -1,12 +1,12 @@
 package types
 
 import (
-	"encoding/binary"
 	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -16,17 +16,13 @@ import (
 const TenToTheFive uint64 = 100000
 
 var (
-	borReceiptPrefix = []byte("matic-bor-receipt-") // borReceiptPrefix + number + block hash -> bor block receipt
-
 	// SystemAddress address for system sender
 	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 // BorReceiptKey = borReceiptPrefix + num (uint64 big endian) + hash
 func BorReceiptKey(number uint64, hash common.Hash) []byte {
-	enc := make([]byte, 8)
-	binary.BigEndian.PutUint64(enc, number)
-	return append(append(borReceiptPrefix, enc...), hash.Bytes()...)
+	return dbutils.HeaderKey(number, hash)
 }
 
 // GetDerivedBorTxHash get derived tx hash from receipt key
