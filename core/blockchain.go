@@ -184,7 +184,9 @@ func ExecuteBlockEphemerallyForBSC(
 		// it won't pass receipts hash or bloom verification
 		newBlock = types.NewBlock(block.Header(), outTxs, block.Uncles(), outReceipts)
 		// Update receipts
-		receipts = outReceipts
+		if !vmConfig.NoReceipts {
+			receipts = outReceipts
+		}
 	} else {
 		newBlock = block
 	}
