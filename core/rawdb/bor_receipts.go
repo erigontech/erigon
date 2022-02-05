@@ -15,7 +15,6 @@ import (
 var (
 	// bor receipt key
 	borReceiptKey = types.BorReceiptKey
-
 )
 
 func borTxLookupKey(hash common.Hash) []byte {
