@@ -41,7 +41,7 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64
 	// get derived tx hash
 	borPrefix := []byte("matic-bor-tx-lookup-")
 	// hashing using prefix + number + hash
-	txHash := GetDerivedBorTxHash((append(borPrefix, append(BorReceiptKey(number),hash.Bytes()...)...)))
+	txHash := GetDerivedBorTxHash((append(borPrefix, append(BorReceiptKey(number), hash.Bytes()...)...)))
 	txIndex := uint(len(receipts))
 
 	// set tx hash and tx index
