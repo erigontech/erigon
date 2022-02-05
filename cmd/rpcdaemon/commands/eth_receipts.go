@@ -312,11 +312,15 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if block == nil {
 		return nil, nil
 	}
+	senders, err := rawdb.ReadSenders(tx, block.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	receipts, err := getReceipts(ctx, tx, chainConfig, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
