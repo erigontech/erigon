@@ -24,7 +24,7 @@ func borTxLookupKey(hash common.Hash) []byte {
 // HasBorReceipt verifies the existence of all block receipt belonging
 // to a block.
 func HasBorReceipts(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.Receipts, borReceiptKey(number, hash)); !has || err != nil {
+	if has, err := db.Has(kv.Receipts, borReceiptKey(number)); !has || err != nil {
 		return false
 	}
 	return true
@@ -32,7 +32,7 @@ func HasBorReceipts(db kv.Has, hash common.Hash, number uint64) bool {
 
 // ReadBorReceiptRLP retrieves the block receipt belonging to a block in RLP encoding.
 func ReadBorReceiptRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
-	data, err := db.GetOne(kv.Receipts, borReceiptKey(number, hash))
+	data, err := db.GetOne(kv.Receipts, borReceiptKey(number))
 	if err != nil {
 		log.Error("ReadBorReceiptRLP failed", "err", err)
 	}
@@ -97,7 +97,11 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 	}
 
 	// Store the flattened receipt slice
-	if err := tx.Append(kv.Receipts, borReceiptKey(number, hash), bytes); err != nil {
+	encodedNumber, err := rlp.EncodeToBytes(number)
+	if err != nil {
+		return err
+	}
+	if err := tx.Append(kv.Receipts, encodedNumber, bytes); err != nil {
 		return err
 	}
 
@@ -106,7 +110,7 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 
 // DeleteBorReceipt removes receipt data associated with a block hash.
 func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
-	key := borReceiptKey(number, hash)
+	key := borReceiptKey(number)
 
 	if err := tx.Delete(kv.Receipts, key, nil); err != nil {
 		log.Crit("Failed to delete bor receipt", "err", err)
@@ -185,7 +189,7 @@ func ReadBorTxLookupEntry(db kv.Tx, txHash common.Hash) (*uint64, error) {
 
 // WriteBorTxLookupEntry stores a positional metadata for bor transaction using block hash and block number
 func WriteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
-	txHash := types.GetDerivedBorTxHash(borReceiptKey(number, hash))
+	txHash := types.GetDerivedBorTxHash(borReceiptKey(number))
 	if err := db.Put(kv.BorTxLookup, borTxLookupKey(txHash), big.NewInt(0).SetUint64(number).Bytes()); err != nil {
 		return err
 	}
@@ -194,7 +198,7 @@ func WriteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
 
 // DeleteBorTxLookupEntry removes bor transaction data associated with block hash and block number
 func DeleteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
-	txHash := types.GetDerivedBorTxHash(borReceiptKey(number, hash))
+	txHash := types.GetDerivedBorTxHash(borReceiptKey(number))
 	if err := DeleteBorTxLookupEntryByTxHash(db, txHash); err != nil {
 		return err
 	}

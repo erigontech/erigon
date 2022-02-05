@@ -20,9 +20,9 @@ var (
 	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
-// BorReceiptKey = borReceiptPrefix + num (uint64 big endian) + hash
-func BorReceiptKey(number uint64, hash common.Hash) []byte {
-	return dbutils.HeaderKey(number, hash)
+// BorReceiptKey =  num (uint64 big endian)
+func BorReceiptKey(number uint64) []byte {
+	return dbutils.EncodeBlockNumber(number)
 }
 
 // GetDerivedBorTxHash get derived tx hash from receipt key
@@ -39,7 +39,7 @@ func NewBorTransaction() *LegacyTx {
 // data and contextual infos like containing block and transactions.
 func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64, receipts Receipts) error {
 	// get derived tx hash
-	txHash := GetDerivedBorTxHash(BorReceiptKey(number, hash))
+	txHash := GetDerivedBorTxHash(BorReceiptKey(number))
 	txIndex := uint(len(receipts))
 
 	// set tx hash and tx index
@@ -69,7 +69,7 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64
 // data and contextual infos like containing block and transactions.
 func DeriveFieldsForBorLogs(logs []*Log, hash common.Hash, number uint64, txIndex uint, logIndex uint) {
 	// get derived tx hash
-	txHash := GetDerivedBorTxHash(BorReceiptKey(number, hash))
+	txHash := GetDerivedBorTxHash(BorReceiptKey(number))
 
 	// the derived log fields can simply be set from the block and transaction
 	for j := 0; j < len(logs); j++ {
