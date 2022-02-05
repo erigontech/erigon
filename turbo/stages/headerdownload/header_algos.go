@@ -630,8 +630,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
-func (hd *HeaderDownload) VerifyHeader(header *types.Header, tx kv.Getter) error {
-	// stateReader := state.NewPlainStateReader(tx)
+func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 	return hd.engine.VerifyHeader(hd.headerReader, header, true)
 }
 
@@ -639,7 +638,7 @@ type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.H
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, tx kv.RwTx, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
@@ -656,21 +655,12 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Header should be preverified, but not yet, try again later
 			break
 		}
-
-		/*
-			else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true,
-				func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, *hd.headerReader.Config(), ibs, link.header, hd.engine)
-				}); err != nil {
-				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
-		*/
-
 		hd.insertList = hd.insertList[:len(hd.insertList)-1]
 		skip := false
 		if !link.preverified {
 			if _, bad := hd.badHeaders[link.hash]; bad {
 				skip = true
-			} else if err := hd.VerifyHeader(link.header, tx); err != nil {
+			} else if err := hd.VerifyHeader(link.header); err != nil {
 				log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
