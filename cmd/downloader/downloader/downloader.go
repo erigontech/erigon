@@ -42,7 +42,6 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
 
 	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
-
 	return torrentConfig, nil
 }
 
