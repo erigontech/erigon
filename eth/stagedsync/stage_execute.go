@@ -135,9 +135,6 @@ func executeBlock(
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return err
 			}
-			if err := rawdb.WriteBorTxLookupEntry(tx, block.Hash(), block.NumberU64()); err != nil {
-				return err
-			}
 		}
 
 	}
