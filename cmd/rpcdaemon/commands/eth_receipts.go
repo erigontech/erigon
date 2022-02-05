@@ -262,6 +262,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if block == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
+	senders, err := rawdb.ReadSenders(tx, block.Hash(), blockNum)
+	if err != nil {
+		return nil, err
+	}
 	var txnIndex uint64
 	var txn types.Transaction
 	for i, transaction := range block.Transactions() {
@@ -279,7 +283,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
+	receipts, err := getReceipts(ctx, tx, cc, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
