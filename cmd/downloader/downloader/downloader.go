@@ -42,7 +42,6 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
 
 	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
-
 	return torrentConfig, nil
 }
 
@@ -144,6 +143,14 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 				"peers", stats.peersCount,
 				"torrents", stats.torrentsCount,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			if stats.peersCount == 0 {
+				ips := torrentClient.BadPeerIPs()
+				if len(ips) > 0 {
+					log.Info("[torrent] Stats",
+						"banned", ips)
+				}
+
+			}
 		}
 	}
 }
