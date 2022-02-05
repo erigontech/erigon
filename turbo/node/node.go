@@ -69,13 +69,13 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	case networkname.DevChainName:
 		log.Info("Starting Erigon in ephemerasl dev mode...")
 	case networkname.BorMainnetChainName:
-		log.Info("Starting TurboBor on Bor Mainnet")
+		log.Info("Starting Erigon on Bor Mainnet")
 	case "", networkname.MainnetChainName:
 		if !ctx.GlobalIsSet(utils.NetworkIdFlag.Name) {
-			log.Info("Starting TurboBor on Ethereum mainnet...")
+			log.Info("Starting Erigon on Ethereum mainnet...")
 		}
 	default:
-		log.Info("Starting TurboBor on", "devnet", chain)
+		log.Info("Starting Erigon on", "devnet", chain)
 	}
 
 	nodeConfig := NewNodeConfig()
@@ -133,7 +133,7 @@ func MakeConfigNodeDefault() *node.Node {
 func makeConfigNode(config *node.Config) *node.Node {
 	stack, err := node.New(config)
 	if err != nil {
-		utils.Fatalf("Failed to create TurboBor node: %v", err)
+		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
 	return stack
