@@ -308,7 +308,6 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if block == nil {
 		return nil, nil
 	}
-
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
