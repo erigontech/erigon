@@ -333,10 +333,12 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
-	input1 := st.state.GetBalance(st.msg.From())
-	input2 := st.state.GetBalance(st.evm.Context().Coinbase)
-	input1Big := input1.ToBig()
-	input2Big := input2.ToBig()
+	var input1 *uint256.Int
+	var input2 *uint256.Int
+	if st.isBor {
+		input1 = st.state.GetBalance(st.msg.From())
+		input2 = st.state.GetBalance(st.evm.Context().Coinbase)
+	}
 
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses

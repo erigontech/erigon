@@ -1,8 +1,7 @@
 package core
 
 import (
-	"math/big"
-
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -11,7 +10,7 @@ import (
 var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
 var transferFeeLogSig = common.HexToHash("0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63")
 var feeAddress = common.HexToAddress("0x0000000000000000000000000000000000001010")
-var bigZero = big.NewInt(0)
+var zero = uint256.NewInt(0)
 
 // AddTransferLog adds transfer log into state
 func AddTransferLog(
@@ -24,7 +23,7 @@ func AddTransferLog(
 	input1,
 	input2,
 	output1,
-	output2 *big.Int,
+	output2 *uint256.Int,
 ) {
 	addTransferLog(
 		state,
@@ -53,7 +52,7 @@ func AddFeeTransferLog(
 	input1,
 	input2,
 	output1,
-	output2 *big.Int,
+	output2 *uint256.Int,
 ) {
 	addTransferLog(
 		state,
@@ -82,14 +81,14 @@ func addTransferLog(
 	input1,
 	input2,
 	output1,
-	output2 *big.Int,
+	output2 *uint256.Int,
 ) {
 	// ignore if amount is 0
-	if amount.Cmp(bigZero) <= 0 {
+	if amount.Cmp(zero) <= 0 {
 		return
 	}
 
-	dataInputs := []*big.Int{
+	dataInputs := []*uint256.Int{
 		amount,
 		input1,
 		input2,
