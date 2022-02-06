@@ -2,7 +2,6 @@ package rawdb
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -126,15 +125,9 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash com
 		return nil, common.Hash{}, 0, 0, nil
 	}
 
-	data := ReadStorageBodyRLP(db, blockHash, *blockNumber)
-
-	if len(data) == 0 {
+	bodyForStorage, err := ReadStorageBody(db, blockHash, *blockNumber)
+	if err != nil{
 		return nil, common.Hash{}, 0, 0, nil
-	}
-
-	bodyForStorage := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
-		return nil, common.Hash{}, 0, 0, err
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
@@ -159,13 +152,13 @@ func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.
 		return nil, common.Hash{}, 0, 0, errors.New("missing block hash")
 	}
 
-	body, _, _ := ReadBody(db, blockHash, *blockNumber)
-	if body == nil {
-		return nil, common.Hash{}, 0, 0, fmt.Errorf("transaction referenced missing number {%d} hash {%s}", blockNumber, blockHash)
+	bodyForStorage, err := ReadStorageBody(db, hash, *blockNumber)
+	if err != nil{
+		return nil, common.Hash{}, 0, 0, nil
 	}
-
+	
 	var tx types.Transaction = types.NewBorTransaction()
-	return &tx, blockHash, *blockNumber, uint64(len(body.Transactions)), nil
+	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
 }
 
 //
