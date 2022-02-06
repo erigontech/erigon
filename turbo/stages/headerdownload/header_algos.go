@@ -587,8 +587,8 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
 	defer hd.lock.RUnlock()
 	// Assemble the request
 	return HeaderRequest{
-		Hash:    common.Hash{},
-		Number:  hd.lastProcessedPayload - 1,
+		Hash:    hd.hashToDownloadPoS,
+		Number:  hd.heightToDownloadPoS, // FIXME(yperbasis): we might not know the block number in forkchoiceUpdated
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
@@ -718,10 +718,10 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
-func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
+func (hd *HeaderDownload) SetHashToDownloadPoS(hash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.expectedHash = hash
+	hd.hashToDownloadPoS = hash
 }
 
 func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
@@ -736,24 +736,22 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	}
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
-		header := segmentFragment.Header
-		// If we found the block number we were missing, we can just dismiss it
-		if header.Hash() != hd.expectedHash {
-			return nil
-		}
-		currentCanonical, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-		if err != nil {
-			return err
-		}
-		if currentCanonical == hd.expectedHash || hd.lastProcessedPayload == 1 {
+		if headerNumber := rawdb.ReadHeaderNumber(tx, hd.hashToDownloadPoS); headerNumber != nil {
+			hd.heightToDownloadPoS = *headerNumber
 			hd.synced = true
 			return nil
 		}
+
+		header := segmentFragment.Header
+		if header.Hash() != hd.hashToDownloadPoS {
+			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.hashToDownloadPoS)
+		}
+
 		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
 			return err
 		}
-		hd.expectedHash = segmentFragment.Header.ParentHash
-		hd.lastProcessedPayload = header.Number.Uint64()
+		hd.hashToDownloadPoS = segmentFragment.Header.ParentHash
+		hd.heightToDownloadPoS = header.Number.Uint64() - 1
 	}
 	return nil
 }
@@ -771,7 +769,7 @@ func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	if hd.posSync {
-		return hd.lastProcessedPayload
+		return hd.heightToDownloadPoS
 	} else {
 		return hd.highestInDb
 	}
@@ -1084,10 +1082,10 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.fetching = fetching
 }
 
-func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
+func (hd *HeaderDownload) SetHeightToDownloadPoS(heightToDownloadPoS uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.lastProcessedPayload = lastProcessed
+	hd.heightToDownloadPoS = heightToDownloadPoS
 }
 
 func (hd *HeaderDownload) Unsync() {

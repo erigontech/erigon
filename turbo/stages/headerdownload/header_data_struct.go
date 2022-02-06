@@ -223,8 +223,8 @@ type HeaderDownload struct {
 	topSeenHeightPoW   uint64
 	// proof-of-stake
 	topSeenHeightPoS     uint64
-	lastProcessedPayload uint64                        // The last header number inserted when processing the chain backwards
-	expectedHash         common.Hash                   // Parenthash of the last header inserted, we keep it so that we do not read it from database over and over
+	heightToDownloadPoS  uint64
+	hashToDownloadPoS    common.Hash
 	synced               bool                          // if we found a canonical hash during backward sync, in this case our sync process is done
 	posSync              bool                          // True if the chain is syncing backwards or not
 	headersCollector     *etl.Collector                // ETL collector for headers

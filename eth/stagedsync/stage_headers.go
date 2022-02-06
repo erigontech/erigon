@@ -385,8 +385,8 @@ func downloadMissingPoSHeaders(
 
 	headerNumber := header.Number.Uint64()
 
-	cfg.hd.SetProcessed(headerNumber)
-	cfg.hd.SetExpectedHash(header.ParentHash)
+	cfg.hd.SetHeightToDownloadPoS(headerNumber - 1)
+	cfg.hd.SetHashToDownloadPoS(header.ParentHash)
 	cfg.hd.SetFetching(true)
 
 	log.Info(fmt.Sprintf("[%s] Waiting for headers...", s.LogPrefix()), "from", headerNumber)
