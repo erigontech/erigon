@@ -141,11 +141,8 @@ func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *u
 // BorTransfer transfer in Bor
 func BorTransfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
 	// get inputs before
-	input1 := db.GetBalance(sender)
-	input2 := db.GetBalance(recipient)
-
-	input1Big := input1.ToBig()
-	input2Big := input2.ToBig()
+	input1 := db.GetBalance(sender).Clone()
+	input2 := db.GetBalance(recipient).Clone()
 
 	if !bailout {
 		db.SubBalance(sender, amount)
@@ -153,12 +150,9 @@ func BorTransfer(db vm.IntraBlockState, sender, recipient common.Address, amount
 	db.AddBalance(recipient, amount)
 
 	// get outputs after
-	output1 := db.GetBalance(sender)
-	output2 := db.GetBalance(recipient)
-
-	output1Big := output1.ToBig()
-	output2Big := output2.ToBig()
+	output1 := db.GetBalance(sender).Clone()
+	output2 := db.GetBalance(recipient).Clone()
 
 	// add transfer log
-	AddTransferLog(db, sender, recipient, amount.ToBig(), input1Big, input2Big, output1Big, output2Big)
+	AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
 }
