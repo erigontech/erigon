@@ -75,8 +75,8 @@ func ReadBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 		receipts = make(types.Receipts, 0)
 	}
 
-	body, _, _ := ReadBody(db, hash, number)
-	if body == nil {
+	data := ReadStorageBodyRLP(db, hash, number)
+	if len(data) == 0 {
 		log.Error("Missing body but have bor receipt", "hash", hash, "number", number)
 		return nil
 	}
@@ -126,13 +126,19 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash com
 		return nil, common.Hash{}, 0, 0, nil
 	}
 
-	body, _, _ := ReadBody(db, blockHash, *blockNumber)
-	if body == nil {
-		return nil, common.Hash{}, 0, 0, fmt.Errorf("transaction referenced missing number {%d} hash {%s}", blockNumber, blockHash)
+	data := ReadStorageBodyRLP(db, blockHash, *blockNumber)
+
+	if len(data) == 0 {
+		return nil, common.Hash{}, 0, 0, nil
+	}
+
+	bodyForStorage := new(types.BodyForStorage)
+	if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+		return nil, common.Hash{}, 0, 0, err
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
-	return &tx, blockHash, *blockNumber, uint64(len(body.Transactions)), nil
+	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
 }
 
 // ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
