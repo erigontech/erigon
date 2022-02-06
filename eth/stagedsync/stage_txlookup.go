@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -25,6 +24,7 @@ type TxLookupCfg struct {
 	prune     prune.Mode
 	tmpdir    string
 	snapshots *snapshotsync.AllSnapshots
+	isBor     bool
 }
 
 func StageTxLookupCfg(
@@ -32,12 +32,14 @@ func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
 	snapshots *snapshotsync.AllSnapshots,
+	isBor bool,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
 		prune:     prune,
 		tmpdir:    tmpdir,
 		snapshots: snapshots,
+		isBor:     isBor,
 	}
 }
 
@@ -103,7 +105,7 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 			}
 		}
 
-		if tool.ChainConfig(tx).Bor != nil {
+		if cfg.isBor {
 			if err := next(k, crypto.Keccak256(append(borPrefix, append(k, blockHash[:]...)...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
 				return err
 			}
@@ -169,7 +171,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 			}
 		}
 
-		if tool.ChainConfig(tx).Bor != nil {
+		if cfg.isBor {
 			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
 				return err
 			}
@@ -205,7 +207,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	// Forward stage doesn't write anything before PruneTo point
 	// TODO: maybe need do binary search of values in db in this case
 	if s.PruneProgress != 0 {
-		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx); err != nil {
+		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx, cfg); err != nil {
 			return err
 		}
 	}
@@ -221,7 +223,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	return nil
 }
 
-func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
+func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context, cfg TxLookupCfg) error {
 	reader := bytes.NewReader(nil)
 	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
@@ -240,7 +242,7 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 				return err
 			}
 		}
-		if tool.ChainConfig(tx).Bor != nil {
+		if cfg.isBor {
 			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
 				return err
 			}
