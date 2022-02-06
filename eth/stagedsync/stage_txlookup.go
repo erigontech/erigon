@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -102,8 +103,10 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 			}
 		}
 
-		if err := next(k, crypto.Keccak256(append(borPrefix, append(k, blockHash[:]...)...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
-			return err
+		if tool.ChainConfig(tx).Bor != nil {
+			if err := next(k, crypto.Keccak256(append(borPrefix, append(k, blockHash[:]...)...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -165,8 +168,11 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 				return err
 			}
 		}
-		if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
-			return err
+
+		if tool.ChainConfig(tx).Bor != nil {
+			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
+				return err
+			}
 		}
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
@@ -234,8 +240,10 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 				return err
 			}
 		}
-		if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
-			return err
+		if tool.ChainConfig(tx).Bor != nil {
+			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
+				return err
+			}
 		}
 
 		return nil
