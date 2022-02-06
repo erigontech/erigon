@@ -126,7 +126,7 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash com
 	}
 
 	bodyForStorage, err := ReadStorageBody(db, blockHash, *blockNumber)
-	if err != nil{
+	if err != nil {
 		return nil, common.Hash{}, 0, 0, nil
 	}
 
@@ -153,10 +153,10 @@ func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.
 	}
 
 	bodyForStorage, err := ReadStorageBody(db, hash, *blockNumber)
-	if err != nil{
+	if err != nil {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	
+
 	var tx types.Transaction = types.NewBorTransaction()
 	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
 }
