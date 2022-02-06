@@ -2,7 +2,6 @@ package rawdb
 
 import (
 	"errors"
-	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -15,10 +14,6 @@ var (
 	// bor receipt key
 	borReceiptKey = types.BorReceiptKey
 )
-
-func borTxLookupKey(hash common.Hash) []byte {
-	return append(hash.Bytes(), hash.Bytes()...)
-}
 
 // HasBorReceipt verifies the existence of all block receipt belonging
 // to a block.
@@ -115,11 +110,7 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 // ReadBorTransactionWithBlockHash retrieves a specific bor (fake) transaction by tx hash and block hash, along with
 // its added positional metadata.
 func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
-	blockNumber, err := ReadBorTxLookupEntry(db, txHash)
-
-	if err != nil {
-		return nil, common.Hash{}, 0, 0, err
-	}
+	blockNumber := ReadHeaderNumber(db, txHash)
 
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0, nil
@@ -137,11 +128,7 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, txHash common.Hash, blockHash com
 // ReadBorTransaction retrieves a specific bor (fake) transaction by hash, along with
 // its added positional metadata.
 func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
-	blockNumber, err := ReadBorTxLookupEntry(db, hash)
-
-	if err != nil {
-		return nil, common.Hash{}, 0, 0, err
-	}
+	blockNumber := ReadHeaderNumber(db, hash)
 
 	if blockNumber == nil {
 		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
@@ -159,52 +146,4 @@ func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.
 
 	var tx types.Transaction = types.NewBorTransaction()
 	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
-}
-
-//
-// Indexes for reverse lookup
-//
-
-// ReadBorTxLookupEntry retrieves the positional metadata associated with a transaction
-// hash to allow retrieving the bor transaction or bor receipt using tx hash.
-func ReadBorTxLookupEntry(db kv.Tx, txHash common.Hash) (*uint64, error) {
-	data, err := db.GetOne(kv.BorTxLookup, borTxLookupKey(txHash))
-
-	if err != nil {
-		return nil, err
-	}
-
-	if len(data) == 0 {
-		return nil, errors.New("no data found")
-	}
-
-	number := new(big.Int).SetBytes(data).Uint64()
-	return &number, nil
-}
-
-// WriteBorTxLookupEntry stores a positional metadata for bor transaction using block hash and block number
-func WriteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
-	txHash := types.GetDerivedBorTxHash(borReceiptKey(number))
-	if err := db.Put(kv.BorTxLookup, borTxLookupKey(txHash), big.NewInt(0).SetUint64(number).Bytes()); err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteBorTxLookupEntry removes bor transaction data associated with block hash and block number
-func DeleteBorTxLookupEntry(db kv.RwTx, hash common.Hash, number uint64) error {
-	txHash := types.GetDerivedBorTxHash(borReceiptKey(number))
-	if err := DeleteBorTxLookupEntryByTxHash(db, txHash); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// DeleteBorTxLookupEntryByTxHash removes bor transaction data associated with a bor tx hash.
-func DeleteBorTxLookupEntryByTxHash(db kv.RwTx, txHash common.Hash) error {
-	if err := db.Delete(kv.BorTxLookup, borTxLookupKey(txHash), nil); err != nil {
-		return err
-	}
-	return nil
 }
