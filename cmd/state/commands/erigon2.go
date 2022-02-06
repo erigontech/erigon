@@ -10,10 +10,11 @@ import (
 	"os/signal"
 	"path"
 	"syscall"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -29,6 +30,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	aggregationStep = 15625 /* this is 500'000 / 32 */
+	unwindLimit     = 90000 /* how it is in geth */
+)
+
 var (
 	commitmentFrequency int // How many blocks to skip between calculating commitment
 	changesets          bool
@@ -38,7 +44,7 @@ func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
-	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 256, "how many blocks to skip between calculating commitment")
+	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -46,13 +52,17 @@ var erigon2Cmd = &cobra.Command{
 	Use:   "erigon2",
 	Short: "Exerimental command to re-execute blocks from beginning using erigon2 state representation",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if commitmentFrequency < 1 || commitmentFrequency > 4096 {
-			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than 4096: %d", commitmentFrequency)
+		if commitmentFrequency < 1 || commitmentFrequency > aggregationStep {
+			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than %d: %d", commitmentFrequency, aggregationStep)
 		}
 		logger := log.New()
 		return Erigon2(genesis, logger)
 	},
 }
+
+const (
+	logInterval = 30 * time.Second
+)
 
 func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
@@ -74,21 +84,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "statedb")
-	if block == 0 {
-		if _, err = os.Stat(stateDbPath); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		} else if err = os.RemoveAll(stateDbPath); err != nil {
-			return err
-		}
-	}
-	db, err2 := kv2.NewMDBX(logger).Path(stateDbPath).Open()
-	if err2 != nil {
-		return err2
-	}
-	defer db.Close()
 	aggPath := path.Join(datadir, "aggregator")
 	if block == 0 {
 		if _, err = os.Stat(aggPath); err != nil {
@@ -102,10 +97,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, 90000, 4096)
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
+	defer agg.Close()
 	agg.GenerateChangesets(changesets)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
@@ -113,22 +109,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	interrupt := false
 	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
-	var rwTx kv.RwTx
-	defer func() {
-		if rwTx != nil {
-			rwTx.Rollback()
-		}
-	}()
 	var rootHash []byte
 	if block == 0 {
-		if rwTx, err = db.BeginRw(ctx); err != nil {
-			return err
-		}
 		genBlock, genesisIbs, err4 := genesis.ToBlock()
 		if err4 != nil {
 			return err4
 		}
-		if err = w.Reset(rwTx, 0); err != nil {
+		if err = w.Reset(0); err != nil {
 			return err
 		}
 		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
@@ -146,16 +133,34 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
 			return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 		}
-		if err = rwTx.Commit(); err != nil {
-			return err
-		}
-	}
-	if rwTx, err = db.BeginRw(ctx); err != nil {
-		return err
 	}
 	var txNum uint64 = 1
 	trace := false
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+	prevBlock := blockNum
+	prevTime := time.Now()
 	for !interrupt {
+		select {
+		default:
+		case <-logEvery.C:
+			aStats := agg.Stats()
+			totalFiles := aStats.AccountsCount + aStats.CodeCount + aStats.StorageCount + aStats.CommitmentCount
+			totalDatSize := aStats.AccountsDatSize + aStats.CodeDatSize + aStats.StorageDatSize + aStats.CommitmentDatSize
+			totalIdxSize := aStats.AccountsIdxSize + aStats.CodeIdxSize + aStats.StorageIdxSize + aStats.CommitmentIdxSize
+			currentTime := time.Now()
+			interval := currentTime.Sub(prevTime)
+			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
+			prevBlock = blockNum
+			prevTime = currentTime
+			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
+				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
+				"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
+				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
+				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
+				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+			)
+		}
 		blockNum++
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
@@ -169,8 +174,8 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if b == nil {
 			break
 		}
-		r := agg.MakeStateReader(rwTx, blockNum)
-		if err = w.Reset(rwTx, blockNum); err != nil {
+		r := agg.MakeStateReader(blockNum)
+		if err = w.Reset(blockNum); err != nil {
 			return err
 		}
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
@@ -197,33 +202,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 				return err
 			}
 			if !bytes.Equal(rootHash, b.Header().Root[:]) {
-				if trace || interrupt {
-					return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
-				} else {
-					blockNum--
-					trace = true
-				}
-				rwTx.Rollback()
-				continue
+				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, b.Header().Root[:], rootHash)
 			}
 		}
 		if err = w.Aggregate(trace); err != nil {
 			return err
 		}
-		// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-		if interrupt || (blockNum+1)%uint64(commitmentFrequency) == 0 {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-			if !interrupt {
-				if rwTx, err = db.BeginRw(ctx); err != nil {
-					return err
-				}
-			}
-		}
-		//if blockNum%1000 == 0 || blockNum >= 4157000 {
-		//	log.Info("Processed", "blocks", blockNum)
-		//}
 	}
 	if w != nil {
 		w.Close()
@@ -297,10 +281,7 @@ func bytesToUint64(buf []byte) (x uint64) {
 }
 
 func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
-	if err != nil {
-		return nil, err
-	}
+	enc := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -336,10 +317,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 
 func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	trace := false
-	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
-	if err != nil {
-		return nil, err
-	}
+	enc := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
 	if enc == nil {
 		return nil, nil
 	}
@@ -347,19 +325,11 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 }
 
 func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
-	if err != nil {
-		return nil, err
-	}
-	return enc, nil
+	return rw.r.ReadAccountCode(address.Bytes(), false /* trace */), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
-	if err != nil {
-		return 0, err
-	}
-	return len(enc), nil
+	return rw.r.ReadAccountCodeSize(address.Bytes(), false /* trace */), nil
 }
 
 func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64, error) {
@@ -429,23 +399,17 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 			inc >>= 8
 		}
 	}
-	if err := ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */); err != nil {
-		return err
-	}
+	ww.w.UpdateAccountData(address.Bytes(), value, false /* trace */)
 	return nil
 }
 
 func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if err := ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */); err != nil {
-		return err
-	}
+	ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */)
 	return nil
 }
 
 func (ww *WriterWrapper) DeleteAccount(address common.Address, original *accounts.Account) error {
-	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
-		return err
-	}
+	ww.w.DeleteAccount(address.Bytes(), false /* trace */)
 	return nil
 }
 
@@ -454,9 +418,7 @@ func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation
 	if trace {
 		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
 	}
-	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace); err != nil {
-		return err
-	}
+	ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value, trace)
 	return nil
 }
 

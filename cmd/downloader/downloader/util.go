@@ -20,13 +20,14 @@ import (
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
 // amount of network announcements, but can't go over 2Mb
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-const DefaultPieceSize = 1 * 1024 * 1024
+const DefaultPieceSize = 2 * 1024 * 1024
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
-	trackers.Best,
-	trackers.Ws,
-	// trackers.Udp, trackers.Https, trackers.Http,
+	//trackers.First(5, trackers.Best),
+	trackers.First(3, trackers.Udp),
+	trackers.First(3, trackers.Https),
+	//trackers.First(3, trackers.Ws),
 }
 
 func AllTorrentPaths(dir string) ([]string, error) {

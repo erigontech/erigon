@@ -7,6 +7,8 @@ import (
 	"net"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"

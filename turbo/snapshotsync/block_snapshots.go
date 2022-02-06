@@ -608,16 +608,14 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
-			if len(senders) > 0 {
-				parseCtx.WithSender(true)
-			}
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+			parseCtx.WithSender(len(senders) == 0)
+			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
 				return err
 			}
 			if len(senders) > 0 {
 				sender = senders[j]
 			}
-			_ = sender
+
 			valueBuf = valueBuf[:0]
 			valueBuf = append(valueBuf, slot.IdHash[:1]...)
 			valueBuf = append(valueBuf, sender[:]...)
@@ -820,44 +818,49 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 RETRY:
 	blockNum := firstBlockNum
 	body := &types.BodyForStorage{}
-	bodyGetter := sn.Bodies.MakeGetter()
-	bodyGetter.Reset(0)
-	buf, _ = bodyGetter.Next(buf[:0])
-	if err := rlp.DecodeBytes(buf, body); err != nil {
-		return err
-	}
-
-	if err := forEach(d, func(i, offset uint64, word []byte) error {
-		if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
-			return err
-		}
-		if err := txnHashIdx.AddKey(slot.IdHash[:], offset); err != nil {
+	if err := sn.Bodies.WithReadAhead(func() error {
+		bodyGetter := sn.Bodies.MakeGetter()
+		bodyGetter.Reset(0)
+		buf, _ = bodyGetter.Next(buf[:0])
+		if err := rlp.DecodeBytes(buf, body); err != nil {
 			return err
 		}
 
-		for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
-			if !bodyGetter.HasNext() {
-				return fmt.Errorf("not enough bodies")
-			}
-			buf, _ = bodyGetter.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, body); err != nil {
+		if err := forEach(d, func(i, offset uint64, word []byte) error {
+			if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
 				return err
 			}
-			blockNum++
-		}
+			if err := txnHashIdx.AddKey(slot.IdHash[:], offset); err != nil {
+				return err
+			}
 
-		if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
+			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+				if !bodyGetter.HasNext() {
+					return fmt.Errorf("not enough bodies")
+				}
+				buf, _ = bodyGetter.Next(buf[:0])
+				if err := rlp.DecodeBytes(buf, body); err != nil {
+					return err
+				}
+				blockNum++
+			}
+
+			if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
+				return err
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+			default:
+			}
+			j++
+			return nil
+		}); err != nil {
 			return err
 		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
-		default:
-		}
-		j++
 		return nil
 	}); err != nil {
 		return err
@@ -952,16 +955,21 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 
 //forEach - only reason why this func exists - is that .Next returns "nextPos" instead of "pos". If fix this in future - then can remove this func
 func forEach(d *compress.Decompressor, walker func(i, offset uint64, word []byte) error) error {
-	g := d.MakeGetter()
-	var wc, pos, nextPos uint64
-	word := make([]byte, 0, 4096)
-	for g.HasNext() {
-		word, nextPos = g.Next(word[:0])
-		if err := walker(wc, pos, word); err != nil {
-			return err
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		var wc, pos, nextPos uint64
+		word := make([]byte, 0, 4096)
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(wc, pos, word); err != nil {
+				return err
+			}
+			wc++
+			pos = nextPos
 		}
-		wc++
-		pos = nextPos
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -988,16 +996,21 @@ func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker fun
 
 RETRY:
 
-	g := d.MakeGetter()
-	var wc, pos, nextPos uint64
-	word := make([]byte, 0, 4096)
-	for g.HasNext() {
-		word, nextPos = g.Next(word[:0])
-		if err := walker(rs, wc, pos, word); err != nil {
-			return err
+	if err = d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		var wc, pos, nextPos uint64
+		word := make([]byte, 0, 4096)
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, wc, pos, word); err != nil {
+				return err
+			}
+			wc++
+			pos = nextPos
 		}
-		wc++
-		pos = nextPos
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if err = rs.Build(); err != nil {
@@ -1017,17 +1030,22 @@ func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) err
 	r := bytes.NewReader(nil)
 	for _, sn := range s.blocks {
 		d := sn.Headers
-		g := d.MakeGetter()
-		for g.HasNext() {
-			header := new(types.Header)
-			word, _ = g.Next(word[:0])
-			r.Reset(word[1:])
-			if err := rlp.Decode(r, header); err != nil {
-				return err
+		if err := d.WithReadAhead(func() error {
+			g := d.MakeGetter()
+			for g.HasNext() {
+				header := new(types.Header)
+				word, _ = g.Next(word[:0])
+				r.Reset(word[1:])
+				if err := rlp.Decode(r, header); err != nil {
+					return err
+				}
+				if err := walker(header); err != nil {
+					return err
+				}
 			}
-			if err := walker(header); err != nil {
-				return err
-			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 	return nil

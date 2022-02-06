@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -59,8 +58,6 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 		//TODO: if hash is empty - create .torrent file from path file (if it exists)
 		infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
-	defer cancel()
 	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes, s.snapshotDir); err != nil {
 		return nil, err
 	}
