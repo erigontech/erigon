@@ -89,7 +89,7 @@ func MergeBorLogs(logs []*Log, borLogs []*Log) []*Log {
 	result := append(logs, borLogs...)
 
 	sort.SliceStable(result, func(i int, j int) bool {
-		if result[i].BlockNumber == result[j].BlockNumber{
+		if result[i].BlockNumber == result[j].BlockNumber {
 			return result[i].Index < result[j].Index
 		}
 		return result[i].BlockNumber < result[j].BlockNumber
