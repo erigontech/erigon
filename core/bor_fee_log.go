@@ -88,18 +88,12 @@ func addTransferLog(
 		return
 	}
 
-	dataInputs := []*uint256.Int{
-		amount,
-		input1,
-		input2,
-		output1,
-		output2,
-	}
-
-	var data []byte
-	for _, v := range dataInputs {
-		data = append(data, common.LeftPadBytes(v.Bytes(), 32)...)
-	}
+	data := make([]byte, 32*5)
+	data = append(data, common.LeftPadBytes(amount.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(input1.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(input2.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(output1.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(output2.Bytes(), 32)...)
 
 	// add transfer log
 	state.AddLog(&types.Log{
