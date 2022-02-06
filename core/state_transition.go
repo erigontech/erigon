@@ -336,8 +336,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	var input1 *uint256.Int
 	var input2 *uint256.Int
 	if st.isBor {
-		input1 = st.state.GetBalance(st.msg.From())
-		input2 = st.state.GetBalance(st.evm.Context().Coinbase)
+		input1 = st.state.GetBalance(st.msg.From()).Clone()
+		input2 = st.state.GetBalance(st.evm.Context().Coinbase).Clone()
 	}
 
 	// First check this message satisfies all consensus rules before
