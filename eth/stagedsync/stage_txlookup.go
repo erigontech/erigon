@@ -102,7 +102,7 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 			}
 		}
 
-		if err := next(k, crypto.Keccak256(append(borPrefix, blockHash[:]...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
+		if err := next(k, crypto.Keccak256(append(borPrefix, append(k, blockHash[:]...)...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
 			return err
 		}
 
