@@ -90,10 +90,10 @@ func addTransferLog(
 
 	data := make([]byte, 32*5)
 	amount.WriteToSlice(data)
-	input1.WriteToSlice(data)
-	input2.WriteToSlice(data)
-	output1.WriteToSlice(data)
-	output2.WriteToSlice(data)
+	input1.WriteToSlice(data[32:])
+	input2.WriteToSlice(data[64:])
+	output1.WriteToSlice(data[96:])
+	output2.WriteToSlice(data[128:])
 
 	// add transfer log
 	state.AddLog(&types.Log{
