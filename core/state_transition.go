@@ -441,8 +441,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 	// add transfer log
 	if st.isBor {
-		output1 := new(uint256.Int).SetBytes(input1.Bytes())
-		output2 := new(uint256.Int).SetBytes(input2.Bytes())
+		output1 := input1.Clone()
+		output2 := input2.Clone()
 		AddFeeTransferLog(
 			st.state,
 
