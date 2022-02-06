@@ -39,7 +39,7 @@ func NewBorTransaction() *LegacyTx {
 // data and contextual infos like containing block and transactions.
 func DeriveFieldsForBorReceipt(receipt *Receipt, hash common.Hash, number uint64, receipts Receipts) error {
 	// get derived tx hash
-	borPrefix := []byte("matic-bor-tx-lookup-")
+	borPrefix := []byte("matic-bor-receipt-")
 	// hashing using prefix + number + hash
 	txHash := GetDerivedBorTxHash((append(borPrefix, append(BorReceiptKey(number), hash.Bytes()...)...)))
 	txIndex := uint(len(receipts))
