@@ -18,7 +18,6 @@ package core
 
 import (
 	"fmt"
-	"math/big"
 	"math/bits"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -68,6 +67,9 @@ type StateTransition struct {
 	//some pre-allocated intermediate variables
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
+
+	isParlia bool
+	isBor    bool
 }
 
 // Message represents a message sent to a contract.
@@ -193,6 +195,8 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTransition {
+	isParlia := evm.ChainConfig().Parlia != nil
+	isBor := evm.ChainConfig().Bor != nil
 	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
@@ -206,6 +210,9 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 
 		sharedBuyGas:        uint256.NewInt(0),
 		sharedBuyGasBalance: uint256.NewInt(0),
+
+		isParlia: isParlia,
+		isBor:    isBor,
 	}
 }
 
@@ -352,7 +359,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 
 	// BSC always gave gas bailout due to system transactions that set 2^256/2 gas limit and
 	// for Parlia consensus this flag should be always be set
-	if st.evm.ChainConfig().Parlia != nil {
+	if st.isParlia {
 		gasBailout = true
 	}
 
@@ -419,10 +426,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		effectiveTip = cmath.Min256(st.tip, new(uint256.Int).Sub(st.gasFeeCap, st.evm.Context().BaseFee))
 	}
 	// consensus engine is parlia
-	if st.evm.ChainConfig().Parlia != nil {
+	if st.isParlia {
 		st.state.AddBalance(consensus.SystemAddress, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 	}
-	amount := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip.ToBig())
+	amount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip)
 	if london && st.evm.ChainConfig().Bor != nil {
 		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
 		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
@@ -430,8 +437,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	} else {
 		st.state.AddBalance(st.evm.Context().Coinbase, new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), effectiveTip))
 	}
-	output1 := new(big.Int).SetBytes(input1Big.Bytes())
-	output2 := new(big.Int).SetBytes(input2Big.Bytes())
 
 	// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 	// add transfer log
@@ -445,8 +450,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			st.evm.Context().Coinbase,
 
 			amount,
-			input1Big,
-			input2Big,
+			input1,
+			input2,
 			output1.Sub(output1, amount),
 			output2.Add(output2, amount),
 		)
