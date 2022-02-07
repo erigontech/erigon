@@ -42,6 +42,7 @@ var (
 	seeding                       bool
 	asJson                        bool
 	forceRebuild                  bool
+	forceVerify                   bool
 	downloaderApiAddr             string
 	torrentVerbosity              string
 	downloadRateStr, uploadRteStr string
@@ -61,11 +62,12 @@ func init() {
 	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "8mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
-	withDatadir(printInfoHashes)
-	printInfoHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
-	printInfoHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
+	withDatadir(printTorrentHashes)
+	printTorrentHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
+	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
+	printTorrentHashes.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
 
-	rootCmd.AddCommand(printInfoHashes)
+	rootCmd.AddCommand(printTorrentHashes)
 }
 
 func withDatadir(cmd *cobra.Command) {
@@ -107,7 +109,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context, cmd *cobra.Command) error {
-	snapshotsDir := path.Join(datadir, "snapshots")
+	snapshotDir := path.Join(datadir, "snapshots")
 	torrentLogLevel, ok := downloader.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
@@ -122,9 +124,9 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	}
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
-	common.MustExist(snapshotsDir)
+	common.MustExist(snapshotDir)
 
-	db := mdbx.MustOpen(snapshotsDir + "/db")
+	db := mdbx.MustOpen(snapshotDir + "/db")
 	var t *downloader.Client
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
@@ -132,7 +134,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 			return fmt.Errorf("get peer id: %w", err)
 		}
 
-		cfg, err := downloader.TorrentConfig(snapshotsDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
+		cfg, err := downloader.TorrentConfig(snapshotDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			return fmt.Errorf("TorrentConfig: %w", err)
 		}
@@ -153,12 +155,12 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	}
 	defer t.Close()
 
-	bittorrentServer, err := downloader.NewServer(db, t, snapshotsDir)
+	bittorrentServer, err := downloader.NewServer(db, t, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotsDir, t.Cli)
+	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, t.Cli)
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
@@ -197,12 +199,16 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	return nil
 }
 
-var printInfoHashes = &cobra.Command{
-	Use:     "info_hashes",
-	Example: "go run ./cmd/downloader info_hashes --datadir <your_datadir>",
+var printTorrentHashes = &cobra.Command{
+	Use:     "torrent_hashes",
+	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		snapshotDir := path.Join(datadir, "snapshots")
 		ctx := cmd.Context()
+
+		if forceVerify { // remove and create .torrent files (will re-read all snapshots)
+			return downloader.VerifyDtaFiles(ctx, snapshotDir)
+		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 			removeChunksStorage(snapshotDir)

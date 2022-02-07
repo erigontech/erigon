@@ -27,7 +27,7 @@ erigon snapshots create --datadir=<your_datadir>
 
 # Create .torrent files (Downloader will seed automatically all .torrent files)
 # output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
-downloader info_hashes --rebuild --datadir=<your_datadir>
+downloader torrent_hashes --rebuild --datadir=<your_datadir>
 
 # Start downloader
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>

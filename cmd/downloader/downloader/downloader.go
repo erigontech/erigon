@@ -1,16 +1,23 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -99,7 +106,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
 	var m runtime.MemStats
-	var stats aggStats
+	var stats AggStats
 
 	for {
 		select {
@@ -125,7 +132,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			runtime.ReadMemStats(&m)
-			stats = calcStats(stats, interval, torrentClient)
+			stats = CalcStats(stats, interval, torrentClient)
 			if allComplete {
 				log.Info("[torrent] Seeding",
 					"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
@@ -137,7 +144,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info("[torrent] Downloading",
-				"progress", fmt.Sprintf("%.2f%%", stats.progress),
+				"Progress", fmt.Sprintf("%.2f%%", stats.Progress),
 				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 				"peers", stats.peersCount,
@@ -146,8 +153,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			if stats.peersCount == 0 {
 				ips := torrentClient.BadPeerIPs()
 				if len(ips) > 0 {
-					log.Info("[torrent] Stats",
-						"banned", ips)
+					log.Info("[torrent] Stats", "banned", ips)
 				}
 
 			}
@@ -166,26 +172,26 @@ func (cli *Client) StopSeeding(hash metainfo.Hash) error {
 	return nil
 }
 
-type aggStats struct {
+type AggStats struct {
 	readBytesPerSec  int64
 	writeBytesPerSec int64
 	peersCount       int64
 
-	progress      float32
+	Progress      float32
 	torrentsCount int
 
 	bytesRead    int64
 	bytesWritten int64
 }
 
-func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Client) (result aggStats) {
+func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Client) (result AggStats) {
 	var aggBytesCompleted, aggLen int64
 	//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
 	peers := map[torrent.PeerID]*torrent.PeerConn{}
 	torrents := client.Torrents()
 	for _, t := range torrents {
 		stats := t.Stats()
-
+		fmt.Printf("a: %+v\n", stats)
 		/*
 			var completedPieces, partialPieces int
 			psrs := t.PieceStateRuns()
@@ -213,7 +219,7 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 	result.readBytesPerSec += (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
 	result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
 
-	result.progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
+	result.Progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
 
 	result.peersCount = int64(len(peers))
 	result.torrentsCount = len(torrents)
@@ -221,7 +227,7 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 }
 
 // AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
-// added first time - pieces verification process will start (disk IO heavy) - progress
+// added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
 func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
@@ -305,4 +311,100 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 		}
 	}()
 	torrentClient.WaitAll() // wait for checksum verify
+}
+
+func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+	files, err := AllTorrentPaths(snapshotDir)
+	if err != nil {
+		return err
+	}
+	totalPieces := 0
+	for _, f := range files {
+		metaInfo, err := metainfo.LoadFromFile(f)
+		if err != nil {
+			return err
+		}
+		info, err := metaInfo.UnmarshalInfo()
+		if err != nil {
+			return err
+		}
+		totalPieces += info.NumPieces()
+	}
+
+	j := 0
+	for _, f := range files {
+		metaInfo, err := metainfo.LoadFromFile(f)
+		if err != nil {
+			return err
+		}
+		info, err := metaInfo.UnmarshalInfo()
+		if err != nil {
+			return err
+		}
+		err = verifyTorrent(&info, snapshotDir, func(i int, good bool) error {
+			j++
+			if !good {
+				log.Error("[torrent] Verify hash mismatch", "at piece", i, "file", f)
+				return fmt.Errorf("invalid file")
+			}
+			select {
+			case <-logEvery.C:
+				log.Info("[torrent] Verify", "Progress", fmt.Sprintf("%.2f%%", 100*float64(j)/float64(totalPieces)))
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func mmapFile(name string) (mm mmap.MMap, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return
+	}
+	if fi.Size() == 0 {
+		return
+	}
+	return mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
+}
+
+func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good bool) error) error {
+	span := new(mmap_span.MMapSpan)
+	for _, file := range info.UpvertedFiles() {
+		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+		mm, err := mmapFile(filename)
+		if err != nil {
+			return err
+		}
+		if int64(len(mm)) != file.Length {
+			return fmt.Errorf("file %q has wrong length", filename)
+		}
+		span.Append(mm)
+	}
+	span.InitIndex()
+	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
+		p := info.Piece(i)
+		hash := sha1.New()
+		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
+		if err != nil {
+			return err
+		}
+		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
+		if err := consumer(i, good); err != nil {
+			return err
+		}
+	}
+	return nil
 }
