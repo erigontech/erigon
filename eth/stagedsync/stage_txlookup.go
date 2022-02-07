@@ -93,7 +93,6 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k []byte, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
-		borPrefix := []byte("matic-bor-receipt-")
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
@@ -106,6 +105,7 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 		}
 
 		if cfg.isBor {
+			borPrefix := []byte("matic-bor-receipt-")
 			if err := next(k, crypto.Keccak256(append(borPrefix, append(k, blockHash[:]...)...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
 				return err
 			}
@@ -156,7 +156,6 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
-		borPrefix := []byte("matic-bor-receipt-")
 		if err := rlp.Decode(reader, body); err != nil {
 			return fmt.Errorf("rlp decode err: %w", err)
 		}
@@ -172,6 +171,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 		}
 
 		if cfg.isBor {
+			borPrefix := []byte("matic-bor-receipt-")
 			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
 				return err
 			}
@@ -228,7 +228,6 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
 		reader.Reset(v)
-		borPrefix := []byte("matic-bor-receipt-")
 		if err := rlp.Decode(reader, body); err != nil {
 			return fmt.Errorf("rlp decode: %w", err)
 		}
@@ -243,6 +242,7 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 			}
 		}
 		if cfg.isBor {
+			borPrefix := []byte("matic-bor-receipt-")
 			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
 				return err
 			}
