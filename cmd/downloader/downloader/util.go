@@ -1,9 +1,12 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -12,6 +15,8 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/mmap_span"
+	"github.com/edsrzf/mmap-go"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
@@ -113,7 +118,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[torrent] Creating .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+			log.Info("[torrent] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
 		}
 	}
 	return nil
@@ -171,4 +176,49 @@ func CreateTorrentFile(root string, info *metainfo.Info, mi *metainfo.MetaInfo) 
 func segmentFileNameFromTorrentFileName(in string) string {
 	ext := filepath.Ext(in)
 	return in[0 : len(in)-len(ext)]
+}
+
+func mmapFile(name string) (mm mmap.MMap, err error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return
+	}
+	if fi.Size() == 0 {
+		return
+	}
+	return mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
+}
+
+func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good bool) error) error {
+	span := new(mmap_span.MMapSpan)
+	for _, file := range info.UpvertedFiles() {
+		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+		mm, err := mmapFile(filename)
+		if err != nil {
+			return err
+		}
+		if int64(len(mm)) != file.Length {
+			return fmt.Errorf("file %q has wrong length", filename)
+		}
+		span.Append(mm)
+	}
+	span.InitIndex()
+	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
+		p := info.Piece(i)
+		hash := sha1.New()
+		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
+		if err != nil {
+			return err
+		}
+		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
+		if err := consumer(i, good); err != nil {
+			return err
+		}
+	}
+	return nil
 }
