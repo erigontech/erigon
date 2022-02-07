@@ -2,7 +2,7 @@
 
 Service to seed/download historical data (immutable .seg files)
 
-## How to Start Erigon in snapshot sync mode 
+## How to Start Erigon in snapshot sync mode
 
 Only Mainnet, Goerli and BSC networks are supported now.
 
@@ -37,12 +37,6 @@ downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 # Erigon is not required for snapshots seeding 
 ```
 
-## How to verify that .seg files have same checksum withch current .torrent files  
-
-```
-downloader torrent_hashes --verify --datadir=<your_datadir>
-```
-
 ## Architecture
 
 Downloader works based on <your_datadir>/snapshots/*.torrent files. Such files can be created 4 ways:
@@ -69,3 +63,9 @@ Downloader does:
 Technical details:
 
 - To prevent attack - .idx creation using random Seed - all nodes will have different .idx file (and same .seg files)
+
+## How to verify that .seg files have same checksum withch current .torrent files
+
+```
+downloader torrent_hashes --verify --datadir=<your_datadir>
+```
