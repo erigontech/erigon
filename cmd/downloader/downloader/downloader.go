@@ -362,6 +362,7 @@ func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
 			return err
 		}
 	}
+	log.Info("[torrent] Verify succeed")
 	return nil
 }
 func mmapFile(name string) (mm mmap.MMap, err error) {
