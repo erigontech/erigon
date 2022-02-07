@@ -655,6 +655,23 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	_, fileName := filepath.Split(segmentFile)
 	log.Info("[Transactions] Compression", "ratio", f.Ratio.String(), "file", fileName)
+
+	d, err := compress.NewDecompressor(segmentFile)
+	if err != nil {
+		panic(err)
+	}
+	defer d.Close()
+	var buf []byte
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf)
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 	return firstTxID, nil
 }
 
@@ -713,6 +730,22 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	}
 	if err := f.Compress(); err != nil {
 		return err
+	}
+
+	d, err := compress.NewDecompressor(segmentFilePath)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	var buf []byte
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf)
+		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
 
 	return nil
