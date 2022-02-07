@@ -67,5 +67,6 @@ Technical details:
 ## How to verify that .seg files have same checksum withch current .torrent files
 
 ```
+# Use it if you see weird behavior, bugs, bans, hardware issues, etc...
 downloader torrent_hashes --verify --datadir=<your_datadir>
 ```
