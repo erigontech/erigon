@@ -1,23 +1,16 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -27,39 +20,7 @@ import (
 const ASSERT = false
 
 type Client struct {
-	Cli *torrent.Client
-}
-
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
-	torrentConfig := DefaultTorrentConfig()
-	torrentConfig.ListenPort = torrentPort
-	torrentConfig.Seed = seeding
-	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
-	torrentConfig.PeerID = peerID
-
-	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
-
-	// debug
-	if lg.Debug == verbosity {
-		torrentConfig.Debug = true
-	}
-	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
-
-	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
-	return torrentConfig, nil
-}
-
-func New(cfg *torrent.ClientConfig) (*Client, error) {
-	torrentClient, err := torrent.NewClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("fail to start torrent client: %w", err)
-	}
-	return &Client{
-		Cli: torrentClient,
-	}, nil
+	Client *torrent.Client
 }
 
 func DefaultTorrentConfig() *torrent.ClientConfig {
@@ -85,13 +46,55 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func SavePeerID(db kv.RwDB, peerID []byte) error {
+func TorrentConfig(snapshotsDir string, seeding bool, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
+	torrentConfig := DefaultTorrentConfig()
+	torrentConfig.ListenPort = torrentPort
+	torrentConfig.Seed = seeding
+	torrentConfig.DataDir = snapshotsDir
+	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+
+	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
+
+	// debug
+	if lg.Debug == verbosity {
+		torrentConfig.Debug = true
+	}
+	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
+
+	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
+	return torrentConfig, nil
+}
+
+func New(cfg *torrent.ClientConfig, downloaderDB kv.RwDB) (*Client, error) {
+	peerID, err := readPeerID(downloaderDB)
+	if err != nil {
+		return nil, fmt.Errorf("get peer id: %w", err)
+	}
+	cfg.PeerID = string(peerID)
+	torrentClient, err := torrent.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("fail to start torrent client: %w", err)
+	}
+	if len(peerID) == 0 {
+		if err = savePeerID(downloaderDB, torrentClient.PeerID()); err != nil {
+			return nil, fmt.Errorf("save peer id: %w", err)
+		}
+	}
+
+	return &Client{
+		Client: torrentClient,
+	}, nil
+}
+
+func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID)
+		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID[:])
 	})
 }
 
-func ReadPeerID(db kv.RoDB) (peerID []byte, err error) {
+func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 	if err = db.View(context.Background(), func(tx kv.Tx) error {
 		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 		if err != nil {
@@ -106,14 +109,14 @@ func ReadPeerID(db kv.RoDB) (peerID []byte, err error) {
 }
 
 func (cli *Client) Close() {
-	for _, tr := range cli.Cli.Torrents() {
+	for _, tr := range cli.Client.Torrents() {
 		tr.Drop()
 	}
-	cli.Cli.Close()
+	cli.Client.Close()
 }
 
 func (cli *Client) PeerID() []byte {
-	peerID := cli.Cli.PeerID()
+	peerID := cli.Client.PeerID()
 	return peerID[:]
 }
 
@@ -178,7 +181,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 }
 
 func (cli *Client) StopSeeding(hash metainfo.Hash) error {
-	t, ok := cli.Cli.Torrent(hash)
+	t, ok := cli.Client.Torrent(hash)
 	if !ok {
 		return nil
 	}
@@ -379,49 +382,5 @@ func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
 		}
 	}
 	log.Info("[torrent] Verify succeed")
-	return nil
-}
-func mmapFile(name string) (mm mmap.MMap, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return
-	}
-	if fi.Size() == 0 {
-		return
-	}
-	return mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
-}
-
-func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good bool) error) error {
-	span := new(mmap_span.MMapSpan)
-	for _, file := range info.UpvertedFiles() {
-		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
-		mm, err := mmapFile(filename)
-		if err != nil {
-			return err
-		}
-		if int64(len(mm)) != file.Length {
-			return fmt.Errorf("file %q has wrong length", filename)
-		}
-		span.Append(mm)
-	}
-	span.InitIndex()
-	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
-		p := info.Piece(i)
-		hash := sha1.New()
-		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
-		if err != nil {
-			return err
-		}
-		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
-		if err := consumer(i, good); err != nil {
-			return err
-		}
-	}
 	return nil
 }

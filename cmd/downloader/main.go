@@ -19,12 +19,9 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -109,6 +106,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	snapshotDir := path.Join(datadir, "snapshots")
+	common.MustExist(snapshotDir)
 	torrentLogLevel, ok := downloader.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
@@ -123,64 +121,29 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	}
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
-	common.MustExist(snapshotDir)
 
 	downloaderDB := mdbx.MustOpen(snapshotDir + "/db")
-	var t *downloader.Client
+	var dl *downloader.Client
 
-	peerID, err := downloader.ReadPeerID(downloaderDB)
-	if err != nil {
-		return fmt.Errorf("get peer id: %w", err)
-	}
-	cfg, err := downloader.TorrentConfig(snapshotDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, err := downloader.TorrentConfig(snapshotDir, seeding, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		return fmt.Errorf("TorrentConfig: %w", err)
 	}
-	t, err = downloader.New(cfg)
+	dl, err = downloader.New(cfg, downloaderDB)
 	if err != nil {
 		return err
 	}
-	if len(peerID) == 0 {
-		if err = downloader.SavePeerID(downloaderDB, t.PeerID()); err != nil {
-			return fmt.Errorf("save peer id: %w", err)
-		}
+	log.Info("[torrent] Start", "seeding", cfg.Seed, "my peerID", dl.Client.PeerID())
+	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, dl.Client); err != nil {
+		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
-	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
 
-	bittorrentServer, err := downloader.NewServer(downloaderDB, t, snapshotDir)
+	go downloader.MainLoop(ctx, dl.Client)
+
+	bittorrentServer, err := downloader.NewGrpcServer(downloaderDB, dl, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
-
-	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, t.Cli)
-	if err != nil {
-		return fmt.Errorf("start: %w", err)
-	}
-
-	if downloader.ASSERT {
-		var cc *params.ChainConfig
-		{
-			chaindataDir := path.Join(datadir, "chaindata")
-			common.MustExist(chaindataDir)
-			chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
-			if err != nil {
-				return fmt.Errorf("%w, path: %s", err, chaindataDir)
-			}
-			cc = tool.ChainConfigFromDB(chaindata)
-			chaindata.Close()
-		}
-
-		snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-		for _, t := range t.Cli.Torrents() {
-			expectHashStr := snapshotsCfg.Preverified[t.Info().Name]
-			expectHash := metainfo.NewHashFromHex(expectHashStr)
-			if t.InfoHash() != expectHash {
-				return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", t.Info().Name, t.InfoHash(), expectHash)
-			}
-		}
-	}
-
-	go downloader.MainLoop(ctx, t.Cli)
 
 	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil)
 	if err != nil {
@@ -259,7 +222,7 @@ func removeChunksStorage(snapshotDir string) {
 	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-wal"))
 }
 
-func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)

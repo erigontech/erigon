@@ -20,6 +20,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -96,4 +97,18 @@ var DefaultTxPoolConfig = TxPoolConfig{
 	GlobalQueue:        30_000,
 
 	Lifetime: 3 * time.Hour,
+}
+
+var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpool.Config {
+	cfg := txpool.DefaultConfig
+	cfg.PendingSubPoolLimit = int(pool1Cfg.GlobalSlots)
+	cfg.BaseFeeSubPoolLimit = int(pool1Cfg.GlobalBaseFeeQueue)
+	cfg.QueuedSubPoolLimit = int(pool1Cfg.GlobalQueue)
+	cfg.PriceBump = pool1Cfg.PriceBump
+	cfg.MinFeeCap = pool1Cfg.PriceLimit
+	cfg.AccountSlots = pool1Cfg.AccountSlots
+	cfg.LogEvery = 1 * time.Minute
+	cfg.CommitEvery = 5 * time.Minute
+	cfg.TracedSenders = pool1Cfg.TracedSenders
+	return cfg
 }
