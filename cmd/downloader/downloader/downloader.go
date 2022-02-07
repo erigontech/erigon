@@ -1,23 +1,16 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -27,7 +20,30 @@ import (
 const ASSERT = false
 
 type Client struct {
-	Cli *torrent.Client
+	Client *torrent.Client
+}
+
+func DefaultTorrentConfig() *torrent.ClientConfig {
+	torrentConfig := torrent.NewDefaultClientConfig()
+
+	// enable dht
+	torrentConfig.NoDHT = true
+	//torrentConfig.DisableTrackers = true
+	//torrentConfig.DisableWebtorrent = true
+	//torrentConfig.DisableWebseeds = true
+
+	// Increase default timeouts, because we often run on commodity networks
+	torrentConfig.MinDialTimeout = 6 * time.Second      // default: 3sec
+	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
+	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
+
+	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
+	torrentConfig.EstablishedConnsPerTorrent = 5 // default: 50
+	torrentConfig.TorrentPeersHighWater = 10     // default: 500
+	torrentConfig.TorrentPeersLowWater = 5       // default: 50
+	torrentConfig.HalfOpenConnsPerTorrent = 5    // default: 25
+	torrentConfig.TotalHalfOpenConns = 10        // default: 100
+	return torrentConfig
 }
 
 func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
@@ -58,31 +74,8 @@ func New(cfg *torrent.ClientConfig) (*Client, error) {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
 	return &Client{
-		Cli: torrentClient,
+		Client: torrentClient,
 	}, nil
-}
-
-func DefaultTorrentConfig() *torrent.ClientConfig {
-	torrentConfig := torrent.NewDefaultClientConfig()
-
-	// enable dht
-	torrentConfig.NoDHT = true
-	//torrentConfig.DisableTrackers = true
-	//torrentConfig.DisableWebtorrent = true
-	//torrentConfig.DisableWebseeds = true
-
-	// Increase default timeouts, because we often run on commodity networks
-	torrentConfig.MinDialTimeout = 6 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
-
-	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
-	torrentConfig.EstablishedConnsPerTorrent = 5 // default: 50
-	torrentConfig.TorrentPeersHighWater = 10     // default: 500
-	torrentConfig.TorrentPeersLowWater = 5       // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = 5    // default: 25
-	torrentConfig.TotalHalfOpenConns = 10        // default: 100
-	return torrentConfig
 }
 
 func SavePeerID(db kv.RwDB, peerID []byte) error {
@@ -106,14 +99,14 @@ func ReadPeerID(db kv.RoDB) (peerID []byte, err error) {
 }
 
 func (cli *Client) Close() {
-	for _, tr := range cli.Cli.Torrents() {
+	for _, tr := range cli.Client.Torrents() {
 		tr.Drop()
 	}
-	cli.Cli.Close()
+	cli.Client.Close()
 }
 
 func (cli *Client) PeerID() []byte {
-	peerID := cli.Cli.PeerID()
+	peerID := cli.Client.PeerID()
 	return peerID[:]
 }
 
@@ -178,7 +171,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 }
 
 func (cli *Client) StopSeeding(hash metainfo.Hash) error {
-	t, ok := cli.Cli.Torrent(hash)
+	t, ok := cli.Client.Torrent(hash)
 	if !ok {
 		return nil
 	}
@@ -379,49 +372,5 @@ func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
 		}
 	}
 	log.Info("[torrent] Verify succeed")
-	return nil
-}
-func mmapFile(name string) (mm mmap.MMap, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		return
-	}
-	if fi.Size() == 0 {
-		return
-	}
-	return mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
-}
-
-func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good bool) error) error {
-	span := new(mmap_span.MMapSpan)
-	for _, file := range info.UpvertedFiles() {
-		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
-		mm, err := mmapFile(filename)
-		if err != nil {
-			return err
-		}
-		if int64(len(mm)) != file.Length {
-			return fmt.Errorf("file %q has wrong length", filename)
-		}
-		span.Append(mm)
-	}
-	span.InitIndex()
-	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
-		p := info.Piece(i)
-		hash := sha1.New()
-		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
-		if err != nil {
-			return err
-		}
-		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
-		if err := consumer(i, good); err != nil {
-			return err
-		}
-	}
 	return nil
 }

@@ -19,12 +19,9 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -126,7 +123,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	common.MustExist(snapshotDir)
 
 	downloaderDB := mdbx.MustOpen(snapshotDir + "/db")
-	var t *downloader.Client
+	var dl *downloader.Client
 
 	peerID, err := downloader.ReadPeerID(downloaderDB)
 	if err != nil {
@@ -136,51 +133,28 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("TorrentConfig: %w", err)
 	}
-	t, err = downloader.New(cfg)
+	dl, err = downloader.New(cfg)
 	if err != nil {
 		return err
 	}
 	if len(peerID) == 0 {
-		if err = downloader.SavePeerID(downloaderDB, t.PeerID()); err != nil {
+		if err = downloader.SavePeerID(downloaderDB, dl.PeerID()); err != nil {
 			return fmt.Errorf("save peer id: %w", err)
 		}
 	}
-	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
+	log.Info(fmt.Sprintf("Seeding: %dl, my peerID: %x", cfg.Seed, dl.Client.PeerID()))
 
-	bittorrentServer, err := downloader.NewServer(downloaderDB, t, snapshotDir)
-	if err != nil {
-		return fmt.Errorf("new server: %w", err)
-	}
-
-	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, t.Cli)
+	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, dl.Client)
 	if err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
 
-	if downloader.ASSERT {
-		var cc *params.ChainConfig
-		{
-			chaindataDir := path.Join(datadir, "chaindata")
-			common.MustExist(chaindataDir)
-			chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
-			if err != nil {
-				return fmt.Errorf("%w, path: %s", err, chaindataDir)
-			}
-			cc = tool.ChainConfigFromDB(chaindata)
-			chaindata.Close()
-		}
+	go downloader.MainLoop(ctx, dl.Client)
 
-		snapshotsCfg := snapshothashes.KnownConfig(cc.ChainName)
-		for _, t := range t.Cli.Torrents() {
-			expectHashStr := snapshotsCfg.Preverified[t.Info().Name]
-			expectHash := metainfo.NewHashFromHex(expectHashStr)
-			if t.InfoHash() != expectHash {
-				return fmt.Errorf("file %s has unexpected hash %x, expected %x. May help: git submodule update --init --recursive --force", t.Info().Name, t.InfoHash(), expectHash)
-			}
-		}
+	bittorrentServer, err := downloader.NewGrpcServer(downloaderDB, dl, snapshotDir)
+	if err != nil {
+		return fmt.Errorf("new server: %w", err)
 	}
-
-	go downloader.MainLoop(ctx, t.Cli)
 
 	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil)
 	if err != nil {
@@ -259,7 +233,7 @@ func removeChunksStorage(snapshotDir string) {
 	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-wal"))
 }
 
-func StartGrpc(snServer *downloader.SNDownloaderServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
+func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
