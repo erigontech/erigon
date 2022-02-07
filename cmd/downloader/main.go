@@ -17,7 +17,6 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -126,36 +125,29 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	common.MustExist(snapshotDir)
 
-	db := mdbx.MustOpen(snapshotDir + "/db")
+	downloaderDB := mdbx.MustOpen(snapshotDir + "/db")
 	var t *downloader.Client
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		peerID, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
-		if err != nil {
-			return fmt.Errorf("get peer id: %w", err)
-		}
 
-		cfg, err := downloader.TorrentConfig(snapshotDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
-		if err != nil {
-			return fmt.Errorf("TorrentConfig: %w", err)
-		}
-		t, err = downloader.New(cfg)
-		if err != nil {
-			return err
-		}
-		if len(peerID) == 0 {
-			err = t.SavePeerID(tx)
-			if err != nil {
-				return fmt.Errorf("save peer id: %w", err)
-			}
-		}
-		log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
-		return nil
-	}); err != nil {
+	peerID, err := downloader.ReadPeerID(downloaderDB)
+	if err != nil {
+		return fmt.Errorf("get peer id: %w", err)
+	}
+	cfg, err := downloader.TorrentConfig(snapshotDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	if err != nil {
+		return fmt.Errorf("TorrentConfig: %w", err)
+	}
+	t, err = downloader.New(cfg)
+	if err != nil {
 		return err
 	}
-	defer t.Close()
+	if len(peerID) == 0 {
+		if err = downloader.SavePeerID(downloaderDB, t.PeerID()); err != nil {
+			return fmt.Errorf("save peer id: %w", err)
+		}
+	}
+	log.Info(fmt.Sprintf("Seeding: %t, my peerID: %x", cfg.Seed, t.Cli.PeerID()))
 
-	bittorrentServer, err := downloader.NewServer(db, t, snapshotDir)
+	bittorrentServer, err := downloader.NewServer(downloaderDB, t, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

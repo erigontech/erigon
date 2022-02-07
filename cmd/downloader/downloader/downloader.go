@@ -85,8 +85,24 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func (cli *Client) SavePeerID(db kv.Putter) error {
-	return db.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), cli.PeerID())
+func SavePeerID(db kv.RwDB, peerID []byte) error {
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID)
+	})
+}
+
+func ReadPeerID(db kv.RoDB) (peerID []byte, err error) {
+	if err = db.View(context.Background(), func(tx kv.Tx) error {
+		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
+		if err != nil {
+			return fmt.Errorf("get peer id: %w", err)
+		}
+		peerID = common2.Copy(peerIDFromDB)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return peerID, nil
 }
 
 func (cli *Client) Close() {
