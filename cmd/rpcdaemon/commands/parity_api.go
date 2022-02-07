@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -9,15 +10,16 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
-const latestTag = "latest"
+var latestTag = common.BytesToHash([]byte("latest"))
 
-var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be '%s'", latestTag)
+var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be '%s' ('latest')", latestTag)
 
 // ParityAPI the interface for the parity_ RPC commands
 type ParityAPI interface {
-	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, tag interface{}) ([]hexutil.Bytes, error)
+	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 }
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
@@ -33,8 +35,8 @@ func NewParityAPIImpl(db kv.RoDB) *ParityAPIImpl {
 }
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
-func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, tag interface{}) ([]hexutil.Bytes, error) {
-	if err := api.checkTag(tag); err != nil {
+func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
+	if err := api.checkBlockNumber(blockNumberOrTag); err != nil {
 		return nil, err
 	}
 
@@ -79,23 +81,10 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	return keys, nil
 }
 
-func (api *ParityAPIImpl) checkTag(tag interface{}) error {
-	if tag == nil {
+func (api *ParityAPIImpl) checkBlockNumber(blockNumber rpc.BlockNumberOrHash) error {
+	hash, isHash := blockNumber.Hash()
+	if !isHash || !bytes.Equal(hash.Bytes(), latestTag.Bytes()) {
 		return ErrWrongTag
-	} else {
-		switch t := tag.(type) {
-		case string:
-			switch t {
-			case latestTag:
-				break
-			default:
-				return ErrWrongTag
-			}
-		case int:
-			return ErrWrongTag
-		default:
-			return ErrWrongTag
-		}
 	}
 	return nil
 }

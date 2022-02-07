@@ -1,11 +1,11 @@
 package commands
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/spf13/cobra"
 )
 
@@ -33,10 +33,8 @@ var listStorageKeysCmd = &cobra.Command{
 		}
 		toAddress := common.HexToAddress(addr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
-		if blockNum != "latest" {
-			return fmt.Errorf("wrong block num, try 'latest'")
-		}
-		requests.ParityList(reqId, toAddress, quantity, offset, blockNum)
+		blockNumber := rpc.BlockNumberOrHashWithHash(common.BytesToHash([]byte(blockNum)), false)
+		requests.ParityList(reqId, toAddress, quantity, offset, blockNumber)
 		return nil
 	},
 }

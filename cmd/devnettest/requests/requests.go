@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 func parseResponse(resp interface{}) string {
@@ -65,7 +66,7 @@ func TxpoolContent(reqId int) {
 	fmt.Printf("Txpool content: %v\n", parseResponse(b))
 }
 
-func ParityList(reqId int, account common.Address, quantity int, offset []byte, blockNum interface{}) {
+func ParityList(reqId int, account common.Address, quantity int, offset []byte, blockNum rpc.BlockNumberOrHash) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.ParityListStorageKeysResult
 
