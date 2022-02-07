@@ -169,7 +169,7 @@ func HeadersPOS(
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber)
 
 	if forkChoiceInsteadOfNewPayload {
-		handleForkChoice(&forkChoiceMessage, s, u, tx, cfg, headerInserter)
+		handleForkChoice(&forkChoiceMessage, s, u, ctx, tx, cfg, headerInserter)
 	} else {
 		if err := handleNewPayload(&payloadMessage, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
@@ -189,6 +189,7 @@ func handleForkChoice(
 	forkChoiceMessage *privateapi.ForkChoiceMessage,
 	s *StageState,
 	u Unwinder,
+	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
@@ -199,22 +200,43 @@ func handleForkChoice(
 		return err
 	}
 
+	hadToSync := false
 	if header == nil {
+		hadToSync = true
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-		// TODO(yperbasis): do the sync and switch to the new chain
-	} else {
-		parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+
+		cfg.hd.SetHashToDownloadPoS(forkChoiceMessage.HeadBlockHash)
+		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
 		if err != nil {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 			return err
 		}
-
-		forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
-		if err != nil {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-			return err
+		if !success {
+			return nil
 		}
 
+		header, err = rawdb.ReadHeaderByHash(tx, forkChoiceMessage.HeadBlockHash)
+		if err != nil {
+			return err
+		}
+	}
+
+	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	if err != nil {
+		if !hadToSync {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		}
+		return err
+	}
+
+	forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
+	if err != nil {
+		if !hadToSync {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+		}
+		return err
+	}
+
+	if !hadToSync {
 		if header.Number.Uint64()-forkingPoint <= ShortPoSReorgThresholdBlocks {
 			// Short range re-org
 			cfg.hd.SetPendingPayloadStatus(forkChoiceMessage.HeadBlockHash)
@@ -222,16 +244,14 @@ func handleForkChoice(
 			// Long range re-org
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
-
-		u.UnwindTo(forkingPoint, common.Hash{})
-
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-
-		return fixCanonicalChain(s.LogPrefix(), logEvery, header.Number.Uint64(), forkChoiceMessage.HeadBlockHash, tx, cfg.blockReader)
 	}
 
-	return nil
+	u.UnwindTo(forkingPoint, common.Hash{})
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	return fixCanonicalChain(s.LogPrefix(), logEvery, header.Number.Uint64(), forkChoiceMessage.HeadBlockHash, tx, cfg.blockReader)
 }
 
 func handleNewPayload(
@@ -277,7 +297,9 @@ func handleNewPayload(
 			return err
 		}
 	} else {
-		success, err = downloadMissingPoSHeaders(s, ctx, tx, cfg, header, headerInserter)
+		cfg.hd.SetHeightToDownloadPoS(headerNumber - 1)
+		cfg.hd.SetHashToDownloadPoS(header.ParentHash)
+		success, err = downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
 		if err != nil {
 			return err
 		}
@@ -367,12 +389,12 @@ func verifyAndSavePoSHeader(
 	return
 }
 
+// Prerequisite: HashToDownloadPoS must be set on cfg.hd
 func downloadMissingPoSHeaders(
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
-	header *types.Header,
 	headerInserter *headerdownload.HeaderInserter,
 ) (success bool, err error) {
 	cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
@@ -383,16 +405,12 @@ func downloadMissingPoSHeaders(
 		return
 	}
 
-	headerNumber := header.Number.Uint64()
-
-	cfg.hd.SetHeightToDownloadPoS(headerNumber - 1)
-	cfg.hd.SetHashToDownloadPoS(header.ParentHash)
 	cfg.hd.SetFetching(true)
 
-	log.Info(fmt.Sprintf("[%s] Waiting for headers...", s.LogPrefix()), "from", headerNumber)
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()))
 
 	stopped := false
-	prevProgress := headerNumber
+	prevProgress := uint64(0)
 
 	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer headerCollector.Close()
@@ -428,10 +446,12 @@ func downloadMissingPoSHeaders(
 		case <-ctx.Done():
 			stopped = true
 		case <-logEvery.C:
-			diff := prevProgress - cfg.hd.Progress()
-			if cfg.hd.Progress() <= prevProgress {
-				log.Info("Wrote Block Headers backwards", "from", headerNumber,
-					"now", cfg.hd.Progress(), "blk/sec", float64(diff)/float64(logInterval/time.Second))
+			if prevProgress == 0 {
+				prevProgress = cfg.hd.Progress()
+			} else if cfg.hd.Progress() <= prevProgress {
+				diff := prevProgress - cfg.hd.Progress()
+				log.Info("Wrote Block Headers backwards", "now", cfg.hd.Progress(),
+					"blk/sec", float64(diff)/float64(logInterval/time.Second))
 				prevProgress = cfg.hd.Progress()
 			}
 		case <-timer.C:
