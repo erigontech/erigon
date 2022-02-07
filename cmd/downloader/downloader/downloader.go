@@ -46,13 +46,12 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
+func TorrentConfig(snapshotsDir string, seeding bool, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
 	torrentConfig := DefaultTorrentConfig()
 	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = seeding
 	torrentConfig.DataDir = snapshotsDir
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
-	torrentConfig.PeerID = peerID
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
 	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
@@ -68,23 +67,34 @@ func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity l
 	return torrentConfig, nil
 }
 
-func New(cfg *torrent.ClientConfig) (*Client, error) {
+func New(cfg *torrent.ClientConfig, downloaderDB kv.RwDB) (*Client, error) {
+	peerID, err := readPeerID(downloaderDB)
+	if err != nil {
+		return nil, fmt.Errorf("get peer id: %w", err)
+	}
+	cfg.PeerID = string(peerID)
 	torrentClient, err := torrent.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
+	if len(peerID) == 0 {
+		if err = savePeerID(downloaderDB, torrentClient.PeerID()); err != nil {
+			return nil, fmt.Errorf("save peer id: %w", err)
+		}
+	}
+
 	return &Client{
 		Client: torrentClient,
 	}, nil
 }
 
-func SavePeerID(db kv.RwDB, peerID []byte) error {
+func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID)
+		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID[:])
 	})
 }
 
-func ReadPeerID(db kv.RoDB) (peerID []byte, err error) {
+func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 	if err = db.View(context.Background(), func(tx kv.Tx) error {
 		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 		if err != nil {

@@ -106,6 +106,7 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	snapshotDir := path.Join(datadir, "snapshots")
+	common.MustExist(snapshotDir)
 	torrentLogLevel, ok := downloader.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
@@ -120,33 +121,21 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	}
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
-	common.MustExist(snapshotDir)
 
 	downloaderDB := mdbx.MustOpen(snapshotDir + "/db")
 	var dl *downloader.Client
 
-	peerID, err := downloader.ReadPeerID(downloaderDB)
-	if err != nil {
-		return fmt.Errorf("get peer id: %w", err)
-	}
-	cfg, err := downloader.TorrentConfig(snapshotDir, seeding, string(peerID), torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, err := downloader.TorrentConfig(snapshotDir, seeding, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		return fmt.Errorf("TorrentConfig: %w", err)
 	}
-	dl, err = downloader.New(cfg)
+	dl, err = downloader.New(cfg, downloaderDB)
 	if err != nil {
 		return err
 	}
-	if len(peerID) == 0 {
-		if err = downloader.SavePeerID(downloaderDB, dl.PeerID()); err != nil {
-			return fmt.Errorf("save peer id: %w", err)
-		}
-	}
-	log.Info(fmt.Sprintf("Seeding: %dl, my peerID: %x", cfg.Seed, dl.Client.PeerID()))
-
-	err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, dl.Client)
-	if err != nil {
-		return fmt.Errorf("start: %w", err)
+	log.Info("[torrent] Start", "seeding", cfg.Seed, "my peerID", dl.Client.PeerID())
+	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, dl.Client); err != nil {
+		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
 
 	go downloader.MainLoop(ctx, dl.Client)
