@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
@@ -18,6 +19,7 @@ func init() {
 	listStorageKeysCmd.MarkFlagRequired("addr")
 	listStorageKeysCmd.Flags().StringVar(&offsetAddr, "offset", "", "Offset storage key from which the batch should start")
 	listStorageKeysCmd.Flags().IntVar(&quantity, "quantity", 10, "Integer number of addresses to display in a batch")
+	listStorageKeysCmd.Flags().StringVar(&blockNum, "block", "latest", "Integer block number, or the string 'latest', 'earliest' or 'pending'; now only 'latest' is available")
 
 	rootCmd.AddCommand(listStorageKeysCmd)
 }
@@ -25,12 +27,16 @@ func init() {
 var listStorageKeysCmd = &cobra.Command{
 	Use:   "parity-list",
 	Short: "Returns all storage keys of the given address",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if clearDev {
 			defer clearDevDB()
 		}
 		toAddress := common.HexToAddress(addr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
-		requests.ParityList(reqId, toAddress, quantity, offset)
+		if blockNum != "latest" {
+			return fmt.Errorf("wrong block num, try 'latest'")
+		}
+		requests.ParityList(reqId, toAddress, quantity, offset, blockNum)
+		return nil
 	},
 }

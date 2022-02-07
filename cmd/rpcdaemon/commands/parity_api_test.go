@@ -23,7 +23,7 @@ func TestParityAPIImpl_ListStorageKeys_NoOffset(t *testing.T) {
 		"120e23dcb7e4437386073613853db77b10011a2404eefc716b97c7767e37f8eb",
 	}
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
-	result, err := api.ListStorageKeys(context.Background(), addr, 5, nil)
+	result, err := api.ListStorageKeys(context.Background(), addr, 5, nil, latestTag)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_ExistingPrefix(t *testing.T) {
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("29")
 	b := hexutil.Bytes(offset)
-	result, err := api.ListStorageKeys(context.Background(), addr, 5, &b)
+	result, err := api.ListStorageKeys(context.Background(), addr, 5, &b, latestTag)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_NonExistingPrefix(t *testing.T
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("30")
 	b := hexutil.Bytes(offset)
-	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b)
+	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestTag)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestParityAPIImpl_ListStorageKeys_WithOffset_EmptyResponse(t *testing.T) {
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
 	offset := common.Hex2Bytes("ff")
 	b := hexutil.Bytes(offset)
-	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b)
+	result, err := api.ListStorageKeys(context.Background(), addr, 2, &b, latestTag)
 	if err != nil {
 		t.Errorf("calling ListStorageKeys: %v", err)
 	}
@@ -97,6 +97,6 @@ func TestParityAPIImpl_ListStorageKeys_AccNotFound(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	api := NewParityAPIImpl(db)
 	addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcaef")
-	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil)
+	_, err := api.ListStorageKeys(context.Background(), addr, 2, nil, latestTag)
 	assert.Error(err, fmt.Errorf("acc not found"))
 }

@@ -11,9 +11,13 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
+const latestTag = "latest"
+
+var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be '%s'", latestTag)
+
 // ParityAPI the interface for the parity_ RPC commands
 type ParityAPI interface {
-	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes) ([]hexutil.Bytes, error)
+	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, tag interface{}) ([]hexutil.Bytes, error)
 }
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
@@ -29,7 +33,11 @@ func NewParityAPIImpl(db kv.RoDB) *ParityAPIImpl {
 }
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
-func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes) ([]hexutil.Bytes, error) {
+func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, tag interface{}) ([]hexutil.Bytes, error) {
+	if err := api.checkTag(tag); err != nil {
+		return nil, err
+	}
+
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
@@ -69,4 +77,25 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, err
 	}
 	return keys, nil
+}
+
+func (api *ParityAPIImpl) checkTag(tag interface{}) error {
+	if tag == nil {
+		return ErrWrongTag
+	} else {
+		switch t := tag.(type) {
+		case string:
+			switch t {
+			case latestTag:
+				break
+			default:
+				return ErrWrongTag
+			}
+		case int:
+			return ErrWrongTag
+		default:
+			return ErrWrongTag
+		}
+	}
+	return nil
 }
