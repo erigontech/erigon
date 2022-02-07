@@ -2,7 +2,10 @@
 package node
 
 import (
+	"path"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -108,7 +111,10 @@ func New(
 
 // RegisterEthService adds an Ethereum client to the stack.
 func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) (*eth.Ethereum, error) {
-	return eth.New(stack, cfg, logger)
+	txpoolCfg := core.DefaultTxPool2Config(cfg.TxPool)
+	txpoolCfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
+
+	return eth.New(stack, cfg, txpoolCfg, logger)
 }
 
 func NewNodeConfig() *node.Config {

@@ -142,7 +142,7 @@ type Ethereum struct {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, logger log.Logger) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -302,29 +302,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	var blockReader interfaces.FullBlockReader
 	if config.Snapshot.Enabled {
 		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
-		//TODO: incremental snapshot sync
-		if err := chainKv.Update(ctx, func(tx kv.RwTx) error {
-			const SyncedWithSnapshot = "synced_with_snapshot"
-			v, err := tx.GetOne(kv.DatabaseInfo, []byte(SyncedWithSnapshot))
-			if err != nil {
-				return err
-			}
-			if v != nil {
-				valueInDB := binary.BigEndian.Uint64(v)
-				if valueInDB != snConfig.ExpectBlocks {
-					log.Warn(fmt.Sprintf("'incremental snapshots feature' not implemented yet. New snapshots available up to block %d, but this node was synced to snapshot %d and will keep other blocks in db. (it's safe, re-sync may reduce db size)", valueInDB, snConfig.ExpectBlocks))
-					snConfig.ExpectBlocks = valueInDB
-				}
-				return nil
-			}
-
-			num := make([]byte, 8)
-			binary.BigEndian.PutUint64(num, snConfig.ExpectBlocks)
-			if err := tx.Put(kv.DatabaseInfo, []byte(SyncedWithSnapshot), num); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
+		snConfig.ExpectBlocks, err = RestoreExpectedExternalSnapshot(chainKv, snConfig)
+		if err != nil {
 			return nil, err
 		}
 
@@ -349,18 +328,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
 	if !config.TxPool.Disable {
-		cfg := txpool2.DefaultConfig
-		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
-		cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
-		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
-		cfg.PriceBump = config.TxPool.PriceBump
-		cfg.MinFeeCap = config.TxPool.PriceLimit
-		cfg.AccountSlots = config.TxPool.AccountSlots
-		cfg.LogEvery = 1 * time.Minute
-		cfg.CommitEvery = 5 * time.Minute
-		cfg.TracedSenders = config.TxPool.TracedSenders
-
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
 
@@ -368,7 +335,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+			ctx, txpoolCfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
 		)
 		if err != nil {
 			return nil, err
@@ -537,6 +504,49 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)
 	return backend, nil
+}
+
+func RestoreExpectedExternalSnapshot(db kv.RwDB, snConfig *snapshothashes.Config) (uint64, error) {
+	const SyncedWithSnapshot = "synced_with_snapshot"
+	var snapshotToBlockInDB *uint64
+	// Check if we have an already initialized chain and fall back to
+	// that if so. Otherwise we need to generate a new genesis spec.
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		v, err := tx.GetOne(kv.DatabaseInfo, []byte(SyncedWithSnapshot))
+		if err != nil {
+			return err
+		}
+		if v != nil {
+			valueInDB := binary.BigEndian.Uint64(v)
+			snapshotToBlockInDB = &valueInDB
+			return nil
+		}
+
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	if snapshotToBlockInDB != nil {
+		if *snapshotToBlockInDB != snConfig.ExpectBlocks {
+			return *snapshotToBlockInDB, nil //
+			//log.Warn(fmt.Sprintf("'incremental snapshots feature' not implemented yet. New snapshots available up to block %d, but this node was synced to snapshot %d and will keep other blocks in db. (it's safe, re-sync may reduce db size)", snapshotToBlockInDB, snConfig.ExpectBlocks))
+			//snConfig.ExpectBlocks = *snapshotToBlockInDB
+		}
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+		num := make([]byte, 8)
+		binary.BigEndian.PutUint64(num, snConfig.ExpectBlocks)
+		if err := tx.Put(kv.DatabaseInfo, []byte(SyncedWithSnapshot), num); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return snConfig.ExpectBlocks, nil
 }
 
 func (s *Ethereum) APIs() []rpc.API {
