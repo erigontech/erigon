@@ -90,4 +90,6 @@ var DefaultFlags = []cli.Flag{
 	utils.SentryAddrFlag,
 	utils.DownloaderAddrFlag,
 	HealthCheckFlag,
+	utils.HeimdallURLFlag,
+	utils.WithoutHeimdallFlag,
 }

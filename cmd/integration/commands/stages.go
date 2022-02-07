@@ -284,6 +284,7 @@ var cmdSetPrune = &cobra.Command{
 func init() {
 	withDatadir(cmdPrintStages)
 	withChain(cmdPrintStages)
+	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
 
 	withIntegrityChecks(cmdStageSenders)
@@ -292,18 +293,21 @@ func init() {
 	withUnwind(cmdStageSenders)
 	withDatadir(cmdStageSenders)
 	withChain(cmdStageSenders)
+	withHeimdall(cmdStageSenders)
 
 	rootCmd.AddCommand(cmdStageSenders)
 
 	withDatadir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
 	withChain(cmdStageHeaders)
+	withHeimdall(cmdStageHeaders)
 
 	rootCmd.AddCommand(cmdStageHeaders)
 
 	withDatadir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
+	withHeimdall(cmdStageBodies)
 
 	rootCmd.AddCommand(cmdStageBodies)
 
@@ -315,6 +319,7 @@ func init() {
 	withBatchSize(cmdStageExec)
 	withTxTrace(cmdStageExec)
 	withChain(cmdStageExec)
+	withHeimdall(cmdStageExec)
 
 	rootCmd.AddCommand(cmdStageExec)
 
@@ -325,6 +330,7 @@ func init() {
 	withPruneTo(cmdStageHashState)
 	withBatchSize(cmdStageHashState)
 	withChain(cmdStageHashState)
+	withHeimdall(cmdStageHashState)
 
 	rootCmd.AddCommand(cmdStageHashState)
 
@@ -335,6 +341,7 @@ func init() {
 	withPruneTo(cmdStageTrie)
 	withIntegrityChecks(cmdStageTrie)
 	withChain(cmdStageTrie)
+	withHeimdall(cmdStageTrie)
 
 	rootCmd.AddCommand(cmdStageTrie)
 
@@ -344,6 +351,7 @@ func init() {
 	withUnwind(cmdStageHistory)
 	withPruneTo(cmdStageHistory)
 	withChain(cmdStageHistory)
+	withHeimdall(cmdStageHistory)
 
 	rootCmd.AddCommand(cmdStageHistory)
 
@@ -353,6 +361,7 @@ func init() {
 	withUnwind(cmdLogIndex)
 	withPruneTo(cmdLogIndex)
 	withChain(cmdLogIndex)
+	withHeimdall(cmdLogIndex)
 
 	rootCmd.AddCommand(cmdLogIndex)
 
@@ -362,6 +371,7 @@ func init() {
 	withUnwind(cmdCallTraces)
 	withPruneTo(cmdCallTraces)
 	withChain(cmdCallTraces)
+	withHeimdall(cmdCallTraces)
 
 	rootCmd.AddCommand(cmdCallTraces)
 
@@ -371,6 +381,7 @@ func init() {
 	withDatadir(cmdStageTxLookup)
 	withPruneTo(cmdStageTxLookup)
 	withChain(cmdStageTxLookup)
+	withHeimdall(cmdStageTxLookup)
 
 	rootCmd.AddCommand(cmdStageTxLookup)
 
@@ -380,10 +391,12 @@ func init() {
 	withDatadir(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
 	withChain(cmdRemoveMigration)
+	withHeimdall(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withDatadir(cmdRunMigrations)
 	withChain(cmdRunMigrations)
+	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 
 	withDatadir(cmdSetPrune)
@@ -937,8 +950,8 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
 	}
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-
-	cfg := stagedsync.StageTxLookupCfg(db, pm, tmpdir, allSnapshots(chainConfig))
+	isBor := chainConfig.Bor != nil
+	cfg := stagedsync.StageTxLookupCfg(db, pm, tmpdir, allSnapshots(chainConfig), isBor)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.TxLookup, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindTxLookup(u, s, tx, cfg, ctx)
@@ -1026,6 +1039,12 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
+	case networkname.MumbaiChainName:
+		chainConfig = params.MumbaiChainConfig
+		genesis = core.DefaultMumbaiGenesisBlock()
+	case networkname.BorMainnetChainName:
+		chainConfig = params.BorMainnetChainConfig
+		genesis = core.DefaultBorMainnetGenesisBlock()
 	}
 	return genesis, chainConfig
 }
@@ -1083,12 +1102,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
 		c.DBPath = path.Join(datadir, "clique/db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Parlia != nil {
 		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}
