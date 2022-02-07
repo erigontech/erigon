@@ -768,6 +768,23 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	if err := f.Compress(); err != nil {
 		return err
 	}
+
+	d, err := compress.NewDecompressor(segmentFilePath)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	var buf []byte
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf)
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+
 	return nil
 }
 
