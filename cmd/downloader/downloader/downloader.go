@@ -191,7 +191,6 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 	torrents := client.Torrents()
 	for _, t := range torrents {
 		stats := t.Stats()
-		fmt.Printf("a: %+v\n", stats)
 		/*
 			var completedPieces, partialPieces int
 			psrs := t.PieceStateRuns()
