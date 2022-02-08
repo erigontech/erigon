@@ -42,6 +42,16 @@ type EthTransaction struct {
 	Value    hexutil.Big     `json:"value"`
 }
 
+type EthSendRawTransaction struct {
+	CommonResponse
+	TxnHash common.Hash `json:"result"`
+}
+
+type EthTxPool struct {
+	CommonResponse
+	Result interface{} `json:"result"`
+}
+
 type EthBlockByNumberResult struct {
 	Difficulty   hexutil.Big      `json:"difficulty"`
 	Miner        common.Address   `json:"miner"`
@@ -239,8 +249,14 @@ type AccountResult struct {
 	StorageHash  common.Hash     `json:"storageHash"`
 	StorageProof []StorageResult `json:"storageProof"`
 }
+
 type StorageResult struct {
 	Key   string       `json:"key"`
 	Value *hexutil.Big `json:"value"`
 	Proof []string     `json:"proof"`
+}
+
+type ParityListStorageKeysResult struct {
+	CommonResponse
+	Result []hexutil.Bytes `json:"result"`
 }
