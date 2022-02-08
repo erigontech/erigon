@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -28,6 +29,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon/consensus/bor"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -185,6 +188,7 @@ type Config struct {
 	Clique params.ConsensusSnapshotConfig
 	Aura   params.AuRaConfig
 	Parlia params.ParliaConfig
+	Bor    params.BorConfig
 
 	// Transaction pool options
 	TxPool core.TxPoolConfig
@@ -207,9 +211,15 @@ type Config struct {
 
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
+
+	// URL to connect to Heimdall node
+	HeimdallURL string
+
+	// No heimdall service
+	WithoutHeimdall bool
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, dataDir string) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -249,6 +259,11 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 	case *params.ParliaConfig:
 		if chainConfig.Parlia != nil {
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
+		}
+	case *params.BorConfig:
+		if chainConfig.Bor != nil {
+			borDbPath := path.Join(dataDir, "bor") // bor consensus path: datadir/bor
+			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
 		}
 	}
 

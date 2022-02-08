@@ -29,6 +29,7 @@ const (
 	MimetypeTypedData         = "data/typed"
 	MimetypeClique            = "application/x-clique-header"
 	MimetypeParlia            = "application/x-parlia-header"
+	MimetypeBor               = "application/x-bor-header"
 	MimetypeTextPlain         = "text/plain"
 )
 

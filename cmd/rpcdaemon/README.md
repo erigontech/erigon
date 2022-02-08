@@ -247,6 +247,11 @@ The following table shows the current implementation status of Erigon's RPC daem
 | txpool_content                             | Yes     | `remote`                                   |
 | txpool_status                              | Yes     | `remote`                                   |
 |                                            |         |                                            |
+| eth_getCompilers                           | No      | deprecated                                 |
+| eth_compileLLL                             | No      | deprecated                                 |
+| eth_compileSolidity                        | No      | deprecated                                 |
+| eth_compileSerpent                         | No      | deprecated                                 |
+|                                            |         |                                            |
 | db_putString                               | No      | deprecated                                 |
 | db_getString                               | No      | deprecated                                 |
 | db_putHex                                  | No      | deprecated                                 |
@@ -259,6 +264,15 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_issuance                            | Yes     | Erigon only                                |
 |                                            |         |                                            |
 | starknet_call                              | Yes     | Starknet only                              |
+|                                            |         |                                      |
+| bor_getSnapshot                            | Yes     | Bor only                             |
+| bor_getAuthor                              | Yes     | Bor only                             |
+| bor_getSnapshotAtHash                      | Yes     | Bor only                             |
+| bor_getSigners                             | Yes     | Bor only                             |
+| bor_getSignersAtHash                       | Yes     | Bor only                             |
+| bor_getCurrentProposer                     | Yes     | Bor only                             |
+| bor_getCurrentValidators                   | Yes     | Bor only                             |
+| bor_getRootHash                            | Yes     | Bor only                             |
 
 This table is constantly updated. Please visit again.
 

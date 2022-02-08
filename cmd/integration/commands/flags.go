@@ -21,6 +21,7 @@ var (
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
+	HeimdallURL                    string
 	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
@@ -126,4 +127,8 @@ func withTxTrace(cmd *cobra.Command) {
 
 func withChain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
+}
+
+func withHeimdall(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
 }

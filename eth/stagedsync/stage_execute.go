@@ -115,11 +115,12 @@ func executeBlock(
 	vmConfig.Tracer = callTracer
 
 	var receipts types.Receipts
+	var stateSyncReceipt *types.ReceiptForStorage
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	if isPoSa {
 		receipts, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	} else {
-		receipts, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+		receipts, stateSyncReceipt, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
 	}
 	if err != nil {
 		return err
@@ -129,6 +130,13 @@ func executeBlock(
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
+
+		if stateSyncReceipt != nil {
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	if cfg.changeSetHook != nil {
