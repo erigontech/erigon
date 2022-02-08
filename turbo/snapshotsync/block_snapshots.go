@@ -320,22 +320,6 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	wg := sync.WaitGroup{}
-	for _, sn := range s.blocks {
-		wg.Add(1)
-		go func(sn *BlocksSnapshot) {
-			defer wg.Done()
-			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-			assertSegment(f)
-			f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-			assertSegment(f)
-			f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
-			assertSegment(f)
-			fmt.Printf("done:%s\n", f)
-		}(sn)
-	}
-	wg.Wait()
-	panic("success")
 
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
@@ -674,27 +658,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	_, fileName := filepath.Split(segmentFile)
 	log.Info("[Transactions] Compression", "ratio", f.Ratio.String(), "file", fileName)
 
-	assertSegment(segmentFile)
-
 	return firstTxID, nil
-}
-
-func assertSegment(segmentFile string) {
-	d, err := compress.NewDecompressor(segmentFile)
-	if err != nil {
-		panic(err)
-	}
-	defer d.Close()
-	var buf []byte
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
 }
 
 func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
@@ -754,8 +718,6 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		return err
 	}
 
-	assertSegment(segmentFilePath)
-
 	return nil
 }
 
@@ -809,8 +771,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	if err := f.Compress(); err != nil {
 		return err
 	}
-
-	assertSegment(segmentFilePath)
 
 	return nil
 }
@@ -1093,4 +1053,41 @@ func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) err
 		}
 	}
 	return nil
+}
+
+func assertAllSegments(blocks []*BlocksSnapshot, root string) {
+	wg := sync.WaitGroup{}
+	for _, sn := range blocks {
+		wg.Add(1)
+		go func(sn *BlocksSnapshot) {
+			defer wg.Done()
+			f := path.Join(root, SegmentFileName(sn.From, sn.To, Headers))
+			assertSegment(f)
+			f = path.Join(root, SegmentFileName(sn.From, sn.To, Bodies))
+			assertSegment(f)
+			f = path.Join(root, SegmentFileName(sn.From, sn.To, Transactions))
+			assertSegment(f)
+			fmt.Printf("done:%s\n", f)
+		}(sn)
+	}
+	wg.Wait()
+	panic("success")
+}
+
+func assertSegment(segmentFile string) {
+	d, err := compress.NewDecompressor(segmentFile)
+	if err != nil {
+		panic(err)
+	}
+	defer d.Close()
+	var buf []byte
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 }
