@@ -1055,6 +1055,7 @@ func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) err
 	return nil
 }
 
+//nolint
 func assertAllSegments(blocks []*BlocksSnapshot, root string) {
 	wg := sync.WaitGroup{}
 	for _, sn := range blocks {
