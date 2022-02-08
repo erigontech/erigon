@@ -1055,7 +1055,7 @@ func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) err
 	return nil
 }
 
-//nolint:unused
+//nolint
 func assertAllSegments(blocks []*BlocksSnapshot, root string) {
 	wg := sync.WaitGroup{}
 	for _, sn := range blocks {
@@ -1075,7 +1075,7 @@ func assertAllSegments(blocks []*BlocksSnapshot, root string) {
 	panic("success")
 }
 
-//nolint:unused
+//nolint
 func assertSegment(segmentFile string) {
 	d, err := compress.NewDecompressor(segmentFile)
 	if err != nil {
