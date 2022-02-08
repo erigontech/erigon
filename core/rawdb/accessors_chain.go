@@ -270,6 +270,18 @@ func ReadStorageBodyRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVa
 	return bodyRlp
 }
 
+func ReadStorageBody(db kv.Getter, hash common.Hash, number uint64) (types.BodyForStorage, error) {
+	bodyRlp, err := db.GetOne(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
+	if err != nil {
+		log.Error("ReadBodyRLP failed", "err", err)
+	}
+	bodyForStorage := new(types.BodyForStorage)
+	if err := rlp.DecodeBytes(bodyRlp, bodyForStorage); err != nil {
+		return types.BodyForStorage{}, err
+	}
+	return *bodyForStorage, nil
+}
+
 func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil

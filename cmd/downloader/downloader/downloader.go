@@ -20,39 +20,7 @@ import (
 const ASSERT = false
 
 type Client struct {
-	Cli *torrent.Client
-}
-
-func TorrentConfig(snapshotsDir string, seeding bool, peerID string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
-	torrentConfig := DefaultTorrentConfig()
-	torrentConfig.ListenPort = torrentPort
-	torrentConfig.Seed = seeding
-	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
-	torrentConfig.PeerID = peerID
-
-	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
-
-	// debug
-	if lg.Debug == verbosity {
-		torrentConfig.Debug = true
-	}
-	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
-
-	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
-	return torrentConfig, nil
-}
-
-func New(cfg *torrent.ClientConfig) (*Client, error) {
-	torrentClient, err := torrent.NewClient(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("fail to start torrent client: %w", err)
-	}
-	return &Client{
-		Cli: torrentClient,
-	}, nil
+	Client *torrent.Client
 }
 
 func DefaultTorrentConfig() *torrent.ClientConfig {
@@ -78,19 +46,77 @@ func DefaultTorrentConfig() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func (cli *Client) SavePeerID(db kv.Putter) error {
-	return db.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), cli.PeerID())
+func TorrentConfig(snapshotsDir string, seeding bool, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
+	torrentConfig := DefaultTorrentConfig()
+	torrentConfig.ListenPort = torrentPort
+	torrentConfig.Seed = seeding
+	torrentConfig.DataDir = snapshotsDir
+	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+
+	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
+	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
+
+	// debug
+	if lg.Debug == verbosity {
+		torrentConfig.Debug = true
+	}
+	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
+
+	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
+	return torrentConfig, nil
+}
+
+func New(cfg *torrent.ClientConfig, downloaderDB kv.RwDB) (*Client, error) {
+	peerID, err := readPeerID(downloaderDB)
+	if err != nil {
+		return nil, fmt.Errorf("get peer id: %w", err)
+	}
+	cfg.PeerID = string(peerID)
+	torrentClient, err := torrent.NewClient(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("fail to start torrent client: %w", err)
+	}
+	if len(peerID) == 0 {
+		if err = savePeerID(downloaderDB, torrentClient.PeerID()); err != nil {
+			return nil, fmt.Errorf("save peer id: %w", err)
+		}
+	}
+
+	return &Client{
+		Client: torrentClient,
+	}, nil
+}
+
+func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID[:])
+	})
+}
+
+func readPeerID(db kv.RoDB) (peerID []byte, err error) {
+	if err = db.View(context.Background(), func(tx kv.Tx) error {
+		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
+		if err != nil {
+			return fmt.Errorf("get peer id: %w", err)
+		}
+		peerID = common2.Copy(peerIDFromDB)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return peerID, nil
 }
 
 func (cli *Client) Close() {
-	for _, tr := range cli.Cli.Torrents() {
+	for _, tr := range cli.Client.Torrents() {
 		tr.Drop()
 	}
-	cli.Cli.Close()
+	cli.Client.Close()
 }
 
 func (cli *Client) PeerID() []byte {
-	peerID := cli.Cli.PeerID()
+	peerID := cli.Client.PeerID()
 	return peerID[:]
 }
 
@@ -99,7 +125,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
 	var m runtime.MemStats
-	var stats aggStats
+	var stats AggStats
 
 	for {
 		select {
@@ -125,7 +151,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			runtime.ReadMemStats(&m)
-			stats = calcStats(stats, interval, torrentClient)
+			stats = CalcStats(stats, interval, torrentClient)
 			if allComplete {
 				log.Info("[torrent] Seeding",
 					"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
@@ -137,7 +163,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			}
 
 			log.Info("[torrent] Downloading",
-				"progress", fmt.Sprintf("%.2f%%", stats.progress),
+				"Progress", fmt.Sprintf("%.2f%%", stats.Progress),
 				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 				"peers", stats.peersCount,
@@ -146,8 +172,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 			if stats.peersCount == 0 {
 				ips := torrentClient.BadPeerIPs()
 				if len(ips) > 0 {
-					log.Info("[torrent] Stats",
-						"banned", ips)
+					log.Info("[torrent] Stats", "banned", ips)
 				}
 
 			}
@@ -156,7 +181,7 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 }
 
 func (cli *Client) StopSeeding(hash metainfo.Hash) error {
-	t, ok := cli.Cli.Torrent(hash)
+	t, ok := cli.Client.Torrent(hash)
 	if !ok {
 		return nil
 	}
@@ -166,26 +191,25 @@ func (cli *Client) StopSeeding(hash metainfo.Hash) error {
 	return nil
 }
 
-type aggStats struct {
+type AggStats struct {
 	readBytesPerSec  int64
 	writeBytesPerSec int64
 	peersCount       int64
 
-	progress      float32
+	Progress      float32
 	torrentsCount int
 
 	bytesRead    int64
 	bytesWritten int64
 }
 
-func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Client) (result aggStats) {
+func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Client) (result AggStats) {
 	var aggBytesCompleted, aggLen int64
 	//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
 	peers := map[torrent.PeerID]*torrent.PeerConn{}
 	torrents := client.Torrents()
 	for _, t := range torrents {
 		stats := t.Stats()
-
 		/*
 			var completedPieces, partialPieces int
 			psrs := t.PieceStateRuns()
@@ -213,7 +237,7 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 	result.readBytesPerSec += (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
 	result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
 
-	result.progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
+	result.Progress = float32(float64(100) * (float64(aggBytesCompleted) / float64(aggLen)))
 
 	result.peersCount = int64(len(peers))
 	result.torrentsCount = len(torrents)
@@ -221,7 +245,7 @@ func calcStats(prevStats aggStats, interval time.Duration, client *torrent.Clien
 }
 
 // AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
-// added first time - pieces verification process will start (disk IO heavy) - progress
+// added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
 func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
@@ -263,11 +287,12 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 	for _, t := range torrentClient.Torrents() {
 		select {
 		case <-ctx.Done():
-			t.Drop()
 			return ctx.Err()
 		case <-t.GotInfo():
 			mi := t.Metainfo()
-			_ = CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi)
+			if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -305,4 +330,57 @@ func waitForChecksumVerify(ctx context.Context, torrentClient *torrent.Client) {
 		}
 	}()
 	torrentClient.WaitAll() // wait for checksum verify
+}
+
+func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+	files, err := AllTorrentPaths(snapshotDir)
+	if err != nil {
+		return err
+	}
+	totalPieces := 0
+	for _, f := range files {
+		metaInfo, err := metainfo.LoadFromFile(f)
+		if err != nil {
+			return err
+		}
+		info, err := metaInfo.UnmarshalInfo()
+		if err != nil {
+			return err
+		}
+		totalPieces += info.NumPieces()
+	}
+
+	j := 0
+	for _, f := range files {
+		metaInfo, err := metainfo.LoadFromFile(f)
+		if err != nil {
+			return err
+		}
+		info, err := metaInfo.UnmarshalInfo()
+		if err != nil {
+			return err
+		}
+		err = verifyTorrent(&info, snapshotDir, func(i int, good bool) error {
+			j++
+			if !good {
+				log.Error("[torrent] Verify hash mismatch", "at piece", i, "file", f)
+				return fmt.Errorf("invalid file")
+			}
+			select {
+			case <-logEvery.C:
+				log.Info("[torrent] Verify", "Progress", fmt.Sprintf("%.2f%%", 100*float64(j)/float64(totalPieces)))
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	log.Info("[torrent] Verify succeed")
+	return nil
 }

@@ -1,3 +1,8 @@
+# Most of Erigon's parts - can run inside and outside of Erigon (as separated processes).
+# For example: p2p sentry can work inside Erigon - or outside (even on another server), txpool also, JSON RPC also
+#
+# This file is just an example: how to run most of Erigon's services as separated processes.
+
 version: '2.2'
 
 services:
@@ -50,7 +55,7 @@ services:
       - "8550:8550"
     restart: unless-stopped
 
-  downloader: # Service to download/seed historical data
+  downloader: # Service to download/seed historical data (need only if you use --experimental.snapshot)
     image: thorax/erigon:${TAG:-latest}
     command: downloader ${DOWNLOADER_FLAGS-} --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)

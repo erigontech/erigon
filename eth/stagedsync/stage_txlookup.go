@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -23,6 +24,7 @@ type TxLookupCfg struct {
 	prune     prune.Mode
 	tmpdir    string
 	snapshots *snapshotsync.AllSnapshots
+	isBor     bool
 }
 
 func StageTxLookupCfg(
@@ -30,12 +32,14 @@ func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
 	snapshots *snapshotsync.AllSnapshots,
+	isBor bool,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
 		prune:     prune,
 		tmpdir:    tmpdir,
 		snapshots: snapshots,
+		isBor:     isBor,
 	}
 }
 
@@ -99,6 +103,14 @@ func TxLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, qu
 				return err
 			}
 		}
+
+		if cfg.isBor {
+			borPrefix := []byte("matic-bor-receipt-")
+			if err := next(k, crypto.Keccak256(append(borPrefix, append(k, blockHash[:]...)...)), bigNum.SetUint64(blocknum).Bytes()); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
@@ -157,6 +169,13 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 				return err
 			}
 		}
+
+		if cfg.isBor {
+			borPrefix := []byte("matic-bor-receipt-")
+			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
+				return err
+			}
+		}
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
@@ -188,7 +207,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	// Forward stage doesn't write anything before PruneTo point
 	// TODO: maybe need do binary search of values in db in this case
 	if s.PruneProgress != 0 {
-		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx); err != nil {
+		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx, cfg); err != nil {
 			return err
 		}
 	}
@@ -204,7 +223,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	return nil
 }
 
-func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context) error {
+func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context, cfg TxLookupCfg) error {
 	reader := bytes.NewReader(nil)
 	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
@@ -222,6 +241,13 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 				return err
 			}
 		}
+		if cfg.isBor {
+			borPrefix := []byte("matic-bor-receipt-")
+			if err := next(k, crypto.Keccak256(append(borPrefix, k...)), nil); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
