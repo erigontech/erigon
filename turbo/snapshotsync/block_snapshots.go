@@ -334,6 +334,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			fmt.Printf("done:%s\n", f)
 		}(sn)
 	}
+	wg.Wait()
 	panic("success")
 
 	for _, sn := range s.blocks {
