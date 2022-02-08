@@ -18,6 +18,10 @@ var Mainnet = fromToml(mainnet)
 var goerli []byte
 var Goerli = fromToml(goerli)
 
+//go:embed erigon-snapshots/bsc.toml
+var bsc []byte
+var Bsc = fromToml(bsc)
+
 type Preverified map[string]string
 
 func fromToml(in []byte) (out Preverified) {
@@ -30,6 +34,7 @@ func fromToml(in []byte) (out Preverified) {
 var (
 	MainnetChainSnapshotConfig = newConfig(Mainnet)
 	GoerliChainSnapshotConfig  = newConfig(Goerli)
+	BscChainSnapshotConfig     = newConfig(Bsc)
 )
 
 func newConfig(preverified Preverified) *Config {
@@ -80,7 +85,9 @@ func KnownConfig(networkName string) *Config {
 		return MainnetChainSnapshotConfig
 	case networkname.GoerliChainName:
 		return GoerliChainSnapshotConfig
+	case networkname.BSCChainName:
+		return BscChainSnapshotConfig
 	default:
-		return nil
+		return newConfig(Preverified{})
 	}
 }

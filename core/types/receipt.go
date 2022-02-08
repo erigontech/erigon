@@ -432,10 +432,10 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
-		return errors.New("transaction and receipt count mismatch")
+		return fmt.Errorf("transaction and receipt count mismatch, tx count = %d, receipts count = %d", len(txs), len(r))
 	}
 	if len(senders) != len(txs) {
-		return errors.New("transaction and senders count mismatch")
+		return fmt.Errorf("transaction and senders count mismatch, tx count = %d, receipts count = %d", len(txs), len(r))
 	}
 	for i := 0; i < len(r); i++ {
 		// The transaction type and hash can be retrieved from the transaction itself

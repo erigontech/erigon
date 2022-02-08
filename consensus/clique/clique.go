@@ -240,6 +240,11 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.ConsensusSnapshotConfig
 	return c
 }
 
+// Type returns underlying consensus engine
+func (c *Clique) Type() params.ConsensusType {
+	return params.CliqueConsensus
+}
+
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *Clique) Author(header *types.Header) (common.Address, error) {

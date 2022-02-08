@@ -550,7 +550,7 @@ var (
 	}
 	SnapshotRetireFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapshotRetire,
-		Usage: "Delete(!) old blocks from DB, by move them to snapshots",
+		Usage: "Delete(!) old blocks from DB, by moving them to snapshots",
 	}
 	DbPageSizeFlag = cli.Uint64Flag{
 		Name:  "db.pagesize",
@@ -561,6 +561,18 @@ var (
 	HealthCheckFlag = cli.BoolFlag{
 		Name:  "healthcheck",
 		Usage: "Enabling grpc health check",
+	}
+
+	HeimdallURLFlag = cli.StringFlag{
+		Name:  "bor.heimdall",
+		Usage: "URL of Heimdall service",
+		Value: "http://localhost:1317",
+	}
+
+	// WithoutHeimdallFlag no heimdall (for testing purpose)
+	WithoutHeimdallFlag = cli.BoolFlag{
+		Name:  "bor.withoutheimdall",
+		Usage: "Run without Heimdall service (for testing purpose)",
 	}
 )
 
@@ -639,6 +651,10 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
+		case networkname.MumbaiChainName:
+			urls = params.MumbaiBootnodes
+		case networkname.BorMainnetChainName:
+			urls = params.BorMainnetBootnodes
 		default:
 			if cfg.BootstrapNodes != nil {
 				return // already set, don't apply defaults.
@@ -680,6 +696,10 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
+		case networkname.MumbaiChainName:
+			urls = params.MumbaiBootnodes
+		case networkname.BorMainnetChainName:
+			urls = params.BorMainnetBootnodes
 		default:
 			if cfg.BootstrapNodesV5 != nil {
 				return // already set, don't apply defaults.
@@ -970,6 +990,10 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "kovan")
 	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
+	case networkname.MumbaiChainName:
+		return filepath.Join(datadir, "mumbai")
+	case networkname.BorMainnetChainName:
+		return filepath.Join(datadir, "bor-mainnet")
 	default:
 		return datadir
 	}
@@ -1181,6 +1205,11 @@ func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
 	cfg.DBPath = path.Join(datadir, "parlia")
 }
 
+func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.HeimdallURL = ctx.GlobalString(HeimdallURLFlag.Name)
+	cfg.WithoutHeimdall = ctx.GlobalBool(WithoutHeimdallFlag.Name)
+}
+
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
 	cfg.Enabled = ctx.GlobalIsSet(MiningEnabledFlag.Name)
 	cfg.EnabledPOS = !ctx.GlobalIsSet(ProposingDisableFlag.Name)
@@ -1296,6 +1325,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setParlia(ctx, &cfg.Parlia, nodeConfig.DataDir)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
+	setBorConfig(ctx, cfg)
 
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.EnabledIssuance = ctx.GlobalIsSet(EnabledIssuance.Name)
@@ -1393,6 +1423,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 1212120
 		}
 		cfg.Genesis = core.DefaultFermionGenesisBlock()
+	case networkname.MumbaiChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 80001
+		}
+		cfg.Genesis = core.DefaultMumbaiGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.MumbaiGenesisHash)
+	case networkname.BorMainnetChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 137
+		}
+		cfg.Genesis = core.DefaultBorMainnetGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.BorMainnetGenesisHash)
 	case networkname.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
@@ -1477,6 +1519,10 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
+	case networkname.MumbaiChainName:
+		genesis = core.DefaultMumbaiGenesisBlock()
+	case networkname.BorMainnetChainName:
+		genesis = core.DefaultBorMainnetGenesisBlock()
 	case networkname.DevChainName:
 		Fatalf("Developer chains are ephemeral")
 	}

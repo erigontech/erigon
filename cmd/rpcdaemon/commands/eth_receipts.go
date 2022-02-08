@@ -248,13 +248,38 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	}
 	defer tx.Rollback()
 
-	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
+	var borTx *types.Transaction
+	var blockHash common.Hash
+	var blockNum uint64
+	var ok bool
+
+	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+
+	if chainConfig.Bor != nil {
+		if blockNum == 0 {
+			var blocN uint64
+			borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
+			if err != nil {
+				return nil, err
+			}
+			if borTx == nil {
+				return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+			}
+			blockNum = blocN
+		}
+	} else {
+		blockNum, ok, err = api.txnLookup(ctx, tx, hash)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+		}
 	}
+
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -262,23 +287,29 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if block == nil {
 		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 	}
-	var txnIndex uint64
-	var txn types.Transaction
-	for i, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
-			txn = transaction
-			txnIndex = uint64(i)
-			break
-		}
-	}
-	if txn == nil {
-		return nil, nil
-	}
 
 	cc, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
+	if borTx != nil {
+		receipt := rawdb.ReadBorReceipt(tx, blockHash, blockNum)
+		return marshalReceipt(receipt, *borTx, cc, block, hash), nil
+	}
+	var txnIndex uint64
+	var txn types.Transaction
+	for idx, transaction := range block.Transactions() {
+		if transaction.Hash() == hash {
+			txn = transaction
+			txnIndex = uint64(idx)
+			break
+		}
+	}
+
+	if txn == nil {
+		return nil, nil
+	}
+
 	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
@@ -286,10 +317,11 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if len(receipts) <= int(txnIndex) {
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, hash), nil
 }
 
 // GetBlockReceipts - receipts for individual block
+// func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
 func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber) ([]map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -319,13 +351,13 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash()))
 	}
 
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block, hash common.Hash) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -343,7 +375,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	fields := map[string]interface{}{
 		"blockHash":         receipt.BlockHash,
 		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		"transactionHash":   txn.Hash(),
+		"transactionHash":   hash,
 		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
 		"from":              from,
 		"to":                txn.GetTo(),

@@ -281,6 +281,11 @@ func New(
 	return c
 }
 
+// Type returns underlying consensus engine
+func (p *Parlia) Type() params.ConsensusType {
+	return params.ParliaConsensus
+}
+
 // Author retrieves the Ethereum address of the account that minted the given
 // block, which may be different from the header's coinbase if a consensus
 // engine is based on signatures.
@@ -744,6 +749,10 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if len(systemTxs) > 0 {
 		return nil, nil, fmt.Errorf("the length of systemTxs is still %d", len(systemTxs))
 	}
+	// Re-order receipts so that are in right order
+	sort.Slice(receipts, func(i int, j int) bool {
+		return receipts[i].TransactionIndex < receipts[j].TransactionIndex
+	})
 	return txs, receipts, nil
 }
 

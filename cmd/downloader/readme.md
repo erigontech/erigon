@@ -2,7 +2,9 @@
 
 Service to seed/download historical data (immutable .seg files)
 
-## Start Erigon in snapshot sync mode
+## How to Start Erigon in snapshot sync mode
+
+Only Mainnet, Goerli and BSC networks are supported now.
 
 ```shell
 make erigon downloader 
@@ -16,18 +18,20 @@ downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<
 erigon --experimental.snapshot --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
 ```
 
-## To create new network or bootnode, need create new snapshots and start seeding them
+## How to create new network or bootnode
 
 ```shell
+# Need create new snapshots and start seeding them
+ 
 # Create new snapshots (can change snapshot size by: --from=0 --to=1_000_000 --segment.size=500_000)
 # It will dump blocks from Database to .seg files:
 erigon snapshots create --datadir=<your_datadir> 
 
 # Create .torrent files (Downloader will seed automatically all .torrent files)
 # output format is compatible with https://github.com/ledgerwatch/erigon-snapshot
-downloader info_hashes --rebuild --datadir=<your_datadir>
+downloader torrent_hashes --rebuild --datadir=<your_datadir>
 
-# Start downloader
+# Start downloader (seeds automatically)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 
 # Erigon is not required for snapshots seeding 
@@ -59,3 +63,10 @@ Downloader does:
 Technical details:
 
 - To prevent attack - .idx creation using random Seed - all nodes will have different .idx file (and same .seg files)
+
+## How to verify that .seg files have same checksum withch current .torrent files
+
+```
+# Use it if you see weird behavior, bugs, bans, hardware issues, etc...
+downloader torrent_hashes --verify --datadir=<your_datadir>
+```

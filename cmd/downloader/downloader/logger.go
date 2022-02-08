@@ -32,7 +32,7 @@ type adapterLogger struct{}
 func (b adapterLogger) Log(msg lg.Msg) {
 	lvl, ok := msg.GetLevel()
 	if !ok {
-		lvl = lg.Info
+		lvl = lg.Debug
 	}
 
 	switch lvl {
@@ -40,7 +40,9 @@ func (b adapterLogger) Log(msg lg.Msg) {
 		log.Debug(msg.String())
 	case lg.Info:
 		str := msg.String()
-		if strings.Contains(str, "EOF") { // suppress useless errors
+		if strings.Contains(str, "EOF") ||
+			strings.Contains(str, "spurious timer") ||
+			strings.Contains(str, "banning ip <nil>") { // suppress useless errors
 			break
 		}
 

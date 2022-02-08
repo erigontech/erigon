@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -19,11 +18,11 @@ var (
 	ErrNotSupportedSnapshot  = errors.New("not supported snapshot for this network id")
 )
 var (
-	_ proto_downloader.DownloaderServer = &SNDownloaderServer{}
+	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewServer(db kv.RwDB, client *Client, snapshotDir string) (*SNDownloaderServer, error) {
-	sn := &SNDownloaderServer{
+func NewGrpcServer(db kv.RwDB, client *Client, snapshotDir string) (*GrpcServer, error) {
+	sn := &GrpcServer{
 		db:          db,
 		t:           client,
 		snapshotDir: snapshotDir,
@@ -46,25 +45,23 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentCl
 	return nil
 }
 
-type SNDownloaderServer struct {
+type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	t           *Client
 	db          kv.RwDB
 	snapshotDir string
 }
 
-func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
 	infoHashes := make([]metainfo.Hash, len(request.Items))
 	for i, it := range request.Items {
 		//TODO: if hash is empty - create .torrent file from path file (if it exists)
 		infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Minute*10)
-	defer cancel()
-	if err := ResolveAbsentTorrents(ctx, s.t.Cli, infoHashes, s.snapshotDir); err != nil {
+	if err := ResolveAbsentTorrents(ctx, s.t.Client, infoHashes, s.snapshotDir); err != nil {
 		return nil, err
 	}
-	for _, t := range s.t.Cli.Torrents() {
+	for _, t := range s.t.Client.Torrents() {
 		t.AllowDataDownload()
 		t.AllowDataUpload()
 		t.DownloadAll()
@@ -72,8 +69,8 @@ func (s *SNDownloaderServer) Download(ctx context.Context, request *proto_downlo
 	return &emptypb.Empty{}, nil
 }
 
-func (s *SNDownloaderServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-	torrents := s.t.Cli.Torrents()
+func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
+	torrents := s.t.Client.Torrents()
 	reply := &proto_downloader.StatsReply{Completed: true, Torrents: int32(len(torrents))}
 
 	peers := map[torrent.PeerID]struct{}{}

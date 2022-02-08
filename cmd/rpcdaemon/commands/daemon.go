@@ -15,7 +15,7 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db kv.RoDB,
+func APIList(ctx context.Context, db kv.RoDB, borDb kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet starknet.CAIROVMClient, filters *filters.Filters,
 	stateCache kvcache.Cache,
@@ -39,6 +39,7 @@ func APIList(ctx context.Context, db kv.RoDB,
 	engineImpl := NewEngineAPI(base, db, eth)
 	adminImpl := NewAdminAPI(eth)
 	parityImpl := NewParityAPIImpl(db)
+	borImpl := NewBorAPI(base, db, borDb) // bor (consensus) specific
 
 	for _, enabledAPI := range cfg.API {
 		switch enabledAPI {
@@ -110,6 +111,13 @@ func APIList(ctx context.Context, db kv.RoDB,
 				Namespace: "engine",
 				Public:    true,
 				Service:   EngineAPI(engineImpl),
+				Version:   "1.0",
+			})
+		case "bor":
+			defaultAPIList = append(defaultAPIList, rpc.API{
+				Namespace: "bor",
+				Public:    true,
+				Service:   BorAPI(borImpl),
 				Version:   "1.0",
 			})
 		case "admin":
