@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -82,9 +81,9 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 }
 
 func (api *ParityAPIImpl) checkBlockNumber(blockNumber rpc.BlockNumberOrHash) error {
-	hash, isHash := blockNumber.Hash()
-	if !isHash || !bytes.Equal(hash.Bytes(), latestTag.Bytes()) {
-		return ErrWrongTag
+	num, isNum := blockNumber.Number()
+	if isNum && rpc.LatestBlockNumber == num {
+		return nil
 	}
-	return nil
+	return ErrWrongTag
 }

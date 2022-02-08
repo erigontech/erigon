@@ -48,7 +48,7 @@ enode://d30d079163d7b69fcb261c0538c0c3faba4fb4429652970e60fa25deb02a789b4811e98b
 Open terminal 2 and navigate to erigon/build/bin folder. Here type the following command
     
 ```bash 
-./rpcdaemon --datadir=dev  --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
+./rpcdaemon --datadir=dev  --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,parity
 ```
 The result will look like this:
 <img width="1636" alt="rpc daemon start" src="https://user-images.githubusercontent.com/24697803/140478408-ac1be94a-4a63-42c6-8673-e24decadd658.png">

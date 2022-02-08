@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/spf13/cobra"
 )
 
@@ -33,8 +32,7 @@ var listStorageKeysCmd = &cobra.Command{
 		}
 		toAddress := common.HexToAddress(addr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
-		blockNumber := rpc.BlockNumberOrHashWithHash(common.BytesToHash([]byte(blockNum)), false)
-		requests.ParityList(reqId, toAddress, quantity, offset, blockNumber)
+		requests.ParityList(reqId, toAddress, quantity, offset, blockNum)
 		return nil
 	},
 }

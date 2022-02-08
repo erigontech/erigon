@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/rpc"
 )
 
 var (
@@ -67,7 +66,7 @@ func (req *RequestGenerator) txpoolContent() string {
 	return fmt.Sprintf(template, req.reqID)
 }
 
-func (req *RequestGenerator) parityStorageKeyListContent(address common.Address, quantity int, offset []byte, blockNum rpc.BlockNumberOrHash) string {
+func (req *RequestGenerator) parityStorageKeyListContent(address common.Address, quantity int, offset []byte, blockNum string) string {
 	const template = `{"jsonrpc":"2.0","method":"parity_listStorageKeys","params":["0x%x", %d, %v, "%s"],"id":%d}`
 	var offsetString string
 	if len(offset) != 0 {
@@ -75,9 +74,6 @@ func (req *RequestGenerator) parityStorageKeyListContent(address common.Address,
 	} else {
 		offsetString = "null"
 	}
-	hash, isHash := blockNum.Hash()
-	if !isHash {
-		panic("wrong type of blocknum")
-	}
-	return fmt.Sprintf(template, address, quantity, offsetString, hash, req.reqID)
+
+	return fmt.Sprintf(template, address, quantity, offsetString, blockNum, req.reqID)
 }
