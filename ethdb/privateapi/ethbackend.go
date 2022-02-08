@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -31,6 +32,8 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
+
+const MaxPendingPayloads = 128
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -297,11 +300,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return nil, payloadStatus.CriticalError
 	}
 
-	// Discard all previous prepared payloads
-	// TODO(yperbasis): must be much more specific (something like if canonical block changes)
-	// or moved to EngineGetPayloadV1 / EngineForkChoiceUpdatedV1
-	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
-
 	return convertPayloadStatus(&payloadStatus), nil
 }
 
@@ -374,6 +372,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
+	s.evictOldPendingPayloads()
+
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 
@@ -389,6 +389,20 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
 		PayloadId:     s.payloadId,
 	}, nil
+}
+
+func (s *EthBackendServer) evictOldPendingPayloads() {
+	// sort payload IDs in ascending order
+	ids := make([]uint64, 0, len(s.pendingPayloads))
+	for id := range s.pendingPayloads {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	// remove old payloads so that at most MaxPendingPayloads - 1 remain
+	for i := 0; i <= len(s.pendingPayloads)-MaxPendingPayloads; i++ {
+		delete(s.pendingPayloads, ids[i])
+	}
 }
 
 func (s *EthBackendServer) StartProposer() {
@@ -460,6 +474,7 @@ func (s *EthBackendServer) StartProposer() {
 					Transactions:  encodedTransactions,
 				}
 			}
+
 			// Broadcast the signal that an entire loop over pending payloads has been executed
 			s.syncCond.Broadcast()
 		}
