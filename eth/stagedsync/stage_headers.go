@@ -148,8 +148,9 @@ func HeadersPOS(
 
 	var payloadMessage privateapi.PayloadMessage
 	var forkChoiceMessage privateapi.ForkChoiceMessage
-	forkChoiceInsteadOfNewPayload := false
 
+	// Decide what kind of action we need to take place
+	forkChoiceInsteadOfNewPayload := false
 	select {
 	case <-ctx.Done():
 		return nil

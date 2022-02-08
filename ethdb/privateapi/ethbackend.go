@@ -49,8 +49,9 @@ type EthBackendServer struct {
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send new Beacon Chain payloads to staged sync
 	newPayloadCh chan<- PayloadMessage
+	// Send Beacon Chain fork choice updates to staged sync
 	forkChoiceCh chan<- ForkChoiceMessage
-	// Notify whether the current block being processed is Valid or not
+	// Replies to newPayload & forkchoice requests
 	statusCh <-chan PayloadStatus
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
@@ -84,6 +85,7 @@ type PayloadMessage struct {
 	Body   *types.RawBody
 }
 
+// The message we are going to send to the stage sync in ForkchoiceUpdated
 type ForkChoiceMessage struct {
 	HeadBlockHash      common.Hash
 	SafeBlockHash      common.Hash
@@ -283,6 +285,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		// TODO(yperbasis): not entirely correct since per the spec:
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
 		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
+		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -342,6 +345,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
+	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
+	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
+	// (i.e. it references an old block).
+	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
+
 	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
@@ -363,10 +371,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if req.PayloadAttributes == nil || payloadStatus.Status != remote.EngineStatus_VALID {
 		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(&payloadStatus)}, nil
 	}
-
-	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
-	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
-	// (i.e. it references an old block).
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
