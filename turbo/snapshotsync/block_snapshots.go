@@ -321,6 +321,16 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 	defer logEvery.Stop()
 	for _, sn := range s.blocks {
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+		assertSegment(f)
+		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		assertSegment(f)
+		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+		assertSegment(f)
+	}
+	panic("success")
+
+	for _, sn := range s.blocks {
+		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
 		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -656,6 +666,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	_, fileName := filepath.Split(segmentFile)
 	log.Info("[Transactions] Compression", "ratio", f.Ratio.String(), "file", fileName)
 
+	assertSegment(segmentFile)
+
+	return firstTxID, nil
+}
+
+func assertSegment(segmentFile string) {
 	d, err := compress.NewDecompressor(segmentFile)
 	if err != nil {
 		panic(err)
@@ -665,14 +681,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	if err := d.WithReadAhead(func() error {
 		g := d.MakeGetter()
 		for g.HasNext() {
-			buf, _ = g.Next(buf)
+			buf, _ = g.Next(buf[:0])
 		}
 		return nil
 	}); err != nil {
 		panic(err)
 	}
-
-	return firstTxID, nil
 }
 
 func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
@@ -732,21 +746,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		return err
 	}
 
-	d, err := compress.NewDecompressor(segmentFilePath)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	var buf []byte
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		for g.HasNext() {
-			buf, _ = g.Next(buf)
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	assertSegment(segmentFilePath)
 
 	return nil
 }
@@ -802,21 +802,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		return err
 	}
 
-	d, err := compress.NewDecompressor(segmentFilePath)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	var buf []byte
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		for g.HasNext() {
-			buf, _ = g.Next(buf)
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	assertSegment(segmentFilePath)
 
 	return nil
 }
