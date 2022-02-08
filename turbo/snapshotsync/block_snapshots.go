@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -319,13 +320,19 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+	wg := sync.WaitGroup{}
 	for _, sn := range s.blocks {
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
-		assertSegment(f)
-		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
-		assertSegment(f)
-		f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
-		assertSegment(f)
+		wg.Add(1)
+		go func(sn *BlocksSnapshot) {
+			defer wg.Done()
+			f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+			assertSegment(f)
+			f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+			assertSegment(f)
+			f = path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+			assertSegment(f)
+			fmt.Printf("done:%s\n", f)
+		}(sn)
 	}
 	panic("success")
 
