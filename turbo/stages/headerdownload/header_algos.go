@@ -588,7 +588,7 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
 	// Assemble the request
 	return HeaderRequest{
 		Hash:    hd.hashToDownloadPoS,
-		Number:  hd.heightToDownloadPoS, // FIXME(yperbasis): we might not know the block number in forkchoiceUpdated
+		Number:  hd.heightToDownloadPoS,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
@@ -736,6 +736,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	}
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
+		// FIXME(yperbasis): HeaderNumber may only be available after Stage 3
 		if headerNumber := rawdb.ReadHeaderNumber(tx, hd.hashToDownloadPoS); headerNumber != nil {
 			hd.heightToDownloadPoS = *headerNumber
 			hd.synced = true

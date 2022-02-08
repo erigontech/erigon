@@ -153,9 +153,9 @@ func HeadersPOS(
 	forkChoiceInsteadOfNewPayload := false
 	select {
 	case <-ctx.Done():
-		return nil
+		return nil // FIXME(yperbasis): what about ethbackend waiting for payload status?
 	case <-cfg.hd.SkipCycleHack:
-		return nil
+		return nil // FIXME(yperbasis): what about ethbackend waiting for payload status?
 	case forkChoiceMessage = <-cfg.forkChoiceCh:
 		forkChoiceInsteadOfNewPayload = true
 	case payloadMessage = <-cfg.newPayloadCh:
@@ -208,6 +208,7 @@ func handleForkChoice(
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		repliedWithSyncStatus = true
 
+		cfg.hd.SetHeightToDownloadPoS(cfg.hd.TopSeenHeight()) // approximate
 		cfg.hd.SetHashToDownloadPoS(headerHash)
 		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
 		if err != nil {
@@ -313,6 +314,8 @@ func handleNewPayload(
 			return err
 		}
 	} else {
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+
 		cfg.hd.SetHeightToDownloadPoS(headerNumber - 1)
 		cfg.hd.SetHashToDownloadPoS(header.ParentHash)
 		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
@@ -370,6 +373,7 @@ func verifyAndSaveNewPoSHeader(
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
+		// Extend canonical chain by the new header
 		err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader)
 		if err != nil {
 			return
@@ -402,8 +406,6 @@ func downloadMissingPoSHeaders(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) (success bool, err error) {
-	cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-
 	cfg.hd.SetPOSSync(true)
 	err = cfg.hd.ReadProgressFromDb(tx)
 	if err != nil {
