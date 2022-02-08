@@ -195,18 +195,20 @@ func handleForkChoice(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
-	header, err := rawdb.ReadHeaderByHash(tx, forkChoiceMessage.HeadBlockHash)
+	headerHash := forkChoiceMessage.HeadBlockHash
+
+	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
 
-	hadToSync := false
+	repliedWithSyncStatus := false
 	if header == nil {
-		hadToSync = true
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+		repliedWithSyncStatus = true
 
-		cfg.hd.SetHashToDownloadPoS(forkChoiceMessage.HeadBlockHash)
+		cfg.hd.SetHashToDownloadPoS(headerHash)
 		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
 		if err != nil {
 			return err
@@ -215,15 +217,18 @@ func handleForkChoice(
 			return nil
 		}
 
-		header, err = rawdb.ReadHeaderByHash(tx, forkChoiceMessage.HeadBlockHash)
+		header, err = rawdb.ReadHeaderByHash(tx, headerHash)
 		if err != nil {
 			return err
 		}
 	}
 
+	headerNumber := header.Number.Uint64()
+	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
+
 	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
 	if err != nil {
-		if !hadToSync {
+		if !repliedWithSyncStatus {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
 		return err
@@ -231,16 +236,17 @@ func handleForkChoice(
 
 	forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
 	if err != nil {
-		if !hadToSync {
+		if !repliedWithSyncStatus {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
 		return err
 	}
 
-	if !hadToSync {
-		if header.Number.Uint64()-forkingPoint <= ShortPoSReorgThresholdBlocks {
+	if !repliedWithSyncStatus {
+		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
 			// Short range re-org
-			cfg.hd.SetPendingPayloadStatus(forkChoiceMessage.HeadBlockHash)
+			// TODO(yperbasis): what if some bodies are missing?
+			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
 			// Long range re-org
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
@@ -252,7 +258,17 @@ func handleForkChoice(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	return fixCanonicalChain(s.LogPrefix(), logEvery, header.Number.Uint64(), forkChoiceMessage.HeadBlockHash, tx, cfg.blockReader)
+	err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader)
+	if err != nil {
+		return err
+	}
+
+	err = rawdb.WriteHeadHeaderHash(tx, headerHash)
+	if err != nil {
+		return err
+	}
+
+	return stages.SaveStageProgress(tx, stages.Headers, headerNumber)
 }
 
 func handleNewPayload(
@@ -269,13 +285,13 @@ func handleNewPayload(
 
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
-	existingHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
+	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
 
-	if existingHash != (common.Hash{}) && headerHash == existingHash {
+	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
 		// previously received valid header
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_VALID,
@@ -293,7 +309,7 @@ func handleNewPayload(
 
 	success := false
 	if parent != nil {
-		success, err = verifyAndSavePoSHeader(s, tx, cfg, header, headerInserter)
+		success, err = verifyAndSaveNewPoSHeader(s, tx, cfg, header, headerInserter)
 		if err != nil {
 			return err
 		}
@@ -327,7 +343,7 @@ func handleNewPayload(
 	return nil
 }
 
-func verifyAndSavePoSHeader(
+func verifyAndSaveNewPoSHeader(
 	s *StageState,
 	tx kv.RwTx,
 	cfg HeadersCfg,
@@ -358,15 +374,15 @@ func verifyAndSavePoSHeader(
 		// OK, we're on the canonical chain
 		cfg.hd.SetPendingPayloadStatus(headerHash)
 
-		err = rawdb.WriteHeadHeaderHash(tx, headerHash)
-		if err != nil {
-			return
-		}
-
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
 		err = fixCanonicalChain(s.LogPrefix(), logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader)
+		if err != nil {
+			return
+		}
+
+		err = rawdb.WriteHeadHeaderHash(tx, headerHash)
 		if err != nil {
 			return
 		}
@@ -376,7 +392,7 @@ func verifyAndSavePoSHeader(
 			return
 		}
 
-		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
+		// FIXME(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
 		err = stages.SaveStageProgress(tx, stages.Bodies, headerNumber)
 		if err != nil {
 			return
@@ -384,6 +400,7 @@ func verifyAndSavePoSHeader(
 	} else {
 		// Side chain or something weird
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
+		// No canonization, HeadHeaderHash & StageProgress are not updated
 	}
 
 	success = true
@@ -431,7 +448,6 @@ func downloadMissingPoSHeaders(
 		sentToPeer := false
 		maxRequests := 4096
 		for !sentToPeer && !stopped && maxRequests != 0 {
-			// TODO(yperbasis): double check that we don't download headers that are already in the DB. What does header/body Unwind do?
 			// TODO(yperbasis): handle the case when are not able to sync a chain
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
