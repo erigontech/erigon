@@ -307,38 +307,31 @@ func handleNewPayload(
 		return err
 	}
 
-	success := false
 	if parent != nil {
-		success, err = verifyAndSaveNewPoSHeader(s, tx, cfg, header, headerInserter)
-		if err != nil {
+		success, err := verifyAndSaveNewPoSHeader(s, tx, cfg, header, headerInserter)
+		if err != nil || !success {
 			return err
 		}
 	} else {
 		cfg.hd.SetHeightToDownloadPoS(headerNumber - 1)
 		cfg.hd.SetHashToDownloadPoS(header.ParentHash)
-		success, err = downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
+		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
+		if err != nil || !success {
+			return err
+		}
+
+		if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
+			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+			return nil
+		}
+
+		err = headerInserter.FeedHeaderPoS(tx, header, headerHash)
 		if err != nil {
 			return err
 		}
-		if success {
-			if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-				log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
-				success = false
-			} else if err := headerInserter.FeedHeaderPoS(tx, header, headerHash); err != nil {
-				return err
-			}
-		}
 	}
 
-	if success {
-		// Note an inconsistency here:
-		// We insert raw bodies immediately and skip stage 3. (Stage 2 will not be skipped.)
-		// TODO(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
-		// TODO(yperbasis): Or use turbo/stages/bodydownload/prefetched_blocks.go ?
-		if err := rawdb.WriteRawBody(tx, headerHash, headerNumber, payloadMessage.Body); err != nil {
-			return err
-		}
-	}
+	// TODO(yperbasis): bodyDownloader.AddToPrefetch(block)
 
 	return nil
 }
@@ -388,12 +381,6 @@ func verifyAndSaveNewPoSHeader(
 		}
 
 		err = stages.SaveStageProgress(tx, stages.Headers, headerNumber)
-		if err != nil {
-			return
-		}
-
-		// FIXME(yperbasis): double check, incl. prevention of re-downloading bodies already in the DB. What does header/body Unwind do?
-		err = stages.SaveStageProgress(tx, stages.Bodies, headerNumber)
 		if err != nil {
 			return
 		}
