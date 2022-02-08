@@ -736,13 +736,6 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	}
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
-		// FIXME(yperbasis): HeaderNumber may only be available after Stage 3
-		if headerNumber := rawdb.ReadHeaderNumber(tx, hd.hashToDownloadPoS); headerNumber != nil {
-			hd.heightToDownloadPoS = *headerNumber
-			hd.synced = true
-			return nil
-		}
-
 		header := segmentFragment.Header
 		if header.Hash() != hd.hashToDownloadPoS {
 			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.hashToDownloadPoS)
@@ -751,8 +744,18 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
 			return err
 		}
-		hd.hashToDownloadPoS = segmentFragment.Header.ParentHash
+
+		hd.hashToDownloadPoS = header.ParentHash
 		hd.heightToDownloadPoS = header.Number.Uint64() - 1
+
+		if rawdb.ReadHeader(tx, hd.hashToDownloadPoS, hd.heightToDownloadPoS) != nil {
+			hd.synced = true
+			return nil
+		}
+
+		if hd.heightToDownloadPoS == 0 {
+			return errors.New("wrong genesis in PoS sync")
+		}
 	}
 	return nil
 }
