@@ -65,11 +65,11 @@ func TxpoolContent(reqId int) {
 	fmt.Printf("Txpool content: %v\n", parseResponse(b))
 }
 
-func ParityList(reqId int, account common.Address, quantity int, offset []byte) {
+func ParityList(reqId int, account common.Address, quantity int, offset []byte, blockNum string) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.ParityListStorageKeysResult
 
-	res := reqGen.Erigon("parity_listStorageKeys", reqGen.parityStorageKeyListContent(account, quantity, offset), &b)
+	res := reqGen.Erigon("parity_listStorageKeys", reqGen.parityStorageKeyListContent(account, quantity, offset, blockNum), &b)
 	if res.Err != nil {
 		fmt.Printf("Error fetching storage keys: %v\n", res.Err)
 		return
