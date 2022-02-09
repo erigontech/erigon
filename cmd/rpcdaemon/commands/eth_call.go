@@ -420,7 +420,7 @@ func (api *APIImpl) OptimizedAccessList(ctx context.Context, args ethapi.CallArg
 		}
 
 		// https://eips.ethereum.org/EIPS/eip-2930#charging-less-for-accesses-in-the-access-list
-		accessListSavingPerSlot := params.ColdSloadCostEIP2929 - params.TxAccessListStorageKeyGas - params.WarmStorageReadCostEIP2929
+		accessListSavingPerSlot := params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929 - params.TxAccessListStorageKeyGas
 
 		numSlots := uint64(len(entry.StorageKeys))
 		if numSlots*accessListSavingPerSlot <= params.TxAccessListAddressGas {
