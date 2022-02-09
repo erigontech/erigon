@@ -30,9 +30,12 @@ import (
 	"text/tabwriter"
 	"text/template"
 
+	lg "github.com/anacrolix/log"
+	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -419,7 +422,6 @@ var (
 	}
 	DownloaderAddrFlag = cli.StringFlag{
 		Name:  "downloader.api.addr",
-		Value: "127.0.0.1:9093",
 		Usage: "downloader address '<host>:<port>'",
 	}
 	BootnodesFlag = cli.StringFlag{
@@ -551,6 +553,26 @@ var (
 	SnapshotRetireFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapshotRetire,
 		Usage: "Delete(!) old blocks from DB, by moving them to snapshots",
+	}
+	TorrentVerbosityFlag = cli.StringFlag{
+		Name:  "torrent.verbosity",
+		Value: lg.Warning.LogString(),
+		Usage: "DEBUG | INFO | WARN | ERROR",
+	}
+	TorrentDownloadRateFlag = cli.StringFlag{
+		Name:  "torrent.download.rate",
+		Value: "8mb",
+		Usage: "bytes per second, example: 32mb",
+	}
+	TorrentUploadRateFlag = cli.StringFlag{
+		Name:  "torrent.upload.rate",
+		Value: "8mb",
+		Usage: "byt,es per second, example: 32mb",
+	}
+	TorrentPortFlag = cli.IntFlag{
+		Name:  "torrent.port",
+		Value: 42069,
+		Usage: "port to listen and serve BitTorrent protocol",
 	}
 	DbPageSizeFlag = cli.Uint64Flag{
 		Name:  "db.pagesize",
@@ -1310,6 +1332,41 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
 		cfg.Snapshot.RetireEnabled = true
 	}
+	torrentVerbosity := lg.Warning
+	if ctx.GlobalBool(TorrentVerbosityFlag.Name) {
+		torrentVerbosity = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]
+	}
+
+	var downloadRateStr, uploadRateStr string
+	if ctx.GlobalBool(TorrentDownloadRateFlag.Name) {
+		downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
+	}
+	if ctx.GlobalBool(TorrentUploadRateFlag.Name) {
+		uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
+	}
+	var downloadRate, uploadRate datasize.ByteSize
+	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
+		panic(err)
+	}
+	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
+		panic(err)
+	}
+	torrentPort := TorrentPortFlag.Value
+	if ctx.GlobalBool(TorrentPortFlag.Name) {
+		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
+	}
+
+	TorrentPortFlag = cli.IntFlag{
+		Name:  "torrent.port",
+		Value: 42069,
+		Usage: "port to listen and serve BitTorrent protocol",
+	}
+
+	torrentCfg, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+	if err != nil {
+		panic(err)
+	}
+	cfg.Torrent = torrentCfg
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true

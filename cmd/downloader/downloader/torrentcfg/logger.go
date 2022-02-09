@@ -1,4 +1,4 @@
-package downloader
+package torrentcfg
 
 import (
 	stdlog "log"

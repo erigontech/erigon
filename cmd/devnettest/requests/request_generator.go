@@ -66,13 +66,14 @@ func (req *RequestGenerator) txpoolContent() string {
 	return fmt.Sprintf(template, req.reqID)
 }
 
-func (req *RequestGenerator) parityStorageKeyListContent(address common.Address, quantity int, offset []byte) string {
-	const template = `{"jsonrpc":"2.0","method":"parity_listStorageKeys","params":["0x%x", %d, %v],"id":%d}`
+func (req *RequestGenerator) parityStorageKeyListContent(address common.Address, quantity int, offset []byte, blockNum string) string {
+	const template = `{"jsonrpc":"2.0","method":"parity_listStorageKeys","params":["0x%x", %d, %v, "%s"],"id":%d}`
 	var offsetString string
 	if len(offset) != 0 {
 		offsetString = fmt.Sprintf(`"0x%x"`, offset)
 	} else {
 		offsetString = "null"
 	}
-	return fmt.Sprintf(template, address, quantity, offsetString, req.reqID)
+
+	return fmt.Sprintf(template, address, quantity, offsetString, blockNum, req.reqID)
 }

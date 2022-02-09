@@ -256,6 +256,6 @@ type StorageResult struct {
 }
 
 type ParityListStorageKeysResult struct {
+	CommonResponse
 	Result []hexutil.Bytes `json:"result"`
-	Error  string          `json:"error"`
 }
