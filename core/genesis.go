@@ -561,10 +561,11 @@ func DefaultGenesisBlock() *Genesis {
 func DefaultSepoliaGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.SepoliaChainConfig,
-		Nonce:		0,
-		ExtraData:  hexutil.MustDecode("0x5365706f6c69612c20417468656e732c204174746963612c2047726565636521"),
+		Nonce:      0,
+		ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
 		GasLimit:   30000000,
 		Difficulty: big.NewInt(131072),
+		Timestamp:  1633267481,
 		Alloc:      readPrealloc("allocs/sepolia.json"),
 	}
 }
