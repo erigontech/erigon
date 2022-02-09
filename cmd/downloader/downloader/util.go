@@ -17,15 +17,11 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 )
-
-// DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
-// amount of network announcements, but can't go over 2Mb
-// see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
-const DefaultPieceSize = 2 * 1024 * 1024
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
@@ -125,7 +121,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 }
 
 func BuildInfoBytesForFile(root string, fileName string) (*metainfo.Info, error) {
-	info := &metainfo.Info{PieceLength: DefaultPieceSize}
+	info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
 	if err := info.BuildFromFilePath(filepath.Join(root, fileName)); err != nil {
 		return nil, err
 	}
