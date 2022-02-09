@@ -158,6 +158,14 @@ Loop:
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.FeedHeaderFunc(tx), logPrefix, logEvery.C); err != nil {
 			return err
 		}
+
+		if err = rawdb.WriteHeadHeaderHash(tx, headerInserter.GetHighestHash()); err != nil {
+			return fmt.Errorf("[%s] marking head header hash as %x: %w", logPrefix, headerInserter.GetHighestHash(), err)
+		}
+		if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
+			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
+		}
+
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)

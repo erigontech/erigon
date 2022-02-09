@@ -789,12 +789,6 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 			forkingPoint = ancestorHeight
 		}
-		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
-			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
-		}
-		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
-		}
 		hi.highest = blockHeight
 		hi.highestHash = hash
 		hi.highestTimestamp = header.Time
