@@ -1334,7 +1334,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 	torrentVerbosity := lg.Warning
 	if ctx.GlobalBool(TorrentVerbosityFlag.Name) {
-		torrentVerbosity, _ = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]
+		torrentVerbosity = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]
 	}
 
 	var downloadRateStr, uploadRateStr string
