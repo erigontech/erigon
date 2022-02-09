@@ -210,9 +210,9 @@ func handleForkChoice(
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		repliedWithSyncStatus = true
 
-		cfg.hd.SetHeightToDownloadPoS(cfg.hd.TopSeenHeight()) // approximate
-		cfg.hd.SetHashToDownloadPoS(headerHash)
-		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
+		hashToDownload := headerHash
+		heighToDownload := cfg.hd.TopSeenHeight() // approximate
+		success, err := downloadMissingPoSHeaders(hashToDownload, heighToDownload, s, ctx, tx, cfg, headerInserter)
 		if err != nil {
 			return err
 		}
@@ -318,9 +318,9 @@ func handleNewPayload(
 	} else {
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 
-		cfg.hd.SetHeightToDownloadPoS(headerNumber - 1)
-		cfg.hd.SetHashToDownloadPoS(header.ParentHash)
-		success, err := downloadMissingPoSHeaders(s, ctx, tx, cfg, headerInserter)
+		hashToDownload := header.ParentHash
+		heightToDownload := headerNumber - 1
+		success, err := downloadMissingPoSHeaders(hashToDownload, heightToDownload, s, ctx, tx, cfg, headerInserter)
 		if err != nil || !success {
 			return err
 		}
@@ -400,8 +400,9 @@ func verifyAndSaveNewPoSHeader(
 	return
 }
 
-// Prerequisite: HashToDownloadPoS must be set on cfg.hd
 func downloadMissingPoSHeaders(
+	hashToDownloadPoS common.Hash,
+	heightToDownload uint64,
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
@@ -415,6 +416,8 @@ func downloadMissingPoSHeaders(
 	}
 
 	cfg.hd.SetFetching(true)
+	cfg.hd.SetHashToDownloadPoS(hashToDownloadPoS)
+	cfg.hd.SetHeightToDownloadPoS(heightToDownload)
 
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()))
 
