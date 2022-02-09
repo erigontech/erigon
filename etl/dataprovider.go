@@ -110,10 +110,11 @@ func (p *fileDataProvider) String() string {
 }
 
 func writeToDisk(encoder Encoder, entries []sortableBufferEntry) error {
-	pair := [2][]byte{}
+	pair := make([][]byte, 2)
+	pairInterface := interface{}(pair) // to avoid interface cast on each iteration
 	for i := range entries {
 		pair[0], pair[1] = entries[i].key, entries[i].value
-		if err := encoder.Encode(pair); err != nil {
+		if err := encoder.Encode(pairInterface); err != nil {
 			return fmt.Errorf("error writing entries to disk: %w", err)
 		}
 	}

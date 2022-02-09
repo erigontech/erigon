@@ -24,9 +24,7 @@ import (
 	"math"
 	"math/bits"
 	"os"
-	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -97,6 +95,7 @@ type RecSplit struct {
 	indexW             *bufio.Writer
 	bytesPerRec        int
 	numBuf             [8]byte
+	bucketKeyBuf       [16]byte
 	trace              bool
 	prevOffset         uint64 // Previously added offset (for calculating minDelta for Elias Fano encoding of "enum -> offset" index)
 	minDelta           uint64 // minDelta for Elias Fano encoding of "enum -> offset" index
@@ -281,11 +280,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	rs.hasher.Reset()
 	rs.hasher.Write(key) //nolint:errcheck
 	hi, lo := rs.hasher.Sum128()
-	var bucketKey [16]byte
-	binary.BigEndian.PutUint64(bucketKey[:], remap(hi, rs.bucketCount))
-	binary.BigEndian.PutUint64(bucketKey[8:], lo)
-	var offsetVal [8]byte
-	binary.BigEndian.PutUint64(offsetVal[:], offset)
+	binary.BigEndian.PutUint64(rs.bucketKeyBuf[:], remap(hi, rs.bucketCount))
+	binary.BigEndian.PutUint64(rs.bucketKeyBuf[8:], lo)
+	binary.BigEndian.PutUint64(rs.numBuf[:], offset)
 	if offset > rs.maxOffset {
 		rs.maxOffset = offset
 	}
@@ -297,16 +294,15 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	}
 
 	if rs.enums {
-		if err := rs.offsetCollector.Collect(offsetVal[:], nil); err != nil {
+		if err := rs.offsetCollector.Collect(rs.numBuf[:], nil); err != nil {
 			return err
 		}
-		var keyIdx [8]byte
-		binary.BigEndian.PutUint64(keyIdx[:], rs.keysAdded)
-		if err := rs.bucketCollector.Collect(bucketKey[:], keyIdx[:]); err != nil {
+		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
 	} else {
-		if err := rs.bucketCollector.Collect(bucketKey[:], offsetVal[:]); err != nil {
+		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
 		}
 	}
@@ -495,9 +491,7 @@ func (rs *RecSplit) loadFuncOffset(k, _ []byte, _ etl.CurrentTableReader, _ etl.
 // Build has to be called after all the keys have been added, and it initiates the process
 // of building the perfect hash function and writing index into a file
 func (rs *RecSplit) Build() error {
-	_, fileName := filepath.Split(rs.indexFile)
-	tmpIdxFilePath := filepath.Join(rs.tmpDir, fileName)
-	common.MustExist(rs.tmpDir)
+	tmpIdxFilePath := rs.indexFile + ".tmp"
 
 	if rs.built {
 		return fmt.Errorf("already built")
@@ -622,8 +616,6 @@ func (rs *RecSplit) Build() error {
 	_ = rs.indexW.Flush()
 	_ = rs.indexF.Sync()
 	_ = rs.indexF.Close()
-	dir, _ := filepath.Split(rs.indexFile)
-	common.MustExist(dir)
 	if err := os.Rename(tmpIdxFilePath, rs.indexFile); err != nil {
 		return err
 	}

@@ -116,6 +116,7 @@ type Getter struct {
 	mask        byte
 	uncovered   []int // Buffer for uncovered portions of the word
 	word        []byte
+	fName       string
 }
 
 func (g *Getter) zero() bool {
@@ -212,7 +213,7 @@ func (d *Decompressor) Count() int { return int(d.count) }
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concurrently
 // for the same decompressor
 func (d *Decompressor) MakeGetter() *Getter {
-	return &Getter{patternDict: &d.dict, posDict: &d.posDict, data: d.data[d.wordsStart:], uncovered: make([]int, 0, 128)}
+	return &Getter{patternDict: &d.dict, posDict: &d.posDict, data: d.data[d.wordsStart:], uncovered: make([]int, 0, 128), fName: d.compressedFile}
 }
 
 func (g *Getter) Reset(offset uint64) {
@@ -247,7 +248,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		lastPos = intPos
 		pattern := g.nextPattern()
 		if len(g.word) < intPos {
-			panic("likely .idx is invalid")
+			panic(fmt.Sprintf("likely .idx is invalid: %s", g.fName))
 		}
 		copy(g.word[intPos:], pattern)
 		if intPos > lastUncovered {
@@ -284,7 +285,7 @@ func (g *Getter) Skip() uint64 {
 		intPos := lastPos + int(pos) - 1
 		lastPos = intPos
 		if wordLen < intPos {
-			panic("likely .idx is invalid")
+			panic(fmt.Sprintf("likely .idx is invalid: %s", g.fName))
 		}
 		if intPos > lastUncovered {
 			add += uint64(intPos - lastUncovered)
@@ -402,7 +403,7 @@ func (g *Getter) MatchPrefix(buf []byte) bool {
 		intPos := lastPos + int(pos) - 1
 		lastPos = intPos
 		if wordLen < intPos {
-			panic("likely .idx is invalid")
+			panic(fmt.Sprintf("likely .idx is invalid: %s", g.fName))
 		}
 		pattern = g.nextPattern()
 		if strings.HasPrefix(string(pattern), string(buf)) {
