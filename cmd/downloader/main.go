@@ -35,7 +35,6 @@ import (
 
 var (
 	datadir                        string
-	seeding                        bool
 	asJson                         bool
 	forceRebuild                   bool
 	forceVerify                    bool
@@ -51,7 +50,6 @@ func init() {
 
 	withDatadir(rootCmd)
 
-	rootCmd.PersistentFlags().BoolVar(&seeding, "torrent.seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", "8mb", "bytes per second, example: 32mb")
@@ -120,9 +118,9 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 
-	cfg, err := torrentcfg.New(snapshotDir, seeding, torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		return fmt.Errorf("New: %w", err)
 	}
@@ -130,7 +128,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	log.Info("[torrent] Start", "seeding", cfg.Seed, "my peerID", protocols.TorrentClient.PeerID())
+	log.Info("[torrent] Start", "my peerID", protocols.TorrentClient.PeerID())
 	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}

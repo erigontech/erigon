@@ -1362,7 +1362,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		Usage: "port to listen and serve BitTorrent protocol",
 	}
 
-	torrentCfg, err := torrentcfg.New(cfg.SnapshotDir, true, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+	torrentCfg, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		panic(err)
 	}
