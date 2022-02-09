@@ -2,7 +2,7 @@ package networkname
 
 const (
 	MainnetChainName    = "mainnet"
-	SepoliaChainName 	= "sepolia"
+	SepoliaChainName    = "sepolia"
 	RopstenChainName    = "ropsten"
 	RinkebyChainName    = "rinkeby"
 	GoerliChainName     = "goerli"
