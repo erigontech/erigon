@@ -271,7 +271,7 @@ func handleForkChoice(
 		return err
 	}
 
-	return stages.SaveStageProgress(tx, stages.Headers, headerNumber)
+	return s.Update(tx, headerNumber)
 }
 
 func handleNewPayload(
@@ -386,7 +386,7 @@ func verifyAndSaveNewPoSHeader(
 			return
 		}
 
-		err = stages.SaveStageProgress(tx, stages.Headers, headerNumber)
+		err = s.Update(tx, headerNumber)
 		if err != nil {
 			return
 		}
@@ -623,6 +623,13 @@ Loop:
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
+		}
+
+		if err = rawdb.WriteHeadHeaderHash(tx, headerInserter.GetHighestHash()); err != nil {
+			return fmt.Errorf("[%s] marking head header hash as %x: %w", logPrefix, headerInserter.GetHighestHash(), err)
+		}
+		if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
+			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
 		}
 
 		announces := cfg.hd.GrabAnnounces()
