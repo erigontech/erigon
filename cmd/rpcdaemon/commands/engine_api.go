@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -252,6 +253,46 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 		}
 	}
 	return blockHashToBody, nil
+}
+
+// Gets a transistionConfiguration and pings the execution layer and checks if the execution layer has the correct configurations
+func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration, terminalBlockNumber hexutil.Uint64 /* terminalBlockNumber is always zero */) (TransitionConfiguration, error) {
+	tx, err := e.db.BeginRo(ctx)
+
+	if err != nil {
+		return TransitionConfiguration{}, err
+	}
+
+	defer tx.Rollback()
+
+	if terminalBlockNumber != 0 {
+		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", terminalBlockNumber)
+	}
+
+	chainConfig, err := e.BaseAPI.chainConfig(tx)
+
+	if err != nil {
+		return TransitionConfiguration{}, err
+	}
+
+	totalTerminalDifficulty := chainConfig.TerminalTotalDifficulty
+
+	if totalTerminalDifficulty != transitionConfiguration.TerminalTotalDifficulty.ToInt() {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), totalTerminalDifficulty)
+	}
+
+	block := rawdb.ReadCurrentBlock(tx)
+	blockHash := block.Hash()
+
+	if blockHash != transitionConfiguration.TerminalBlockHash {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, blockHash)
+	}
+
+	return TransitionConfiguration{
+		TerminalTotalDifficulty: (*hexutil.Big)(totalTerminalDifficulty),
+		TerminalBlockHash:       blockHash,
+		TerminalBlockNumber:     0,
+	}, nil
 }
 
 // NewEngineAPI returns EngineImpl instance
