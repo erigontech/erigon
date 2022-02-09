@@ -1075,6 +1075,7 @@ func assertAllSegments(blocks []*BlocksSnapshot, root string) {
 	panic("success")
 }
 
+//nolint
 func assertSegment(segmentFile string) {
 	d, err := compress.NewDecompressor(segmentFile)
 	if err != nil {

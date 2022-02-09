@@ -17,8 +17,8 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
@@ -34,15 +34,14 @@ import (
 )
 
 var (
-	datadir                       string
-	seeding                       bool
-	asJson                        bool
-	forceRebuild                  bool
-	forceVerify                   bool
-	downloaderApiAddr             string
-	torrentVerbosity              string
-	downloadRateStr, uploadRteStr string
-	torrentPort                   int
+	datadir                        string
+	asJson                         bool
+	forceRebuild                   bool
+	forceVerify                    bool
+	downloaderApiAddr              string
+	torrentVerbosity               string
+	downloadRateStr, uploadRateStr string
+	torrentPort                    int
 )
 
 func init() {
@@ -51,11 +50,10 @@ func init() {
 
 	withDatadir(rootCmd)
 
-	rootCmd.PersistentFlags().BoolVar(&seeding, "seeding", true, "Seed snapshots")
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
-	rootCmd.Flags().StringVar(&downloadRateStr, "download.rate", "8mb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadRteStr, "upload.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "8mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
 	withDatadir(printTorrentHashes)
@@ -107,7 +105,7 @@ var rootCmd = &cobra.Command{
 func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	snapshotDir := path.Join(datadir, "snapshots")
 	common.MustExist(snapshotDir)
-	torrentLogLevel, ok := downloader.String2LogLevel[torrentVerbosity]
+	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
 	}
@@ -116,31 +114,28 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
 		return err
 	}
-	if err := uploadRate.UnmarshalText([]byte(uploadRteStr)); err != nil {
+	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "seeding", seeding, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 
-	downloaderDB := mdbx.MustOpen(snapshotDir + "/db")
-	var dl *downloader.Client
-
-	cfg, err := downloader.TorrentConfig(snapshotDir, seeding, torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
-		return fmt.Errorf("TorrentConfig: %w", err)
+		return fmt.Errorf("New: %w", err)
 	}
-	dl, err = downloader.New(cfg, downloaderDB)
+	protocols, err := downloader.New(cfg, snapshotDir)
 	if err != nil {
 		return err
 	}
-	log.Info("[torrent] Start", "seeding", cfg.Seed, "my peerID", dl.Client.PeerID())
-	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, dl.Client); err != nil {
+	log.Info("[torrent] Start", "my peerID", protocols.TorrentClient.PeerID())
+	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
 
-	go downloader.MainLoop(ctx, dl.Client)
+	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
 
-	bittorrentServer, err := downloader.NewGrpcServer(downloaderDB, dl, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

@@ -46,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -138,6 +139,8 @@ type Ethereum struct {
 	// to proof-of-stake so we start reverse syncing from the header
 	reverseDownloadCh     chan privateapi.PayloadMessage
 	waitingForBeaconChain uint32 // atomic boolean flag
+
+	downloadProtocols *downloader.Protocols
 }
 
 // New creates a new Ethereum object (including the
@@ -313,8 +316,22 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, config.SnapshotDir)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
-		// connect to Downloader
-		backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
+		if len(stack.Config().DownloaderAddr) > 0 {
+			// connect to external Downloader
+			backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
+		} else {
+			// start embedded Downloader
+			backend.downloadProtocols, err = downloader.New(config.Torrent, config.SnapshotDir)
+			if err != nil {
+				return nil, err
+			}
+			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir)
+			if err != nil {
+				return nil, fmt.Errorf("new server: %w", err)
+			}
+
+			backend.downloaderClient = downloadergrpc.NewClientDirect(bittorrentServer)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -794,6 +811,9 @@ func (s *Ethereum) Start() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
+	if s.downloadProtocols != nil {
+		s.downloadProtocols.Close()
+	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {

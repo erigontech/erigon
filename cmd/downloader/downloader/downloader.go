@@ -3,72 +3,29 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"time"
 
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/storage"
-	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/time/rate"
 )
 
 const ASSERT = false
 
-type Client struct {
-	Client *torrent.Client
+type Protocols struct {
+	TorrentClient *torrent.Client
+	DB            kv.RwDB
 }
 
-func DefaultTorrentConfig() *torrent.ClientConfig {
-	torrentConfig := torrent.NewDefaultClientConfig()
+func New(cfg *torrent.ClientConfig, snapshotDir string) (*Protocols, error) {
+	db := mdbx.MustOpen(filepath.Join(snapshotDir, "db"))
 
-	// enable dht
-	torrentConfig.NoDHT = true
-	//torrentConfig.DisableTrackers = true
-	//torrentConfig.DisableWebtorrent = true
-	//torrentConfig.DisableWebseeds = true
-
-	// Increase default timeouts, because we often run on commodity networks
-	torrentConfig.MinDialTimeout = 6 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
-
-	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
-	torrentConfig.EstablishedConnsPerTorrent = 5 // default: 50
-	torrentConfig.TorrentPeersHighWater = 10     // default: 500
-	torrentConfig.TorrentPeersLowWater = 5       // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = 5    // default: 25
-	torrentConfig.TotalHalfOpenConns = 10        // default: 100
-	return torrentConfig
-}
-
-func TorrentConfig(snapshotsDir string, seeding bool, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
-	torrentConfig := DefaultTorrentConfig()
-	torrentConfig.ListenPort = torrentPort
-	torrentConfig.Seed = seeding
-	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
-
-	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
-	torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
-
-	// debug
-	if lg.Debug == verbosity {
-		torrentConfig.Debug = true
-	}
-	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
-
-	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
-	return torrentConfig, nil
-}
-
-func New(cfg *torrent.ClientConfig, downloaderDB kv.RwDB) (*Client, error) {
-	peerID, err := readPeerID(downloaderDB)
+	peerID, err := readPeerID(db)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
 	}
@@ -78,13 +35,14 @@ func New(cfg *torrent.ClientConfig, downloaderDB kv.RwDB) (*Client, error) {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
 	if len(peerID) == 0 {
-		if err = savePeerID(downloaderDB, torrentClient.PeerID()); err != nil {
+		if err = savePeerID(db, torrentClient.PeerID()); err != nil {
 			return nil, fmt.Errorf("save peer id: %w", err)
 		}
 	}
 
-	return &Client{
-		Client: torrentClient,
+	return &Protocols{
+		TorrentClient: torrentClient,
+		DB:            db,
 	}, nil
 }
 
@@ -108,19 +66,20 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 	return peerID, nil
 }
 
-func (cli *Client) Close() {
-	for _, tr := range cli.Client.Torrents() {
+func (cli *Protocols) Close() {
+	for _, tr := range cli.TorrentClient.Torrents() {
 		tr.Drop()
 	}
-	cli.Client.Close()
+	cli.TorrentClient.Close()
+	cli.DB.Close()
 }
 
-func (cli *Client) PeerID() []byte {
-	peerID := cli.Client.PeerID()
+func (cli *Protocols) PeerID() []byte {
+	peerID := cli.TorrentClient.PeerID()
 	return peerID[:]
 }
 
-func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
+func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
 	interval := time.Second * 5
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
@@ -180,8 +139,8 @@ func MainLoop(ctx context.Context, torrentClient *torrent.Client) {
 	}
 }
 
-func (cli *Client) StopSeeding(hash metainfo.Hash) error {
-	t, ok := cli.Client.Torrent(hash)
+func (cli *Protocols) StopSeeding(hash metainfo.Hash) error {
+	t, ok := cli.TorrentClient.Torrent(hash)
 	if !ok {
 		return nil
 	}
