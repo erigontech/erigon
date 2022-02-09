@@ -36,7 +36,7 @@ var MainnetBootnodes = []string{
 // Sepolia test network.
 var SepoliaBootnodes = []string{
 	"enode://7c9740e4d64674801fe62b76798d46778a038c49caebb15843d8c0f2b2f80d7ceba2585b4be366e6161988f81ddcfcd6fca98b5da52ae9a6f22c1b2a84b24a04@18.130.169.73:30303",
-    "enode://ec66ddcf1a974950bd4c782789a7e04f8aa7110a72569b6e65fcd51e937e74eed303b1ea734e4d19cfaec9fbff9b6ee65bf31dcb50ba79acce9dd63a6aca61c7@52.14.151.177:30303",
+	"enode://ec66ddcf1a974950bd4c782789a7e04f8aa7110a72569b6e65fcd51e937e74eed303b1ea734e4d19cfaec9fbff9b6ee65bf31dcb50ba79acce9dd63a6aca61c7@52.14.151.177:30303",
 }
 
 // RopstenBootnodes are the enode URLs of the P2P bootstrap nodes running on the
