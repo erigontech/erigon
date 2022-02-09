@@ -16,44 +16,19 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
     + [Beacon Chain](#beacon-chain)
     + [Dev Chain](#dev-chain)
 
-- [Erigon](#erigon)
-- [System Requirements](#system-requirements)
-- [Usage](#usage)
-    - [Getting Started](#getting-started)
-    - [Optional stages](#optional-stages)
-    - [Testnets](#testnets)
-    - [Mining](#mining)
-    - [Windows](#windows)
-    - [Beacon Chain](#beacon-chain)
-    - [Multiple Instances on the Same Machine](#multiple-instances-on-the-same-machine)
-    - [Dev Chain](#dev-chain)
 - [Key features](#key-features)
-    - [More Efficient State Storage](#more-efficient-state-storage)
-    - [Faster Initial Sync](#faster-initial-sync)
-    - [JSON-RPC daemon](#json-rpc-daemon)
-      - [**For local DB**](#for-local-db)
-      - [**For remote DB**](#for-remote-db)
-    - [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    - [Grafana dashboard](#grafana-dashboard)
-    - [Prune old data](#prune-old-data)
+    + [More Efficient State Storage](#more-efficient-state-storage)
+    + [Faster Initial Sync](#faster-initial-sync)
+    + [JSON-RPC daemon](#json-rpc-daemon)
+    + [Run all components by docker-compose](#run-all-components-by-docker-compose)
+    + [Grafana dashboard](#grafana-dashboard)
 - [FAQ](#faq)
-    - [How much RAM do I need](#how-much-ram-do-i-need)
-    - [Default Ports and Protocols / Firewalls?](#default-ports-and-protocols--firewalls)
-      - [`erigon` ports](#erigon-ports)
-      - [`rpcdaemon` ports](#rpcdaemon-ports)
-      - [`sentry` ports](#sentry-ports)
-      - [Other ports](#other-ports)
-    - [How to get diagnostic for bug report?](#how-to-get-diagnostic-for-bug-report)
-    - [How to run local devnet?](#how-to-run-local-devnet)
 - [Getting in touch](#getting-in-touch)
-    - [Erigon Discord Server](#erigon-discord-server)
-    - [Reporting security issues/concerns](#reporting-security-issuesconcerns)
-    - [Team](#team)
+    + [Erigon Discord Server](#erigon-discord-server)
+    + [Reporting security issues/concerns](#reporting-security-issues-concerns)
+    + [Team](#team)
 - [Known issues](#known-issues)
-    - [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
-    - [Blocks Execution is slow on cloud-network-drives](#blocks-execution-is-slow-on-cloud-network-drives)
-    - [Filesystem's background features are expensive](#filesystems-background-features-are-expensive)
-    - [Gnome Tracker can kill Erigon](#gnome-tracker-can-kill-erigon)
+    + [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
 
 <!--te-->
 
@@ -337,41 +312,41 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 
 #### `erigon` ports
 
-| Port  | Protocol  |     Purpose      | Expose  |
-| :---: | :-------: | :--------------: | :-----: |
-| 30303 | TCP & UDP |  eth/66 peering  | Public  |
-| 9090  |    TCP    | gRPC Connections | Private |
+|  Port |  Protocol |      Purpose     |  Expose |
+|:-----:|:---------:|:----------------:|:-------:|
+| 30303 | TCP & UDP |  eth/66 peering  |  Public |
+|  9090 |    TCP    | gRPC Connections | Private |
 
 Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
 internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 
 #### `rpcdaemon` ports
 
-|  Port   |  Protocol   |       Purpose       |  Expose   |
-| :-----: | :---------: | :-----------------: | :-------: |
-|  8545   |     TCP     |  HTTP & WebSockets  |  Private  |
-| :-----: | :---------: | :-----------------: | :-------: |
-|  8550   |     TCP     |        HTTP         |  Private  |
+|  Port |  Protocol |      Purpose      |  Expose |
+|:-----:|:---------:|:-----------------:|:-------:|
+|  8545 |    TCP    | HTTP & WebSockets | Private |
+|:-----:|:---------:|:-----------------:|:-------:|
+|  8550 |    TCP    |       HTTP        | Private |
 
 Typically 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
 Typically 8550 is exposed only internally for the engineApi JSON-RPC queries
 
 #### `sentry` ports
 
-| Port  | Protocol  |     Purpose      | Expose  |
-| :---: | :-------: | :--------------: | :-----: |
-| 30303 | TCP & UDP |     Peering      | Public  |
-| 9091  |    TCP    | gRPC Connections | Private |
+|  Port |  Protocol |      Purpose     |  Expose |
+|:-----:|:---------:|:----------------:|:-------:|
+| 30303 | TCP & UDP |      Peering     |  Public |
+|  9091 |    TCP    | gRPC Connections | Private |
 
 Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port
 9091 is for internal gRCP connections (e.g erigon -> sentry)
 
 #### Other ports
 
-| Port  | Protocol | Purpose | Expose  |
-| :---: | :------: | :-----: | :-----: |
-| 6060  |   TCP    |  pprof  | Private |
-| 6060  |   TCP    | metrics | Private |
+| Port | Protocol | Purpose |  Expose |
+|:----:|:--------:|:-------:|:-------:|
+| 6060 |    TCP   |  pprof  | Private |
+| 6060 |    TCP   | metrics | Private |
 
 Optional flags can be enabled that enable pprof or metrics (or both) - however, they both run on 6060 by default, so
 you'll have to change one if you want to run both at the same time. use `--help` with the binary for more info.
