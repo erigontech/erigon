@@ -13,16 +13,21 @@ service ETHBACKEND {
   rpc NetVersion(NetVersionRequest) returns (NetVersionReply);
 
   rpc NetPeerCount(NetPeerCountRequest) returns (NetPeerCountReply);
-  // "The Merge" RPC Requests to be netively implemented in the Erigon Node Backend
 
-  // Fetch Execution Payload using its id.
+  // ------------------------------------------------------------------------
+  // "The Merge" RPC requests natively implemented in the Erigon node backend
+
+  // Fetch Execution Payload using its ID.
   rpc EngineGetPayloadV1(EngineGetPayloadRequest) returns (types.ExecutionPayload);
 
-  // Execute the payload.
-  rpc EngineExecutePayloadV1(types.ExecutionPayload) returns (EngineExecutePayloadReply);
+  // Validate and possibly execute the payload.
+  rpc EngineNewPayloadV1(types.ExecutionPayload) returns (EnginePayloadStatus);
 
   // Update fork choice
   rpc EngineForkChoiceUpdatedV1(EngineForkChoiceUpdatedRequest) returns (EngineForkChoiceUpdatedReply);
+
+  // End of the Merge requests
+  // ------------------------------------------------------------------------
 
   // Version returns the service version number
   rpc Version(google.protobuf.Empty) returns (types.VersionReply);
@@ -68,30 +73,41 @@ message NetPeerCountReply { uint64 count = 1; }
 message EngineGetPayloadRequest {
   uint64 payloadId = 1;
 }
-message EngineExecutePayloadReply {
-  string status = 1;
-  types.H256 latestValidHash = 2;
+
+enum EngineStatus {
+  VALID = 0;
+  INVALID = 1;
+  SYNCING = 2;
+  ACCEPTED = 3;
+  INVALID_BLOCK_HASH = 4;
+  INVALID_TERMINAL_BLOCK = 5;
 }
 
-message EnginePreparePayload {
+message EnginePayloadStatus {
+  EngineStatus status = 1;
+  types.H256 latestValidHash = 2;
+  string validationError = 3;
+}
+
+message EnginePayloadAttributes {
   uint64 timestamp = 1;
   types.H256 random = 2;
-  types.H160 feeRecipient = 3;
+  types.H160 suggestedFeeRecipient = 3;
 }
 
-message EngineForkChoiceUpdated {
+message EngineForkChoiceState {
   types.H256 headBlockHash = 1;
   types.H256 safeBlockHash = 2;
   types.H256 finalizedBlockHash = 3;
 }
 
 message EngineForkChoiceUpdatedRequest {
-  EngineForkChoiceUpdated forkchoice = 1;
-  EnginePreparePayload prepare = 2;
+  EngineForkChoiceState forkchoiceState = 1;
+  EnginePayloadAttributes payloadAttributes = 2;
 }
 
 message EngineForkChoiceUpdatedReply {
-  string status = 1;
+  EnginePayloadStatus payloadStatus = 1;
   uint64 payloadId = 2;
 }
 

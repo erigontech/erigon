@@ -16,7 +16,8 @@ web3 = []
 
 [dependencies]
 arrayref = "0.3"
-ethereum-types = { version = "0.12", default-features = false }
+ethereum-types = { version = "0.13", default-features = false }
+ethnum = { version = "1", default-features = false }
 once_cell = { version = "1", optional = true }
 prost = "0.9"
 serde = { version = "1", features = ["derive"], optional = true }

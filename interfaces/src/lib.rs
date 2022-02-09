@@ -111,6 +111,18 @@ pub mod types {
     U!(H128, ethereum_types::H128, ethereum_types::U128);
     U!(H256, ethereum_types::H256, ethereum_types::U256);
     U!(H512, ethereum_types::H512, ethereum_types::U512);
+
+    impl From<ethnum::U256> for H256 {
+        fn from(v: ethnum::U256) -> Self {
+            ethereum_types::H256(v.to_be_bytes()).into()
+        }
+    }
+
+    impl From<H256> for ethnum::U256 {
+        fn from(v: H256) -> Self {
+            ethnum::U256::from_be_bytes(ethereum_types::H256::from(v).0)
+        }
+    }
 }
 
 #[cfg(feature = "consensus")]
