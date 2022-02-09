@@ -53,12 +53,20 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
 }
 
+// TransitionConfiguration represents the correct configurations of the CL and the EL
+type TransitionConfiguration struct {
+	TerminalTotalDifficulty *hexutil.Big   `json:"terminalTotalDifficulty" gencodec:"required"`
+	TerminalBlockHash       common.Hash    `json:"terminalBlockHash"     gencodec:"required"`
+	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber" gencodec:"requiered"`
+}
+
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
+	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration, terminalBlockNumber hexutil.Uint64) (TransitionConfiguration, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
