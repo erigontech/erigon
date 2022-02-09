@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -153,9 +154,10 @@ func HeadersPOS(
 	forkChoiceInsteadOfNewPayload := false
 	select {
 	case <-ctx.Done():
-		return nil // FIXME(yperbasis): what about ethbackend waiting for payload status?
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		return nil
 	case <-cfg.hd.SkipCycleHack:
-		return nil // FIXME(yperbasis): what about ethbackend waiting for payload status?
+		return nil
 	case forkChoiceMessage = <-cfg.forkChoiceCh:
 		forkChoiceInsteadOfNewPayload = true
 	case payloadMessage = <-cfg.newPayloadCh:
