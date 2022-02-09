@@ -587,8 +587,8 @@ func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
 	defer hd.lock.RUnlock()
 	// Assemble the request
 	return HeaderRequest{
-		Hash:    common.Hash{},
-		Number:  hd.lastProcessedPayload - 1,
+		Hash:    hd.hashToDownloadPoS,
+		Number:  hd.heightToDownloadPoS,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
@@ -718,10 +718,10 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
-func (hd *HeaderDownload) SetExpectedHash(hash common.Hash) {
+func (hd *HeaderDownload) SetHashToDownloadPoS(hash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.expectedHash = hash
+	hd.hashToDownloadPoS = hash
 }
 
 func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
@@ -737,23 +737,25 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
-		// If we found the block number we were missing, we can just dismiss it
-		if header.Hash() != hd.expectedHash {
-			return nil
+		if header.Hash() != hd.hashToDownloadPoS {
+			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.hashToDownloadPoS)
 		}
-		currentCanonical, err := rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
-		if err != nil {
-			return err
-		}
-		if currentCanonical == hd.expectedHash || hd.lastProcessedPayload == 1 {
-			hd.synced = true
-			return nil
-		}
+
 		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
 			return err
 		}
-		hd.expectedHash = segmentFragment.Header.ParentHash
-		hd.lastProcessedPayload = header.Number.Uint64()
+
+		hd.hashToDownloadPoS = header.ParentHash
+		hd.heightToDownloadPoS = header.Number.Uint64() - 1
+
+		if rawdb.ReadHeader(tx, hd.hashToDownloadPoS, hd.heightToDownloadPoS) != nil {
+			hd.synced = true
+			return nil
+		}
+
+		if hd.heightToDownloadPoS == 0 {
+			return errors.New("wrong genesis in PoS sync")
+		}
 	}
 	return nil
 }
@@ -771,7 +773,7 @@ func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	if hd.posSync {
-		return hd.lastProcessedPayload
+		return hd.heightToDownloadPoS
 	} else {
 		return hd.highestInDb
 	}
@@ -825,6 +827,49 @@ func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader in
 	}
 }
 
+// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
+// Most common case - forking point is the height of the parent header
+func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *types.Header) (forkingPoint uint64, err error) {
+	blockHeight := header.Number.Uint64()
+	var ch common.Hash
+	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
+		ch = fromCache.(common.Hash)
+	} else {
+		if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
+			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
+		}
+	}
+	if ch == header.ParentHash {
+		forkingPoint = blockHeight - 1
+	} else {
+		// Going further back
+		ancestorHash := parent.ParentHash
+		ancestorHeight := blockHeight - 2
+		// Look in the cache first
+		for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
+			ch = fromCache.(common.Hash)
+			if ch == ancestorHash {
+				break
+			}
+			ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+			ancestorHash = ancestor.ParentHash
+			ancestorHeight--
+		}
+		// Now look in the DB
+		for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
+			ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+			ancestorHash = ancestor.ParentHash
+			ancestorHeight--
+		}
+		if err != nil {
+			return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+		}
+		// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
+		forkingPoint = ancestorHeight
+	}
+	return
+}
+
 func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interfaces.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
@@ -853,45 +898,9 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
 		hi.newCanonical = true
-		// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
-		// Most common case - forking point is the height of the parent header
-		var forkingPoint uint64
-		var ch common.Hash
-		var err error
-		if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
-			ch = fromCache.(common.Hash)
-		} else {
-			if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
-				return nil, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
-			}
-		}
-		if ch == header.ParentHash {
-			forkingPoint = blockHeight - 1
-		} else {
-			// Going further back
-			ancestorHash := parent.ParentHash
-			ancestorHeight := blockHeight - 2
-			// Look in the cache first
-			for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
-				ch = fromCache.(common.Hash)
-				if ch == ancestorHash {
-					break
-				}
-				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
-				ancestorHash = ancestor.ParentHash
-				ancestorHeight--
-			}
-			// Now look in the DB
-			for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
-				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
-				ancestorHash = ancestor.ParentHash
-				ancestorHeight--
-			}
-			if err != nil {
-				return nil, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
-			}
-			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
-			forkingPoint = ancestorHeight
+		forkingPoint, err := hi.ForkingPoint(db, header, parent)
+		if err != nil {
+			return nil, err
 		}
 		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
 			return nil, fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
@@ -942,13 +951,6 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 	}
 	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
-	}
-
-	if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
-		return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
-	}
-	if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-		return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
 	}
 
 	hi.highest = blockHeight
@@ -1084,10 +1086,10 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.fetching = fetching
 }
 
-func (hd *HeaderDownload) SetProcessed(lastProcessed uint64) {
+func (hd *HeaderDownload) SetHeightToDownloadPoS(heightToDownloadPoS uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.lastProcessedPayload = lastProcessed
+	hd.heightToDownloadPoS = heightToDownloadPoS
 }
 
 func (hd *HeaderDownload) Unsync() {
@@ -1132,22 +1134,22 @@ func (hd *HeaderDownload) Fetching() bool {
 	return hd.fetching
 }
 
-func (hd *HeaderDownload) GetPendingExecutionStatus() common.Hash {
+func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.pendingExecutionStatus
+	return hd.pendingPayloadStatus
 }
 
-func (hd *HeaderDownload) SetPendingExecutionStatus(header common.Hash) {
+func (hd *HeaderDownload) SetPendingPayloadStatus(header common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingExecutionStatus = header
+	hd.pendingPayloadStatus = header
 }
 
-func (hd *HeaderDownload) ClearPendingExecutionStatus() {
+func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingExecutionStatus = common.Hash{}
+	hd.pendingPayloadStatus = common.Hash{}
 }
 
 func (hd *HeaderDownload) InsertList() []*Link {

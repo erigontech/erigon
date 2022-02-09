@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sort"
 	"sync"
 	"sync/atomic"
 
@@ -16,20 +17,11 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
-)
-
-type PayloadStatus string
-
-const (
-	Syncing PayloadStatus = "SYNCING"
-	Valid   PayloadStatus = "VALID"
-	Invalid PayloadStatus = "INVALID"
 )
 
 type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error)
@@ -40,6 +32,8 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
+
+const MaxPendingPayloads = 128
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -53,10 +47,12 @@ type EthBackendServer struct {
 	// Block proposing for proof-of-stake
 	payloadId       uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
-	// Send reverse sync starting point to staged sync
-	reverseDownloadCh chan<- PayloadMessage
-	// Notify whether the current block being processed is Valid or not
-	statusCh <-chan ExecutionStatus
+	// Send new Beacon Chain payloads to staged sync
+	newPayloadCh chan<- PayloadMessage
+	// Send Beacon Chain fork choice updates to staged sync
+	forkChoiceCh chan<- ForkChoiceMessage
+	// Replies to newPayload & forkchoice requests
+	statusCh <-chan PayloadStatus
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -76,24 +72,32 @@ type EthBackend interface {
 // This is the status of a newly execute block.
 // Hash: Block hash
 // Status: block's status
-type ExecutionStatus struct {
-	Status          PayloadStatus
+type PayloadStatus struct {
+	Status          remote.EngineStatus
 	LatestValidHash common.Hash
-	Error           error
+	ValidationError error
+	CriticalError   error
 }
 
-// The message we are going to send to the stage sync in ExecutePayload
+// The message we are going to send to the stage sync in NewPayload
 type PayloadMessage struct {
 	Header *types.Header
 	Body   *types.RawBody
 }
 
+// The message we are going to send to the stage sync in ForkchoiceUpdated
+type ForkChoiceMessage struct {
+	HeadBlockHash      common.Hash
+	SafeBlockHash      common.Hash
+	FinalizedBlockHash common.Hash
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, reverseDownloadCh chan<- PayloadMessage, statusCh <-chan ExecutionStatus, waitingForBeaconChain *uint32,
-	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
+	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		reverseDownloadCh: reverseDownloadCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
+		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
@@ -205,20 +209,24 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remote.BlockRequest) 
 	return &remote.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
 }
 
-// EngineExecutePayloadV1, executes payload
-func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error) {
+func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadStatus {
+	reply := remote.EnginePayloadStatus{Status: payloadStatus.Status}
+	if payloadStatus.LatestValidHash != (common.Hash{}) {
+		reply.LatestValidHash = gointerfaces.ConvertHashToH256(payloadStatus.LatestValidHash)
+	}
+	if payloadStatus.ValidationError != nil {
+		reply.ValidationError = payloadStatus.ValidationError.Error()
+	}
+	return &reply
+}
+
+// EngineNewPayloadV1, validates and possibly executes payload
+func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
-	}
-
-	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-	// If another payload is already commissioned then we just reply with syncing
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
-		// We are still syncing a commissioned payload
-		return &remote.EngineExecutePayloadReply{Status: string(Syncing)}, nil
 	}
 
 	var baseFee *big.Int
@@ -248,11 +256,24 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
 		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
+
+	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
-		return nil, fmt.Errorf("invalid hash for payload. got: %s, wanted: %s", common.Bytes2Hex(blockHash[:]), common.Bytes2Hex(header.Hash().Bytes()))
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
+
+	// If another payload is already commissioned then we just reply with syncing
+	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+		// We are still syncing a commissioned payload
+		// TODO(yperbasis): not entirely correct since per the spec:
+		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
+		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
+		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
+	}
+
 	// Send the block over
-	s.reverseDownloadCh <- PayloadMessage{
+	s.newPayloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
 			Transactions: req.Transactions,
@@ -260,23 +281,18 @@ func (s *EthBackendServer) EngineExecutePayloadV1(ctx context.Context, req *type
 		},
 	}
 
-	executedStatus := <-s.statusCh
-	// Discard all previous prepared payloads if another block was proposed
-	if executedStatus.Error != nil {
-		return nil, executedStatus.Error
+	payloadStatus := <-s.statusCh
+	if payloadStatus.CriticalError != nil {
+		return nil, payloadStatus.CriticalError
 	}
-	// Discard all payload assembled
-	s.pendingPayloads = make(map[uint64]types2.ExecutionPayload)
-	// Send reply over
-	reply := remote.EngineExecutePayloadReply{Status: string(executedStatus.Status)}
-	if executedStatus.LatestValidHash != (common.Hash{}) {
-		reply.LatestValidHash = gointerfaces.ConvertHashToH256(executedStatus.LatestValidHash)
-	}
-	return &reply, nil
+
+	return convertPayloadStatus(&payloadStatus), nil
 }
 
 // EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
+	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
+
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 
@@ -303,7 +319,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	}
 }
 
-// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new bloc
+// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
@@ -312,44 +328,68 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	// Check if parent equate to the head
-	parent := gointerfaces.ConvertH256ToHash(req.Forkchoice.HeadBlockHash)
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
+	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
+	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
+	// (i.e. it references an old block).
+	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
 
-	if parent != rawdb.ReadHeadHeaderHash(tx) {
-		// TODO(enriavil1): make unwind happen
-		return &remote.EngineForkChoiceUpdatedReply{
-			Status: string(Syncing),
-		}, nil
-	}
-
-	// Same if we are not waiting for the beacon chain
 	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 		return &remote.EngineForkChoiceUpdatedReply{
-			Status: string(Syncing),
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
+	}
+
+	s.forkChoiceCh <- ForkChoiceMessage{
+		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
+		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
+		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
+	}
+
+	payloadStatus := <-s.statusCh
+	if payloadStatus.CriticalError != nil {
+		return nil, payloadStatus.CriticalError
+	}
+
+	// No need for payload building
+	if req.PayloadAttributes == nil || payloadStatus.Status != remote.EngineStatus_VALID {
+		return &remote.EngineForkChoiceUpdatedReply{PayloadStatus: convertPayloadStatus(&payloadStatus)}, nil
 	}
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
+	s.evictOldPendingPayloads()
+
+	// payload IDs start from 1 (0 signifies null)
+	s.payloadId++
+
 	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
-		Random:    req.Prepare.Random,
-		Timestamp: req.Prepare.Timestamp,
-		Coinbase:  req.Prepare.FeeRecipient,
+		Random:    req.PayloadAttributes.Random,
+		Timestamp: req.PayloadAttributes.Timestamp,
+		Coinbase:  req.PayloadAttributes.SuggestedFeeRecipient,
 	}
 	// Unpause assemble process
 	s.syncCond.Broadcast()
 	// successfully assembled the payload and assigned the correct id
-	defer func() { s.payloadId++ }()
 	return &remote.EngineForkChoiceUpdatedReply{
-		Status:    "SUCCESS",
-		PayloadId: s.payloadId,
+		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
+		PayloadId:     s.payloadId,
 	}, nil
+}
+
+func (s *EthBackendServer) evictOldPendingPayloads() {
+	// sort payload IDs in ascending order
+	ids := make([]uint64, 0, len(s.pendingPayloads))
+	for id := range s.pendingPayloads {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	// remove old payloads so that at most MaxPendingPayloads - 1 remain
+	for i := 0; i <= len(s.pendingPayloads)-MaxPendingPayloads; i++ {
+		delete(s.pendingPayloads, ids[i])
+	}
 }
 
 func (s *EthBackendServer) StartProposer() {
@@ -421,6 +461,7 @@ func (s *EthBackendServer) StartProposer() {
 					Transactions:  encodedTransactions,
 				}
 			}
+
 			// Broadcast the signal that an entire loop over pending payloads has been executed
 			s.syncCond.Broadcast()
 		}

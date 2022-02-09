@@ -33,8 +33,8 @@ type ApiBackend interface {
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
-	EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EngineExecutePayloadReply, error)
-	EngineForkchoiceUpdateV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)
+	EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
+	EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)
 	EngineGetPayloadV1(ctx context.Context, payloadId uint64) (*types2.ExecutionPayload, error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 }
@@ -164,11 +164,11 @@ func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, h
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }
 
-func (back *RemoteBackend) EngineExecutePayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EngineExecutePayloadReply, err error) {
-	return back.remoteEthBackend.EngineExecutePayloadV1(ctx, payload)
+func (back *RemoteBackend) EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EnginePayloadStatus, err error) {
+	return back.remoteEthBackend.EngineNewPayloadV1(ctx, payload)
 }
 
-func (back *RemoteBackend) EngineForkchoiceUpdateV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
+func (back *RemoteBackend) EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	return back.remoteEthBackend.EngineForkChoiceUpdatedV1(ctx, request)
 }
 
