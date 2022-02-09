@@ -343,6 +343,7 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 
 	switch event.Type {
 	case remote.Event_HEADER:
+		fmt.Printf("alex: new head\n")
 		payload := event.Data
 		var header types.Header
 		if len(payload) == 0 {
