@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"reflect"
-	"time"
 
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -117,7 +115,6 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
-	defer func(t time.Time) { fmt.Printf("alex stage_finish.go:120: %s\n", time.Since(t)) }(time.Now())
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var notifyFrom uint64
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
