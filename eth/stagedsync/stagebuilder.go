@@ -11,7 +11,7 @@ import (
 )
 
 type ChainEventNotifier interface {
-	OnNewHeader(newHeaderRlp []byte)
+	OnNewHeader(newHeadersRlp [][]byte)
 	OnNewPendingLogs(types.Logs)
 }
 

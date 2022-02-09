@@ -16,7 +16,7 @@ type PendingTxsSubscription func([]types.Transaction) error
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
 	id                        int
-	headerSubscriptions       map[int]chan []byte
+	headerSubscriptions       map[int]chan [][]byte
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
@@ -25,17 +25,17 @@ type Events struct {
 
 func NewEvents() *Events {
 	return &Events{
-		headerSubscriptions:       map[int]chan []byte{},
+		headerSubscriptions:       map[int]chan [][]byte{},
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
 	}
 }
 
-func (e *Events) AddHeaderSubscription() (chan []byte, func()) {
+func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	ch := make(chan []byte, 8)
+	ch := make(chan [][]byte, 8)
 	e.id++
 	id := e.id
 	e.headerSubscriptions[id] = ch
@@ -57,12 +57,12 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
 }
 
-func (e *Events) OnNewHeader(newHeaderRlp []byte) {
+func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.headerSubscriptions {
 		select {
-		case ch <- newHeaderRlp:
+		case ch <- newHeadersRlp:
 		default: //if channel is full (slow consumer), drop old messages
 			for i := 0; i < cap(ch)/2; i++ {
 				select {
@@ -70,7 +70,7 @@ func (e *Events) OnNewHeader(newHeaderRlp []byte) {
 				default:
 				}
 			}
-			ch <- newHeaderRlp
+			ch <- newHeadersRlp
 		}
 	}
 }

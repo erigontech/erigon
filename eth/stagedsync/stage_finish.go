@@ -126,17 +126,19 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	notifyFrom++
 
 	var notifyTo uint64
+	var headersRlp [][]byte
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
 		}
 		notifyTo = binary.BigEndian.Uint64(k)
-		notifier.OnNewHeader(common2.CopyBytes(headerRLP))
+		headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
 		log.Error("RPC Daemon notification failed", "error", err)
 		return err
 	}
+	notifier.OnNewHeader(headersRlp)
 
 	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
 	return nil

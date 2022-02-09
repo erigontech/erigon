@@ -140,22 +140,27 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	ch, clean := s.events.AddHeaderSubscription()
 	defer clean()
 	log.Info("new subscription to newHeaders established")
-	defer log.Warn("subscription to newHeaders closed", "reason", err)
+	defer func() {
+		if err != nil {
+			log.Warn("subscription to newHeaders closed", "reason", err)
+		} else {
+			log.Warn("subscription to newHeaders closed")
+		}
+	}()
 	for {
 		select {
 		case <-s.ctx.Done():
 			return s.ctx.Err()
 		case <-subscribeServer.Context().Done():
 			return subscribeServer.Context().Err()
-		case headerRlp := <-ch:
-			err = subscribeServer.Send(&remote.SubscribeReply{
-				Type: remote.Event_HEADER,
-				Data: headerRlp,
-			})
-			// next time we try to send an event
-			if err != nil {
-				log.Info("event subscription channel was closed", "reason", err)
-				return err
+		case headersRlp := <-ch:
+			for _, headerRlp := range headersRlp {
+				if err = subscribeServer.Send(&remote.SubscribeReply{
+					Type: remote.Event_HEADER,
+					Data: headerRlp,
+				}); err != nil {
+					return err
+				}
 			}
 		}
 	}
