@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -56,24 +57,24 @@ func StageLoop(
 		height := hd.TopSeenHeight()
 		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
-		pendingExecutionStatus := hd.GetPendingExecutionStatus()
-		if pendingExecutionStatus != (common.Hash{}) {
+		pendingPayloadStatus := hd.GetPendingPayloadStatus()
+		if pendingPayloadStatus != (common.Hash{}) {
 			if err != nil {
-				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{Error: err}
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 			} else {
-				var status privateapi.PayloadStatus
-				if headBlockHash == pendingExecutionStatus {
-					status = privateapi.Valid
+				var status remote.EngineStatus
+				if headBlockHash == pendingPayloadStatus {
+					status = remote.EngineStatus_VALID
 				} else {
-					status = privateapi.Invalid
+					status = remote.EngineStatus_INVALID
 				}
-				hd.ExecutionStatusCh <- privateapi.ExecutionStatus{
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{
 					Status:          status,
 					LatestValidHash: headBlockHash,
 				}
 			}
 
-			hd.ClearPendingExecutionStatus()
+			hd.ClearPendingPayloadStatus()
 		}
 
 		if err != nil {
@@ -249,8 +250,9 @@ func NewStagedSync(
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	reverseDownloadCh chan privateapi.PayloadMessage,
-	waitingForPOSHeaders *uint32,
+	newPayloadCh chan privateapi.PayloadMessage,
+	forkChoiceCh chan privateapi.ForkChoiceMessage,
+	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
@@ -276,8 +278,9 @@ func NewStagedSync(
 			controlServer.Penalize,
 			cfg.BatchSize,
 			p2pCfg.NoDiscovery,
-			reverseDownloadCh,
-			waitingForPOSHeaders,
+			newPayloadCh,
+			forkChoiceCh,
+			waitingForBeaconChain,
 			allSnapshots,
 			snapshotDownloader,
 			blockReader,

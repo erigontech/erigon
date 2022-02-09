@@ -56,7 +56,7 @@ type PayloadAttributes struct {
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
-	ExecutePayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
+	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
 }
@@ -68,51 +68,56 @@ type EngineImpl struct {
 	api services.ApiBackend
 }
 
-// ForkchoiceUpdatedV1 is executed only if we are running a beacon validator,
-// in erigon we do not use this for reorgs like go-ethereum does since we can do that in engine_executePayloadV1
-// if the payloadAttributes is different than null, we return
-func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
-	// Unwinds can be made within engine_excutePayloadV1 so we can return success regardless
-	if payloadAttributes == nil {
-		return map[string]interface{}{
-			"status": "SUCCESS",
-		}, nil
+func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} {
+	json := map[string]interface{}{
+		"status": x.Status.String(),
 	}
-	// Request for assembling payload
-	reply, err := e.api.EngineForkchoiceUpdateV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
-		Prepare: &remote.EnginePreparePayload{
-			Timestamp:    uint64(payloadAttributes.Timestamp),
-			Random:       gointerfaces.ConvertHashToH256(payloadAttributes.Random),
-			FeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
-		},
-		Forkchoice: &remote.EngineForkChoiceUpdated{
+	if x.LatestValidHash != nil {
+		json["latestValidHash"] = gointerfaces.ConvertH256ToHash(x.LatestValidHash)
+	}
+	if x.ValidationError != "" {
+		json["validationError"] = x.ValidationError
+	}
+
+	return json
+}
+
+func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+	var prepareParameters *remote.EnginePayloadAttributes
+	if payloadAttributes != nil {
+		prepareParameters = &remote.EnginePayloadAttributes{
+			Timestamp:             uint64(payloadAttributes.Timestamp),
+			Random:                gointerfaces.ConvertHashToH256(payloadAttributes.Random),
+			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
+		}
+	}
+	reply, err := e.api.EngineForkchoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
+		ForkchoiceState: &remote.EngineForkChoiceState{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
 			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
 		},
+		PayloadAttributes: prepareParameters,
 	})
 	if err != nil {
 		return nil, err
 	}
-	// Process reply
-	if reply.Status == "SYNCING" {
-		return map[string]interface{}{
-			"status": reply.Status,
-		}, nil
+
+	json := map[string]interface{}{
+		"payloadStatus": convertPayloadStatus(reply.PayloadStatus),
 	}
-	encodedPayloadId := make([]byte, 8)
-	binary.BigEndian.PutUint64(encodedPayloadId, reply.PayloadId)
-	// Answer
-	return map[string]interface{}{
-		"status":    reply.Status,
-		"payloadId": hexutil.Bytes(encodedPayloadId),
-	}, nil
+	if reply.PayloadId != 0 {
+		encodedPayloadId := make([]byte, 8)
+		binary.BigEndian.PutUint64(encodedPayloadId, reply.PayloadId)
+		json["payloadId"] = hexutil.Bytes(encodedPayloadId)
+	}
+
+	return json, nil
 }
 
-// ExecutePayloadV1 takes a block from the beacon chain and do either two of the following things
-// - Stageloop the block just received if we have the payload's parent hash already
-// - Start the reverse sync process otherwise, and return "Syncing"
-func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
+// NewPayloadV1 processes new payloads (blocks) from the beacon chain.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
+func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
 		var overflow bool
@@ -128,7 +133,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 	for i, transaction := range payload.Transactions {
 		transactions[i] = ([]byte)(transaction)
 	}
-	res, err := e.api.EngineExecutePayloadV1(ctx, &types2.ExecutionPayload{
+	res, err := e.api.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
@@ -148,16 +153,7 @@ func (e *EngineImpl) ExecutePayloadV1(ctx context.Context, payload *ExecutionPay
 		return nil, err
 	}
 
-	if res.LatestValidHash != nil {
-		var latestValidHash common.Hash = gointerfaces.ConvertH256ToHash(res.LatestValidHash)
-		return map[string]interface{}{
-			"status":          res.Status,
-			"latestValidHash": latestValidHash,
-		}, nil
-	}
-	return map[string]interface{}{
-		"status": res.Status,
-	}, nil
+	return convertPayloadStatus(res), nil
 }
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {

@@ -260,8 +260,16 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		// bor (consensus) specific db
 		var borKv kv.RoDB
 		borDbPath := path.Join(cfg.Datadir, "bor")
+		{
+			// ensure db exist
+			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, err
+			}
+			tmpDb.Close()
+		}
 		log.Trace("Creating consensus db", "path", borDbPath)
-		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Readonly().Open()
+		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
