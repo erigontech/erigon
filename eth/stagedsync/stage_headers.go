@@ -895,6 +895,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		i++
 	}
+	log.Info("[Snapshots] Fetching torrent files metadata")
 	for {
 		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
 			log.Error("[Snapshots] Can't call downloader", "err", err)
