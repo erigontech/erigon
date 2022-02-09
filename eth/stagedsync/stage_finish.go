@@ -1,18 +1,15 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"reflect"
-
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	common2 "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -128,20 +125,13 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	notifyFrom++
 
-	startKey := make([]byte, reflect.TypeOf(notifyFrom).Size()+32)
 	var notifyTo uint64
-	binary.BigEndian.PutUint64(startKey, notifyFrom)
-	if err := tx.ForEach(kv.Headers, startKey, func(k, headerRLP []byte) error {
+	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
 		}
-		header := new(types.Header)
-		if err := rlp.Decode(bytes.NewReader(headerRLP), header); err != nil {
-			log.Error("Invalid block header RLP", "err", err)
-			return err
-		}
-		notifyTo = header.Number.Uint64()
-		notifier.OnNewHeader(header)
+		notifyTo = binary.BigEndian.Uint64(k)
+		notifier.OnNewHeader(common2.CopyBytes(headerRLP))
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
 		log.Error("RPC Daemon notification failed", "error", err)
