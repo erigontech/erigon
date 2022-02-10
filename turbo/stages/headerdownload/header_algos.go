@@ -990,9 +990,9 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
 func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID enode.ID) (requestMore bool, penalties []PenaltyItem) {
-	// ChainSegment is sorted in the order of descending block numbers, so the lowest is at the end, and the highest is in the beginning
-	highestNum := segment[0].Number
-	lowestNum := segment[len(segment)-1].Number
+	lowestNum := segment[0].Number
+	highest := segment[len(segment)-1]
+	highestNum := highest.Number
 	log.Trace("processSegment", "from", lowestNum, "to", highestNum)
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -1008,7 +1008,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		return
 	}
 	if highestNum > hd.topSeenHeightPoW {
-		if newBlock || hd.seenAnnounces.Seen(segment[0].Hash) {
+		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
 			hd.topSeenHeightPoW = highestNum
 		}
 	}
