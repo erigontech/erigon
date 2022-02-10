@@ -25,9 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -89,37 +87,6 @@ type Backend interface {
 type TxPool interface {
 	// Get retrieves the the transaction from the local txpool with the given hash.
 	Get(hash common.Hash) types.Transaction
-}
-
-// MakeProtocols constructs the P2P protocol definitions for `eth`.
-func MakeProtocols(backend Backend, readNodeInfo func() *NodeInfo, dnsdisc enode.Iterator, chainConfig *params.ChainConfig, genesisHash common.Hash, headHeight uint64) []p2p.Protocol {
-	protocols := make([]p2p.Protocol, len(ProtocolVersions))
-	for i, version := range ProtocolVersions {
-		version := version // Closure
-
-		protocols[i] = p2p.Protocol{
-			Name:    ProtocolName,
-			Version: version,
-			Length:  protocolLengths[version],
-			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				peer := NewPeer(version, p, rw, backend.TxPool())
-				defer peer.Close()
-
-				return backend.RunPeer(peer, func(peer *Peer) error {
-					return Handle(backend, peer)
-				})
-			},
-			NodeInfo: func() interface{} {
-				return readNodeInfo()
-			},
-			PeerInfo: func(id enode.ID) interface{} {
-				return backend.PeerInfo(id)
-			},
-			Attributes:     []enr.Entry{CurrentENREntry(chainConfig, genesisHash, headHeight)},
-			DialCandidates: dnsdisc,
-		}
-	}
-	return protocols
 }
 
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata
