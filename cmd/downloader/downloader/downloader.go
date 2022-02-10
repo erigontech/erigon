@@ -168,8 +168,6 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 	peers := map[torrent.PeerID]*torrent.PeerConn{}
 	torrents := client.Torrents()
 	for _, t := range torrents {
-		fmt.Printf("alex: %s, %x\n", t.Info().Name, t.InfoHash())
-
 		stats := t.Stats()
 		/*
 			var completedPieces, partialPieces int
