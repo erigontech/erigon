@@ -831,7 +831,7 @@ RETRY:
 		i, offset uint64
 		err       error
 	}
-	txsCh := make(chan txWithOffet, 4096)
+	txsCh := make(chan txWithOffet, 10*1024)
 	go func() {
 		defer close(txsCh)
 		parseCtx := txpool.NewTxParseContext(chainID)
@@ -1014,7 +1014,7 @@ type decompressItem struct {
 }
 
 func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompressItem {
-	ch := make(chan decompressItem, 4096)
+	ch := make(chan decompressItem, 10*1024)
 	go func() {
 		defer close(ch)
 		if err := d.WithReadAhead(func() error {
