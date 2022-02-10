@@ -825,6 +825,32 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 	}
 
 RETRY:
+	ch := forEachAsync(ctx, d)
+	type txWithOffet struct {
+		txnHash   [32]byte
+		i, offset uint64
+		err       error
+	}
+	txsCh := make(chan txWithOffet, 4096)
+	go func() {
+		defer close(txsCh)
+		parseCtx := txpool.NewTxParseContext(chainID)
+		parseCtx.WithSender(false)
+		slot := txpool.TxSlot{}
+		var sender [20]byte
+		for it := range ch {
+			if it.err != nil {
+				txsCh <- txWithOffet{err: it.err}
+				return
+			}
+			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+				txsCh <- txWithOffet{err: it.err}
+				return
+			}
+			txsCh <- txWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
+		}
+	}()
+
 	blockNum := firstBlockNum
 	body := &types.BodyForStorage{}
 	if err := sn.Bodies.WithReadAhead(func() error {
@@ -835,40 +861,14 @@ RETRY:
 			return err
 		}
 
-		ch := forEachAsync(ctx, d)
-		type txWithOffet struct {
-			txn       txpool.TxSlot
-			i, offset uint64
-			err       error
-		}
-		txsCh := make(chan txWithOffet, 4096)
-		go func() {
-			defer close(txsCh)
-			parseCtx := txpool.NewTxParseContext(chainID)
-			parseCtx.WithSender(false)
-			slot := txpool.TxSlot{}
-			var sender [20]byte
-			for it := range ch {
-				if it.err != nil {
-					txsCh <- txWithOffet{err: it.err}
-					return
-				}
-				if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
-					txsCh <- txWithOffet{err: it.err}
-					return
-				}
-				txsCh <- txWithOffet{txn: slot, i: it.i, offset: it.offset}
-			}
-		}()
 		for it := range txsCh {
 			if it.err != nil {
 				return it.err
 			}
-			i, offset, slot := it.i, it.offset, it.txn
-			if err := txnHashIdx.AddKey(slot.IdHash[:], offset); err != nil {
+			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
 				return err
 			}
-			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+it.i { // skip empty blocks
 				if !bodyGetter.HasNext() {
 					return fmt.Errorf("not enough bodies")
 				}
@@ -879,7 +879,7 @@ RETRY:
 				blockNum++
 			}
 
-			if err := txnHash2BlockNumIdx.AddKey(slot.IdHash[:], blockNum); err != nil {
+			if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
 				return err
 			}
 
