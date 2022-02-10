@@ -8,14 +8,15 @@ import (
 
 type RpcEventType uint64
 
-type HeaderSubscription func(*types.Header) error
+type HeaderSubscription func(headerRLP []byte) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
-	headerSubscriptions       map[int]HeaderSubscription
+	id                        int
+	headerSubscriptions       map[int]chan [][]byte
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
@@ -24,17 +25,24 @@ type Events struct {
 
 func NewEvents() *Events {
 	return &Events{
-		headerSubscriptions:       map[int]HeaderSubscription{},
+		headerSubscriptions:       map[int]chan [][]byte{},
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
 	}
 }
 
-func (e *Events) AddHeaderSubscription(s HeaderSubscription) {
+func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	e.headerSubscriptions[len(e.headerSubscriptions)] = s
+	ch := make(chan [][]byte, 8)
+	e.id++
+	id := e.id
+	e.headerSubscriptions[id] = ch
+	return ch, func() {
+		delete(e.headerSubscriptions, id)
+		close(ch)
+	}
 }
 
 func (e *Events) AddPendingLogsSubscription(s PendingLogsSubscription) {
@@ -49,12 +57,20 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
 }
 
-func (e *Events) OnNewHeader(newHeader *types.Header) {
+func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	for i, sub := range e.headerSubscriptions {
-		if err := sub(newHeader); err != nil {
-			delete(e.headerSubscriptions, i)
+	for _, ch := range e.headerSubscriptions {
+		select {
+		case ch <- newHeadersRlp:
+		default: //if channel is full (slow consumer), drop old messages
+			for i := 0; i < cap(ch)/2; i++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+			ch <- newHeadersRlp
 		}
 	}
 }
