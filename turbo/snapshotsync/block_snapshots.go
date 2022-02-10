@@ -887,7 +887,7 @@ RETRY:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum, "a", len(ch), "b", len(txsCh))
 			default:
 			}
 			j++
