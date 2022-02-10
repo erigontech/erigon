@@ -317,11 +317,14 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 	return snapshot, false
 }
 
-func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string) error {
+func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string, from uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	for _, sn := range s.blocks {
+		if sn.From < from {
+			continue
+		}
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
 		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
@@ -329,6 +332,9 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 	}
 
 	for _, sn := range s.blocks {
+		if sn.From < from {
+			continue
+		}
 		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
 		if err := BodiesIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
@@ -339,6 +345,9 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		return err
 	}
 	for _, sn := range s.blocks {
+		if sn.From < from {
+			continue
+		}
 		// build txs idx
 		gg := sn.Bodies.MakeGetter()
 		buf, _ := gg.Next(nil)
