@@ -61,6 +61,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		if txn != nil {
 			return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
 		}
+		return nil, nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
