@@ -832,7 +832,7 @@ RETRY:
 		err       error
 	}
 	txsCh := make(chan txWithOffet, 10*1024)
-	go func() {
+	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
 		defer close(txsCh)
 		parseCtx := txpool.NewTxParseContext(chainID)
 		parseCtx.WithSender(false)
@@ -899,23 +899,30 @@ RETRY:
 		return err
 	}
 
-	if err = txnHashIdx.Build(); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			log.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			txnHashIdx.ResetNextSalt()
-			txnHash2BlockNumIdx.ResetNextSalt()
-			goto RETRY
+	wg := sync.WaitGroup{}
+	errCh := make(chan error, 2)
+	defer close(errCh)
+	go func() {
+		defer wg.Done()
+		errCh <- txnHashIdx.Build()
+	}()
+	go func() {
+		defer wg.Done()
+		errCh <- txnHash2BlockNumIdx.Build()
+	}()
+	wg.Wait()
+
+	for i := 0; i < 2; i++ {
+		err = <-errCh
+		if err != nil {
+			if errors.Is(err, recsplit.ErrCollision) {
+				log.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+				txnHashIdx.ResetNextSalt()
+				txnHash2BlockNumIdx.ResetNextSalt()
+				goto RETRY
+			}
+			return err
 		}
-		return err
-	}
-	if err = txnHash2BlockNumIdx.Build(); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			log.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			txnHashIdx.ResetNextSalt()
-			txnHash2BlockNumIdx.ResetNextSalt()
-			goto RETRY
-		}
-		return err
 	}
 
 	if j != expectedCount {
