@@ -318,7 +318,7 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 }
 
 func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string, from uint64) error {
-	logEvery := time.NewTicker(30 * time.Second)
+	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	for _, sn := range s.blocks {
