@@ -787,10 +787,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum, expectedCount uint64, segmentFilePath, tmpDir string, logEvery *time.Ticker) error {
 	dir, _ := filepath.Split(segmentFilePath)
 
-	parseCtx := txpool.NewTxParseContext(chainID)
-	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
-	var sender [20]byte
 	var j uint64
 
 	d, err := compress.NewDecompressor(segmentFilePath)
@@ -840,15 +836,39 @@ RETRY:
 		}
 
 		ch := forEachAsync(ctx, d)
-		for it := range ch {
-			i, offset, word := it.i, it.offset, it.word
-			if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
-				return err
+		type txWithOffet struct {
+			txn       txpool.TxSlot
+			i, offset uint64
+			err       error
+		}
+		txsCh := make(chan txWithOffet)
+		go func() {
+			defer close(txsCh)
+			parseCtx := txpool.NewTxParseContext(chainID)
+			parseCtx.WithSender(false)
+			slot := txpool.TxSlot{}
+			var sender [20]byte
+			for it := range ch {
+				if it.err != nil {
+					txsCh <- txWithOffet{err: it.err}
+					return
+				}
+				i, offset, word := it.i, it.offset, it.word
+				if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+					txsCh <- txWithOffet{err: it.err}
+					return
+				}
+				txsCh <- txWithOffet{txn: slot, i: i, offset: offset}
 			}
+		}()
+		for it := range txsCh {
+			if it.err != nil {
+				return it.err
+			}
+			i, offset, slot := it.i, it.offset, it.txn
 			if err := txnHashIdx.AddKey(slot.IdHash[:], offset); err != nil {
 				return err
 			}
-
 			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
 				if !bodyGetter.HasNext() {
 					return fmt.Errorf("not enough bodies")
