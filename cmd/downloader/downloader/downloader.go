@@ -243,7 +243,9 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		t.AllowDataUpload()
 	}
 	if !silent {
-		go LoggingLoop(ctx, torrentClient)
+		ctxLocal, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go LoggingLoop(ctxLocal, torrentClient)
 	}
 
 	for _, t := range torrentClient.Torrents() {
