@@ -189,6 +189,7 @@ func remap16(x uint64, n uint16) uint16 {
 // ResetNextSalt resets the RecSplit and uses the next salt value to try to avoid collisions
 // when mapping keys to 64-bit values
 func (rs *RecSplit) ResetNextSalt() {
+	rs.built = false
 	rs.collision = false
 	rs.keysAdded = 0
 	rs.salt++

@@ -531,12 +531,9 @@ func (c *Changes) deleteFiles() error {
 	return nil
 }
 
-func buildIndex(datPath, idxPath, tmpDir string, count int) (*compress.Decompressor, *recsplit.Index, error) {
-	d, err := compress.NewDecompressor(datPath)
-	if err != nil {
-		return nil, nil, err
-	}
+func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*recsplit.Index, error) {
 	var rs *recsplit.RecSplit
+	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   count,
 		Enums:      false,
@@ -549,7 +546,7 @@ func buildIndex(datPath, idxPath, tmpDir string, count int) (*compress.Decompres
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
 		IndexFile: idxPath,
 	}); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	word := make([]byte, 0, 256)
 	var pos uint64
@@ -559,13 +556,13 @@ func buildIndex(datPath, idxPath, tmpDir string, count int) (*compress.Decompres
 		for g.HasNext() {
 			word, _ = g.Next(word[:0])
 			if err = rs.AddKey(word, pos); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 			// Skip value
 			pos = g.Skip()
 		}
 		if err = rs.Build(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if rs.Collision() {
 			log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
@@ -576,9 +573,9 @@ func buildIndex(datPath, idxPath, tmpDir string, count int) (*compress.Decompres
 	}
 	var idx *recsplit.Index
 	if idx, err = recsplit.OpenIndex(idxPath); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return d, idx, nil
+	return idx, nil
 }
 
 // aggregate gathers changes from the changefiles into a B-tree, and "removes" them from the database
@@ -667,7 +664,6 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 		for key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]); b && e == nil; key, before, after, b, e = c.nextTriple(key[:0], before[:0], after[:0]) {
 			totalRecords++
 			txKey = append(txKey[:8], key...)
-			//fmt.Printf("%s txKey = [%d]%x\n", historyType.String(), txNum, key)
 			// In the inital files and most merged file, the txKey is added to the file, but it gets removed in the final merge
 			if err = comp.AddWord(txKey); err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("produceChangeSets AddWord key: %w", err)
@@ -676,10 +672,10 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 				return nil, nil, nil, nil, fmt.Errorf("produceChangeSets AddWord before: %w", err)
 			}
 			var bitmap *roaring64.Bitmap
-			bitmap = bitmaps[string(before)]
-			if bitmap == nil {
+			var ok bool
+			if bitmap, ok = bitmaps[string(key)]; !ok {
 				bitmap = roaring64.New()
-				bitmaps[string(before)] = bitmap
+				bitmaps[string(key)] = bitmap
 			}
 			bitmap.Add(txNum)
 		}
@@ -697,7 +693,10 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 	comp = nil
 	var d *compress.Decompressor
 	var index *recsplit.Index
-	if d, index, err = buildIndex(chsetDatPath, chsetIdxPath, c.dir, totalRecords); err != nil {
+	if d, err = compress.NewDecompressor(chsetDatPath); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets changeset decompressor: %w", err)
+	}
+	if index, err = buildIndex(d, chsetIdxPath, c.dir, totalRecords); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets changeset buildIndex: %w", err)
 	}
 	// Create bitmap files
@@ -725,6 +724,7 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 		if err = bitmapC.AddWord(bitmapKey); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap add key: %w", err)
 		}
+		bitmaps[key].RunOptimize()
 		if bitmapVal, err = bitmaps[key].ToBytes(); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmapVal production: %w", err)
 		}
@@ -739,7 +739,10 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 	bitmapC = nil
 	var bitmapD *compress.Decompressor
 	var bitmapI *recsplit.Index
-	if bitmapD, bitmapI, err = buildIndex(bitmapDatPath, bitmapIdxPath, c.dir, len(bitmapKeys)); err != nil {
+	if bitmapD, err = compress.NewDecompressor(bitmapDatPath); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap decompressor: %w", err)
+	}
+	if bitmapI, err = buildIndex(bitmapD, bitmapIdxPath, c.dir, len(bitmapKeys)); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap buildIndex: %w", err)
 	}
 	return d, index, bitmapD, bitmapI, nil
@@ -1009,8 +1012,8 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 				err = fmt.Errorf("whole in change files [%d-%d]", item.endBlock, minStart)
 				return false
 			}
-			if item.fileCount != 12 && item.fileCount != 8 {
-				err = fmt.Errorf("missing change files for interval [%d-%d]", item.startBlock, item.endBlock)
+			if item.fileCount != 11 && item.fileCount != 8 {
+				err = fmt.Errorf("missing or too many (%d) change files for interval [%d-%d]", item.fileCount, item.startBlock, item.endBlock)
 				return false
 			}
 			minStart = item.startBlock
@@ -1407,7 +1410,7 @@ func (a *Aggregator) backgroundMerge() {
 				if fType == Commitment {
 					valTransform = cvt.commitmentValTransform
 				}
-				if newItems[fType], err = a.computeAggregation(fType.String(), toRemove[fType], from, to, valTransform); err != nil {
+				if newItems[fType], err = a.computeAggregation(fType.String(), toRemove[fType], from, to, valTransform, true /* withIndex */); err != nil {
 					a.mergeError <- fmt.Errorf("computeAggreation %s: %w", fType.String(), err)
 					return
 				}
@@ -1434,6 +1437,98 @@ func (a *Aggregator) backgroundMerge() {
 	}
 }
 
+func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) error {
+	datTmpPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat.tmp", fType.String(), item.startBlock, item.endBlock))
+	datPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), item.startBlock, item.endBlock))
+	idxPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", fType.String(), item.startBlock, item.endBlock))
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datTmpPath, a.diffDir, compress.MinPatternScore, 1)
+	if err != nil {
+		return fmt.Errorf("reduceHistoryFiles create compressor %s: %w", datPath, err)
+	}
+	defer comp.Close()
+	g := item.getter
+	var val []byte
+	var count int
+	for g.HasNext() {
+		g.Skip() // Skip key on on the first pass
+		val, _ = g.Next(val[:0])
+		if err = comp.AddWord(val); err != nil {
+			return fmt.Errorf("reduceHistoryFiles AddWord: %w", err)
+		}
+		count++
+	}
+	if err = comp.Compress(); err != nil {
+		return fmt.Errorf("reduceHistoryFiles compress: %w", err)
+	}
+	var d *compress.Decompressor
+	if d, err = compress.NewDecompressor(datTmpPath); err != nil {
+		return fmt.Errorf("reduceHistoryFiles create decompressor: %w", err)
+	}
+	var rs *recsplit.RecSplit
+	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   count,
+		Enums:      true,
+		BucketSize: 2000,
+		Salt:       0,
+		LeafSize:   8,
+		TmpDir:     a.diffDir,
+		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a},
+		IndexFile: idxPath,
+	}); err != nil {
+		return fmt.Errorf("reduceHistoryFiles NewRecSplit: %w", err)
+	}
+	g1 := d.MakeGetter()
+	for {
+		g.Reset(0)
+		g1.Reset(0)
+		var lastOffset uint64
+		var key []byte
+		for g.HasNext() {
+			key, _ = g.Next(key[:0])
+			g.Skip()
+			pos := g1.Skip()
+			if err = rs.AddKey(key, lastOffset); err != nil {
+				return fmt.Errorf("reduceHistoryFiles %p AddKey: %w", rs, err)
+			}
+			//fmt.Printf("AddKey [%x]\n", key)
+			lastOffset = pos
+		}
+		if err = rs.Build(); err != nil {
+			if rs.Collision() {
+				log.Info("Building reduceHistoryFiles. Collision happened. It's ok. Restarting...")
+				rs.ResetNextSalt()
+				//fmt.Printf("Salt reset %p\n", rs)
+			} else {
+				return fmt.Errorf("reduceHistoryFiles Build: %w", err)
+			}
+		} else {
+			break
+		}
+	}
+	if err = item.decompressor.Close(); err != nil {
+		return fmt.Errorf("reduceHistoryFiles close decompressor: %w", err)
+	}
+	if err = os.Remove(datPath); err != nil {
+		return fmt.Errorf("reduceHistoryFiles remove: %w", err)
+	}
+	if err = os.Rename(datTmpPath, datPath); err != nil {
+		return fmt.Errorf("reduceHistoryFiles rename: %w", err)
+	}
+	if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+		return fmt.Errorf("reduceHistoryFiles create new decompressor: %w", err)
+	}
+	item.getter = item.decompressor.MakeGetter()
+	item.getterMerge = item.decompressor.MakeGetter()
+	if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+		return fmt.Errorf("reduceHistoryFiles open index: %w", err)
+	}
+	item.indexReader = recsplit.NewIndexReader(item.index)
+	item.readerMerge = recsplit.NewIndexReader(item.index)
+	return nil
+}
+
 func (a *Aggregator) backgroundHistoryMerge() {
 	defer a.historyWg.Done()
 	for range a.historyChannel {
@@ -1445,6 +1540,7 @@ func (a *Aggregator) backgroundHistoryMerge() {
 		// Lock the set of commitment files - those are the smallest, because account, storage and code files may be added by the aggregation thread first
 		toRemove[CodeBitmap], _, _, blockFrom, blockTo = a.findLargestMerge(CodeBitmap, uint64(math.MaxUint64) /* maxBlockTo */, 500_000 /* maxSpan */)
 
+		finalMerge := blockTo-blockFrom+1 == 500_000
 		for fType := AccountHistory; fType < NumberOfTypes; fType++ {
 			var from, to uint64
 			if fType == CodeBitmap {
@@ -1462,11 +1558,28 @@ func (a *Aggregator) backgroundHistoryMerge() {
 				}
 			}
 			if len(toRemove[fType]) > 1 {
-				// TODO: Special aggregation for blockTo - blockFrom + 1 == 500_000
-				if newItems[fType], err = a.computeAggregation(fType.String(), toRemove[fType], from, to, nil /* valTransform */); err != nil {
+				if newItems[fType], err = a.computeAggregation(fType.String(), toRemove[fType], from, to, nil, /* valTransform */
+					!finalMerge || fType == AccountBitmap || fType == StorageBitmap || fType == CodeBitmap /* withIndex */); err != nil {
 					a.historyError <- fmt.Errorf("computeAggreation %s: %w", fType.String(), err)
 					return
 				}
+			}
+		}
+		if finalMerge {
+			// Special aggregation for blockTo - blockFrom + 1 == 500_000
+			// Remove keys from the .dat files assuming that they will only be used after querying the bitmap index
+			// and therefore, there is no situation where non-existent key is queried.
+			if err = a.reduceHistoryFiles(AccountHistory, newItems[AccountHistory]); err != nil {
+				a.historyError <- fmt.Errorf("reduceHistoryFiles %s: %w", AccountHistory.String(), err)
+				return
+			}
+			if err = a.reduceHistoryFiles(StorageHistory, newItems[StorageHistory]); err != nil {
+				a.historyError <- fmt.Errorf("reduceHistoryFiles %s: %w", StorageHistory.String(), err)
+				return
+			}
+			if err = a.reduceHistoryFiles(CodeHistory, newItems[CodeHistory]); err != nil {
+				a.historyError <- fmt.Errorf("reduceHistoryFiles %s: %w", CodeHistory.String(), err)
+				return
 			}
 		}
 		for fType := AccountHistory; fType < NumberOfTypes; fType++ {
@@ -1490,6 +1603,10 @@ func (a *Aggregator) GenerateChangesets(on bool) {
 	if !a.changesets && on {
 		a.historyWg.Add(1)
 		go a.backgroundHistoryMerge()
+	}
+	if a.changesets && !on {
+		close(a.historyChannel)
+		a.historyWg.Wait()
 	}
 	a.changesets = on
 }
@@ -1556,6 +1673,7 @@ func (a *Aggregator) Close() {
 	close(a.mergeChannel)
 	a.mergeWg.Wait()
 	if a.changesets {
+		close(a.historyChannel)
 		a.historyWg.Wait()
 	}
 	// Closing state files only after background aggregation goroutine is finished
@@ -2437,7 +2555,10 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 	return
 }
 
-func (a *Aggregator) computeAggregation(treeName string, toAggregate []*byEndBlockItem, aggFrom uint64, aggTo uint64, valTransform func(val []byte, transValBuf []byte) ([]byte, error)) (*byEndBlockItem, error) {
+func (a *Aggregator) computeAggregation(treeName string,
+	toAggregate []*byEndBlockItem, aggFrom uint64, aggTo uint64,
+	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
+	withIndex bool) (*byEndBlockItem, error) {
 	var item2 = &byEndBlockItem{startBlock: aggFrom, endBlock: aggTo}
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -2451,13 +2572,20 @@ func (a *Aggregator) computeAggregation(treeName string, toAggregate []*byEndBlo
 		}
 	}
 	var err error
-	if item2.decompressor, item2.index, err = a.mergeIntoStateFile(&cp, 0, treeName, aggFrom, aggTo, a.diffDir, valTransform); err != nil {
+	var count int
+	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, 0, treeName, aggFrom, aggTo, a.diffDir, valTransform); err != nil {
 		return nil, fmt.Errorf("mergeIntoStateFile %s [%d-%d]: %w", treeName, aggFrom, aggTo, err)
 	}
 	item2.getter = item2.decompressor.MakeGetter()
 	item2.getterMerge = item2.decompressor.MakeGetter()
-	item2.indexReader = recsplit.NewIndexReader(item2.index)
-	item2.readerMerge = recsplit.NewIndexReader(item2.index)
+	if withIndex {
+		idxPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, aggFrom, aggTo))
+		if item2.index, err = buildIndex(item2.decompressor, idxPath, a.diffDir, count); err != nil {
+			return nil, fmt.Errorf("mergeIntoStateFile buildIndex %s [%d-%d]: %w", treeName, aggFrom, aggTo, err)
+		}
+		item2.indexReader = recsplit.NewIndexReader(item2.index)
+		item2.readerMerge = recsplit.NewIndexReader(item2.index)
+	}
 	return item2, nil
 }
 
@@ -2466,9 +2594,17 @@ func createDatAndIndex(treeName string, diffDir string, bt *btree.BTree, blockFr
 	idxPath := path.Join(diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, blockFrom, blockTo))
 	count, err := btreeToFile(bt, datPath, diffDir, false /* trace */, 1 /* workers */)
 	if err != nil {
-		return nil, nil, fmt.Errorf("btreeToFile: %w", err)
+		return nil, nil, fmt.Errorf("createDatAndIndex %s build btree: %w", treeName, err)
 	}
-	return buildIndex(datPath, idxPath, diffDir, count)
+	var d *compress.Decompressor
+	if d, err = compress.NewDecompressor(datPath); err != nil {
+		return nil, nil, fmt.Errorf("createDatAndIndex %s decompressor: %w", treeName, err)
+	}
+	var index *recsplit.Index
+	if index, err = buildIndex(d, idxPath, diffDir, count); err != nil {
+		return nil, nil, fmt.Errorf("createDatAndIndex %s buildIndex: %w", treeName, err)
+	}
+	return d, index, nil
 }
 
 func (a *Aggregator) addLocked(fType FileType, item *byEndBlockItem) {
@@ -2500,7 +2636,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	w.a.changesBtree.Delete(i)
 	var aggTask AggregationTask
 	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
-		aggTask.changes[fType].Init(fType.String(), w.a.aggregationStep, w.a.diffDir, false /* beforeOn */)
+		aggTask.changes[fType].Init(fType.String(), w.a.aggregationStep, w.a.diffDir, w.a.changesets && fType != Commitment)
 	}
 	var err error
 	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
@@ -2528,12 +2664,14 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 }
 
 // mergeIntoStateFile assumes that all entries in the cp heap have type FILE_CURSOR
-func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename string, startBlock, endBlock uint64, dir string, valTransform func(val []byte, transValBuf []byte) ([]byte, error)) (*compress.Decompressor, *recsplit.Index, error) {
+func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
+	basename string, startBlock, endBlock uint64, dir string,
+	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
+) (*compress.Decompressor, int, error) {
 	datPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
-	idxPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.idx", basename, startBlock, endBlock))
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
 	if err != nil {
-		return nil, nil, fmt.Errorf("compressor %s: %w", datPath, err)
+		return nil, 0, fmt.Errorf("compressor %s: %w", datPath, err)
 	}
 	defer comp.Close()
 	count := 0
@@ -2556,7 +2694,7 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename 
 				}
 			}
 			if ci1.t != FILE_CURSOR {
-				return nil, nil, fmt.Errorf("mergeIntoStateFile: cursor of unexpected type: %d", ci1.t)
+				return nil, 0, fmt.Errorf("mergeIntoStateFile: cursor of unexpected type: %d", ci1.t)
 			}
 			first = true
 			firstDelete = len(ci1.val) == 0
@@ -2593,7 +2731,7 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename 
 		if startBlock != 0 || !skip {
 			if keyBuf != nil && (prefixLen == 0 || len(keyBuf) != prefixLen || bytes.HasPrefix(lastKey, keyBuf)) {
 				if err = comp.AddWord(keyBuf); err != nil {
-					return nil, nil, err
+					return nil, 0, err
 				}
 				if a.trace {
 					if _, ok := a.tracedKeys[string(keyBuf)]; ok {
@@ -2603,13 +2741,13 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename 
 				count++ // Only counting keys, not values
 				if valTransform != nil {
 					if transValBuf, err = valTransform(valBuf, transValBuf[:0]); err != nil {
-						return nil, nil, fmt.Errorf("mergeIntoStateFile valTransform [%x]: %w", valBuf, err)
+						return nil, 0, fmt.Errorf("mergeIntoStateFile valTransform [%x]: %w", valBuf, err)
 					}
 					if err = comp.AddWord(transValBuf); err != nil {
-						return nil, nil, err
+						return nil, 0, err
 					}
 				} else if err = comp.AddWord(valBuf); err != nil {
-					return nil, nil, err
+					return nil, 0, err
 				}
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
@@ -2622,7 +2760,7 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename 
 	}
 	if keyBuf != nil {
 		if err = comp.AddWord(keyBuf); err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
 		if a.trace {
 			if _, ok := a.tracedKeys[string(keyBuf)]; ok {
@@ -2632,24 +2770,23 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int, basename 
 		count++ // Only counting keys, not values
 		if valTransform != nil {
 			if transValBuf, err = valTransform(valBuf, transValBuf[:0]); err != nil {
-				return nil, nil, fmt.Errorf("mergeIntoStateFile valTransform [%x]: %w", valBuf, err)
+				return nil, 0, fmt.Errorf("mergeIntoStateFile valTransform [%x]: %w", valBuf, err)
 			}
 			if err = comp.AddWord(transValBuf); err != nil {
-				return nil, nil, err
+				return nil, 0, err
 			}
 		} else if err = comp.AddWord(valBuf); err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
 	}
 	if err = comp.Compress(); err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 	var d *compress.Decompressor
-	var idx *recsplit.Index
-	if d, idx, err = buildIndex(datPath, idxPath, dir, count); err != nil {
-		return nil, nil, fmt.Errorf("build index: %w", err)
+	if d, err = compress.NewDecompressor(datPath); err != nil {
+		return nil, 0, fmt.Errorf("decompressor: %w", err)
 	}
-	return d, idx, nil
+	return d, count, nil
 }
 
 func (a *Aggregator) stats(fType FileType) (count int, datSize, idxSize int64) {
