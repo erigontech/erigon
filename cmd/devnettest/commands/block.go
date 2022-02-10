@@ -21,7 +21,7 @@ var (
 )
 
 const (
-	gasPrice = 50000
+	gasPrice = 912345678
 )
 
 func init() {
