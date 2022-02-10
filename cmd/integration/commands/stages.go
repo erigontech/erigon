@@ -995,6 +995,9 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case "", params.MainnetChainName:
 		chainConfig = params.MainnetChainConfig
 		genesis = core.DefaultGenesisBlock()
+	case params.SepoliaChainName:
+		chainConfig = params.SepoliaChainConfig
+		genesis = core.DefaultSepoliaGenesisBlock()
 	case params.RopstenChainName:
 		chainConfig = params.RopstenChainConfig
 		genesis = core.DefaultRopstenGenesisBlock()
