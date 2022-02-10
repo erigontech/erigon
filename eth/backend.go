@@ -802,6 +802,7 @@ func (s *Ethereum) Start() error {
 			sentry.RecvUploadHeadersMessageLoop(s.sentryCtx, s.sentries[i], s.sentryControlServer, nil)
 		}(i)
 	}
+	time.Sleep(10 * time.Millisecond)
 
 	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryControlServer.Hd, s.notifications, s.sentryControlServer.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 
