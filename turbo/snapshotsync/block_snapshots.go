@@ -832,8 +832,8 @@ RETRY:
 		i, offset uint64
 		err       error
 	}
-	txsCh := make(chan txHashWithOffet, 10*1024)
-	txsCh2 := make(chan txHashWithOffet, 10*1024)
+	txsCh := make(chan txHashWithOffet, 1024)
+	txsCh2 := make(chan txHashWithOffet, 1024)
 	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
 		defer close(txsCh)
 		defer close(txsCh2)
@@ -1023,7 +1023,7 @@ type decompressItem struct {
 }
 
 func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompressItem {
-	ch := make(chan decompressItem, 10*1024)
+	ch := make(chan decompressItem, 1024)
 	go func() {
 		defer close(ch)
 		if err := d.WithReadAhead(func() error {
