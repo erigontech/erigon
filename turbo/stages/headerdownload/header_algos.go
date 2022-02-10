@@ -851,7 +851,7 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
 func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID string) (requestMore bool, penalties []PenaltyItem) {
-	log.Trace("processSegment", "from", segment.Headers[len(segment.Headers)-1].Number.Uint64(), segment.Headers[0].Number.Uint64(), "to")
+	log.Trace("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	foundAnchor, start := hd.findAnchors(segment)
@@ -867,8 +867,8 @@ func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, p
 		}
 		return
 	}
-	height := segment.Headers[0].Number.Uint64()
-	hash := segment.Headers[0].Hash()
+	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
+	hash := segment.Headers[len(segment.Headers)-1].Hash()
 	if newBlock || hd.seenAnnounces.Seen(hash) {
 		if height > hd.topSeenHeight {
 			hd.topSeenHeight = height
