@@ -1015,27 +1015,6 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	return nil
 }
 
-//forEach - only reason why this func exists - is that .Next returns "nextPos" instead of "pos". If fix this in future - then can remove this func
-func forEach(d *compress.Decompressor, walker func(i, offset uint64, word []byte) error) error {
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		var wc, pos, nextPos uint64
-		word := make([]byte, 0, 4096)
-		for g.HasNext() {
-			word, nextPos = g.Next(word[:0])
-			if err := walker(wc, pos, word); err != nil {
-				return err
-			}
-			wc++
-			pos = nextPos
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
 type decompressItem struct {
 	i, offset uint64
 	word      []byte
