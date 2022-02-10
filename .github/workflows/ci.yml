@@ -8,6 +8,9 @@ on:
     branches:
       - main
       - stable
+env:
+  CGO_ENABLED: "1"
+  CGO_CXXFLAGS: "-std=c++17"
 jobs:
   tests:
     strategy:
@@ -42,6 +45,5 @@ jobs:
       - name: Install deps
         if: matrix.os == 'windows-2019'
         run: choco upgrade mingw cmake -y --no-progress
-      - run: go test ./...
-
-
+      - name: Test
+        run: go test ./...
