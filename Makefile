@@ -130,8 +130,11 @@ lintci-deps:
 
 clean:
 	go clean -cache
-	rm -fr build/*
+	find ./build ! -regex "\(./build/bin/golangci-lint\|./build/bin\|./build\)" -type f,d -delete
 	cd libmdbx/ && make clean
+ifneq (,$(wildcard ./build/bin/golangci-lint))
+	./build/bin/golangci-lint cache clean
+endif
 
 # The devtools target installs tools required for 'go generate'.
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
