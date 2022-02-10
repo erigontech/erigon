@@ -252,6 +252,7 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 			return ctx.Err()
 		case <-t.GotInfo():
 			mi := t.Metainfo()
+			fmt.Printf("%s, %x\n", t.Info().Name, mi.HashInfoBytes())
 			if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi); err != nil {
 				return err
 			}
