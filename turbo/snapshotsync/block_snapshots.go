@@ -905,10 +905,12 @@ RETRY:
 	wg := sync.WaitGroup{}
 	errCh := make(chan error, 2)
 	defer close(errCh)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		errCh <- txnHashIdx.Build()
 	}()
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		errCh <- txnHash2BlockNumIdx.Build()
