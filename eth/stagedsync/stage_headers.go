@@ -625,13 +625,6 @@ Loop:
 			return err
 		}
 
-		if err = rawdb.WriteHeadHeaderHash(tx, headerInserter.GetHighestHash()); err != nil {
-			return fmt.Errorf("[%s] marking head header hash as %x: %w", logPrefix, headerInserter.GetHighestHash(), err)
-		}
-		if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
-			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
-		}
-
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
@@ -668,9 +661,18 @@ Loop:
 	}
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
-	} else if headerInserter.GetHighest() != 0 {
-		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
-			return fmt.Errorf("fix canonical chain: %w", err)
+	}
+	if headerInserter.GetHighest() != 0 {
+		if !headerInserter.Unwind() {
+			if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+				return fmt.Errorf("fix canonical chain: %w", err)
+			}
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, headerInserter.GetHighestHash()); err != nil {
+			return fmt.Errorf("[%s] marking head header hash as %x: %w", logPrefix, headerInserter.GetHighestHash(), err)
+		}
+		if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
+			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
 		}
 	}
 	if !useExternalTx {
