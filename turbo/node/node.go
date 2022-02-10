@@ -52,6 +52,9 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
+	case params.SepoliaChainName:
+		log.Info("Starting Erigon on Sepolia testnet...")
+
 	case params.RopstenChainName:
 		log.Info("Starting Erigon on Ropsten testnet...")
 

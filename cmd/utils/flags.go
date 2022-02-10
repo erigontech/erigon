@@ -600,6 +600,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case params.SepoliaChainName:
+			urls = params.SepoliaBootnodes
 		case params.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case params.RinkebyChainName:
@@ -631,9 +633,10 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.GlobalIsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
 	} else {
-
 		chain := ctx.GlobalString(ChainFlag.Name)
 		switch chain {
+		case params.SepoliaChainName:
+			urls = params.SepoliaBootnodes
 		case params.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case params.RinkebyChainName:
@@ -916,6 +919,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "kovan")
 	case params.FermionChainName:
 		return filepath.Join(datadir, "fermion")
+	case params.SepoliaChainName:
+		return filepath.Join(datadir, "sepolia")
 	default:
 		return datadir
 	}
@@ -1264,6 +1269,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
+	case params.SepoliaChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 11155111
+		}
+		cfg.Genesis = core.DefaultSepoliaGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.SepoliaGenesisHash)
 	case params.RopstenChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 3
@@ -1366,6 +1377,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 	var genesis *core.Genesis
 	chain := ctx.GlobalString(ChainFlag.Name)
 	switch chain {
+	case params.SepoliaChainName:
+		genesis = core.DefaultSepoliaGenesisBlock()
 	case params.RopstenChainName:
 		genesis = core.DefaultRopstenGenesisBlock()
 	case params.RinkebyChainName:
