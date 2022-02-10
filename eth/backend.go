@@ -326,7 +326,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			if err != nil {
 				return nil, err
 			}
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir)
+			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir, false)
 			if err != nil {
 				return nil, fmt.Errorf("new server: %w", err)
 			}
@@ -802,6 +802,7 @@ func (s *Ethereum) Start() error {
 			sentry.RecvUploadHeadersMessageLoop(s.sentryCtx, s.sentries[i], s.sentryControlServer, nil)
 		}(i)
 	}
+	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
 	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryControlServer.Hd, s.notifications, s.sentryControlServer.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 

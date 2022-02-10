@@ -128,14 +128,14 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	log.Info("[torrent] Start", "my peerID", protocols.TorrentClient.PeerID())
+	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.TorrentClient.PeerID()))
 	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
 
 	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
 
-	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, true)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
