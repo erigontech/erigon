@@ -35,17 +35,18 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220203181034-d49d18ddaf17
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220210080230-92d71e09942d
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
+	github.com/onsi/gomega v1.16.0 // indirect
 	github.com/pelletier/go-toml v1.9.4
-	github.com/quasilyte/go-ruleguard/dsl v0.3.6
-	github.com/rs/cors v1.8.0
-	github.com/shirou/gopsutil/v3 v3.21.9
+	github.com/quasilyte/go-ruleguard/dsl v0.3.15
+	github.com/rs/cors v1.8.2
+	github.com/shirou/gopsutil/v3 v3.21.12
 	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.7.1-0.20210427113832-6241f9ab9942
 	github.com/torquem-ch/mdbx-go v0.22.10
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13

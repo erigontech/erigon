@@ -52,6 +52,6 @@ func TestEthSubscribe(t *testing.T) {
 
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
-		require.Equal(header.Number.Uint64(), i)
+		require.Equal(i, header.Number.Uint64())
 	}
 }

@@ -186,7 +186,6 @@ func StageLoopStep(
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 
 			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
-
 		}); err != nil {
 			return err
 		}
