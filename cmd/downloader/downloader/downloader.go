@@ -228,7 +228,7 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 }
 
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
+func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string, silent bool) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, infoHash := range preverifiedHashes {
 		if _, ok := torrentClient.Torrent(infoHash); ok {
@@ -241,6 +241,9 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
+	}
+	if !silent {
+		go LoggingLoop(ctx, torrentClient)
 	}
 
 	for _, t := range torrentClient.Torrents() {
