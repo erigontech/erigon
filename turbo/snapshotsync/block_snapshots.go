@@ -925,7 +925,10 @@ RETRY:
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum,
+						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
 				}
 			}
@@ -977,7 +980,10 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[Snapshots Indexing] HeadersHashIdx", "blockNumber", h.Number.Uint64())
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("[Snapshots Indexing] HeadersHashIdx", "blockNum", h.Number.Uint64(),
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		default:
 		}
 		return nil
@@ -1006,7 +1012,10 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			log.Info("[Snapshots Indexing] BodyNumberIdx", "blockNumber", firstBlockNumInSegment+i)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("[Snapshots Indexing] BodyNumberIdx", "blockNum", firstBlockNumInSegment+i,
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		default:
 		}
 		return nil
