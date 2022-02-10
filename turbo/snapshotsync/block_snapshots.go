@@ -841,7 +841,7 @@ RETRY:
 			i, offset uint64
 			err       error
 		}
-		txsCh := make(chan txWithOffet)
+		txsCh := make(chan txWithOffet, 4096)
 		go func() {
 			defer close(txsCh)
 			parseCtx := txpool.NewTxParseContext(chainID)
@@ -853,12 +853,11 @@ RETRY:
 					txsCh <- txWithOffet{err: it.err}
 					return
 				}
-				i, offset, word := it.i, it.offset, it.word
-				if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+				if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
 					txsCh <- txWithOffet{err: it.err}
 					return
 				}
-				txsCh <- txWithOffet{txn: slot, i: i, offset: offset}
+				txsCh <- txWithOffet{txn: slot, i: it.i, offset: it.offset}
 			}
 		}()
 		for it := range txsCh {
@@ -1013,7 +1012,7 @@ type decompressItem struct {
 }
 
 func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompressItem {
-	ch := make(chan decompressItem, 1024)
+	ch := make(chan decompressItem, 4096)
 	go func() {
 		defer close(ch)
 		if err := d.WithReadAhead(func() error {
