@@ -836,6 +836,7 @@ RETRY:
 	txsCh2 := make(chan txHashWithOffet, 10*1024)
 	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
 		defer close(txsCh)
+		defer close(txsCh2)
 		parseCtx := txpool.NewTxParseContext(chainID)
 		parseCtx.WithSender(false)
 		slot := txpool.TxSlot{}
