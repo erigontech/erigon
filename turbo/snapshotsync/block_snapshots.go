@@ -962,7 +962,7 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 	}
 	defer d.Close()
 
-	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		h := types.Header{}
 		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
 			return err
@@ -995,7 +995,7 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	}
 	defer d.Close()
 
-	if err := Idx(d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
@@ -1069,7 +1069,7 @@ func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompress
 }
 
 // Idx - iterate over segment and building .idx file
-func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
+func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpDir string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
 	segmentFileName := d.FilePath()
 	var extension = filepath.Ext(segmentFileName)
 	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
@@ -1089,22 +1089,14 @@ func Idx(d *compress.Decompressor, firstDataID uint64, tmpDir string, walker fun
 	}
 
 RETRY:
-
-	if err = d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		var wc, pos, nextPos uint64
-		word := make([]byte, 0, 4096)
-		for g.HasNext() {
-			word, nextPos = g.Next(word[:0])
-			if err := walker(rs, wc, pos, word); err != nil {
-				return err
-			}
-			wc++
-			pos = nextPos
+	ch := forEachAsync(ctx, d)
+	for it := range ch {
+		if it.err != nil {
+			return it.err
 		}
-		return nil
-	}); err != nil {
-		return err
+		if err := walker(rs, it.i, it.offset, it.word); err != nil {
+			return err
+		}
 	}
 
 	if err = rs.Build(); err != nil {
