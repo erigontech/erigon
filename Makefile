@@ -130,7 +130,7 @@ lintci-deps:
 
 clean:
 	go clean -cache
-	find ./build ! -regex "\(./build/bin/golangci-lint\|./build/bin\|./build\)" -type f,d -delete
+	find ./build ! -path "./build/bin/golangci-lint" -type f,d -empty -delete
 	cd libmdbx/ && make clean
 ifneq (,$(wildcard ./build/bin/golangci-lint))
 	./build/bin/golangci-lint cache clean
