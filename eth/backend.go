@@ -137,7 +137,7 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the block
-	newPayloadCh          chan privateapi.PayloadMessage
+	newPayloadCh          chan types.Block
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain uint32 // atomic boolean flag
 
@@ -373,7 +373,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
-	backend.newPayloadCh = make(chan privateapi.PayloadMessage)
+	backend.newPayloadCh = make(chan types.Block)
 	backend.forkChoiceCh = make(chan privateapi.ForkChoiceMessage)
 
 	// proof-of-work mining

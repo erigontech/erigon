@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -249,7 +250,7 @@ func NewStagedSync(
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	newPayloadCh chan privateapi.PayloadMessage,
+	newPayloadCh chan types.Block,
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,

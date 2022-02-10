@@ -48,7 +48,7 @@ type EthBackendServer struct {
 	payloadId       uint64
 	pendingPayloads map[uint64]types2.ExecutionPayload
 	// Send new Beacon Chain payloads to staged sync
-	newPayloadCh chan<- PayloadMessage
+	newPayloadCh chan<- types.Block
 	// Send Beacon Chain fork choice updates to staged sync
 	forkChoiceCh chan<- ForkChoiceMessage
 	// Replies to newPayload & forkchoice requests
@@ -79,12 +79,6 @@ type PayloadStatus struct {
 	CriticalError   error
 }
 
-// The message we are going to send to the stage sync in NewPayload
-type PayloadMessage struct {
-	Header *types.Header
-	Body   *types.RawBody
-}
-
 // The message we are going to send to the stage sync in ForkchoiceUpdated
 type ForkChoiceMessage struct {
 	HeadBlockHash      common.Hash
@@ -93,7 +87,7 @@ type ForkChoiceMessage struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
+	config *params.ChainConfig, newPayloadCh chan<- types.Block, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
 	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -259,12 +253,21 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
+		// TODO(yperbasis): double check EIP-2718 transactions
+		TxHash: types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
+	}
+
+	// TODO(yperbasis): double check EIP-2718 transactions
+	transactions, err := types.DecodeTransactions(req.Transactions)
+	if err != nil {
+		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
+		// TODO(yperbasis): latestValidHash
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, ValidationError: "failed to decode transactions"}, nil
 	}
 
 	// If another payload is already commissioned then we just reply with syncing
@@ -278,13 +281,8 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	// Send the block over
-	s.newPayloadCh <- PayloadMessage{
-		Header: &header,
-		Body: &types.RawBody{
-			Transactions: req.Transactions,
-			Uncles:       nil,
-		},
-	}
+	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil)
+	s.newPayloadCh <- *block
 
 	payloadStatus := <-s.statusCh
 	if payloadStatus.CriticalError != nil {
@@ -446,6 +444,7 @@ func (s *EthBackendServer) StartProposer() {
 						log.Warn("Broken tx rlp", "err", err.Error())
 						return
 					}
+					// TODO(yperbasis): double check EIP-2718 transactions
 					encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 				}
 				// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us

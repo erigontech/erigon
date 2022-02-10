@@ -48,7 +48,7 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
-	newPayloadCh          chan privateapi.PayloadMessage
+	newPayloadCh          chan types.Block
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
@@ -67,7 +67,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	newPayloadCh chan privateapi.PayloadMessage,
+	newPayloadCh chan types.Block,
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
@@ -147,7 +147,7 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
-	var payloadMessage privateapi.PayloadMessage
+	var payloadMessage types.Block
 	var forkChoiceMessage privateapi.ForkChoiceMessage
 
 	// Decide what kind of action we need to take place
@@ -275,14 +275,14 @@ func handleForkChoice(
 }
 
 func handleNewPayload(
-	payloadMessage *privateapi.PayloadMessage,
+	block *types.Block,
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
-	header := payloadMessage.Header
+	header := block.Header()
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
