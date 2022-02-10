@@ -866,9 +866,11 @@ RETRY:
 			if it.err != nil {
 				return it.err
 			}
+			t2 := time.Now()
 			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
 				return err
 			}
+			t3 := time.Now()
 			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+it.i { // skip empty blocks
 				if !bodyGetter.HasNext() {
 					return fmt.Errorf("not enough bodies")
@@ -880,6 +882,7 @@ RETRY:
 				blockNum++
 			}
 
+			t4 := time.Now()
 			if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
 				return err
 			}
@@ -888,7 +891,7 @@ RETRY:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				fmt.Printf("took: %s\n", time.Since(t))
+				fmt.Printf("took: %s, %s, %s, %s\n", time.Since(t), time.Since(t2), time.Since(t3), time.Since(t4))
 				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum, "a", len(ch), "b", len(txsCh))
 			default:
 			}
