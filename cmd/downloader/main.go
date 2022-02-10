@@ -128,7 +128,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	log.Info("[torrent] Start", "my peerID", protocols.TorrentClient.PeerID())
+	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.TorrentClient.PeerID()))
 	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
