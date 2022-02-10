@@ -962,8 +962,8 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 	}
 	defer d.Close()
 
+	h := types.Header{}
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		h := types.Header{}
 		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
 			return err
 		}
