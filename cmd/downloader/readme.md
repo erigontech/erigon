@@ -7,6 +7,12 @@ Service to seed/download historical data (immutable .seg files)
 Only Mainnet, Goerli and BSC networks are supported now.
 
 ```shell
+# 1. Downloader by default run inside Erigon, by `--experimental.snapshot` flag:
+erigon --experimental.snapshot --datadir=<your_datadir> 
+```
+
+```shell
+# 2. It's possible to start Downloader as independent process, by `--experimental.snapshot --downloader.api.addr=127.0.0.1:9093` flags:
 make erigon downloader 
 
 # Start downloader (can limit network usage by 512mb/sec: --download.rate=512mb --upload.rate=512mb)
