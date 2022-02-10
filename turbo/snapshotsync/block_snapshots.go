@@ -823,7 +823,9 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 	}
 
 RETRY:
-	txnHash2BlockNumIdx.
+	txnHashIdx.NoLogs(true)
+	txnHash2BlockNumIdx.NoLogs(true)
+
 	ch := forEachAsync(ctx, d)
 	type txHashWithOffet struct {
 		txnHash   [32]byte
