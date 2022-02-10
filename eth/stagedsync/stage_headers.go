@@ -1002,14 +1002,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		// for now easier just store them in db
 		td := big.NewInt(0)
 		if err := snapshotsync.ForEachHeader(ctx, cfg.snapshots, func(header *types.Header) error {
+			blockNum, blockHash := header.Number.Uint64(), header.Hash()
 			td.Add(td, header.Difficulty)
-			if err := rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td); err != nil {
+			if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 				return err
 			}
-			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+			if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 				return err
 			}
-			if err := rawdb.WriteHeaderNumber(tx, header.Hash(), header.Number.Uint64()); err != nil {
+			if err := rawdb.WriteHeaderNumber(tx, blockHash, blockNum); err != nil {
 				return err
 			}
 			select {
