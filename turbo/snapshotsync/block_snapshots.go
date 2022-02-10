@@ -862,6 +862,7 @@ RETRY:
 		}
 
 		for it := range txsCh {
+			t := time.Now()
 			if it.err != nil {
 				return it.err
 			}
@@ -887,6 +888,7 @@ RETRY:
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
+				fmt.Printf("took: %s\n", time.Since(t))
 				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum, "a", len(ch), "b", len(txsCh))
 			default:
 			}
