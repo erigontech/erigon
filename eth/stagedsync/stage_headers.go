@@ -1001,7 +1001,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
 		td := big.NewInt(0)
-		if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+		if err := snapshotsync.ForEachHeader(ctx, cfg.snapshots, func(header *types.Header) error {
 			td.Add(td, header.Difficulty)
 			if err := rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td); err != nil {
 				return err

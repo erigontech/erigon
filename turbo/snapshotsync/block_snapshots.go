@@ -1100,27 +1100,23 @@ RETRY:
 	return nil
 }
 
-func ForEachHeader(s *AllSnapshots, walker func(header *types.Header) error) error {
-	word := make([]byte, 0, 4096)
+func ForEachHeader(ctx context.Context, s *AllSnapshots, walker func(header *types.Header) error) error {
 	r := bytes.NewReader(nil)
 	for _, sn := range s.blocks {
-		d := sn.Headers
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			for g.HasNext() {
-				header := new(types.Header)
-				word, _ = g.Next(word[:0])
-				r.Reset(word[1:])
-				if err := rlp.Decode(r, header); err != nil {
-					return err
-				}
-				if err := walker(header); err != nil {
-					return err
-				}
+		ch := forEachAsync(ctx, sn.Headers)
+		for it := range ch {
+			if it.err != nil {
+				return nil
 			}
-			return nil
-		}); err != nil {
-			return err
+
+			header := new(types.Header)
+			r.Reset(it.word[1:])
+			if err := rlp.Decode(r, header); err != nil {
+				return err
+			}
+			if err := walker(header); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
