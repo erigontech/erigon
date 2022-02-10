@@ -47,6 +47,7 @@ type Collector struct {
 	dataProviders   []dataProvider
 	allFlushed      bool
 	autoClean       bool
+	noLogs          bool
 	bufType         int
 	logPrefix       string
 }
@@ -97,7 +98,8 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
 			provider = KeepInRAM(sortableBuffer)
 			c.allFlushed = true
 		} else {
-			provider, err = FlushToDisk(encoder, sortableBuffer, tmpdir)
+			doFsync := !c.autoClean /* is critical collector */
+			provider, err = FlushToDisk(encoder, sortableBuffer, tmpdir, doFsync, c.noLogs)
 		}
 		if err != nil {
 			return err
@@ -123,6 +125,8 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
 func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
+
+func (c *Collector) NoLogs(v bool) { c.noLogs = v }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {

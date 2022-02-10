@@ -34,8 +34,9 @@ type dataProvider interface {
 }
 
 type fileDataProvider struct {
-	file   *os.File
-	reader io.Reader
+	file      *os.File
+	reader    io.Reader
+	resultBuf [][]byte
 }
 
 type Encoder interface {
@@ -43,7 +44,8 @@ type Encoder interface {
 	Reset(writer io.Writer)
 }
 
-func FlushToDisk(encoder Encoder, b Buffer, tmpdir string) (dataProvider, error) {
+// FlushToDisk - `doFsync` is true only for 'critical' collectors (which should not loose).
+func FlushToDisk(encoder Encoder, b Buffer, tmpdir string, doFsync, noLogs bool) (dataProvider, error) {
 	if b.Len() == 0 {
 		return nil, nil
 	}
@@ -59,19 +61,23 @@ func FlushToDisk(encoder Encoder, b Buffer, tmpdir string) (dataProvider, error)
 	if err != nil {
 		return nil, err
 	}
-	defer bufferFile.Sync() //nolint:errcheck
+	if doFsync {
+		defer bufferFile.Sync() //nolint:errcheck
+	}
 
 	w := bufio.NewWriterSize(bufferFile, BufIOSize)
 	defer w.Flush() //nolint:errcheck
 
 	defer func() {
 		b.Reset() // run it after buf.flush and file.sync
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		log.Info(
-			"Flushed buffer file",
-			"name", bufferFile.Name(),
-			"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		if !noLogs {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info(
+				"Flushed buffer file",
+				"name", bufferFile.Name(),
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+		}
 	}()
 
 	encoder.Reset(w)
@@ -80,7 +86,7 @@ func FlushToDisk(encoder Encoder, b Buffer, tmpdir string) (dataProvider, error)
 		return nil, fmt.Errorf("error writing entries to disk: %w", err)
 	}
 
-	return &fileDataProvider{bufferFile, nil}, nil
+	return &fileDataProvider{file: bufferFile, reader: nil, resultBuf: make([][]byte, 2)}, nil
 }
 
 func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
@@ -92,7 +98,7 @@ func (p *fileDataProvider) Next(decoder Decoder) ([]byte, []byte, error) {
 		p.reader = bufio.NewReaderSize(p.file, BufIOSize)
 	}
 	decoder.Reset(p.reader)
-	return readElementFromDisk(decoder)
+	return readElementFromDisk(p.resultBuf, decoder)
 }
 
 func (p *fileDataProvider) Dispose() uint64 {
@@ -121,10 +127,10 @@ func writeToDisk(encoder Encoder, entries []sortableBufferEntry) error {
 	return nil
 }
 
-func readElementFromDisk(decoder Decoder) ([]byte, []byte, error) {
-	result := make([][]byte, 2)
-	err := decoder.Decode(&result)
-	return result[0], result[1], err
+func readElementFromDisk(resultBuf [][]byte, decoder Decoder) ([]byte, []byte, error) {
+	resultBuf[0], resultBuf[1] = nil, nil
+	err := decoder.Decode(&resultBuf)
+	return resultBuf[0], resultBuf[1], err
 }
 
 type memoryDataProvider struct {

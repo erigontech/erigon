@@ -58,8 +58,9 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 
 	decoder := codec.NewDecoder(readBuffer, &cbor)
 
+	buf := make([][]byte, 2)
 	for i := range entries {
-		k, v, err := readElementFromDisk(decoder)
+		k, v, err := readElementFromDisk(buf, decoder)
 		if err != nil {
 			t.Error(err)
 		}
@@ -67,7 +68,7 @@ func TestWriteAndReadBufferEntry(t *testing.T) {
 		assert.Equal(t, string(entries[i].value), string(v))
 	}
 
-	_, _, err := readElementFromDisk(decoder)
+	_, _, err := readElementFromDisk(buf, decoder)
 	assert.Equal(t, io.EOF, err)
 }
 
