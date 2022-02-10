@@ -787,8 +787,6 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum, expectedCount uint64, segmentFilePath, tmpDir string, logEvery *time.Ticker) error {
 	dir, _ := filepath.Split(segmentFilePath)
 
-	var j uint64
-
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -826,12 +824,13 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 
 RETRY:
 	ch := forEachAsync(ctx, d)
-	type txWithOffet struct {
+	type txHashWithOffet struct {
 		txnHash   [32]byte
 		i, offset uint64
 		err       error
 	}
-	txsCh := make(chan txWithOffet, 10*1024)
+	txsCh := make(chan txHashWithOffet, 10*1024)
+	txsCh2 := make(chan txHashWithOffet, 10*1024)
 	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
 		defer close(txsCh)
 		parseCtx := txpool.NewTxParseContext(chainID)
@@ -840,75 +839,100 @@ RETRY:
 		var sender [20]byte
 		for it := range ch {
 			if it.err != nil {
-				txsCh <- txWithOffet{err: it.err}
+				txsCh <- txHashWithOffet{err: it.err}
+				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
 			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
-				txsCh <- txWithOffet{err: it.err}
+				txsCh <- txHashWithOffet{err: it.err}
+				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
-			txsCh <- txWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
+			txsCh <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
+			txsCh2 <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
 		}
 	}()
-
-	blockNum := firstBlockNum
-	body := &types.BodyForStorage{}
-	if err := sn.Bodies.WithReadAhead(func() error {
-		bodyGetter := sn.Bodies.MakeGetter()
-		bodyGetter.Reset(0)
-		buf, _ = bodyGetter.Next(buf[:0])
-		if err := rlp.DecodeBytes(buf, body); err != nil {
-			return err
-		}
-
-		for it := range txsCh {
-			if it.err != nil {
-				return it.err
-			}
-			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
-				return err
-			}
-			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+it.i { // skip empty blocks
-				if !bodyGetter.HasNext() {
-					return fmt.Errorf("not enough bodies")
-				}
-				buf, _ = bodyGetter.Next(buf[:0])
-				if err := rlp.DecodeBytes(buf, body); err != nil {
-					return err
-				}
-				blockNum++
-			}
-
-			if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
-			default:
-			}
-			j++
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
 
 	wg := sync.WaitGroup{}
 	errCh := make(chan error, 2)
 	defer close(errCh)
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+
+		var j uint64
+		for it := range txsCh {
+			if it.err != nil {
+				errCh <- it.err
+				return
+			}
+			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
+				errCh <- it.err
+			}
+
+			select {
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			default:
+			}
+			j++
+		}
+
+		if j != expectedCount {
+			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
+		}
+
 		errCh <- txnHashIdx.Build()
 	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		blockNum := firstBlockNum
+		body := &types.BodyForStorage{}
+		if err := sn.Bodies.WithReadAhead(func() error {
+			bodyGetter := sn.Bodies.MakeGetter()
+			bodyGetter.Reset(0)
+			buf, _ = bodyGetter.Next(buf[:0])
+			if err := rlp.DecodeBytes(buf, body); err != nil {
+				return err
+			}
+
+			for it := range txsCh2 {
+				if it.err != nil {
+					return it.err
+				}
+				for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+it.i { // skip empty blocks
+					if !bodyGetter.HasNext() {
+						return fmt.Errorf("not enough bodies")
+					}
+					buf, _ = bodyGetter.Next(buf[:0])
+					if err := rlp.DecodeBytes(buf, body); err != nil {
+						return err
+					}
+					blockNum++
+				}
+
+				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
+					return err
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info("[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum)
+				default:
+				}
+			}
+			return nil
+		}); err != nil {
+			errCh <- err
+			return
+		}
 		errCh <- txnHash2BlockNumIdx.Build()
 	}()
+
 	wg.Wait()
 
 	for i := 0; i < 2; i++ {
@@ -922,10 +946,6 @@ RETRY:
 			}
 			return err
 		}
-	}
-
-	if j != expectedCount {
-		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 	}
 
 	return nil
