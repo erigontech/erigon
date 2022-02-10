@@ -505,7 +505,7 @@ func (srv *Server) Start() error {
 	srv.running = true
 	srv.loopWG.Add(1)
 	go srv.run()
-	time.Sleep(time.Millisecond) // just to reduce logs order confusion
+	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 	return nil
 }
 
