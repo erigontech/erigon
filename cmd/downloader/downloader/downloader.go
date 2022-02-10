@@ -168,6 +168,8 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 	peers := map[torrent.PeerID]*torrent.PeerConn{}
 	torrents := client.Torrents()
 	for _, t := range torrents {
+		fmt.Printf("alex: %s, %x\n", t.Info().Name, t.InfoHash())
+
 		stats := t.Stats()
 		/*
 			var completedPieces, partialPieces int
@@ -252,7 +254,6 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 			return ctx.Err()
 		case <-t.GotInfo():
 			mi := t.Metainfo()
-			fmt.Printf("%s, %x\n", t.Info().Name, mi.HashInfoBytes())
 			if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi); err != nil {
 				return err
 			}
