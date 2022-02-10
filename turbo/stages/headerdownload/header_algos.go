@@ -902,12 +902,6 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 		if err != nil {
 			return nil, err
 		}
-		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
-			return nil, fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
-		}
-		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-			return nil, fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
-		}
 		hi.highest = blockHeight
 		hi.highestHash = hash
 		hi.highestTimestamp = header.Time
