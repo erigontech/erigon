@@ -1,16 +1,13 @@
 package privateapi
 
 import (
-	"bytes"
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -72,47 +69,35 @@ func (s *EthBackendServer) NetPeerCount(_ context.Context, _ *remote.NetPeerCoun
 	return &remote.NetPeerCountReply{Count: id}, nil
 }
 
-func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) error {
+func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer remote.ETHBACKEND_SubscribeServer) (err error) {
 	log.Trace("Establishing event subscription channel with the RPC daemon ...")
-	s.events.AddHeaderSubscription(func(h *types.Header) error {
+	ch, clean := s.events.AddHeaderSubscription()
+	defer clean()
+	log.Info("new subscription to newHeaders established")
+	defer func() {
+		if err != nil {
+			log.Warn("subscription to newHeaders closed", "reason", err)
+		} else {
+			log.Warn("subscription to newHeaders closed")
+		}
+	}()
+	for {
 		select {
 		case <-s.ctx.Done():
-			return nil
+			return s.ctx.Err()
 		case <-subscribeServer.Context().Done():
-			return nil
-		default:
+			return subscribeServer.Context().Err()
+		case headersRlp := <-ch:
+			for _, headerRlp := range headersRlp {
+				if err = subscribeServer.Send(&remote.SubscribeReply{
+					Type: remote.Event_HEADER,
+					Data: headerRlp,
+				}); err != nil {
+					return err
+				}
+			}
 		}
-
-		var buf bytes.Buffer
-		if err := rlp.Encode(&buf, h); err != nil {
-			log.Warn("error while marshaling a header", "err", err)
-			return err
-		}
-		payload := buf.Bytes()
-
-		err := subscribeServer.Send(&remote.SubscribeReply{
-			Type: remote.Event_HEADER,
-			Data: payload,
-		})
-
-		// we only close the wg on error because if we successfully sent an event,
-		// that means that the channel wasn't closed and is ready to
-		// receive more events.
-		// if rpcdaemon disconnects, we will receive an error here
-		// next time we try to send an event
-		if err != nil {
-			log.Info("event subscription channel was closed", "reason", err)
-		}
-		return err
-	})
-
-	log.Info("event subscription channel established with the RPC daemon")
-	select {
-	case <-subscribeServer.Context().Done():
-	case <-s.ctx.Done():
 	}
-	log.Info("event subscription channel closed with the RPC daemon")
-	return nil
 }
 
 func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remote.ProtocolVersionRequest) (*remote.ProtocolVersionReply, error) {
