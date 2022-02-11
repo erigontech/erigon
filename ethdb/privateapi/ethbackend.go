@@ -253,8 +253,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		// TODO(yperbasis): double check EIP-2718 transactions
-		TxHash: types.DeriveSha(types.RawTransactions(req.Transactions)),
+		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -262,7 +261,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 
-	// TODO(yperbasis): double check EIP-2718 transactions
 	transactions, err := types.DecodeTransactions(req.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
@@ -438,13 +436,13 @@ func (s *EthBackendServer) StartProposer() {
 
 				for _, tx := range block.Transactions() {
 					buf.Reset()
-
-					err := rlp.Encode(buf, tx)
+					// EIP-2718 txn shouldn't be additionally wrapped as RLP strings,
+					// so MarshalBinary instead of rlp.Encode
+					err := tx.MarshalBinary(buf)
 					if err != nil {
-						log.Warn("Broken tx rlp", "err", err.Error())
+						log.Warn("Failed to marshal transaction", "err", err.Error())
 						return
 					}
-					// TODO(yperbasis): double check EIP-2718 transactions
 					encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 				}
 				// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
