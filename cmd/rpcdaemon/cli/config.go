@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -236,7 +237,9 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool *services.TxPoolService, mining *services.MiningService, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
+// RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
+// `cfg.SingleNodeMode` (mode when it on 1 machine with Erigon)
+func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
@@ -335,7 +338,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	if !cfg.SingleNodeMode {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
 	}
-	remoteEth := services.NewRemoteBackend(conn, db, blockReader)
+	remoteEth := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
 	blockReader = remoteEth
 
 	txpoolConn := conn
@@ -346,8 +349,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		}
 	}
 
-	mining = services.NewMiningService(txpoolConn)
-	txPool = services.NewTxPoolService(txpoolConn)
+	mining = txpool.NewMiningClient(txpoolConn)
+	miningService := services.NewMiningService(mining)
+	txPool = txpool.NewTxpoolClient(txpoolConn)
+	txPoolService := services.NewTxPoolService(txPool)
 	if db == nil {
 		db = remoteKv
 	}
@@ -359,10 +364,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		if !remoteEth.EnsureVersionCompatibility() {
 			rootCancel()
 		}
-		if mining != nil && !mining.EnsureVersionCompatibility() {
+		if mining != nil && !miningService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
-		if !txPool.EnsureVersionCompatibility() {
+		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
 	}()
