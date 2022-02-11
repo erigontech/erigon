@@ -44,12 +44,12 @@ var KvServiceAPIVersion = &types.VersionReply{Major: 5, Minor: 1, Patch: 0}
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
 
-	kv                 kv.RwDB
+	kv                 kv.RoDB
 	stateChangeStreams *StateChangePubSub
 	ctx                context.Context
 }
 
-func NewKvServer(ctx context.Context, kv kv.RwDB) *KvServer {
+func NewKvServer(ctx context.Context, kv kv.RoDB) *KvServer {
 	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx}
 }
 
