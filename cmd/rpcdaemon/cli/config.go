@@ -11,6 +11,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -235,6 +236,71 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	log.Info("DB schemas compatible", "reader", fmt.Sprintf("%d.%d.%d", dbSchemaVersion.Major, dbSchemaVersion.Minor, dbSchemaVersion.Patch),
 		"database", fmt.Sprintf("%d.%d.%d", major, minor, patch))
 	return nil
+}
+
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger log.Logger) (borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
+	if cfg.StateCache.KeysLimit > 0 {
+		stateCache = kvcache.New(cfg.StateCache)
+	} else {
+		stateCache = kvcache.NewDummy()
+	}
+	blockReader = snapshotsync.NewBlockReader()
+	// bor (consensus) specific db
+	var borKv kv.RoDB
+	borDbPath := path.Join(cfg.Datadir, "bor")
+	{
+		// ensure db exist
+		tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, err
+		}
+		tmpDb.Close()
+	}
+	log.Trace("Creating consensus db", "path", borDbPath)
+	borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, err
+	}
+	// Skip the compatibility check, until we have a schema in erigon-lib
+	borDb = borKv
+
+	if cfg.Snapshot.Enabled {
+		var cc *params.ChainConfig
+		if err := erigonDB.View(context.Background(), func(tx kv.Tx) error {
+			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+			if err != nil {
+				return err
+			}
+			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, err
+		}
+		if cc == nil {
+			return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+		}
+
+		allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
+		allSnapshots.AsyncOpenAll(ctx)
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
+	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
+
+	directClient := services.NewEthBackendDirect()
+	services.NewRemoteBackend(directClient, erigonDB, blockReader)
+	panic("direct services are not implemented yet")
+	/*
+		mining = txpool.NewMiningClientDirect()
+		txPool = txpool.NewTxpoolClientDirect()
+	*/
+	return
 }
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
