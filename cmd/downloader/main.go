@@ -135,7 +135,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 
 	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
 
-	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, false)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, true)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
