@@ -134,6 +134,7 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
+	defer protocols.Close()
 
 	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
 
@@ -146,8 +147,9 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	<-cmd.Context().Done()
-	grpcServer.GracefulStop()
+	defer grpcServer.GracefulStop()
+
+	<-ctx.Done()
 	return nil
 }
 
