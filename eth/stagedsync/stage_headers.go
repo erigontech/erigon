@@ -50,7 +50,7 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
-	newPayloadCh          chan types.Block
+	newPayloadCh          chan privateapi.PayloadMessage
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
@@ -70,7 +70,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	newPayloadCh chan types.Block,
+	newPayloadCh chan privateapi.PayloadMessage,
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.AllSnapshots,
@@ -151,7 +151,7 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
-	var payloadMessage types.Block
+	var payloadMessage privateapi.PayloadMessage
 	var forkChoiceMessage privateapi.ForkChoiceMessage
 
 	// Decide what kind of action we need to take place
@@ -224,6 +224,7 @@ func handleForkChoice(
 			return nil
 		}
 
+		// FIXME(yperbasis): HeaderNumber is only populated at Stage 3
 		header, err = rawdb.ReadHeaderByHash(tx, headerHash)
 		if err != nil {
 			return err
@@ -233,13 +234,7 @@ func handleForkChoice(
 	headerNumber := header.Number.Uint64()
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
-	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
-	if err != nil {
-		if !repliedWithSyncStatus {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-		}
-		return err
-	}
+	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
 
 	forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
 	if err != nil {
@@ -279,14 +274,14 @@ func handleForkChoice(
 }
 
 func handleNewPayload(
-	block *types.Block,
+	payloadMessage *privateapi.PayloadMessage,
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
-	header := block.Header()
+	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
@@ -308,10 +303,17 @@ func handleNewPayload(
 	}
 
 	// If we have the parent then we can move on with the stagedsync
-	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+
+	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-		return err
+		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: header.ParentHash, // TODO(yperbasis): potentially wrong when parent is nil
+			ValidationError: err,
+		}
+		return nil
 	}
 
 	if parent != nil {
@@ -341,6 +343,7 @@ func handleNewPayload(
 	}
 
 	if cfg.bodyDownload != nil {
+		block := types.NewBlockFromStorage(headerHash, header, transactions, nil)
 		cfg.bodyDownload.AddToPrefetch(block)
 	}
 
