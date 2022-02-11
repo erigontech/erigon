@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -41,6 +42,7 @@ const ShortPoSReorgThresholdBlocks = 10
 type HeadersCfg struct {
 	db                    kv.RwDB
 	hd                    *headerdownload.HeaderDownload
+	bodyDownload          *bodydownload.BodyDownload
 	chainConfig           params.ChainConfig
 	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
 	announceNewHashes     func(context.Context, []headerdownload.Announce)
@@ -61,6 +63,7 @@ type HeadersCfg struct {
 func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
+	bodyDownload *bodydownload.BodyDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
@@ -78,6 +81,7 @@ func StageHeadersCfg(
 	return HeadersCfg{
 		db:                    db,
 		hd:                    headerDownload,
+		bodyDownload:          bodyDownload,
 		chainConfig:           chainConfig,
 		headerReqSend:         headerReqSend,
 		announceNewHashes:     announceNewHashes,
@@ -220,6 +224,7 @@ func handleForkChoice(
 			return nil
 		}
 
+		// FIXME(yperbasis): HeaderNumber is only populated at Stage 3
 		header, err = rawdb.ReadHeaderByHash(tx, headerHash)
 		if err != nil {
 			return err
@@ -229,13 +234,7 @@ func handleForkChoice(
 	headerNumber := header.Number.Uint64()
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
-	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
-	if err != nil {
-		if !repliedWithSyncStatus {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-		}
-		return err
-	}
+	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
 
 	forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
 	if err != nil {
@@ -304,10 +303,17 @@ func handleNewPayload(
 	}
 
 	// If we have the parent then we can move on with the stagedsync
-	parent, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+
+	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-		return err
+		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: header.ParentHash, // TODO(yperbasis): potentially wrong when parent is nil
+			ValidationError: err,
+		}
+		return nil
 	}
 
 	if parent != nil {
@@ -336,7 +342,10 @@ func handleNewPayload(
 		}
 	}
 
-	// TODO(yperbasis): bodyDownloader.AddToPrefetch(block)
+	if cfg.bodyDownload != nil {
+		block := types.NewBlockFromStorage(headerHash, header, transactions, nil)
+		cfg.bodyDownload.AddToPrefetch(block)
+	}
 
 	return nil
 }

@@ -440,10 +440,11 @@ func (s *EthBackendServer) StartProposer() {
 
 				for _, tx := range block.Transactions() {
 					buf.Reset()
-
-					err := rlp.Encode(buf, tx)
+					// EIP-2718 txn shouldn't be additionally wrapped as RLP strings,
+					// so MarshalBinary instead of rlp.Encode
+					err := tx.MarshalBinary(buf)
 					if err != nil {
-						log.Warn("Broken tx rlp", "err", err.Error())
+						log.Warn("Failed to marshal transaction", "err", err.Error())
 						return
 					}
 					encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
