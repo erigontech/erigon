@@ -224,11 +224,7 @@ func handleForkChoice(
 			return nil
 		}
 
-		// FIXME(yperbasis): HeaderNumber is only populated at Stage 3
-		header, err = rawdb.ReadHeaderByHash(tx, headerHash)
-		if err != nil {
-			return err
-		}
+		header = rawdb.ReadHeader(tx, headerHash, headerInserter.GetHighest())
 	}
 
 	headerNumber := header.Number.Uint64()
@@ -247,7 +243,7 @@ func handleForkChoice(
 	if !repliedWithSyncStatus {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
 			// Short range re-org
-			// TODO(yperbasis): what if some bodies are missing?
+			// TODO(yperbasis): what if some bodies are missing and we have to download them?
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
 			// Long range re-org

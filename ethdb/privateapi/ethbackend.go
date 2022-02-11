@@ -259,7 +259,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
+		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)), // TODO(yperbasis): prohibit EIP-2718 txn wrapped as RLP strings
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
