@@ -32,24 +32,23 @@ func GetBalance(reqId int, address common.Address, blockNum string) {
 	fmt.Printf("Balance retrieved: %v\n", parseResponse(b))
 }
 
-func SendTx(reqId int, signedTx *types.Transaction) {
+func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthSendRawTransaction
 
 	var buf bytes.Buffer
 	err := (*signedTx).MarshalBinary(&buf)
 	if err != nil {
-		fmt.Printf("Error trying to marshal binary: %v\n", err)
-		return
+		return nil, err
 	}
 
 	res := reqGen.Erigon("eth_sendRawTransaction", reqGen.sendRawTransaction(buf.Bytes()), &b)
 	if res.Err != nil {
-		fmt.Printf("Error sending transaction: %v\n", res.Err)
-		return
+		return nil, err
 	}
 
 	fmt.Printf("Submitted transaction successfully: %v\n", parseResponse(b))
+	return &b.TxnHash, nil
 }
 
 func TxpoolContent(reqId int) {

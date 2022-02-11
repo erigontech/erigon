@@ -21,10 +21,10 @@ import (
 var devnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 
 var (
-	sendAddr  string
-	sendValue uint64
-	nonce     uint64
-	searchBlock     bool
+	sendAddr    string
+	sendValue   uint64
+	nonce       uint64
+	searchBlock bool
 )
 
 const (
@@ -96,31 +96,31 @@ func subscribe(client *rpc.Client, method string, hash common.Hash) error {
 	defer sub.Unsubscribe()
 
 	blockCount := 0
-	ForLoop:
-		for {
-			select {
-			case v := <-ch:
-				blockCount++
-				blockNumber := v.(map[string]interface{})["number"]
-				fmt.Printf("Searching for the transaction in block with number: %+v\n", blockNumber)
-				foundTx, err := blockHasHash(client, hash, blockNumber.(string))
-				if err != nil {
-					return err
-				}
-				if foundTx || blockCount == 128 {
-					break ForLoop
-				}
-			case err := <-sub.Err():
+ForLoop:
+	for {
+		select {
+		case v := <-ch:
+			blockCount++
+			blockNumber := v.(map[string]interface{})["number"]
+			fmt.Printf("Searching for the transaction in block with number: %+v\n", blockNumber)
+			foundTx, err := blockHasHash(client, hash, blockNumber.(string))
+			if err != nil {
 				return err
 			}
+			if foundTx || blockCount == 128 {
+				break ForLoop
+			}
+		case err := <-sub.Err():
+			return err
 		}
+	}
 
 	return nil
 
 }
 
 type Block struct {
-	Number *hexutil.Big
+	Number       *hexutil.Big
 	Transactions []common.Hash
 }
 
