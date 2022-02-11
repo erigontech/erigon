@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -168,9 +169,11 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot    Snapshot
-	Torrent     *torrent.ClientConfig
-	SnapshotDir string
+	Snapshot Snapshot
+	Torrent  *torrent.ClientConfig
+
+	TorrentPieceCompletionStorage storage.PieceCompletion
+	SnapshotDir                   string
 
 	BlockDownloaderWindow int
 

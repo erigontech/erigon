@@ -120,10 +120,12 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		return fmt.Errorf("New: %w", err)
 	}
+	defer pieceCompletion.Close()
+
 	protocols, err := downloader.New(cfg, snapshotDir)
 	if err != nil {
 		return err

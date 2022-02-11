@@ -2,6 +2,8 @@ module github.com/ledgerwatch/erigon
 
 go 1.16
 
+replace github.com/etcd-io/bbolt => go.etcd.io/bbolt v1.3.5
+
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
