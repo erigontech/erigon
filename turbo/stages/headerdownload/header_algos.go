@@ -170,7 +170,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
 		delete(hd.links, removal.hash)
-		heap.Remove(hd.linkQueue, removal.idx)
+		hd.moveLinkToQueue(removal, NoQueue)
 		toRemove = append(toRemove, removal.next...)
 	}
 }
@@ -178,7 +178,10 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 func (hd *HeaderDownload) MarkPreverified(link *Link) {
 	// Go through all parent links that are not preverified and mark them too
 	for link != nil && !link.persisted {
-		link.preverified = true
+		if !link.verified {
+			link.verified = true
+			hd.moveLinkToQueue(link, InsertQueueID)
+		}
 		link = hd.links[link.header.ParentHash]
 	}
 }
@@ -186,7 +189,10 @@ func (hd *HeaderDownload) MarkPreverified(link *Link) {
 func (hd *HeaderDownload) MarkPreverifiedForward(link *Link) {
 	// Starting from a block link, go through all the child links
 	// that are not preverified and mark them too.
-	link.preverified = true
+	if !link.verified {
+		link.verified = true
+		hd.moveLinkToQueue(link, InsertQueueID)
+	}
 	for _, childLink := range link.next {
 		hd.MarkPreverifiedForward(childLink)
 	}
@@ -200,7 +206,11 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		if prevLink.persisted {
 			// If we are attching to already persisted link, schedule for insertion (persistence)
-			hd.insertList = append(hd.insertList, link)
+			if link.verified {
+				hd.moveLinkToQueue(link, InsertQueueID)
+			} else {
+				hd.moveLinkToQueue(link, VerifyQueueID)
+			}
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -217,7 +227,7 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool 
 
 	anchorPreverified := false
 	for _, link := range anchor.links {
-		if link.preverified {
+		if link.verified {
 			anchorPreverified = true
 			break
 		}
@@ -266,7 +276,7 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool 
 func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, anchor *Anchor) []PenaltyItem {
 	anchorPreverified := false
 	for _, link := range anchor.links {
-		if link.preverified {
+		if link.verified {
 			anchorPreverified = true
 			break
 		}
@@ -278,7 +288,11 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		// If we attach to already persisted link, mark this one for insertion
 		if prevLink.persisted {
-			hd.insertList = append(hd.insertList, link)
+			if link.verified {
+				hd.moveLinkToQueue(link, InsertQueueID)
+			} else {
+				hd.moveLinkToQueue(link, VerifyQueueID)
+			}
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -351,7 +365,7 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) bool 
 
 func (hd *HeaderDownload) pruneLinkQueue() {
 	for hd.linkQueue.Len() > hd.linkLimit {
-		link := heap.Pop(hd.linkQueue).(*Link)
+		link := heap.Pop(&hd.linkQueue).(*Link)
 		delete(hd.links, link.hash)
 		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
 			for i, n := range parentLink.next {
@@ -488,7 +502,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 
 	// Drain persistedLinksQueue and remove links
 	for hd.persistedLinkQueue.Len() > 0 {
-		link := heap.Pop(hd.persistedLinkQueue).(*Link)
+		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
 	}
 	err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -642,78 +656,99 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
-	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
-	for len(hd.insertList) > 0 {
-		// Make sure long insertions do not appear as a stuck stage 1
-		select {
-		case <-logChannel:
-			log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
-		default:
-		}
-		link := hd.insertList[len(hd.insertList)-1]
-		if link.blockHeight <= hd.preverifiedHeight && !link.preverified {
-			// Header should be preverified, but not yet, try again later
-			break
-		}
-		hd.insertList = hd.insertList[:len(hd.insertList)-1]
-		skip := false
-		if !link.preverified {
-			if _, bad := hd.badHeaders[link.hash]; bad {
-				skip = true
-			} else if err := hd.VerifyHeader(link.header); err != nil {
-				log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
-				if errors.Is(err, consensus.ErrFutureBlock) {
-					// This may become valid later
-					linksInFuture = append(linksInFuture, link)
-					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
-					continue // prevent removal of the link from the hd.linkQueue
-				} else {
-					skip = true
+	checkVerify := true
+	checkInsert := true
+
+	for checkVerify || checkInsert {
+		if checkVerify {
+			checkVerify = false
+			// Perform verification if needed
+			for hd.verifyQueue.Len() > 0 {
+				link := hd.verifyQueue[0]
+				select {
+				case <-logChannel:
+					log.Info(fmt.Sprintf("[%s] Verifying headers", logPrefix), "progress", hd.highestInDb)
+				default:
 				}
-			} else {
-				if hd.seenAnnounces.Pop(link.hash) {
-					hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+				skip := false
+				if link.blockHeight <= hd.preverifiedHeight {
+					if link.blockHeight <= hd.highestInDb {
+						// There was preverified alternative to this link, drop
+						skip = true
+					} else {
+						break // Wait to be mark as pre-verified or an alternative to be inserted
+					}
 				}
+				if !skip {
+					if _, bad := hd.badHeaders[link.hash]; bad {
+						skip = true
+					}
+				}
+				if !skip {
+					if err := hd.VerifyHeader(link.header); err != nil {
+						if errors.Is(err, consensus.ErrFutureBlock) {
+							// This may become valid later
+							log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
+							break // prevent removal of the link from the hd.linkQueue
+						} else {
+							log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
+							skip = true
+						}
+					}
+				}
+				if skip {
+					hd.moveLinkToQueue(link, NoQueue)
+					delete(hd.links, link.hash)
+					continue
+				}
+				hd.moveLinkToQueue(link, InsertQueueID)
+				checkInsert = true
 			}
 		}
-		if _, ok := hd.links[link.hash]; ok {
-			heap.Remove(hd.linkQueue, link.idx)
-		}
-		if skip {
-			delete(hd.links, link.hash)
-			continue
-		}
+		if checkInsert {
+			checkInsert = false
+			// Check what we can insert without verification
+			for hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
+				link := hd.insertQueue[0]
+				// Make sure long insertions do not appear as a stuck stage 1
+				select {
+				case <-logChannel:
+					log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
+				default:
+				}
+				td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
+				if err != nil {
+					return false, err
+				}
+				if td != nil {
+					// Check if transition to proof-of-stake happened and stop forward syncing
+					if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
+						hd.highestInDb = link.blockHeight
+						return true, nil
+					}
+				}
 
-		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
-		if err != nil {
-			return false, err
-		}
-		if td != nil {
-			// Check if transition to proof-of-stake happened and stop forward syncing
-			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
-				hd.highestInDb = link.blockHeight
-				return true, nil
+				if link.blockHeight > hd.highestInDb {
+					hd.highestInDb = link.blockHeight
+				}
+				link.persisted = true
+				link.header = nil // Drop header reference to free memory, as we won't need it anymore
+				link.headerRaw = nil
+				hd.moveLinkToQueue(link, PersistedQueueID)
+				for _, nextLink := range link.next {
+					if nextLink.verified {
+						hd.moveLinkToQueue(link, InsertQueueID)
+					} else {
+						hd.moveLinkToQueue(link, VerifyQueueID)
+						checkVerify = true
+					}
+				}
+			}
+			for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
+				link := heap.Pop(&hd.persistedLinkQueue).(*Link)
+				delete(hd.links, link.hash)
 			}
 		}
-
-		if link.blockHeight > hd.highestInDb {
-			hd.highestInDb = link.blockHeight
-		}
-		link.persisted = true
-		link.header = nil // Drop header reference to free memory, as we won't need it anymore
-		link.headerRaw = nil
-		heap.Push(hd.persistedLinkQueue, link)
-		if len(link.next) > 0 {
-			hd.insertList = append(hd.insertList, link.next...)
-		}
-	}
-	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
-		link := heap.Pop(hd.persistedLinkQueue).(*Link)
-		delete(hd.links, link.hash)
-	}
-	if len(linksInFuture) > 0 {
-		hd.insertList = append(hd.insertList, linksInFuture...)
-		linksInFuture = nil //nolint
 	}
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
@@ -814,9 +849,9 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 	}
 	hd.links[h.Hash] = link
 	if persisted {
-		heap.Push(hd.persistedLinkQueue, link)
+		hd.moveLinkToQueue(link, PersistedQueueID)
 	} else {
-		heap.Push(hd.linkQueue, link)
+		hd.moveLinkToQueue(link, EntryQueueID)
 	}
 	return link
 }
@@ -1149,7 +1184,7 @@ func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 func (hd *HeaderDownload) InsertList() []*Link {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.insertList
+	return nil
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
@@ -1197,7 +1232,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlock
 			Number:    header.Number.Uint64(),
 		}
 		link := hd.addHeaderAsLink(h, true /* persisted */)
-		link.preverified = true
+		link.verified = true
 		if addPreVerifiedHashes {
 			hd.preverifiedHashes[h.Hash] = struct{}{}
 		}
