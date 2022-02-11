@@ -219,8 +219,14 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 		}
 		mi.AnnounceList = Trackers
 
-		if _, err = torrentClient.AddTorrent(mi); err != nil {
+		t := time.Now()
+		_, err = torrentClient.AddTorrent(mi)
+		if err != nil {
 			return err
+		}
+		took := time.Since(t)
+		if took > 3*time.Second {
+			log.Info("[torrent] Check validity", "file", torrentFilePath, "took", took)
 		}
 	}
 
