@@ -94,7 +94,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := Downloader(cmd.Context(), cmd); err != nil {
+		if err := Downloader(cmd.Context()); err != nil {
 			log.Error("Downloader", "err", err)
 			return nil
 		}
@@ -102,7 +102,7 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Downloader(ctx context.Context, cmd *cobra.Command) error {
+func Downloader(ctx context.Context) error {
 	snapshotDir := path.Join(datadir, "snapshots")
 	common.MustExist(snapshotDir)
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]

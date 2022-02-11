@@ -207,12 +207,18 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
+func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
 	files, err := AllTorrentPaths(snapshotsDir)
 	if err != nil {
 		return err
 	}
 	for _, torrentFilePath := range files {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
