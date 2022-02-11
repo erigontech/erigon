@@ -61,7 +61,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := path.Join(datadir, "aggregator")
-	h, err3 := aggregator.NewHistory(aggPath, 4_000_000, aggregationStep)
+	h, err3 := aggregator.NewHistory(aggPath, 499_999, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create history: %w", err3)
 	}
@@ -103,6 +103,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		r := h.MakeHistoryReader()
 		readWrapper := &HistoryWrapper{r: r}
+		//readWrapper.trace = blockNum == 999_999
 		writeWrapper := state.NewNoopWriter()
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
 		if txNum, _, err = runHistory2(trace, blockNum, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
@@ -142,9 +143,6 @@ func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
-		if trace {
-			fmt.Printf("FinishTx called for %d [%x]\n", txNum, tx.Hash())
-		}
 		txNum++
 	}
 
@@ -153,18 +151,18 @@ func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww
 
 // Implements StateReader and StateWriter
 type HistoryWrapper struct {
-	r *aggregator.HistoryReader
+	r     *aggregator.HistoryReader
+	trace bool
 }
 
 func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := hw.r.ReadAccountData(address.Bytes(), false /* trace */)
+	enc, err := hw.r.ReadAccountData(address.Bytes(), hw.trace)
 	if err != nil {
 		return nil, err
 	}
 	if len(enc) == 0 {
 		return nil, nil
 	}
-
 	var a accounts.Account
 	a.Reset()
 	pos := 0
@@ -195,9 +193,12 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 }
 
 func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	trace := false
-	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
+	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), hw.trace)
+	if hw.trace {
+		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc)
+	}
 	if err != nil {
+		fmt.Printf("%v\n", err)
 		return nil, err
 	}
 	if enc == nil {
