@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -41,6 +42,7 @@ const ShortPoSReorgThresholdBlocks = 10
 type HeadersCfg struct {
 	db                    kv.RwDB
 	hd                    *headerdownload.HeaderDownload
+	bodyDownload          *bodydownload.BodyDownload
 	chainConfig           params.ChainConfig
 	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
 	announceNewHashes     func(context.Context, []headerdownload.Announce)
@@ -61,6 +63,7 @@ type HeadersCfg struct {
 func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
+	bodyDownload *bodydownload.BodyDownload,
 	chainConfig params.ChainConfig,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
@@ -78,6 +81,7 @@ func StageHeadersCfg(
 	return HeadersCfg{
 		db:                    db,
 		hd:                    headerDownload,
+		bodyDownload:          bodyDownload,
 		chainConfig:           chainConfig,
 		headerReqSend:         headerReqSend,
 		announceNewHashes:     announceNewHashes,
@@ -336,7 +340,9 @@ func handleNewPayload(
 		}
 	}
 
-	// TODO(yperbasis): bodyDownloader.AddToPrefetch(block)
+	if cfg.bodyDownload != nil {
+		cfg.bodyDownload.AddToPrefetch(block)
+	}
 
 	return nil
 }
