@@ -1362,18 +1362,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
 	}
 
-	TorrentPortFlag = cli.IntFlag{
-		Name:  "torrent.port",
-		Value: 42069,
-		Usage: "port to listen and serve BitTorrent protocol",
+	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		if err != nil {
+			panic(err)
+		}
+		cfg.Torrent = torrentCfg
+		cfg.TorrentPieceCompletionStorage = pieceCompletion
 	}
-
-	torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
-	if err != nil {
-		panic(err)
-	}
-	cfg.Torrent = torrentCfg
-	cfg.TorrentPieceCompletionStorage = pieceCompletion
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true
