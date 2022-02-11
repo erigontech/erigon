@@ -1,6 +1,7 @@
 package torrentcfg
 
 import (
+	"fmt"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -38,7 +39,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, error) {
+func New(snapshotsDir string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, storage.PieceCompletion, error) {
 	torrentConfig := Default()
 	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = true
@@ -55,6 +56,10 @@ func New(snapshotsDir string, verbosity lg.Level, downloadRate, uploadRate datas
 	}
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
 
-	torrentConfig.DefaultStorage = storage.NewMMap(snapshotsDir)
-	return torrentConfig, nil
+	c, err := storage.NewBoltPieceCompletion(snapshotsDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
+	}
+	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, c)
+	return torrentConfig, c, nil
 }

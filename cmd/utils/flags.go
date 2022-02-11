@@ -1368,11 +1368,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		Usage: "port to listen and serve BitTorrent protocol",
 	}
 
-	torrentCfg, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+	torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		panic(err)
 	}
 	cfg.Torrent = torrentCfg
+	cfg.TorrentPieceCompletionStorage = pieceCompletion
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true
