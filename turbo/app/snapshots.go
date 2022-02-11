@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
 	"path"
 	"runtime"
 
@@ -49,6 +48,7 @@ var snapshotCommand = cli.Command{
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
+				SnapshotFromFlag,
 				SnapshotRebuildFlag,
 			}, debug.Flags...),
 		},
@@ -85,13 +85,14 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	snapshotDir := path.Join(dataDir, "snapshots")
 	tmpDir := path.Join(dataDir, etl.TmpDirName)
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
 	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir); err != nil {
+		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir, from); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -121,7 +122,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string, from uint64) error {
 	common.MustExist(snapshotDir)
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
@@ -130,14 +131,14 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
-	if err != nil {
-		return err
-	}
-	for _, f := range idxFilesList {
-		_ = os.Remove(f)
-	}
-	if err := allSnapshots.BuildIndices(ctx, *chainID, tmpDir); err != nil {
+	//idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
+	//if err != nil {
+	//	return err
+	//}
+	//for _, f := range idxFilesList {
+	//	_ = os.Remove(f)
+	//}
+	if err := allSnapshots.BuildIndices(ctx, *chainID, tmpDir, from); err != nil {
 		return err
 	}
 	return nil

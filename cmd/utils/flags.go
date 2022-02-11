@@ -653,6 +653,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		switch chain {
 		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
+		case networkname.SepoliaChainName:
+			urls = params.SepoliaBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
@@ -698,6 +700,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 		switch chain {
 		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
+		case networkname.SepoliaChainName:
+			urls = params.SepoliaBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
@@ -1016,6 +1020,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
 		return filepath.Join(datadir, "bor-mainnet")
+	case networkname.SepoliaChainName:
+		return filepath.Join(datadir, "sepolia")
 	default:
 		return datadir
 	}
@@ -1356,17 +1362,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
 	}
 
-	TorrentPortFlag = cli.IntFlag{
-		Name:  "torrent.port",
-		Value: 42069,
-		Usage: "port to listen and serve BitTorrent protocol",
+	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		if err != nil {
+			panic(err)
+		}
+		cfg.Torrent = torrentCfg
+		cfg.TorrentPieceCompletionStorage = pieceCompletion
 	}
-
-	torrentCfg, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
-	if err != nil {
-		panic(err)
-	}
-	cfg.Torrent = torrentCfg
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true
@@ -1424,6 +1427,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
+	case networkname.SepoliaChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 11155111
+		}
+		cfg.Genesis = core.DefaultSepoliaGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.SepoliaGenesisHash)
 	case networkname.RopstenChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 3
@@ -1556,6 +1565,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 	var genesis *core.Genesis
 	chain := ctx.GlobalString(ChainFlag.Name)
 	switch chain {
+	case networkname.SepoliaChainName:
+		genesis = core.DefaultSepoliaGenesisBlock()
 	case networkname.RopstenChainName:
 		genesis = core.DefaultRopstenGenesisBlock()
 	case networkname.RinkebyChainName:

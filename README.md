@@ -157,6 +157,27 @@ where `<ip address>` is either localhost or the IP address of the device running
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
     
+### Multiple Instances / One Machine
+
+Here's an example of running multiple instances of Erigon against different chains on the same machine:
+
+Against mainnet:
+
+```
+./build/bin/erigon    --datadir "<your-mainnet-data-path>" --private.api.addr=localhost:9091 -port 30303 --chain mainnet
+./build/bin/rpcdaemon --datadir "<your-mainnet-data-path>" --private.api.addr=localhost:9091 --http.api=eth,debug,net,trace,web3,erigon --http.port 8546
+```
+
+As usual, use the same `datadir` and `private.api.addr` for both Erigon and RPC. Explicitly specify the chain and the other ports to make things clearer. Quote your path if it has spaces.
+
+Against rinkeby:
+
+```
+./build/bin/erigon    --datadir "<your-rinkeby-data-path>" --private.api.addr=localhost:9092 -port 30304 --chain rinkeby
+./build/bin/rpcdaemon --datadir "<your-rinkeby-data-path>" --private.api.addr=localhost:9092 --http.api=eth,debug,net,trace,web3,erigon --http.port 8547
+```
+
+Same command, but use different `datadir` and different ports throughout.
 
 ### Dev Chain
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>

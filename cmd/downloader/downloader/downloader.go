@@ -207,20 +207,32 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
+func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
 	files, err := AllTorrentPaths(snapshotsDir)
 	if err != nil {
 		return err
 	}
 	for _, torrentFilePath := range files {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		mi, err := metainfo.LoadFromFile(torrentFilePath)
 		if err != nil {
 			return err
 		}
 		mi.AnnounceList = Trackers
 
-		if _, err = torrentClient.AddTorrent(mi); err != nil {
+		t := time.Now()
+		_, err = torrentClient.AddTorrent(mi)
+		if err != nil {
 			return err
+		}
+		took := time.Since(t)
+		if took > 3*time.Second {
+			log.Info("[torrent] Check validity", "file", torrentFilePath, "took", took)
 		}
 	}
 
@@ -228,7 +240,7 @@ func AddTorrentFiles(snapshotsDir string, torrentClient *torrent.Client) error {
 }
 
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string) error {
+func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string, silent bool) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, infoHash := range preverifiedHashes {
 		if _, ok := torrentClient.Torrent(infoHash); ok {
@@ -241,6 +253,11 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
+	}
+	if !silent {
+		ctxLocal, cancel := context.WithCancel(ctx)
+		defer cancel()
+		go LoggingLoop(ctxLocal, torrentClient)
 	}
 
 	for _, t := range torrentClient.Torrents() {

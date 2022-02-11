@@ -167,6 +167,8 @@ func makeP2PServer(
 	switch genesisHash {
 	case params.MainnetGenesisHash:
 		urls = params.MainnetBootnodes
+	case params.SepoliaGenesisHash:
+		urls = params.SepoliaBootnodes
 	case params.RopstenGenesisHash:
 		urls = params.RopstenBootnodes
 	case params.GoerliGenesisHash:

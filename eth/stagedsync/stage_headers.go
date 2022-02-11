@@ -271,7 +271,7 @@ func handleForkChoice(
 		return err
 	}
 
-	return stages.SaveStageProgress(tx, stages.Headers, headerNumber)
+	return s.Update(tx, headerNumber)
 }
 
 func handleNewPayload(
@@ -386,7 +386,7 @@ func verifyAndSaveNewPoSHeader(
 			return
 		}
 
-		err = stages.SaveStageProgress(tx, stages.Headers, headerNumber)
+		err = s.Update(tx, headerNumber)
 		if err != nil {
 			return
 		}
@@ -661,9 +661,18 @@ Loop:
 	}
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
-	} else if headerInserter.GetHighest() != 0 {
-		if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
-			return fmt.Errorf("fix canonical chain: %w", err)
+	}
+	if headerInserter.GetHighest() != 0 {
+		if !headerInserter.Unwind() {
+			if err := fixCanonicalChain(logPrefix, logEvery, headerInserter.GetHighest(), headerInserter.GetHighestHash(), tx, cfg.blockReader); err != nil {
+				return fmt.Errorf("fix canonical chain: %w", err)
+			}
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, headerInserter.GetHighestHash()); err != nil {
+			return fmt.Errorf("[%s] marking head header hash as %x: %w", logPrefix, headerInserter.GetHighestHash(), err)
+		}
+		if err = s.Update(tx, headerInserter.GetHighest()); err != nil {
+			return fmt.Errorf("[%s] saving Headers progress: %w", logPrefix, err)
 		}
 	}
 	if !useExternalTx {
@@ -977,7 +986,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir); err != nil {
+			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir, 0); err != nil {
 				return err
 			}
 		}
@@ -1001,15 +1010,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
 		td := big.NewInt(0)
-		if err := snapshotsync.ForEachHeader(cfg.snapshots, func(header *types.Header) error {
+		if err := snapshotsync.ForEachHeader(ctx, cfg.snapshots, func(header *types.Header) error {
+			blockNum, blockHash := header.Number.Uint64(), header.Hash()
 			td.Add(td, header.Difficulty)
-			if err := rawdb.WriteTd(tx, header.Hash(), header.Number.Uint64(), td); err != nil {
+			if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
 				return err
 			}
-			if err := rawdb.WriteCanonicalHash(tx, header.Hash(), header.Number.Uint64()); err != nil {
+			if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 				return err
 			}
-			if err := rawdb.WriteHeaderNumber(tx, header.Hash(), header.Number.Uint64()); err != nil {
+			if err := rawdb.WriteHeaderNumber(tx, blockHash, blockNum); err != nil {
 				return err
 			}
 			select {
