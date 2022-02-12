@@ -11,6 +11,7 @@ import (
 	"path"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -329,7 +330,7 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		if health.ProcessHealthcheckIfNeeded(w, r, rpcAPI) {
 			return
 		}
-		if cfg.WebsocketEnabled && r.Method == "GET" {
+		if cfg.WebsocketEnabled && websocket.IsWebSocketUpgrade(r) {
 			wsHandler.ServeHTTP(w, r)
 			return
 		}
