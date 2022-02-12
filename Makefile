@@ -106,7 +106,7 @@ seeder:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
 
-devnettest: git-submodules
+devnettest:
 	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
 	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
 
