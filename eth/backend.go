@@ -133,7 +133,7 @@ type Ethereum struct {
 	newTxs2                 chan txpool2.Hashes
 	txPool2Fetch            *txpool2.Fetch
 	txPool2Send             *txpool2.Send
-	txPool2GrpcServer       *txpool2.GrpcServer
+	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the block
@@ -346,9 +346,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	}
 	config.BodyDownloadTimeoutSeconds = 30
 
-	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
-	if !config.TxPool.Disable {
+	if config.TxPool.Disable {
+		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
+	} else {
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
 
@@ -361,7 +362,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		if err != nil {
 			return nil, err
 		}
-		txPoolRPC = backend.txPool2GrpcServer
 	}
 
 	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
@@ -433,7 +433,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		backend.privateAPI, err = privateapi.StartGrpc(
 			kvRPC,
 			ethBackendRPC,
-			txPoolRPC,
+			backend.txPool2GrpcServer,
 			miningRPC,
 			stack.Config().PrivateApiAddr,
 			stack.Config().PrivateApiRateLimit,
@@ -447,9 +447,13 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	if !config.TxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()
 		backend.txPool2Fetch.ConnectSentries()
+		var newTxsBroadcaster *txpool2.NewSlotsStreams
+		if casted, ok := backend.txPool2GrpcServer.(*txpool2.GrpcServer); ok {
+			newTxsBroadcaster = casted.NewSlotsStreams
+		}
 		go txpool2.MainLoop(backend.sentryCtx,
 			backend.txPool2DB, backend.chainDB,
-			backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams,
+			backend.txPool2, backend.newTxs2, backend.txPool2Send, newTxsBroadcaster,
 			func() {
 				select {
 				case backend.notifyMiningAboutNewTxs <- struct{}{}:
