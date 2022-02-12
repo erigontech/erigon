@@ -2,7 +2,7 @@ package snapshotsync
 
 import (
 	"context"
-	"path"
+	"path/filepath"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -20,7 +20,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
 	createFile := func(from, to uint64, name SnapshotType) {
-		c, err := compress.NewCompressor(context.Background(), "test", path.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
+		c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 		require.NoError(err)
 		defer c.Close()
 		err = c.AddWord([]byte{1})
@@ -31,7 +31,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  path.Join(dir, IdxFileName(from, to, name)),
+			IndexFile:  filepath.Join(dir, IdxFileName(from, to, name)),
 			LeafSize:   8,
 		})
 		require.NoError(err)

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -490,7 +490,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 
 	must(sync.SetCurrentStage(stages.Senders))
@@ -572,7 +572,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	pm, engine, chainConfig, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	if reset {
 		genesis, _ := byChain()
@@ -632,7 +632,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 func stageTrie(db kv.RwDB, ctx context.Context) error {
 	pm, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -684,7 +684,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
@@ -738,7 +738,7 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageLogIndex(db kv.RwDB, ctx context.Context) error {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
@@ -793,7 +793,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	pm, _, _, _, sync, _, _ := newSync(ctx, kv, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
@@ -854,7 +854,7 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 }
 
 func stageHistory(db kv.RwDB, ctx context.Context) error {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 	pm, _, _, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
@@ -924,7 +924,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTxLookup(db kv.RwDB, ctx context.Context) error {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	pm, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.TxLookup))
@@ -1059,7 +1059,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, false)
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, path.Join(datadir, "snapshots"))
+			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}
@@ -1080,7 +1080,7 @@ func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockRea
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 	logger := log.New()
 
 	var pm prune.Mode
@@ -1104,12 +1104,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
 		c := params.CliqueSnapshot
-		c.DBPath = path.Join(datadir, "clique/db")
+		c.DBPath = filepath.Join(datadir, "clique", "db")
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: path.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else if chainConfig.Parlia != nil {
-		consensusConfig := &params.ParliaConfig{DBPath: path.Join(datadir, "parlia")}
+		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else { //ethash
 		engine = ethash.NewFaker()
