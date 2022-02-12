@@ -47,23 +47,18 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-
-	"github.com/ledgerwatch/erigon/consensus/parlia"
-
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -83,7 +78,11 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -540,7 +539,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
-	var borDb kv.RoDB //TODO: support bor
+	var borDb kv.RoDB
+	if casted, ok := backend.engine.(*bor.Bor); ok {
+		borDb = casted.DB
+	}
 	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg, nil)
 	go func() {
 		_ = apiList
