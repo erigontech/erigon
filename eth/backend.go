@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -153,7 +153,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
-	tmpdir := path.Join(stack.Config().DataDir, etl.TmpDirName)
+	tmpdir := filepath.Join(stack.Config().DataDir, etl.TmpDirName)
 	if err := os.RemoveAll(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
@@ -281,7 +281,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		}
 
 		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = path.Join(stack.Config().DataDir, "nodes", "eth66")
+		cfg66.NodeDatabase = filepath.Join(stack.Config().DataDir, "nodes", "eth66")
 		server66 := sentry.NewSentryServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		backend.sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}

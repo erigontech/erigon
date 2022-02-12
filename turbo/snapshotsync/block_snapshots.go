@@ -325,7 +325,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		if sn.From < from {
 			continue
 		}
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+		f := filepath.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
 		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -335,7 +335,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		if sn.From < from {
 			continue
 		}
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		f := filepath.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
 		if err := BodiesIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			}
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
-		f := path.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+		f := filepath.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
 		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, expectedTxsAmount, f, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -802,7 +802,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions)),
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, Transactions)),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
@@ -815,7 +815,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
@@ -1129,11 +1129,11 @@ func assertAllSegments(blocks []*BlocksSnapshot, root string) {
 		wg.Add(1)
 		go func(sn *BlocksSnapshot) {
 			defer wg.Done()
-			f := path.Join(root, SegmentFileName(sn.From, sn.To, Headers))
+			f := filepath.Join(root, SegmentFileName(sn.From, sn.To, Headers))
 			assertSegment(f)
-			f = path.Join(root, SegmentFileName(sn.From, sn.To, Bodies))
+			f = filepath.Join(root, SegmentFileName(sn.From, sn.To, Bodies))
 			assertSegment(f)
-			f = path.Join(root, SegmentFileName(sn.From, sn.To, Transactions))
+			f = filepath.Join(root, SegmentFileName(sn.From, sn.To, Transactions))
 			assertSegment(f)
 			fmt.Printf("done:%s\n", f)
 		}(sn)

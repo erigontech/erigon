@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -60,7 +61,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := path.Join(datadir, "aggregator")
+	aggPath := filepath.Join(datadir, "aggregator")
 	h, err3 := aggregator.NewHistory(aggPath, 499_999, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create history: %w", err3)

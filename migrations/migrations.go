@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"path"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -184,7 +184,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 			return err
 		}
 
-		if err := v.Up(db, path.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
+		if err := v.Up(db, filepath.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					if err := tx.Put(kv.Migrations, []byte("_progress_"+v.Name), key); err != nil {

@@ -8,7 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -138,7 +138,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 				cfg.Datadir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
-				cfg.Chaindata = path.Join(cfg.Datadir, "chaindata")
+				cfg.Chaindata = filepath.Join(cfg.Datadir, "chaindata")
 			}
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled)
 		}
@@ -290,7 +290,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 
 		// bor (consensus) specific db
 		var borKv kv.RoDB
-		borDbPath := path.Join(cfg.Datadir, "bor")
+		borDbPath := filepath.Join(cfg.Datadir, "bor")
 		{
 			// ensure db exist
 			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
@@ -335,7 +335,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
+			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
