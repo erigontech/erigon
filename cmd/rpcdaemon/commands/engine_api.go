@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -281,8 +280,20 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), totalTerminalDifficulty)
 	}
 
-	block := rawdb.ReadCurrentBlock(tx)
-	blockHash := block.Hash()
+	encodedBlock, err := tx.GetOne(kv.TerminalBlock, chainConfig.TerminalTotalDifficulty.Bytes())
+	if err != nil {
+		return TransitionConfiguration{}, err
+	}
+
+	if len(encodedBlock) == 0 {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, common.Hash{})
+	}
+
+	var blockHash common.Hash
+
+	if err := rlp.DecodeBytes(encodedBlock, &blockHash); err != nil {
+		return TransitionConfiguration{}, err
+	}
 
 	if blockHash != transitionConfiguration.TerminalBlockHash {
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, blockHash)

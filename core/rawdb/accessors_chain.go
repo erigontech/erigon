@@ -1343,3 +1343,26 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 
 	return headerTd.Cmp(terminalTotalDifficulty) >= 0, nil
 }
+
+// Stores the hash of the last POW block
+func WriteTerminalBlockHash(tx kv.RwTx, blockNum uint64, terminalTotalDifficulty *big.Int) error {
+	if terminalTotalDifficulty == nil {
+		return nil
+	}
+
+	header := ReadHeaderByNumber(tx, blockNum)
+	if header == nil {
+		return nil
+	}
+
+	headerTd, err := ReadTd(tx, header.Hash(), blockNum)
+	if err != nil {
+		return err
+	}
+
+	if headerTd.Cmp(terminalTotalDifficulty) >= 0 {
+		tx.Put(kv.TerminalBlock, terminalTotalDifficulty.Bytes(), header.Hash().Bytes())
+	}
+
+	return nil
+}

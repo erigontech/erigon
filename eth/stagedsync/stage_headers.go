@@ -126,6 +126,10 @@ func SpawnStageHeaders(
 		return err
 	}
 
+	if err := rawdb.WriteTerminalBlockHash(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty); err != nil {
+		return err
+	}
+
 	if isTrans {
 		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
 	} else {
@@ -572,6 +576,10 @@ Loop:
 
 		isTrans, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
+			return err
+		}
+
+		if err := rawdb.WriteTerminalBlockHash(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty); err != nil {
 			return err
 		}
 
