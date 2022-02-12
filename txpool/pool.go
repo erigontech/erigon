@@ -1375,7 +1375,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 					log.Error("[txpool] collect info to propagate", "err", err)
 					return
 				}
-				newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
+				if newSlotsStreams != nil {
+					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp})
+				}
 
 				// first broadcast all local txs to all peers, then non-local to random sqrt(peersAmount) peers
 				txSentTo := send.BroadcastPooledTxs(localTxRlps)

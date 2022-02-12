@@ -57,6 +57,43 @@ type txPool interface {
 	NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)
 }
 
+var _ txpool_proto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
+var _ txpool_proto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
+
+var ErrPoolDisabled = fmt.Errorf("TxPool Disabled")
+
+type GrpcDisabled struct {
+	txpool_proto.UnimplementedTxpoolServer
+}
+
+func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*types2.VersionReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) FindUnknown(ctx context.Context, hashes *txpool_proto.TxHashes) (*txpool_proto.TxHashes, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) Add(ctx context.Context, request *txpool_proto.AddRequest) (*txpool_proto.AddReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) Transactions(ctx context.Context, request *txpool_proto.TransactionsRequest) (*txpool_proto.TransactionsReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) All(ctx context.Context, request *txpool_proto.AllRequest) (*txpool_proto.AllReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) Pending(ctx context.Context, empty *emptypb.Empty) (*txpool_proto.PendingReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) OnAdd(request *txpool_proto.OnAddRequest, server txpool_proto.Txpool_OnAddServer) error {
+	return ErrPoolDisabled
+}
+func (*GrpcDisabled) Status(ctx context.Context, request *txpool_proto.StatusRequest) (*txpool_proto.StatusReply, error) {
+	return nil, ErrPoolDisabled
+}
+func (*GrpcDisabled) Nonce(ctx context.Context, request *txpool_proto.NonceRequest) (*txpool_proto.NonceReply, error) {
+	return nil, ErrPoolDisabled
+}
+
 type GrpcServer struct {
 	txpool_proto.UnimplementedTxpoolServer
 	ctx             context.Context
