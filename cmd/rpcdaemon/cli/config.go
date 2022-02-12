@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -498,13 +499,19 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 	return nil
 }
 
+// isWebsocket checks the header of a http request for a websocket upgrade request.
+func isWebsocket(r *http.Request) bool {
+	return strings.ToLower(r.Header.Get("Upgrade")) == "websocket" &&
+		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
 func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
 			return
 		}
-		if cfg.WebsocketEnabled && wsHandler != nil && r.Method == "GET" {
+		if cfg.WebsocketEnabled && wsHandler != nil && isWebsocket(r) {
 			wsHandler.ServeHTTP(w, r)
 			return
 		}
