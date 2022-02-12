@@ -411,9 +411,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if config.TxPool.V2 {
 			backend.txPool2Fetch.ConnectCore()
 			backend.txPool2Fetch.ConnectSentries()
+			var newTxsBroadcaster *txpool2.NewSlotsStreams
+			if casted, ok := backend.txPool2GrpcServer.(*txpool2.GrpcServer); ok {
+				newTxsBroadcaster = casted.NewSlotsStreams
+			}
 			go txpool2.MainLoop(backend.downloadCtx,
 				backend.txPool2DB, backend.chainDB,
-				backend.txPool2, backend.newTxs2, backend.txPool2Send, backend.txPool2GrpcServer.NewSlotsStreams,
+				backend.txPool2, backend.newTxs2, backend.txPool2Send, newTxsBroadcaster,
 				func() {
 					select {
 					case backend.notifyMiningAboutNewTxs <- struct{}{}:
