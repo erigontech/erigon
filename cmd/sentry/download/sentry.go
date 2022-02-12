@@ -121,6 +121,8 @@ func (pi *PeerInfo) ClearDeadlines(now time.Time, givePermit bool) int {
 }
 
 func (pi *PeerInfo) Remove() {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
 	pi.removeOnce.Do(func() {
 		close(pi.removed)
 		close(pi.tasks)
@@ -128,6 +130,8 @@ func (pi *PeerInfo) Remove() {
 }
 
 func (pi *PeerInfo) Async(f func()) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
 	select {
 	case <-pi.removed: // noop if peer removed
 	case pi.tasks <- f:
