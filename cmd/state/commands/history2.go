@@ -26,9 +26,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	traceBlock int
+)
+
 func init() {
 	withBlock(history2Cmd)
 	withDatadir(history2Cmd)
+	history2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	rootCmd.AddCommand(history2Cmd)
 }
 
@@ -62,7 +67,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "aggregator")
-	h, err3 := aggregator.NewHistory(aggPath, 499_999, aggregationStep)
+	h, err3 := aggregator.NewHistory(aggPath, block, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create history: %w", err3)
 	}
@@ -71,7 +76,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	vmConfig := vm.Config{}
 
 	interrupt := false
-	blockNum := block
+	blockNum := uint64(0)
 	var txNum uint64 = 1
 	trace := false
 	logEvery := time.NewTicker(logInterval)
@@ -104,7 +109,9 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		r := h.MakeHistoryReader()
 		readWrapper := &HistoryWrapper{r: r}
-		//readWrapper.trace = blockNum == 999_999
+		if traceBlock != 0 {
+			readWrapper.trace = blockNum == uint64(traceBlock)
+		}
 		writeWrapper := state.NewNoopWriter()
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
 		if txNum, _, err = runHistory2(trace, blockNum, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
@@ -138,10 +145,12 @@ func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		if traceBlock != 0 && blockNum == uint64(traceBlock) {
+			fmt.Printf("tx idx %d, num %d, gas used %d\n", i, txNum, receipt.GasUsed)
 		}
 		receipts = append(receipts, receipt)
 		txNum++
