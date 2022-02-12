@@ -47,6 +47,7 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -331,7 +332,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 				return nil, fmt.Errorf("new server: %w", err)
 			}
 
-			backend.downloaderClient = direct.NewClientDirect(bittorrentServer)
+			backend.downloaderClient = direct.NewDownloaderClientDirect(bittorrentServer)
 		}
 		if err != nil {
 			return nil, err
@@ -526,6 +527,13 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 
+	cli.EmbeddedServices(
+		ctx, chainKv, cli.Flags{},
+		ethBackendRPC,
+		backend.txPool2GrpcServer,
+		miningRPC,
+	)
+	cli.RemoteServices()
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)

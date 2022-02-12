@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -15,22 +14,18 @@ func main() {
 	cmd, cfg := cli.RootCommand()
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		logger := log.New()
-		db, borDb, backend, txPool, mining, starknet, stateCache, blockReader, err := cli.RemoteServices(cmd.Context(), *cfg, logger, rootCancel)
+		db, borDb, backend, txPool, mining, starknet, stateCache, blockReader, ff, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "error", err)
 			return nil
 		}
 		defer db.Close()
+		defer borDb.Close()
 
-		var ff *filters.Filters
-		if backend != nil {
-			ff = filters.New(rootCtx, backend, txPool, mining)
-		} else {
-			log.Info("filters are not supported in chaindata mode")
-		}
-
-		if err := cli.StartRpcServer(cmd.Context(), *cfg, commands.APIList(cmd.Context(), db, borDb, backend, txPool, mining, starknet, ff, stateCache, blockReader, *cfg, nil)); err != nil {
+		apiList := commands.APIList(ctx, db, borDb, backend, txPool, mining, starknet, ff, stateCache, blockReader, *cfg, nil)
+		if err := cli.StartRpcServer(ctx, *cfg, apiList); err != nil {
 			log.Error(err.Error())
 			return nil
 		}
