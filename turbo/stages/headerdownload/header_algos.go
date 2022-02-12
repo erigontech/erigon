@@ -186,15 +186,26 @@ func (hd *HeaderDownload) MarkPreverified(link *Link) {
 	}
 }
 
-func (hd *HeaderDownload) MarkPreverifiedForward(link *Link) {
-	// Starting from a block link, go through all the child links
-	// that are not preverified and mark them too.
-	if !link.verified {
-		link.verified = true
-		hd.moveLinkToQueue(link, InsertQueueID)
+func (hd *HeaderDownload) MarkAllPreverified() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	for hd.verifyQueue.Len() > 0 {
+		link := heap.Pop(&hd.verifyQueue).(*Link)
+		if !link.verified {
+			link.verified = true
+			hd.moveLinkToQueue(link, InsertQueueID)
+		} else {
+			panic("verified link in verifyQueue")
+		}
 	}
-	for _, childLink := range link.next {
-		hd.MarkPreverifiedForward(childLink)
+	for hd.linkQueue.Len() > 0 {
+		link := heap.Pop(&hd.linkQueue).(*Link)
+		if !link.verified {
+			link.verified = true
+			hd.moveLinkToQueue(link, InsertQueueID)
+		} else {
+			panic("verified link in linkQueue")
+		}
 	}
 }
 
@@ -1179,12 +1190,6 @@ func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingPayloadStatus = common.Hash{}
-}
-
-func (hd *HeaderDownload) InsertList() []*Link {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	return nil
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
