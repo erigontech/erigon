@@ -1015,10 +1015,6 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 				err = fmt.Errorf("whole in change files [%d-%d]", item.endBlock, minStart)
 				return false
 			}
-			if item.fileCount != 11 && item.fileCount != 8 {
-				err = fmt.Errorf("missing or too many (%d) change files for interval [%d-%d]", item.fileCount, item.startBlock, item.endBlock)
-				return false
-			}
 			minStart = item.startBlock
 		} else {
 			err = fmt.Errorf("overlap of change files [%d-%d] with %d", item.startBlock, item.endBlock, minStart)
@@ -1855,15 +1851,23 @@ func (a *Aggregator) MakeStateWriter(beforeOn bool) *Writer {
 }
 
 func (w *Writer) Close() {
-	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
+	typesLimit := Commitment
+	if w.a.commitments {
+		typesLimit = AccountHistory
+	}
+	for fType := FirstType; fType < typesLimit; fType++ {
 		w.changes[fType].closeFiles()
 	}
 }
 
 func (w *Writer) Reset(blockNum uint64) error {
 	w.blockNum = blockNum
+	typesLimit := Commitment
+	if w.a.commitments {
+		typesLimit = AccountHistory
+	}
 	if blockNum > w.changeFileNum {
-		for fType := FirstType; fType < NumberOfStateTypes; fType++ {
+		for fType := FirstType; fType < typesLimit; fType++ {
 			if err := w.changes[fType].closeFiles(); err != nil {
 				return err
 			}
@@ -1873,7 +1877,7 @@ func (w *Writer) Reset(blockNum uint64) error {
 		}
 	}
 	if w.changeFileNum == 0 || blockNum > w.changeFileNum {
-		for fType := FirstType; fType < NumberOfStateTypes; fType++ {
+		for fType := FirstType; fType < typesLimit; fType++ {
 			if err := w.changes[fType].openFiles(blockNum, true /* write */); err != nil {
 				return err
 			}
@@ -2449,6 +2453,10 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
 					if bytes.HasPrefix(ci1.key, addr) {
 						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+						if len(ci1.val) > 0 {
+							copy(ci1.val, ci1.val[1:])
+							ci1.val = ci1.val[:len(ci1.val)-1]
+						}
 						heap.Fix(&cp, 0)
 					} else {
 						heap.Pop(&cp)
