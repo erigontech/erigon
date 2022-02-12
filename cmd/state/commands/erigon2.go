@@ -16,16 +16,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -44,6 +48,7 @@ var (
 func init() {
 	withBlock(erigon2Cmd)
 	withDatadir(erigon2Cmd)
+	withSnapshotBlocks(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
@@ -109,6 +114,20 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
+	var blockReader interfaces.FullBlockReader
+	if snapshotBlocks {
+		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
+		snConfig.ExpectBlocks, err = eth.RestoreExpectedExternalSnapshot(historyDb, snConfig)
+		if err != nil {
+			return err
+		}
+		allSnapshots := snapshotsync.NewAllSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
+		defer allSnapshots.Close()
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+
 	interrupt := false
 	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
@@ -169,12 +188,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 		blockNum++
-		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
+		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
 		if err != nil {
 			return err
 		}
 		var b *types.Block
-		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, blockNum)
+		b, _, err = blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -187,7 +206,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
 		writeWrapper := &WriterWrapper{w: w, blockNum: blockNum}
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header {
+			h, err := blockReader.Header(ctx, historyTx, hash, number)
+			if err != nil {
+				panic(err)
+			}
+			return h
+		}
 		if txNum, _, err = runBlock2(trace, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
