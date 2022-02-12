@@ -284,14 +284,14 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags,
 
 	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
 
-	txPool = txpool.NewTxpoolClientDirect(txPoolServer)
-	mining = txpool.NewMiningClientDirect(miningServer)
+	txPool = direct.NewTxPoolClient(txPoolServer)
+	mining = direct.NewMiningClient(miningServer)
 
 	ff = filters.New(ctx, eth, txPool, mining)
 	return
 	panic("direct services are not implemented yet")
 	/*
-		mining = txpool.NewMiningClientDirect()
+		mining = txpool.NewMiningClient()
 		txPool = txpool.NewTxpoolClientDirect()
 	*/
 	return

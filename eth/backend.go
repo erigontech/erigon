@@ -332,7 +332,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 				return nil, fmt.Errorf("new server: %w", err)
 			}
 
-			backend.downloaderClient = direct.NewDownloaderClientDirect(bittorrentServer)
+			backend.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 		}
 		if err != nil {
 			return nil, err
