@@ -574,10 +574,10 @@ var (
 		Value: 42069,
 		Usage: "port to listen and serve BitTorrent protocol",
 	}
-	DbPageSizeFlag = cli.Uint64Flag{
+	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "can set mdbx pagesize when on db creation: must be power of 2 and '256 < pagesize < 64*1024' ",
-		Value: 4096,
+		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb' ",
+		Value: "4kb",
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -1037,8 +1037,21 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	}
 
 	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		cfg.MdbxPageSize = ctx.GlobalUint64(DbPageSizeFlag.Name)
+		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+			panic(err)
+		}
+		sz := cfg.MdbxPageSize.Bytes()
+		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
+		}
 	}
+}
+
+func isPowerOfTwo(n uint64) bool {
+	if n == 0 { //corner case: if n is zero it will also consider as power 2
+		return true
+	}
+	return n&(n-1) == 0
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
