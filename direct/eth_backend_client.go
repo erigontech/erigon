@@ -54,6 +54,8 @@ func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remote.C
 	return s.server.ClientVersion(ctx, in)
 }
 
+// -- start Subscribe
+
 func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remote.SubscribeRequest, opts ...grpc.CallOption) (remote.ETHBACKEND_SubscribeClient, error) {
 	messageCh := make(chan *remote.SubscribeReply, 16384)
 	streamServer := &SubscribeServerStreamDirect{messageCh: messageCh, ctx: ctx}
@@ -64,18 +66,6 @@ func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remote.Subsc
 		close(messageCh)
 	}()
 	return &SubscribeClientStreamDirect{messageCh: messageCh, ctx: ctx}, nil
-}
-
-func (s *EthBackendClientDirect) Block(ctx context.Context, in *remote.BlockRequest, opts ...grpc.CallOption) (*remote.BlockReply, error) {
-	return s.server.Block(ctx, in)
-}
-
-func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remote.TxnLookupRequest, opts ...grpc.CallOption) (*remote.TxnLookupReply, error) {
-	return s.server.TxnLookup(ctx, in)
-}
-
-func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remote.NodesInfoRequest, opts ...grpc.CallOption) (*remote.NodesInfoReply, error) {
-	return s.server.NodeInfo(ctx, in)
 }
 
 type SubscribeServerStreamDirect struct {
@@ -104,4 +94,18 @@ func (c *SubscribeClientStreamDirect) Recv() (*remote.SubscribeReply, error) {
 }
 func (c *SubscribeClientStreamDirect) Context() context.Context {
 	return c.ctx
+}
+
+// -- end Subscribe
+
+func (s *EthBackendClientDirect) Block(ctx context.Context, in *remote.BlockRequest, opts ...grpc.CallOption) (*remote.BlockReply, error) {
+	return s.server.Block(ctx, in)
+}
+
+func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remote.TxnLookupRequest, opts ...grpc.CallOption) (*remote.TxnLookupReply, error) {
+	return s.server.TxnLookup(ctx, in)
+}
+
+func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remote.NodesInfoRequest, opts ...grpc.CallOption) (*remote.NodesInfoReply, error) {
+	return s.server.NodeInfo(ctx, in)
 }

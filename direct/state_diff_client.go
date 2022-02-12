@@ -40,6 +40,8 @@ func NewStateDiffClientDirect(server remote.KVServer) *StateDiffClientDirect {
 	return &StateDiffClientDirect{server: server}
 }
 
+// -- start StateChanges
+
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error) {
 	messageCh := make(chan *remote.StateChangeBatch, 16384)
 	streamServer := &StateDiffServerStream{messageCh: messageCh, ctx: ctx}
@@ -76,3 +78,5 @@ func (s *StateDiffServerStream) Send(m *remote.StateChangeBatch) error {
 	return nil
 }
 func (s *StateDiffServerStream) Context() context.Context { return s.ctx }
+
+// -- end StateChanges
