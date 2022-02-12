@@ -239,42 +239,12 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags,
-	ethBackendServer remote.ETHBACKENDServer, txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer) (
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
-	ff *filters.Filters, err error) {
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
+	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer) (eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error) {
 	if cfg.StateCache.KeysLimit > 0 {
 		stateCache = kvcache.New(cfg.StateCache)
 	} else {
 		stateCache = kvcache.NewDummy()
-	}
-	blockReader = snapshotsync.NewBlockReader()
-
-	if cfg.Snapshot.Enabled {
-		var cc *params.ChainConfig
-		if err := erigonDB.View(context.Background(), func(tx kv.Tx) error {
-			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-			if err != nil {
-				return err
-			}
-			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, err
-		}
-		if cc == nil {
-			return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
-		}
-
-		allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
-		allSnapshots.AsyncOpenAll(ctx)
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
 	}
 	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
@@ -283,17 +253,9 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags,
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
 	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
-
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-
 	ff = filters.New(ctx, eth, txPool, mining)
-	return
-	panic("direct services are not implemented yet")
-	/*
-		mining = txpool.NewMiningClient()
-		txPool = txpool.NewTxpoolClientDirect()
-	*/
 	return
 }
 

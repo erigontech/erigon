@@ -48,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -527,13 +528,28 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 
-	cli.EmbeddedServices(
-		ctx, chainKv, cli.Flags{},
+	// start HTTP API
+	httpRpcCfg := cli.Flags{}
+	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
+		ctx, chainKv, httpRpcCfg, blockReader,
 		ethBackendRPC,
 		backend.txPool2GrpcServer,
 		miningRPC,
 	)
-	cli.RemoteServices()
+	if err != nil {
+		return nil, err
+	}
+
+	var borDb kv.RoDB //TODO: support bor
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg, nil)
+	go func() {
+		_ = apiList
+		//if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
+		//	log.Error(err.Error())
+		//	return
+		//}
+	}()
+
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)
