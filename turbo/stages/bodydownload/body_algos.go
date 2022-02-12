@@ -125,7 +125,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullB
 				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			if header == nil {
-				return nil, 0, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
+				return nil, 0, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 			}
 
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {

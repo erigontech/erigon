@@ -190,7 +190,7 @@ func (hd *HeaderDownload) MarkAllPreverified() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for hd.verifyQueue.Len() > 0 {
-		link := heap.Pop(&hd.verifyQueue).(*Link)
+		link := hd.verifyQueue[0]
 		if !link.verified {
 			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
@@ -199,7 +199,7 @@ func (hd *HeaderDownload) MarkAllPreverified() {
 		}
 	}
 	for hd.linkQueue.Len() > 0 {
-		link := heap.Pop(&hd.linkQueue).(*Link)
+		link := hd.linkQueue[0]
 		if !link.verified {
 			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
@@ -676,6 +676,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Perform verification if needed
 			for hd.verifyQueue.Len() > 0 {
 				link := hd.verifyQueue[0]
+				fmt.Printf("top of verify queue: %d %x\n", link.blockHeight, link.hash)
 				select {
 				case <-logChannel:
 					log.Info(fmt.Sprintf("[%s] Verifying headers", logPrefix), "progress", hd.highestInDb)
@@ -712,6 +713,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 					delete(hd.links, link.hash)
 					continue
 				}
+				fmt.Printf("moving to insert queue: %d %x\n", link.blockHeight, link.hash)
 				hd.moveLinkToQueue(link, InsertQueueID)
 				checkInsert = true
 			}
@@ -721,6 +723,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Check what we can insert without verification
 			for hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
 				link := hd.insertQueue[0]
+				fmt.Printf("top of insert queue: %d %x\n", link.blockHeight, link.hash)
 				// Make sure long insertions do not appear as a stuck stage 1
 				select {
 				case <-logChannel:
@@ -746,6 +749,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				link.persisted = true
 				link.header = nil // Drop header reference to free memory, as we won't need it anymore
 				link.headerRaw = nil
+				fmt.Printf("moving to queue: %d %x\n", link.blockHeight, link.hash)
 				hd.moveLinkToQueue(link, PersistedQueueID)
 				for _, nextLink := range link.next {
 					if nextLink.verified {
