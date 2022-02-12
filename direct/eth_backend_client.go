@@ -14,6 +14,10 @@ type EthBackendClientDirect struct {
 	server remote.ETHBACKENDServer
 }
 
+func NewEthBackendClientDirect(server remote.ETHBACKENDServer) *EthBackendClientDirect {
+	return &EthBackendClientDirect{server: server}
+}
+
 func (s *EthBackendClientDirect) Etherbase(ctx context.Context, in *remote.EtherbaseRequest, opts ...grpc.CallOption) (*remote.EtherbaseReply, error) {
 	return s.server.Etherbase(ctx, in)
 }

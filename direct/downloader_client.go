@@ -12,7 +12,7 @@ type DownloaderClientDirect struct {
 	server proto_downloader.DownloaderServer
 }
 
-func NewClientDirect(server proto_downloader.DownloaderServer) *DownloaderClientDirect {
+func NewDownloaderClientDirect(server proto_downloader.DownloaderServer) *DownloaderClientDirect {
 	return &DownloaderClientDirect{server: server}
 }
 
