@@ -206,7 +206,7 @@ func BorRLP(header *types.Header, c *params.BorConfig) []byte {
 type Bor struct {
 	chainConfig *params.ChainConfig // Chain config
 	config      *params.BorConfig   // Consensus engine configuration parameters for bor consensus
-	db          kv.RwDB             // Database to store and retrieve snapshot checkpoints
+	DB          kv.RwDB             // Database to store and retrieve snapshot checkpoints
 
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
@@ -253,7 +253,7 @@ func New(
 	c := &Bor{
 		chainConfig:            chainConfig,
 		config:                 borConfig,
-		db:                     db,
+		DB:                     db,
 		recents:                recents,
 		signatures:             signatures,
 		validatorSetABI:        vABI,
@@ -442,7 +442,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.signatures, c.db, hash); err == nil {
+			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
 				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				break
@@ -468,7 +468,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 
 				// new snap shot
 				snap = newSnapshot(c.config, c.signatures, number, hash, validators)
-				if err := snap.store(c.db); err != nil {
+				if err := snap.store(c.DB); err != nil {
 					return nil, err
 				}
 				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
@@ -514,7 +514,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.db); err != nil {
+		if err = snap.store(c.DB); err != nil {
 			return nil, err
 		}
 		log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
@@ -908,6 +908,7 @@ func (c *Bor) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 
 // Close implements consensus.Engine. It's a noop for bor as there are no background threads.
 func (c *Bor) Close() error {
+	c.DB.Close()
 	return nil
 }
 

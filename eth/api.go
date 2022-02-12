@@ -15,6 +15,3 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 package eth
-
-// AccountRangeMaxResults is the maximum number of results to be returned per call
-const AccountRangeMaxResults = 256

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -21,6 +22,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
@@ -238,11 +240,36 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
+	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer) (eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error) {
+	if stateCacheCfg.KeysLimit > 0 {
+		stateCache = kvcache.New(stateCacheCfg)
+	} else {
+		stateCache = kvcache.NewDummy()
+	}
+	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
+	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
+
+	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
+
+	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
+	txPool = direct.NewTxPoolClient(txPoolServer)
+	mining = direct.NewMiningClient(miningServer)
+	ff = filters.New(ctx, eth, txPool, mining)
+	return
+}
+
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.SingleNodeMode` (mode when it on 1 machine with Erigon)
-func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
+func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (
+	db kv.RoDB, borDb kv.RoDB,
+	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet *services.StarknetService,
+	stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
+	ff *filters.Filters, err error) {
 	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("either remote db or local db must be specified")
+		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
 	}
 
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
@@ -252,10 +279,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 		log.Trace("Creating chain db", "path", cfg.Chaindata)
 		rwKv, err = kv2.NewMDBX(logger).Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
 		if compatErr := checkDbCompatibility(ctx, rwKv); compatErr != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, compatErr
+			return nil, nil, nil, nil, nil, nil, nil, nil, ff, compatErr
 		}
 		db = rwKv
 		stateCache = kvcache.NewDummy()
@@ -268,14 +295,14 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			// ensure db exist
 			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
 			if err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, err
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 			}
 			tmpDb.Close()
 		}
 		log.Trace("Creating consensus db", "path", borDbPath)
 		borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
 		// Skip the compatibility check, until we have a schema in erigon-lib
 		borDb = borKv
@@ -302,10 +329,10 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 				}
 				return nil
 			}); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, err
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 			}
 			if cc == nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
 			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
@@ -315,23 +342,20 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 			blockReader = snapshotsync.NewBlockReader()
 		}
 	}
-	if cfg.PrivateApiAddr == "" {
-		return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, nil
-	}
 
 	creds, err := grpcutil.TLS(cfg.TLSCACert, cfg.TLSCertfile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open tls cert: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("open tls cert: %w", err)
 	}
 	conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
 
 	kvClient := remote.NewKVClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
@@ -346,7 +370,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
 		txpoolConn, err = grpcutil.Connect(creds, cfg.TxPoolApiAddr)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to txpool api: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to txpool api: %w", err)
 		}
 	}
 
@@ -376,12 +400,14 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	if cfg.StarknetGRPCAddress != "" {
 		starknetConn, err := grpcutil.Connect(creds, cfg.StarknetGRPCAddress)
 		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("could not connect to starknet api: %w", err)
+			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to starknet api: %w", err)
 		}
 		starknet = services.NewStarknetService(starknetConn)
 	}
 
-	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, err
+	ff = filters.New(ctx, eth, txPool, mining)
+
+	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }
 
 func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {

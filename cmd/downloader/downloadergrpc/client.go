@@ -10,12 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/common"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func NewClient(ctx context.Context, downloaderAddr string) (proto_downloader.DownloaderClient, error) {
@@ -63,19 +61,4 @@ func String2Proto(in string) *prototypes.H160 {
 	var infoHash [20]byte
 	copy(infoHash[:], common.FromHex(in))
 	return gointerfaces.ConvertAddressToH160(infoHash)
-}
-
-type ClientDirect struct {
-	server *downloader.GrpcServer
-}
-
-func NewClientDirect(server *downloader.GrpcServer) *ClientDirect {
-	return &ClientDirect{server: server}
-}
-
-func (c *ClientDirect) Download(ctx context.Context, in *proto_downloader.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	return c.server.Download(ctx, in)
-}
-func (c *ClientDirect) Stats(ctx context.Context, in *proto_downloader.StatsRequest, opts ...grpc.CallOption) (*proto_downloader.StatsReply, error) {
-	return c.server.Stats(ctx, in)
 }
