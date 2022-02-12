@@ -126,7 +126,7 @@ type Ethereum struct {
 	newTxs2                 chan txpool2.Hashes
 	txPool2Fetch            *txpool2.Fetch
 	txPool2Send             *txpool2.Send
-	txPool2GrpcServer       *txpool2.GrpcServer
+	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 }
 
@@ -314,31 +314,36 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	var txPoolRPC txpool_proto.TxpoolServer
 	var miningRPC txpool_proto.MiningServer
 	if config.TxPool.V2 {
-		cfg := txpool2.DefaultConfig
-		cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
-		cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
-		cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
-		cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
-		cfg.PriceBump = config.TxPool.PriceBump
-		cfg.MinFeeCap = config.TxPool.PriceLimit
-		cfg.AccountSlots = config.TxPool.AccountSlots
-		cfg.LogEvery = 1 * time.Minute
-		cfg.CommitEvery = 5 * time.Minute
-		cfg.TracedSenders = config.TxPool.TracedSenders
+		if config.TxPool.Disable {
+			backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
+			txPoolRPC = backend.txPool2GrpcServer
+		} else {
+			cfg := txpool2.DefaultConfig
+			cfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
+			cfg.PendingSubPoolLimit = int(config.TxPool.GlobalSlots)
+			cfg.BaseFeeSubPoolLimit = int(config.TxPool.GlobalBaseFeeQueue)
+			cfg.QueuedSubPoolLimit = int(config.TxPool.GlobalQueue)
+			cfg.PriceBump = config.TxPool.PriceBump
+			cfg.MinFeeCap = config.TxPool.PriceLimit
+			cfg.AccountSlots = config.TxPool.AccountSlots
+			cfg.LogEvery = 1 * time.Minute
+			cfg.CommitEvery = 5 * time.Minute
+			cfg.TracedSenders = config.TxPool.TracedSenders
 
-		//cacheConfig := kvcache.DefaultCoherentCacheConfig
-		//cacheConfig.MetricsLabel = "txpool"
+			//cacheConfig := kvcache.DefaultCoherentCacheConfig
+			//cacheConfig.MetricsLabel = "txpool"
 
-		stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-		backend.newTxs2 = make(chan txpool2.Hashes, 1024)
-		//defer close(newTxs)
-		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
-		)
-		if err != nil {
-			return nil, err
+			stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
+			backend.newTxs2 = make(chan txpool2.Hashes, 1024)
+			//defer close(newTxs)
+			backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
+				ctx, cfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentries, stateDiffClient,
+			)
+			if err != nil {
+				return nil, err
+			}
+			txPoolRPC = backend.txPool2GrpcServer
 		}
-		txPoolRPC = backend.txPool2GrpcServer
 	} else {
 		backend.txPoolP2PServer, err = txpool.NewP2PServer(backend.downloadCtx, backend.sentries, backend.txPool)
 		if err != nil {
