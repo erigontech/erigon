@@ -238,7 +238,7 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger log.Logger) (borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger log.Logger, ethBackend remote.ETHBACKENDServer) (borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
 	if cfg.StateCache.KeysLimit > 0 {
 		stateCache = kvcache.New(cfg.StateCache)
 	} else {
@@ -293,7 +293,8 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger l
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
-	directClient := services.NewEthBackendDirect()
+	directClient := &direct.EthBackendClientDirect{server: ethBackend}
+
 	services.NewRemoteBackend(directClient, erigonDB, blockReader)
 	panic("direct services are not implemented yet")
 	/*
