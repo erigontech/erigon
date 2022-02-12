@@ -238,31 +238,15 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger log.Logger, ethBackend remote.ETHBACKENDServer) (borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, ethBackendServer remote.ETHBACKENDServer) (
+	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet *services.StarknetService, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, err error) {
 	if cfg.StateCache.KeysLimit > 0 {
 		stateCache = kvcache.New(cfg.StateCache)
 	} else {
 		stateCache = kvcache.NewDummy()
 	}
 	blockReader = snapshotsync.NewBlockReader()
-	// bor (consensus) specific db
-	var borKv kv.RoDB
-	borDbPath := path.Join(cfg.Datadir, "bor")
-	{
-		// ensure db exist
-		tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, err
-		}
-		tmpDb.Close()
-	}
-	log.Trace("Creating consensus db", "path", borDbPath)
-	borKv, err = kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Readonly().Open()
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
-	// Skip the compatibility check, until we have a schema in erigon-lib
-	borDb = borKv
 
 	if cfg.Snapshot.Enabled {
 		var cc *params.ChainConfig
@@ -277,10 +261,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger l
 			}
 			return nil
 		}); err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, err
+			return nil, nil, nil, nil, nil, nil, err
 		}
 		if cc == nil {
-			return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+			return nil, nil, nil, nil, nil, nil, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
 
 		allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, path.Join(cfg.Datadir, "snapshots"))
@@ -293,9 +277,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger l
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
-	directClient := direct.NewEthBackendClientDirect(ethBackend)
+	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
-	services.NewRemoteBackend(directClient, erigonDB, blockReader)
+	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
+	return
 	panic("direct services are not implemented yet")
 	/*
 		mining = txpool.NewMiningClientDirect()
