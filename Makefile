@@ -106,6 +106,10 @@ seeder:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
 
+devnettest:
+	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
+	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
+
 sndownloader:
 	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
 	@echo "Done building."
