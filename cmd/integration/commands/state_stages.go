@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -154,7 +155,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	}
 	defer tx.Rollback()
 
-	tmpDir := path.Join(datadir, etl.TmpDirName)
+	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	quit := ctx.Done()
 
 	var batchSize datasize.ByteSize
@@ -409,7 +410,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -474,7 +475,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	pm, engine, chainConfig, vmConfig, sync, _, _ := newSync(ctx, db, nil)
-	tmpdir := path.Join(datadir, etl.TmpDirName)
+	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {

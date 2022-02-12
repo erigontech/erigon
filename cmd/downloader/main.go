@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"path/filepath"
 	"time"
 
@@ -103,7 +102,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir := path.Join(datadir, "snapshots")
+	snapshotDir := filepath.Join(datadir, "snapshots")
 	common.MustExist(snapshotDir)
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
@@ -157,7 +156,7 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		snapshotDir := path.Join(datadir, "snapshots")
+		snapshotDir := filepath.Join(datadir, "snapshots")
 		ctx := cmd.Context()
 
 		if forceVerify { // remove and create .torrent files (will re-read all snapshots)

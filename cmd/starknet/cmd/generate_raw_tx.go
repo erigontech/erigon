@@ -3,15 +3,16 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/starknet/services"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
-	"os"
-	"path"
-	"strings"
 )
 
 const (
@@ -107,7 +108,7 @@ func config() (*cobra.Command, *Flags) {
 			flags.Datadir = paths.DefaultDataDir()
 		}
 		if flags.Chaindata == "" {
-			flags.Chaindata = path.Join(flags.Datadir, "chaindata")
+			flags.Chaindata = filepath.Join(flags.Datadir, "chaindata")
 		}
 		return nil
 	}

@@ -161,7 +161,7 @@ func UploadSFTP(identityFile, host, dir string, files []string) error {
 	}
 	in := io.MultiWriter(stdin, os.Stdout)
 	for _, f := range files {
-		fmt.Fprintln(in, "put", f, path.Join(dir, filepath.Base(f)))
+		fmt.Fprintln(in, "put", f, filepath.Join(dir, filepath.Base(f)))
 	}
 	stdin.Close()
 	return sftp.Wait()
