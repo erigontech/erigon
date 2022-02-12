@@ -75,8 +75,7 @@ func (req *RequestGenerator) Erigon(method, body string, response interface{}) r
 
 func (req *RequestGenerator) call(target string, method, body string, response interface{}) rpctest.CallResult {
 	start := time.Now()
-	var err error
-	err = post(req.client, erigonUrl, body, response)
+	err := post(req.client, erigonUrl, body, response)
 	return rpctest.CallResult{
 		RequestBody: body,
 		Target:      target,
