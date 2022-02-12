@@ -741,6 +741,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 
 				if link.blockHeight > hd.highestInDb {
 					hd.highestInDb = link.blockHeight
+					checkVerify = true // highestInDb changes, so that there might be more links in verifyQueue to process
 				}
 				link.persisted = true
 				link.header = nil // Drop header reference to free memory, as we won't need it anymore
