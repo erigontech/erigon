@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"context"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,11 +13,10 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(ctx context.Context, db kv.RoDB, borDb kv.RoDB,
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	starknet starknet.CAIROVMClient, filters *filters.Filters,
-	stateCache kvcache.Cache,
-	blockReader interfaces.BlockAndTxnReader,
+func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend,
+	txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet starknet.CAIROVMClient,
+	filters *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
 	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 

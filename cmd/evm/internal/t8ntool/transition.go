@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
@@ -348,7 +349,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
-	location := path.Join(baseDir, filename)
+	location := filepath.Join(baseDir, filename)
 	if err = ioutil.WriteFile(location, b, 0644); err != nil { //nolint:gosec
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
