@@ -10,43 +10,43 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-var _ txpool_proto.TxpoolClient = (*TxPoolClientDirect)(nil)
+var _ txpool_proto.TxpoolClient = (*TxPoolClient)(nil)
 
-type TxPoolClientDirect struct {
+type TxPoolClient struct {
 	server txpool_proto.TxpoolServer
 }
 
-func NewTxPoolClientDirect(server txpool_proto.TxpoolServer) *TxPoolClientDirect {
-	return &TxPoolClientDirect{server}
+func NewTxPoolClient(server txpool_proto.TxpoolServer) *TxPoolClient {
+	return &TxPoolClient{server}
 }
 
-func (s *TxPoolClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+func (s *TxPoolClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
 	return s.server.Version(ctx, in)
 }
 
-func (s *TxPoolClientDirect) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes, opts ...grpc.CallOption) (*txpool_proto.TxHashes, error) {
+func (s *TxPoolClient) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes, opts ...grpc.CallOption) (*txpool_proto.TxHashes, error) {
 	return s.server.FindUnknown(ctx, in)
 }
 
-func (s *TxPoolClientDirect) Add(ctx context.Context, in *txpool_proto.AddRequest, opts ...grpc.CallOption) (*txpool_proto.AddReply, error) {
+func (s *TxPoolClient) Add(ctx context.Context, in *txpool_proto.AddRequest, opts ...grpc.CallOption) (*txpool_proto.AddReply, error) {
 	return s.server.Add(ctx, in)
 }
 
-func (s *TxPoolClientDirect) Transactions(ctx context.Context, in *txpool_proto.TransactionsRequest, opts ...grpc.CallOption) (*txpool_proto.TransactionsReply, error) {
+func (s *TxPoolClient) Transactions(ctx context.Context, in *txpool_proto.TransactionsRequest, opts ...grpc.CallOption) (*txpool_proto.TransactionsReply, error) {
 	return s.server.Transactions(ctx, in)
 }
 
-func (s *TxPoolClientDirect) All(ctx context.Context, in *txpool_proto.AllRequest, opts ...grpc.CallOption) (*txpool_proto.AllReply, error) {
+func (s *TxPoolClient) All(ctx context.Context, in *txpool_proto.AllRequest, opts ...grpc.CallOption) (*txpool_proto.AllReply, error) {
 	return s.server.All(ctx, in)
 }
 
-func (s *TxPoolClientDirect) Pending(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*txpool_proto.PendingReply, error) {
+func (s *TxPoolClient) Pending(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*txpool_proto.PendingReply, error) {
 	return s.server.Pending(ctx, in)
 }
 
 // -- start OnAdd
 
-func (s *TxPoolClientDirect) OnAdd(ctx context.Context, in *txpool_proto.OnAddRequest, opts ...grpc.CallOption) (txpool_proto.Txpool_OnAddClient, error) {
+func (s *TxPoolClient) OnAdd(ctx context.Context, in *txpool_proto.OnAddRequest, opts ...grpc.CallOption) (txpool_proto.Txpool_OnAddClient, error) {
 	messageCh := make(chan *txpool_proto.OnAddReply, 16384)
 	streamServer := &TxPoolOnAddS{messageCh: messageCh, ctx: ctx}
 	go func() {
@@ -88,10 +88,10 @@ func (c *TxPoolOnAddC) Context() context.Context {
 
 // -- end OnAdd
 
-func (s *TxPoolClientDirect) Status(ctx context.Context, in *txpool_proto.StatusRequest, opts ...grpc.CallOption) (*txpool_proto.StatusReply, error) {
+func (s *TxPoolClient) Status(ctx context.Context, in *txpool_proto.StatusRequest, opts ...grpc.CallOption) (*txpool_proto.StatusReply, error) {
 	return s.server.Status(ctx, in)
 }
 
-func (s *TxPoolClientDirect) Nonce(ctx context.Context, in *txpool_proto.NonceRequest, opts ...grpc.CallOption) (*txpool_proto.NonceReply, error) {
+func (s *TxPoolClient) Nonce(ctx context.Context, in *txpool_proto.NonceRequest, opts ...grpc.CallOption) (*txpool_proto.NonceReply, error) {
 	return s.server.Nonce(ctx, in)
 }

@@ -10,23 +10,23 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-var _ txpool_proto.MiningClient = (*MiningClientDirect)(nil)
+var _ txpool_proto.MiningClient = (*MiningClient)(nil)
 
-type MiningClientDirect struct {
+type MiningClient struct {
 	server txpool_proto.MiningServer
 }
 
-func NewMiningClientDirect(server txpool_proto.MiningServer) *MiningClientDirect {
-	return &MiningClientDirect{server: server}
+func NewMiningClient(server txpool_proto.MiningServer) *MiningClient {
+	return &MiningClient{server: server}
 }
 
-func (s *MiningClientDirect) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
+func (s *MiningClient) Version(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.VersionReply, error) {
 	return s.server.Version(ctx, in)
 }
 
 // -- start OnPendingBlock
 
-func (s *MiningClientDirect) OnPendingBlock(ctx context.Context, in *txpool_proto.OnPendingBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingBlockClient, error) {
+func (s *MiningClient) OnPendingBlock(ctx context.Context, in *txpool_proto.OnPendingBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingBlockClient, error) {
 	messageCh := make(chan *txpool_proto.OnPendingBlockReply, 16384)
 	streamServer := &MiningOnPendingBlockS{messageCh: messageCh, ctx: ctx}
 	go func() {
@@ -69,7 +69,7 @@ func (c *MiningOnPendingBlockC) Context() context.Context {
 // -- end OnPendingBlock
 // -- start OnMinedBlock
 
-func (s *MiningClientDirect) OnMinedBlock(ctx context.Context, in *txpool_proto.OnMinedBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnMinedBlockClient, error) {
+func (s *MiningClient) OnMinedBlock(ctx context.Context, in *txpool_proto.OnMinedBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnMinedBlockClient, error) {
 	messageCh := make(chan *txpool_proto.OnMinedBlockReply, 16384)
 	streamServer := &MiningOnMinedBlockS{messageCh: messageCh, ctx: ctx}
 	go func() {
@@ -112,7 +112,7 @@ func (c *MiningOnMinedBlockC) Context() context.Context {
 // -- end OnMinedBlock
 // -- end OnPendingLogs
 
-func (s *MiningClientDirect) OnPendingLogs(ctx context.Context, in *txpool_proto.OnPendingLogsRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingLogsClient, error) {
+func (s *MiningClient) OnPendingLogs(ctx context.Context, in *txpool_proto.OnPendingLogsRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingLogsClient, error) {
 	messageCh := make(chan *txpool_proto.OnPendingLogsReply, 16384)
 	streamServer := &MiningOnPendingLogsS{messageCh: messageCh, ctx: ctx}
 	go func() {
@@ -154,22 +154,22 @@ func (c *MiningOnPendingLogsC) Context() context.Context {
 
 // -- end OnPendingLogs
 
-func (s *MiningClientDirect) GetWork(ctx context.Context, in *txpool_proto.GetWorkRequest, opts ...grpc.CallOption) (*txpool_proto.GetWorkReply, error) {
+func (s *MiningClient) GetWork(ctx context.Context, in *txpool_proto.GetWorkRequest, opts ...grpc.CallOption) (*txpool_proto.GetWorkReply, error) {
 	return s.server.GetWork(ctx, in)
 }
 
-func (s *MiningClientDirect) SubmitWork(ctx context.Context, in *txpool_proto.SubmitWorkRequest, opts ...grpc.CallOption) (*txpool_proto.SubmitWorkReply, error) {
+func (s *MiningClient) SubmitWork(ctx context.Context, in *txpool_proto.SubmitWorkRequest, opts ...grpc.CallOption) (*txpool_proto.SubmitWorkReply, error) {
 	return s.server.SubmitWork(ctx, in)
 }
 
-func (s *MiningClientDirect) SubmitHashRate(ctx context.Context, in *txpool_proto.SubmitHashRateRequest, opts ...grpc.CallOption) (*txpool_proto.SubmitHashRateReply, error) {
+func (s *MiningClient) SubmitHashRate(ctx context.Context, in *txpool_proto.SubmitHashRateRequest, opts ...grpc.CallOption) (*txpool_proto.SubmitHashRateReply, error) {
 	return s.server.SubmitHashRate(ctx, in)
 }
 
-func (s *MiningClientDirect) HashRate(ctx context.Context, in *txpool_proto.HashRateRequest, opts ...grpc.CallOption) (*txpool_proto.HashRateReply, error) {
+func (s *MiningClient) HashRate(ctx context.Context, in *txpool_proto.HashRateRequest, opts ...grpc.CallOption) (*txpool_proto.HashRateReply, error) {
 	return s.server.HashRate(ctx, in)
 }
 
-func (s *MiningClientDirect) Mining(ctx context.Context, in *txpool_proto.MiningRequest, opts ...grpc.CallOption) (*txpool_proto.MiningReply, error) {
+func (s *MiningClient) Mining(ctx context.Context, in *txpool_proto.MiningRequest, opts ...grpc.CallOption) (*txpool_proto.MiningReply, error) {
 	return s.server.Mining(ctx, in)
 }

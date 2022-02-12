@@ -8,17 +8,17 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-type DownloaderClientDirect struct {
+type DownloaderClient struct {
 	server proto_downloader.DownloaderServer
 }
 
-func NewDownloaderClientDirect(server proto_downloader.DownloaderServer) *DownloaderClientDirect {
-	return &DownloaderClientDirect{server: server}
+func NewDownloaderClient(server proto_downloader.DownloaderServer) *DownloaderClient {
+	return &DownloaderClient{server: server}
 }
 
-func (c *DownloaderClientDirect) Download(ctx context.Context, in *proto_downloader.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *DownloaderClient) Download(ctx context.Context, in *proto_downloader.DownloadRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	return c.server.Download(ctx, in)
 }
-func (c *DownloaderClientDirect) Stats(ctx context.Context, in *proto_downloader.StatsRequest, opts ...grpc.CallOption) (*proto_downloader.StatsReply, error) {
+func (c *DownloaderClient) Stats(ctx context.Context, in *proto_downloader.StatsRequest, opts ...grpc.CallOption) (*proto_downloader.StatsReply, error) {
 	return c.server.Stats(ctx, in)
 }
