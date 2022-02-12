@@ -18,7 +18,7 @@ package recsplit
 
 import (
 	"fmt"
-	"path"
+	"path/filepath"
 	"testing"
 )
 
@@ -29,7 +29,7 @@ func TestRecSplit2(t *testing.T) {
 		BucketSize: 10,
 		Salt:       0,
 		TmpDir:     tmpDir,
-		IndexFile:  path.Join(tmpDir, "index"),
+		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
@@ -65,7 +65,7 @@ func TestRecSplitDuplicate(t *testing.T) {
 		BucketSize: 10,
 		Salt:       0,
 		TmpDir:     tmpDir,
-		IndexFile:  path.Join(tmpDir, "index"),
+		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
@@ -92,7 +92,7 @@ func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 		BucketSize: 10,
 		Salt:       0,
 		TmpDir:     tmpDir,
-		IndexFile:  path.Join(tmpDir, "index"),
+		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   64,
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
@@ -105,7 +105,7 @@ func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 
 func TestIndexLookup(t *testing.T) {
 	tmpDir := t.TempDir()
-	indexFile := path.Join(tmpDir, "index")
+	indexFile := filepath.Join(tmpDir, "index")
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
@@ -141,7 +141,7 @@ func TestIndexLookup(t *testing.T) {
 
 func TestTwoLayerIndex(t *testing.T) {
 	tmpDir := t.TempDir()
-	indexFile := path.Join(tmpDir, "index")
+	indexFile := filepath.Join(tmpDir, "index")
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,

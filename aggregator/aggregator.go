@@ -1451,9 +1451,9 @@ func (a *Aggregator) backgroundMerge() {
 }
 
 func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) error {
-	datTmpPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat.tmp", fType.String(), item.startBlock, item.endBlock))
-	datPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), item.startBlock, item.endBlock))
-	idxPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", fType.String(), item.startBlock, item.endBlock))
+	datTmpPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat.tmp", fType.String(), item.startBlock, item.endBlock))
+	datPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), item.startBlock, item.endBlock))
+	idxPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", fType.String(), item.startBlock, item.endBlock))
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datTmpPath, a.diffDir, compress.MinPatternScore, 1)
 	if err != nil {
 		return fmt.Errorf("reduceHistoryFiles create compressor %s: %w", datPath, err)
@@ -2600,7 +2600,7 @@ func (a *Aggregator) computeAggregation(treeName string,
 	item2.getter = item2.decompressor.MakeGetter()
 	item2.getterMerge = item2.decompressor.MakeGetter()
 	if withIndex {
-		idxPath := path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, aggFrom, aggTo))
+		idxPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, aggFrom, aggTo))
 		if item2.index, err = buildIndex(item2.decompressor, idxPath, a.diffDir, count); err != nil {
 			return nil, fmt.Errorf("mergeIntoStateFile buildIndex %s [%d-%d]: %w", treeName, aggFrom, aggTo, err)
 		}
@@ -2611,8 +2611,8 @@ func (a *Aggregator) computeAggregation(treeName string,
 }
 
 func createDatAndIndex(treeName string, diffDir string, bt *btree.BTree, blockFrom uint64, blockTo uint64) (*compress.Decompressor, *recsplit.Index, error) {
-	datPath := path.Join(diffDir, fmt.Sprintf("%s.%d-%d.dat", treeName, blockFrom, blockTo))
-	idxPath := path.Join(diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, blockFrom, blockTo))
+	datPath := filepath.Join(diffDir, fmt.Sprintf("%s.%d-%d.dat", treeName, blockFrom, blockTo))
+	idxPath := filepath.Join(diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, blockFrom, blockTo))
 	count, err := btreeToFile(bt, datPath, diffDir, false /* trace */, 1 /* workers */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("createDatAndIndex %s build btree: %w", treeName, err)
@@ -2693,7 +2693,7 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 	basename string, startBlock, endBlock uint64, dir string,
 	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
 ) (*compress.Decompressor, int, error) {
-	datPath := path.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
+	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
 	if err != nil {
 		return nil, 0, fmt.Errorf("compressor %s: %w", datPath, err)

@@ -22,7 +22,6 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"testing"
 )
@@ -76,7 +75,7 @@ func checksum(file string) uint32 {
 
 func prepareDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
-	file := path.Join(tmpDir, "compressed")
+	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2)
 	if err != nil {

@@ -19,14 +19,14 @@ package compress
 import (
 	"context"
 	"fmt"
-	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
-	file := path.Join(tmpDir, "compressed")
+	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
 	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2)
 	if err != nil {
