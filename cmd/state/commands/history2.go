@@ -61,7 +61,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := path.Join(datadir, "aggregator")
-	h, err3 := aggregator.NewHistory(aggPath, 499_999, aggregationStep)
+	h, err3 := aggregator.NewHistory(aggPath, block, aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create history: %w", err3)
 	}
