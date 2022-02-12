@@ -1,7 +1,9 @@
 package requests
 
 import (
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -32,6 +34,39 @@ func initialiseRequestGenerator(reqId int) *RequestGenerator {
 	}
 
 	return &reqGen
+}
+
+func (req *RequestGenerator) Get() rpctest.CallResult {
+	start := time.Now()
+	res := rpctest.CallResult{
+		RequestID: req.reqID,
+	}
+
+	resp, err := http.Get(erigonUrl)
+	if err != nil {
+		res.Took = time.Since(start)
+		res.Err = err
+		return res
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		res.Took = time.Since(start)
+		res.Err = errors.New("bad request")
+		return res
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		res.Took = time.Since(start)
+		res.Err = err
+		return res
+	}
+
+	res.Response = body
+	res.Took = time.Since(start)
+	res.Err = err
+	return res
 }
 
 func (req *RequestGenerator) Erigon(method, body string, response interface{}) rpctest.CallResult {
