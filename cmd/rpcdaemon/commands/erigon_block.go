@@ -58,3 +58,33 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 
 	return header, nil
 }
+
+func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64) (types.Block, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return types.Block{}, err
+	}
+	defer tx.Rollback()
+
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	currenttHeaderTime := currentHeader.Time
+
+	firstHeader := rawdb.ReadHeaderByNumber(tx, 1)
+	firstHeaderTime := firstHeader.Time
+
+	if currenttHeaderTime == timeStamp {
+		block := *rawdb.ReadCurrentBlock(tx)
+		return block, nil
+	}
+
+	if firstHeaderTime == timeStamp {
+		block, err := rawdb.ReadBlockByNumber(tx, 1)
+		if err != nil {
+			return types.Block{}, err
+		}
+		return *block, nil
+	}
+
+	return types.Block{}, nil
+
+}
