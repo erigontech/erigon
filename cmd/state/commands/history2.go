@@ -70,7 +70,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	vmConfig := vm.Config{}
 
 	interrupt := false
-	blockNum := 0
+	blockNum := uint64(0)
 	var txNum uint64 = 1
 	trace := false
 	logEvery := time.NewTicker(logInterval)
