@@ -290,7 +290,6 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 	}
 
 	if headerTd != transitionConfiguration.TerminalTotalDifficulty.ToInt() {
-
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, header.Hash())
 	}
 
