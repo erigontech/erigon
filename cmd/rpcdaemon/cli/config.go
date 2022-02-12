@@ -293,7 +293,7 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, logger l
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
-	directClient := &direct.EthBackendClientDirect{server: ethBackend}
+	directClient := direct.NewEthBackendClientDirect(ethBackend)
 
 	services.NewRemoteBackend(directClient, erigonDB, blockReader)
 	panic("direct services are not implemented yet")
