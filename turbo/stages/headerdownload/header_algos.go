@@ -737,9 +737,9 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				hd.moveLinkToQueue(link, PersistedQueueID)
 				for _, nextLink := range link.next {
 					if nextLink.verified {
-						hd.moveLinkToQueue(link, InsertQueueID)
+						hd.moveLinkToQueue(nextLink, InsertQueueID)
 					} else {
-						hd.moveLinkToQueue(link, VerifyQueueID)
+						hd.moveLinkToQueue(nextLink, VerifyQueueID)
 						checkVerify = true
 					}
 				}
