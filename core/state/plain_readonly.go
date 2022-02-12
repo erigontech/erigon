@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -45,6 +46,7 @@ type PlainState struct {
 	tx                           kv.Tx
 	blockNr                      uint64
 	storage                      map[common.Address]*btree.BTree
+	trace                        bool
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
@@ -59,6 +61,10 @@ func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 		storage:     make(map[common.Address]*btree.BTree),
 		accHistoryC: c1, storageHistoryC: c2, accChangesC: c3, storageChangesC: c4,
 	}
+}
+
+func (s *PlainState) SetTrace(trace bool) {
+	s.trace = trace
 }
 
 func (s *PlainState) SetBlockNr(blockNr uint64) {
@@ -174,6 +180,9 @@ func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint
 	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr+1)
 	if err != nil {
 		return nil, err
+	}
+	if s.trace {
+		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
 	if len(enc) == 0 {
 		return nil, nil

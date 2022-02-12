@@ -2,6 +2,8 @@ module github.com/ledgerwatch/erigon
 
 go 1.16
 
+replace github.com/etcd-io/bbolt => go.etcd.io/bbolt v1.3.5
+
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.7.0
@@ -38,14 +40,14 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220209064931-2e162c70ba94
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220212145123-d9367b582a21
 	github.com/ledgerwatch/log/v3 v3.4.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/gomega v1.16.0 // indirect
-	github.com/pelletier/go-toml v1.9.3
-	github.com/pelletier/go-toml/v2 v2.0.0-beta.4
-	github.com/quasilyte/go-ruleguard/dsl v0.3.10
+	github.com/pelletier/go-toml v1.9.4
+	github.com/pelletier/go-toml/v2 v2.0.0-beta.5
+	github.com/quasilyte/go-ruleguard/dsl v0.3.15
 	github.com/rs/cors v1.8.2
 	github.com/shirou/gopsutil/v3 v3.21.12
 	github.com/spf13/cobra v1.2.1

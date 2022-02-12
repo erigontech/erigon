@@ -21,13 +21,13 @@ import (
 	"math/big"
 	"os"
 	"os/user"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -168,9 +168,11 @@ type Config struct {
 
 	BadBlockHash common.Hash // hash of the block marked as bad
 
-	Snapshot    Snapshot
-	Torrent     *torrent.ClientConfig
-	SnapshotDir string
+	Snapshot Snapshot
+	Torrent  *torrent.ClientConfig
+
+	TorrentPieceCompletionStorage storage.PieceCompletion
+	SnapshotDir                   string
 
 	BlockDownloaderWindow int
 
@@ -264,7 +266,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.BorConfig:
 		if chainConfig.Bor != nil {
-			borDbPath := path.Join(dataDir, "bor") // bor consensus path: datadir/bor
+			borDbPath := filepath.Join(dataDir, "bor") // bor consensus path: datadir/bor
 			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
 		}
 	}

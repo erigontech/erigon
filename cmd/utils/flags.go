@@ -574,10 +574,10 @@ var (
 		Value: 42069,
 		Usage: "port to listen and serve BitTorrent protocol",
 	}
-	DbPageSizeFlag = cli.Uint64Flag{
+	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "can set mdbx pagesize when on db creation: must be power of 2 and '256 < pagesize < 64*1024' ",
-		Value: 4096,
+		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb' ",
+		Value: "4kb",
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -653,6 +653,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		switch chain {
 		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
+		case networkname.SepoliaChainName:
+			urls = params.SepoliaBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
@@ -698,6 +700,8 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 		switch chain {
 		case networkname.MainnetChainName:
 			urls = params.MainnetBootnodes
+		case networkname.SepoliaChainName:
+			urls = params.SepoliaBootnodes
 		case networkname.RopstenChainName:
 			urls = params.RopstenBootnodes
 		case networkname.RinkebyChainName:
@@ -792,11 +796,11 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
-		enodeDBPath = path.Join(datadir, "nodes", "eth66")
+		enodeDBPath = filepath.Join(datadir, "nodes", "eth66")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
-	serverKey := nodeKey(path.Join(datadir, "nodekey"))
+	serverKey := nodeKey(filepath.Join(datadir, "nodekey"))
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
@@ -1016,6 +1020,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
 		return filepath.Join(datadir, "bor-mainnet")
+	case networkname.SepoliaChainName:
+		return filepath.Join(datadir, "sepolia")
 	default:
 		return datadir
 	}
@@ -1031,8 +1037,21 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	}
 
 	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		cfg.MdbxPageSize = ctx.GlobalUint64(DbPageSizeFlag.Name)
+		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+			panic(err)
+		}
+		sz := cfg.MdbxPageSize.Bytes()
+		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
+		}
 	}
+}
+
+func isPowerOfTwo(n uint64) bool {
+	if n == 0 { //corner case: if n is zero it will also consider as power 2
+		return true
+	}
+	return n&(n-1) == 0
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
@@ -1141,7 +1160,7 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
 	} else {
-		cfg.Ethash.DatasetDir = path.Join(datadir, "ethash-dags")
+		cfg.Ethash.DatasetDir = filepath.Join(datadir, "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)
@@ -1213,18 +1232,18 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
 	if ctx.GlobalIsSet(CliqueDataDirFlag.Name) {
-		cfg.DBPath = path.Join(ctx.GlobalString(CliqueDataDirFlag.Name), "clique/db")
+		cfg.DBPath = filepath.Join(ctx.GlobalString(CliqueDataDirFlag.Name), "clique", "db")
 	} else {
-		cfg.DBPath = path.Join(datadir, "clique/db")
+		cfg.DBPath = filepath.Join(datadir, "clique", "db")
 	}
 }
 
 func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
-	cfg.DBPath = path.Join(datadir, "aura")
+	cfg.DBPath = filepath.Join(datadir, "aura")
 }
 
 func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
-	cfg.DBPath = path.Join(datadir, "parlia")
+	cfg.DBPath = filepath.Join(datadir, "parlia")
 }
 
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1325,7 +1344,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	cfg.SnapshotDir = path.Join(nodeConfig.DataDir, "snapshots")
+	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
 	}
@@ -1356,17 +1375,14 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
 	}
 
-	TorrentPortFlag = cli.IntFlag{
-		Name:  "torrent.port",
-		Value: 42069,
-		Usage: "port to listen and serve BitTorrent protocol",
+	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		if err != nil {
+			panic(err)
+		}
+		cfg.Torrent = torrentCfg
+		cfg.TorrentPieceCompletionStorage = pieceCompletion
 	}
-
-	torrentCfg, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
-	if err != nil {
-		panic(err)
-	}
-	cfg.Torrent = torrentCfg
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true
@@ -1424,6 +1440,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.Genesis = core.DefaultGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
+	case networkname.SepoliaChainName:
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = 11155111
+		}
+		cfg.Genesis = core.DefaultSepoliaGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, params.SepoliaGenesisHash)
 	case networkname.RopstenChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 3
@@ -1556,6 +1578,8 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 	var genesis *core.Genesis
 	chain := ctx.GlobalString(ChainFlag.Name)
 	switch chain {
+	case networkname.SepoliaChainName:
+		genesis = core.DefaultSepoliaGenesisBlock()
 	case networkname.RopstenChainName:
 		genesis = core.DefaultRopstenGenesisBlock()
 	case networkname.RinkebyChainName:
