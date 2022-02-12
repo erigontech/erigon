@@ -243,6 +243,8 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer) (eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.New(stateCacheCfg)
+	} else {
+		stateCache = kvcache.NewDummy()
 	}
 	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
