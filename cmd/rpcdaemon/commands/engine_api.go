@@ -280,7 +280,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), totalTerminalDifficulty)
 	}
 
-	encodedBlock, err := tx.GetOne(kv.TerminalBlock, chainConfig.TerminalTotalDifficulty.Bytes())
+	encodedBlock, err := tx.GetOne(kv.ConsensusTable, chainConfig.TerminalTotalDifficulty.Bytes())
 	if err != nil {
 		return TransitionConfiguration{}, err
 	}

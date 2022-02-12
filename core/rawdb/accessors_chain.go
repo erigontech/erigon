@@ -1361,7 +1361,7 @@ func WriteTerminalBlockHash(tx kv.RwTx, blockNum uint64, terminalTotalDifficulty
 	}
 
 	if headerTd.Cmp(terminalTotalDifficulty) >= 0 {
-		tx.Put(kv.TerminalBlock, terminalTotalDifficulty.Bytes(), header.Hash().Bytes())
+		tx.Put(kv.ConsensusTable, terminalTotalDifficulty.Bytes(), header.Hash().Bytes())
 	}
 
 	return nil
