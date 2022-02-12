@@ -281,16 +281,22 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), totalTerminalDifficulty)
 	}
 
-	block := rawdb.ReadCurrentBlock(tx)
-	blockHash := block.Hash()
+	headerNum := rawdb.ReadCurrentBlockNumber(tx)
+	header := rawdb.ReadHeaderByNumber(tx, *headerNum)
 
-	if blockHash != transitionConfiguration.TerminalBlockHash {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, blockHash)
+	headerTd, err := rawdb.ReadTd(tx, header.Hash(), *headerNum)
+	if err != nil {
+		return TransitionConfiguration{}, err
+	}
+
+	if headerTd != transitionConfiguration.TerminalTotalDifficulty.ToInt() {
+
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, header.Hash())
 	}
 
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(totalTerminalDifficulty),
-		TerminalBlockHash:       blockHash,
+		TerminalBlockHash:       header.Hash(),
 		TerminalBlockNumber:     0,
 	}, nil
 }
