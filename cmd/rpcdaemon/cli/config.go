@@ -239,12 +239,10 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, cfg Flags, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
 	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer) (eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error) {
-	if cfg.StateCache.KeysLimit > 0 {
-		stateCache = kvcache.New(cfg.StateCache)
-	} else {
-		stateCache = kvcache.NewDummy()
+	if stateCacheCfg.KeysLimit > 0 {
+		stateCache = kvcache.New(stateCacheCfg)
 	}
 	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
