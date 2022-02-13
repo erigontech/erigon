@@ -135,6 +135,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
 		for len(removeList) > 0 {
 			removal := removeList[len(removeList)-1]
 			hd.moveLinkToQueue(removal, NoQueue)
+			delete(hd.links, removal.hash)
 			removeList = append(removeList[:len(removeList)-1], removal.next...)
 		}
 	}

@@ -119,9 +119,6 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader interfaces.Ful
 			if err != nil {
 				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
-			//if hash == (common.Hash{}) {
-			//	break
-			//}
 
 			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 			if err != nil {
