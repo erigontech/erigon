@@ -18,6 +18,7 @@ package recsplit
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
@@ -126,6 +127,13 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
 	}
 	rs.salt = args.Salt
+	if rs.salt == 0 {
+		seedBytes := make([]byte, 4)
+		if _, err := rand.Read(seedBytes); err != nil {
+			return nil, err
+		}
+		rs.salt = binary.BigEndian.Uint32(seedBytes)
+	}
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile

@@ -20,6 +20,7 @@
 package recsplit
 
 import (
+	"path/filepath"
 	"testing"
 )
 
