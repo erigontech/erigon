@@ -130,7 +130,6 @@ func SpawnStageHeaders(
 		return err
 	}
 
-
 	if isTrans {
 		return HeadersPOS(s, u, ctx, tx, cfg, useExternalTx)
 	} else {
