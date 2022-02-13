@@ -311,9 +311,16 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 
 // SeekInBitmap - returns value in bitmap which is >= n
 func SeekInBitmap64(m *roaring64.Bitmap, n uint64) (found uint64, ok bool) {
-	m.RemoveRange(0, n)
 	if m.IsEmpty() {
 		return 0, false
 	}
-	return m.Minimum(), true
+	if n == 0 {
+		return m.Minimum(), true
+	}
+	searchRank := m.Rank(n - 1)
+	if searchRank >= m.GetCardinality() {
+		return 0, false
+	}
+	found, _ = m.Select(searchRank)
+	return found, true
 }
