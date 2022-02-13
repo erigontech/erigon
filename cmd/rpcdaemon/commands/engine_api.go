@@ -280,20 +280,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), totalTerminalDifficulty)
 	}
 
-	encodedBlock, err := tx.GetOne(kv.ConsensusTable, chainConfig.TerminalTotalDifficulty.Bytes())
-	if err != nil {
-		return TransitionConfiguration{}, err
-	}
-
-	if len(encodedBlock) == 0 {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, common.Hash{})
-	}
-
 	var blockHash common.Hash
-
-	if err := rlp.DecodeBytes(encodedBlock, &blockHash); err != nil {
-		return TransitionConfiguration{}, err
-	}
 
 	if blockHash != transitionConfiguration.TerminalBlockHash {
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, blockHash)
