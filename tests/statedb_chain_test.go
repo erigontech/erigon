@@ -65,7 +65,7 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts := bind.NewKeyedTransactorWithChainID(key)
 
 	var contractAddress common.Address
 	var selfDestructorContract *contracts.SelfDestructor
