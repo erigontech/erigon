@@ -78,7 +78,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader interfaces.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	if blockNum < bd.requestedLow {
 		blockNum = bd.requestedLow
 	}
@@ -115,17 +115,17 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullB
 			}
 			hash = header.Hash()
 		} else {
-			hash, err = rawdb.ReadCanonicalHash(db, blockNum)
+			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
 				return nil, 0, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 
-			header, err = blockReader.Header(context.Background(), db, hash, blockNum)
+			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 			if err != nil {
 				return nil, 0, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			if header == nil {
-				return nil, 0, fmt.Errorf("header not found: blockNum=%d, trace=%s", blockNum, dbg.Stack())
+				return nil, 0, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 			}
 
 			if block := bd.prefetchedBlocks.Pop(hash); block != nil {
@@ -135,7 +135,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullB
 
 				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
 				var td *big.Int
-				if parent, err := rawdb.ReadTd(db, block.ParentHash(), block.NumberU64()-1); err != nil {
+				if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
 					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
 				} else if parent != nil {
 					td = new(big.Int).Add(block.Difficulty(), parent)
@@ -148,7 +148,7 @@ func (bd *BodyDownload) RequestMoreBodies(db kv.Tx, blockReader interfaces.FullB
 				bd.deliveriesH[blockNum-bd.requestedLow] = header
 				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
 					// Perhaps we already have this block
-					block = rawdb.ReadBlock(db, hash, blockNum)
+					block = rawdb.ReadBlock(tx, hash, blockNum)
 					if block == nil {
 						var doubleHash DoubleHash
 						copy(doubleHash[:], header.UncleHash.Bytes())

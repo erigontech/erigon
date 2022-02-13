@@ -249,7 +249,9 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	}
 	kvRPC := remotedbserver.NewKvServer(ctx, erigonDB)
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-	subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
+	_ = stateDiffClient
+	//TODO: enable next line
+	//subscribeToStateChangesLoop(ctx, stateDiffClient, stateCache)
 
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
