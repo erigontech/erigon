@@ -711,7 +711,6 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}
-
 		ancestor, err := headerReader.Header(context.Background(), tx, ancestorHash, ancestorHeight)
 		if err != nil {
 			return err

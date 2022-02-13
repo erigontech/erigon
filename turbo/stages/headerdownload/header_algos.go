@@ -129,6 +129,15 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
+	// Find the link, remove it and all its descendands from all the queues
+	if link, ok := hd.links[headerHash]; ok {
+		removeList := []*Link{link}
+		for len(removeList) > 0 {
+			removal := removeList[len(removeList)-1]
+			hd.moveLinkToQueue(removal, NoQueue)
+			removeList = append(removeList[:len(removeList)-1], removal.next...)
+		}
+	}
 }
 
 func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
@@ -676,7 +685,6 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Perform verification if needed
 			for hd.verifyQueue.Len() > 0 {
 				link := hd.verifyQueue[0]
-				fmt.Printf("top of verify queue: %d %x\n", link.blockHeight, link.hash)
 				select {
 				case <-logChannel:
 					log.Info(fmt.Sprintf("[%s] Verifying headers", logPrefix), "progress", hd.highestInDb)
@@ -713,7 +721,6 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 					delete(hd.links, link.hash)
 					continue
 				}
-				fmt.Printf("moving to insert queue: %d %x\n", link.blockHeight, link.hash)
 				hd.moveLinkToQueue(link, InsertQueueID)
 				checkInsert = true
 			}
@@ -723,7 +730,16 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Check what we can insert without verification
 			for hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
 				link := hd.insertQueue[0]
-				fmt.Printf("top of insert queue: %d %x\n", link.blockHeight, link.hash)
+				_, bad := hd.badHeaders[link.hash]
+				if !bad {
+					_, bad = hd.badHeaders[link.header.ParentHash]
+				}
+				if bad {
+					// If the link or its parent is marked bad, throw it out
+					hd.moveLinkToQueue(link, NoQueue)
+					delete(hd.links, link.hash)
+					continue
+				}
 				// Make sure long insertions do not appear as a stuck stage 1
 				select {
 				case <-logChannel:
@@ -749,7 +765,6 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				link.persisted = true
 				link.header = nil // Drop header reference to free memory, as we won't need it anymore
 				link.headerRaw = nil
-				fmt.Printf("moving to queue: %d %x\n", link.blockHeight, link.hash)
 				hd.moveLinkToQueue(link, PersistedQueueID)
 				for _, nextLink := range link.next {
 					if nextLink.verified {
