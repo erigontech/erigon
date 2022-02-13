@@ -224,11 +224,17 @@ func (hr *HistoryReader) searchInHistory(bitmapType, historyType FileType, key [
 				if _, err = bm.ReadFrom(bytes.NewReader(bitmapVal)); err != nil {
 					return false
 				}
-				bm.RemoveRange(0, searchTx)
-				if bm.IsEmpty() {
+				if searchTx == 0 {
+					foundTxNum = bm.Minimum()
+					foundEndBlock = item.endBlock
+					found = true
+					return false
+				}
+				searchRank := bm.Rank(searchTx - 1)
+				if searchRank >= bm.GetCardinality() {
 					continue
 				}
-				foundTxNum = bm.Minimum()
+				foundTxNum, _ = bm.Select(searchRank)
 				foundEndBlock = item.endBlock
 				found = true
 				return false

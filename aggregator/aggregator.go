@@ -2436,6 +2436,9 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 			key, _ := g.Next(nil)
 			if bytes.HasPrefix(key, addr) {
 				val, _ := g.Next(nil)
+				if len(val) > 0 {
+					val = val[1:]
+				}
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endBlock: item.endBlock})
 			}
 		}
