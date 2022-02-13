@@ -288,9 +288,9 @@ func initialState1() error {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-	transactOpts2 := bind.NewKeyedTransactor(key2)
+	transactOpts := bind.NewKeyedTransactorWithChainID(key)
+	transactOpts1 := bind.NewKeyedTransactorWithChainID(key1)
+	transactOpts2 := bind.NewKeyedTransactorWithChainID(key2)
 
 	var tokenContract *contracts.Token
 	// We generate the blocks without plainstant because it's not supported in core.GenerateChain
