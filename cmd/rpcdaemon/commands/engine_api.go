@@ -274,10 +274,18 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, err
 	}
 
-	totalTerminalDifficulty := chainConfig.TerminalTotalDifficulty
+	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
 
-	if totalTerminalDifficulty != transitionConfiguration.TerminalTotalDifficulty.ToInt() {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), totalTerminalDifficulty)
+	if terminalTotalDifficulty != transitionConfiguration.TerminalTotalDifficulty.ToInt() {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %d, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty.ToInt(), terminalTotalDifficulty)
+	}
+
+	if *chainConfig.TerminalBlockHash == (common.Hash{}) {
+		return TransitionConfiguration{
+			TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
+			TerminalBlockHash:       *chainConfig.TerminalBlockHash,
+			TerminalBlockNumber:     0,
+		}, nil
 	}
 
 	if *chainConfig.TerminalBlockHash != transitionConfiguration.TerminalBlockHash {
@@ -285,7 +293,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 	}
 
 	return TransitionConfiguration{
-		TerminalTotalDifficulty: (*hexutil.Big)(totalTerminalDifficulty),
+		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       *chainConfig.TerminalBlockHash,
 		TerminalBlockNumber:     0,
 	}, nil
