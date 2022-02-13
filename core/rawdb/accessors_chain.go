@@ -1360,7 +1360,8 @@ func WriteTerminalBlockHash(tx kv.RwTx, blockNum uint64, terminalTotalDifficulty
 		return err
 	}
 
-	if headerTd.Cmp(terminalTotalDifficulty) >= 0 {
+	// only update the table if headTd equals TTD
+	if headerTd.Cmp(terminalTotalDifficulty) == 0 {
 		tx.Put(kv.ConsensusTable, terminalTotalDifficulty.Bytes(), header.Hash().Bytes())
 	}
 
