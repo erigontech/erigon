@@ -431,7 +431,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.TxPoolV2 != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	if ms.TxPoolV2 != nil {

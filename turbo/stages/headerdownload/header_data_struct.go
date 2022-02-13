@@ -12,6 +12,16 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
+type QueueID uint8
+
+const (
+	NoQueue QueueID = iota
+	EntryQueueID
+	VerifyQueueID
+	InsertQueueID
+	PersistedQueueID
+)
+
 // Link is a chain link that can be connect to other chain links
 // For a given link, parent link can be found by hd.links[link.header.ParentHash], and child links by link.next (there may be more than one child in case of forks)
 // Links encapsule block headers
@@ -22,9 +32,10 @@ type Link struct {
 	next        []*Link     // Allows iteration over links in ascending block height order
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
-	persisted   bool // Whether this link comes from the database record
-	preverified bool // Ancestor of pre-verified header
-	idx         int  // Index in the heap
+	persisted   bool    // Whether this link comes from the database record
+	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
+	idx         int     // Index in the heap
+	queueId     QueueID // which queue this link belongs to
 }
 
 // LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
@@ -69,6 +80,8 @@ func (lq *LinkQueue) Pop() interface{} {
 	old := *lq
 	n := len(old)
 	x := old[n-1]
+	x.idx = -1
+	x.queueId = NoQueue
 	*lq = old[0 : n-1]
 	return x
 }
@@ -168,6 +181,41 @@ type Announce struct {
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
+// InsertQueue keeps the links before they are inserted in the database
+// It priorities them by block height (the lowest block height on the top),
+// and if block heights are the same, by the verification status (verified/preverified on the top)
+type InsertQueue []*Link
+
+func (iq InsertQueue) Len() int {
+	return len(iq)
+}
+
+func (iq InsertQueue) Less(i, j int) bool {
+	return iq[i].blockHeight < iq[j].blockHeight
+}
+
+func (iq InsertQueue) Swap(i, j int) {
+	iq[i], iq[j] = iq[j], iq[i]
+	iq[i].idx, iq[j].idx = i, j // Restore indices after the swap
+}
+
+func (iq *InsertQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	x.(*Link).idx = len(*iq)
+	*iq = append(*iq, x.(*Link))
+}
+
+func (iq *InsertQueue) Pop() interface{} {
+	old := *iq
+	n := len(old)
+	x := old[n-1]
+	*iq = old[0 : n-1]
+	x.idx = -1
+	x.queueId = NoQueue
+	return x
+}
+
 type HeaderDownload struct {
 	badHeaders         map[common.Hash]struct{}
 	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
@@ -175,10 +223,11 @@ type HeaderDownload struct {
 	links              map[common.Hash]*Link    // Links by header hash
 	engine             consensus.Engine
 	headerReader       consensus.ChainHeaderReader
-	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
+	verifyQueue        InsertQueue    // Priority queue of non-peristed links ready for verification
+	insertQueue        InsertQueue    // Priority queue of non-persisted links that are verified and can be inserted
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
-	persistedLinkQueue *LinkQueue     // Priority queue of persisted links used to limit their number
-	linkQueue          *LinkQueue     // Priority queue of non-persisted links used to limit their number
+	persistedLinkQueue LinkQueue      // Priority queue of persisted links used to limit their number
+	linkQueue          LinkQueue      // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue   // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
 	SkipCycleHack      chan struct{} // devenet will signal to this channel to skip sync cycle and release write db transaction. It's temporary solution - later we will do mining without write transaction.
@@ -215,16 +264,16 @@ func NewHeaderDownload(
 		engine:             engine,
 		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
-		persistedLinkQueue: &LinkQueue{},
-		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
 	}
-	heap.Init(hd.persistedLinkQueue)
-	heap.Init(hd.linkQueue)
+	heap.Init(&hd.persistedLinkQueue)
+	heap.Init(&hd.linkQueue)
 	heap.Init(hd.anchorQueue)
+	heap.Init(&hd.verifyQueue)
+	heap.Init(&hd.insertQueue)
 	return hd
 }
 
@@ -253,6 +302,37 @@ func (p Penalty) String() string {
 
 func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
+}
+
+func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
+	if link.queueId == queueId {
+		return
+	}
+	// Remove
+	switch link.queueId {
+	case NoQueue:
+	case EntryQueueID:
+		heap.Remove(&hd.linkQueue, link.idx)
+	case VerifyQueueID:
+		heap.Remove(&hd.verifyQueue, link.idx)
+	case InsertQueueID:
+		heap.Remove(&hd.insertQueue, link.idx)
+	case PersistedQueueID:
+		heap.Remove(&hd.persistedLinkQueue, link.idx)
+	}
+	// Push
+	switch queueId {
+	case NoQueue:
+	case EntryQueueID:
+		heap.Push(&hd.linkQueue, link)
+	case VerifyQueueID:
+		heap.Push(&hd.verifyQueue, link)
+	case InsertQueueID:
+		heap.Push(&hd.insertQueue, link)
+	case PersistedQueueID:
+		heap.Push(&hd.persistedLinkQueue, link)
+	}
+	link.queueId = queueId
 }
 
 // HeaderInserter encapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
