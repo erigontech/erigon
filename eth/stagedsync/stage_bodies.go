@@ -131,7 +131,7 @@ Loop:
 			currentTime := uint64(time.Now().Unix())
 			req, blockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
-				return fmt.Errorf("request more bodies: %w, tx=%p", err, tx)
+				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
 		}

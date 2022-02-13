@@ -700,9 +700,10 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 					}
 				}
 				if !skip {
-					if _, bad := hd.badHeaders[link.hash]; bad {
-						skip = true
-					}
+					_, skip = hd.badHeaders[link.hash]
+				}
+				if !skip {
+					_, skip = hd.badHeaders[link.header.ParentHash]
 				}
 				if !skip {
 					if err := hd.VerifyHeader(link.header); err != nil {
