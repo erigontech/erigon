@@ -19,6 +19,7 @@ package direct
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -202,15 +203,15 @@ func (c *SentryClientDirect) PeerCount(ctx context.Context, in *sentry.PeerCount
 
 func (c *SentryClientDirect) Messages(ctx context.Context, in *sentry.MessagesRequest, opts ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {
 	in.Ids = filterIds(in.Ids, c.Protocol())
-	messageCh := make(chan *sentry.InboundMessage, 16384)
-	streamServer := &SentryReceiveServerDirect{messageCh: messageCh, ctx: ctx}
+	ch := make(chan *sentry.InboundMessage, 16384)
+	streamServer := &SentryReceiveServerDirect{messageCh: ch, ctx: ctx}
 	go func() {
+		defer close(ch)
 		if err := c.server.Messages(in, streamServer); err != nil {
 			log.Warn("Messages returned", "err", err)
 		}
-		close(messageCh)
 	}()
-	return &SentryReceiveClientDirect{messageCh: messageCh, ctx: ctx}, nil
+	return &SentryReceiveClientDirect{messageCh: ch, ctx: ctx}, nil
 }
 
 // SentryReceiveServerDirect implements proto_sentry.Sentry_ReceiveMessagesServer
@@ -236,6 +237,9 @@ type SentryReceiveClientDirect struct {
 
 func (c *SentryReceiveClientDirect) Recv() (*sentry.InboundMessage, error) {
 	m := <-c.messageCh
+	if m == nil {
+		return nil, io.EOF
+	}
 	return m, nil
 }
 func (c *SentryReceiveClientDirect) Context() context.Context {
@@ -246,15 +250,15 @@ func (c *SentryReceiveClientDirect) Context() context.Context {
 // -- start Peers
 
 func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest, opts ...grpc.CallOption) (sentry.Sentry_PeersClient, error) {
-	messageCh := make(chan *sentry.PeersReply, 16384)
-	streamServer := &SentryReceivePeersServerDirect{ch: messageCh, ctx: ctx}
+	ch := make(chan *sentry.PeersReply, 16384)
+	streamServer := &SentryReceivePeersServerDirect{ch: ch, ctx: ctx}
 	go func() {
+		defer close(ch)
 		if err := c.server.Peers(in, streamServer); err != nil {
 			log.Warn("Peers returned", "err", err)
 		}
-		close(messageCh)
 	}()
-	return &SentryReceivePeersClientDirect{ch: messageCh, ctx: ctx}, nil
+	return &SentryReceivePeersClientDirect{ch: ch, ctx: ctx}, nil
 }
 
 // SentryReceivePeersServerDirect - implements proto_sentry.Sentry_ReceivePeersServer
@@ -280,6 +284,9 @@ type SentryReceivePeersClientDirect struct {
 
 func (c *SentryReceivePeersClientDirect) Recv() (*sentry.PeersReply, error) {
 	m := <-c.ch
+	if m == nil {
+		return nil, io.EOF
+	}
 	return m, nil
 }
 func (c *SentryReceivePeersClientDirect) Context() context.Context {

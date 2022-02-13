@@ -2,6 +2,7 @@ package direct
 
 import (
 	"context"
+	"io"
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -47,15 +48,15 @@ func (s *TxPoolClient) Pending(ctx context.Context, in *emptypb.Empty, opts ...g
 // -- start OnAdd
 
 func (s *TxPoolClient) OnAdd(ctx context.Context, in *txpool_proto.OnAddRequest, opts ...grpc.CallOption) (txpool_proto.Txpool_OnAddClient, error) {
-	messageCh := make(chan *txpool_proto.OnAddReply, 16384)
-	streamServer := &TxPoolOnAddS{messageCh: messageCh, ctx: ctx}
+	ch := make(chan *txpool_proto.OnAddReply, 16384)
+	streamServer := &TxPoolOnAddS{messageCh: ch, ctx: ctx}
 	go func() {
+		defer close(ch)
 		if err := s.server.OnAdd(in, streamServer); err != nil {
 			log.Warn("[direct] stream returns", "err", err)
 		}
-		close(messageCh)
 	}()
-	return &TxPoolOnAddC{messageCh: messageCh, ctx: ctx}, nil
+	return &TxPoolOnAddC{messageCh: ch, ctx: ctx}, nil
 }
 
 type TxPoolOnAddS struct {
@@ -80,6 +81,9 @@ type TxPoolOnAddC struct {
 
 func (c *TxPoolOnAddC) Recv() (*txpool_proto.OnAddReply, error) {
 	m := <-c.messageCh
+	if m == nil {
+		return nil, io.EOF
+	}
 	return m, nil
 }
 func (c *TxPoolOnAddC) Context() context.Context {
