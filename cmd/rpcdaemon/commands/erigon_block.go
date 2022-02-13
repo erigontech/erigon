@@ -69,20 +69,59 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	currenttHeaderTime := currentHeader.Time
 
-	firstHeader := rawdb.ReadHeaderByNumber(tx, 1)
+	var lowestNumber uint64 = 1
+	highestNumber := currentHeader.Number.Uint64()
+	middleNumber := (highestNumber + lowestNumber) / 2
+
+	firstHeader := rawdb.ReadHeaderByNumber(tx, lowestNumber)
 	firstHeaderTime := firstHeader.Time
 
+	middleHeader := rawdb.ReadHeaderByNumber(tx, middleNumber)
+
 	if currenttHeaderTime == timeStamp {
-		block := *rawdb.ReadCurrentBlock(tx)
-		return block, nil
+		block := rawdb.ReadCurrentBlock(tx)
+		return *block, nil
 	}
 
 	if firstHeaderTime == timeStamp {
-		block, err := rawdb.ReadBlockByNumber(tx, 1)
+		block, err := rawdb.ReadBlockByNumber(tx, lowestNumber)
 		if err != nil {
 			return types.Block{}, err
 		}
 		return *block, nil
+	}
+
+	if middleHeader.Time == timeStamp {
+		block, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+		if err != nil {
+			return types.Block{}, err
+		}
+
+		return *block, nil
+	}
+
+	for lowestNumber < highestNumber {
+
+		if middleHeader.Time < timeStamp {
+			lowestNumber = middleNumber
+		}
+
+		if middleHeader.Time > timeStamp {
+			highestNumber = middleNumber
+		}
+
+		if middleHeader.Time == timeStamp {
+			block, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+			if err != nil {
+				return types.Block{}, err
+			}
+
+			return *block, nil
+		}
+
+		middleNumber = (highestNumber + lowestNumber) / 2
+		middleHeader = rawdb.ReadHeaderByNumber(tx, middleNumber)
+
 	}
 
 	return types.Block{}, nil
