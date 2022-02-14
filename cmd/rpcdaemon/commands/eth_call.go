@@ -295,7 +295,7 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (*accessListResult, error) {
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
@@ -391,28 +391,21 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}, nil
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			if optimizeGas != nil && *optimizeGas {
+				optimizeToInAccessList(accessList, to)
+			}
+			return accessList, nil
 		}
 		prevTracer = tracer
 	}
 }
 
-// OptimizedAccessList is similar to CreateAccessList, but with focus on optimizing gas savings for transactions using the resulting access list.
-func (api *APIImpl) OptimizedAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (*accessListResult, error) {
-	accessList, err := api.CreateAccessList(ctx, args, blockNrOrHash)
-	if err != nil || accessList == nil {
-		return accessList, err
-	}
-
-	to, err := api.toAddress(ctx, args)
-	if err != nil {
-		return nil, err
-	}
-
+// to address is warm already, so we can save by adding it to the access list
+// only if we are adding a lot of its storage slots as well
+func optimizeToInAccessList(accessList *accessListResult, to common.Address) {
 	indexToRemove := -1
 
-	// to address is warm already, so we can save by adding it to the access list
-	// only if we are adding a lot of its storage slots as well
 	for i := 0; i < len(*accessList.Accesslist); i++ {
 		entry := (*accessList.Accesslist)[i]
 		if entry.Address != to {
@@ -431,8 +424,6 @@ func (api *APIImpl) OptimizedAccessList(ctx context.Context, args ethapi.CallArg
 	if indexToRemove >= 0 {
 		*accessList.Accesslist = removeIndex(*accessList.Accesslist, indexToRemove)
 	}
-
-	return accessList, nil
 }
 
 func removeIndex(s types.AccessList, index int) types.AccessList {
