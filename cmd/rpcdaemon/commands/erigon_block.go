@@ -69,7 +69,7 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	currenttHeaderTime := currentHeader.Time
 
-	var lowestNumber uint64 = 1
+	var lowestNumber uint64 = 0
 	highestNumber := currentHeader.Number.Uint64()
 	middleNumber := (highestNumber + lowestNumber) / 2
 
@@ -103,11 +103,11 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 	for lowestNumber < highestNumber {
 
 		if middleHeader.Time < timeStamp {
-			lowestNumber = middleNumber
+			lowestNumber = middleNumber + 1
 		}
 
 		if middleHeader.Time > timeStamp {
-			highestNumber = middleNumber
+			highestNumber = middleNumber - 1
 		}
 
 		if middleHeader.Time == timeStamp {
@@ -121,6 +121,7 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 		middleNumber = (highestNumber + lowestNumber) / 2
 		middleHeader = rawdb.ReadHeaderByNumber(tx, middleNumber)
+		fmt.Printf("middleNumber: %d, highestNumber: %d, lowestNumber: %d\n", middleNumber, highestNumber, lowestNumber)
 
 	}
 
