@@ -171,6 +171,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 		blockNum++
+		//fmt.Printf("block %d\n", blockNum)
 		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
