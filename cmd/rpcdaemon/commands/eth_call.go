@@ -343,9 +343,25 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil
 
-	to, err := api.toAddress(ctx, args)
-	if err != nil {
-		return nil, err
+	var to common.Address
+	if args.To != nil {
+		to = *args.To
+	} else {
+		// Require nonce to calculate address of created contract
+		if args.Nonce == nil {
+			var nonce uint64
+			reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
+				Address: gointerfaces.ConvertAddressToH160(*args.From),
+			}, &grpc.EmptyCallOption{})
+			if err != nil {
+				return nil, err
+			}
+			if reply.Found {
+				nonce = reply.Nonce + 1
+			}
+			args.Nonce = (*hexutil.Uint64)(&nonce)
+		}
+		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
@@ -428,26 +444,4 @@ func optimizeToInAccessList(accessList *accessListResult, to common.Address) {
 
 func removeIndex(s types.AccessList, index int) types.AccessList {
 	return append(s[:index], s[index+1:]...)
-}
-
-func (api *APIImpl) toAddress(ctx context.Context, args ethapi.CallArgs) (common.Address, error) {
-	if args.To != nil {
-		return *args.To, nil
-	}
-
-	// Require nonce to calculate address of created contract
-	if args.Nonce == nil {
-		reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
-			Address: gointerfaces.ConvertAddressToH160(*args.From),
-		}, &grpc.EmptyCallOption{})
-		if err != nil {
-			return common.Address{}, err
-		}
-		var nonce uint64
-		if reply.Found {
-			nonce = reply.Nonce + 1
-		}
-		args.Nonce = (*hexutil.Uint64)(&nonce)
-	}
-	return crypto.CreateAddress(*args.From, uint64(*args.Nonce)), nil
 }
