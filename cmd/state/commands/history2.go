@@ -27,6 +27,7 @@ import (
 )
 
 var (
+	blockTo    int
 	traceBlock int
 )
 
@@ -34,6 +35,7 @@ func init() {
 	withBlock(history2Cmd)
 	withDatadir(history2Cmd)
 	history2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
+	history2Cmd.Flags().IntVar(&blockTo, "blockto", 0, "block number to stop replay of history at")
 	rootCmd.AddCommand(history2Cmd)
 }
 
@@ -67,7 +69,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadir, "aggregator")
-	h, err3 := aggregator.NewHistory(aggPath, block, aggregationStep)
+	h, err3 := aggregator.NewHistory(aggPath, uint64(blockTo), aggregationStep)
 	if err3 != nil {
 		return fmt.Errorf("create history: %w", err3)
 	}
@@ -95,6 +97,9 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 			log.Info("Progress", "block", blockNum, "blk/s", speed)
 		}
 		blockNum++
+		if blockNum > uint64(blockTo) {
+			break
+		}
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
 			return err
@@ -106,6 +111,11 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if b == nil {
 			break
+		}
+		if blockNum < block {
+			// Skip that block, but increase txNum
+			txNum += uint64(len(b.Transactions())) + 1
+			continue
 		}
 		r := h.MakeHistoryReader()
 		readWrapper := &HistoryWrapper{r: r}
@@ -205,7 +215,7 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), hw.trace)
 	if hw.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc)
+		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
 	}
 	if err != nil {
 		fmt.Printf("%v\n", err)
