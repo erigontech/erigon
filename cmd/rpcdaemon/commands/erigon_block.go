@@ -124,6 +124,11 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 	}
 
-	return types.Block{}, nil
+	block, err := rawdb.ReadBlockByNumber(tx, highestNumber)
+	if err != nil {
+		return types.Block{}, err
+	}
+
+	return *block, nil
 
 }
