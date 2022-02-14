@@ -48,6 +48,7 @@ func init() {
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -170,6 +171,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 		blockNum++
+		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
 			return err
