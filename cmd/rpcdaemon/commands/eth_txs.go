@@ -23,45 +23,45 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 		return nil, err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
 
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, nil
-	}
-	block, err := api.blockByNumberWithSenders(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
-	}
-	blockHash := block.Hash()
-	var txnIndex uint64
-	var txn types2.Transaction
-	for i, transaction := range block.Transactions() {
-		if transaction.Hash() == hash {
-			txn = transaction
-			txnIndex = uint64(i)
-			break
+	if ok {
+		block, err := api.blockByNumberWithSenders(tx, blockNum)
+		if err != nil {
+			return nil, err
 		}
-	}
+		if block == nil {
+			return nil, nil
+		}
+		blockHash := block.Hash()
+		var txnIndex uint64
+		var txn types2.Transaction
+		for i, transaction := range block.Transactions() {
+			if transaction.Hash() == hash {
+				txn = transaction
+				txnIndex = uint64(i)
+				break
+			}
+		}
 
-	// Add GasPrice for the DynamicFeeTransaction
-	var baseFee *big.Int
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-	if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
-		baseFee = block.BaseFee()
-	}
+		// Add GasPrice for the DynamicFeeTransaction
+		var baseFee *big.Int
+		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
+			baseFee = block.BaseFee()
+		}
 
-	if txn != nil {
-		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+		if txn != nil {
+			return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+		}
+		return nil, nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
@@ -76,7 +76,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 	}
 	if len(reply.RlpTxs[0]) > 0 {
 		s := rlp.NewStream(bytes.NewReader(reply.RlpTxs[0]), uint64(len(reply.RlpTxs[0])))
-		txn, err = types2.DecodeTransaction(s)
+		txn, err := types2.DecodeTransaction(s)
 		if err != nil {
 			return nil, err
 		}

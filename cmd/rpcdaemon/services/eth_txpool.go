@@ -18,9 +18,9 @@ type TxPoolService struct {
 	version gointerfaces.Version
 }
 
-func NewTxPoolService(cc grpc.ClientConnInterface) *TxPoolService {
+func NewTxPoolService(client txpool.TxpoolClient) *TxPoolService {
 	return &TxPoolService{
-		TxpoolClient: txpool.NewTxpoolClient(cc),
+		TxpoolClient: client,
 		version:      gointerfaces.VersionFromProto(privateapi.TxPoolAPIVersion),
 		log:          log.New("remote_service", "tx_pool"),
 	}

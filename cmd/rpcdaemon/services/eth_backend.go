@@ -47,9 +47,9 @@ type RemoteBackend struct {
 	blockReader      interfaces.BlockAndTxnReader
 }
 
-func NewRemoteBackend(cc grpc.ClientConnInterface, db kv.RoDB, blockReader interfaces.BlockAndTxnReader) *RemoteBackend {
+func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader interfaces.BlockAndTxnReader) *RemoteBackend {
 	return &RemoteBackend{
-		remoteEthBackend: remote.NewETHBACKENDClient(cc),
+		remoteEthBackend: client,
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
 		log:              log.New("remote_service", "eth_backend"),
 		db:               db,

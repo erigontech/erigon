@@ -2,7 +2,7 @@
 package node
 
 import (
-	"path"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core"
@@ -57,6 +57,8 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
+	case networkname.SepoliaChainName:
+		log.Info("Starting Erigon on Sepolia testnet...")
 	case networkname.RopstenChainName:
 		log.Info("Starting Erigon on Ropsten testnet...")
 	case networkname.RinkebyChainName:
@@ -114,7 +116,7 @@ func New(
 // RegisterEthService adds an Ethereum client to the stack.
 func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) (*eth.Ethereum, error) {
 	txpoolCfg := core.DefaultTxPool2Config(cfg.TxPool)
-	txpoolCfg.DBDir = path.Join(stack.Config().DataDir, "txpool")
+	txpoolCfg.DBDir = filepath.Join(stack.Config().DataDir, "txpool")
 
 	return eth.New(stack, cfg, txpoolCfg, logger)
 }

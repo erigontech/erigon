@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"time"
 
@@ -95,7 +94,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root string) error {
 		return err
 	}
 	for i, f := range files {
-		torrentFileName := path.Join(root, f+".torrent")
+		torrentFileName := filepath.Join(root, f+".torrent")
 		if _, err := os.Stat(torrentFileName); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return err

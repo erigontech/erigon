@@ -276,34 +276,40 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	isBor := mock.ChainConfig.Bor != nil
 	mock.Sync = stagedsync.New(
-		stagedsync.DefaultStages(mock.Ctx, prune, stagedsync.StageHeadersCfg(
-			mock.DB,
-			mock.downloader.Hd,
-			*mock.ChainConfig,
-			sendHeaderRequest,
-			propagateNewBlockHashes,
-			penalize,
-			cfg.BatchSize,
-			false,
-			nil,
-			nil,
-			nil,
-			allSnapshots,
-			snapshotsDownloader,
-			blockReader,
-			mock.tmpdir,
-		), stagedsync.StageCumulativeIndexCfg(mock.DB), stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig), stagedsync.StageBodiesCfg(
-			mock.DB,
-			mock.downloader.Bd,
-			sendBodyRequest,
-			penalize,
-			blockPropagator,
-			cfg.BodyDownloadTimeoutSeconds,
-			*mock.ChainConfig,
-			cfg.BatchSize,
-			allSnapshots,
-			blockReader,
-		), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
+		stagedsync.DefaultStages(mock.Ctx, prune,
+			stagedsync.StageHeadersCfg(
+				mock.DB,
+				mock.downloader.Hd,
+				mock.downloader.Bd,
+				*mock.ChainConfig,
+				sendHeaderRequest,
+				propagateNewBlockHashes,
+				penalize,
+				cfg.BatchSize,
+				false,
+				nil,
+				nil,
+				nil,
+				allSnapshots,
+				snapshotsDownloader,
+				blockReader,
+				mock.tmpdir,
+			),
+			stagedsync.StageCumulativeIndexCfg(mock.DB),
+			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
+			stagedsync.StageBodiesCfg(
+				mock.DB,
+				mock.downloader.Bd,
+				sendBodyRequest,
+				penalize,
+				blockPropagator,
+				cfg.BodyDownloadTimeoutSeconds,
+				*mock.ChainConfig,
+				cfg.BatchSize,
+				allSnapshots,
+				blockReader,
+			),
+			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, allSnapshots),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
@@ -454,7 +460,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path"
 	"path/filepath"
 	"time"
 
@@ -94,7 +93,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := Downloader(cmd.Context(), cmd); err != nil {
+		if err := Downloader(cmd.Context()); err != nil {
 			log.Error("Downloader", "err", err)
 			return nil
 		}
@@ -102,8 +101,8 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Downloader(ctx context.Context, cmd *cobra.Command) error {
-	snapshotDir := path.Join(datadir, "snapshots")
+func Downloader(ctx context.Context) error {
+	snapshotDir := filepath.Join(datadir, "snapshots")
 	common.MustExist(snapshotDir)
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
@@ -120,22 +119,25 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		return fmt.Errorf("New: %w", err)
 	}
+	defer pieceCompletion.Close()
+
 	protocols, err := downloader.New(cfg, snapshotDir)
 	if err != nil {
 		return err
 	}
-	log.Info("[torrent] Start", "my peerID", protocols.TorrentClient.PeerID())
+	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.TorrentClient.PeerID()))
 	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
+	defer protocols.Close()
 
 	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
 
-	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, true)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
@@ -144,8 +146,9 @@ func Downloader(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	<-cmd.Context().Done()
-	grpcServer.GracefulStop()
+	defer grpcServer.GracefulStop()
+
+	<-ctx.Done()
 	return nil
 }
 
@@ -153,7 +156,7 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		snapshotDir := path.Join(datadir, "snapshots")
+		snapshotDir := filepath.Join(datadir, "snapshots")
 		ctx := cmd.Context()
 
 		if forceVerify { // remove and create .torrent files (will re-read all snapshots)

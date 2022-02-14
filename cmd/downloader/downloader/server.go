@@ -21,11 +21,12 @@ var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir string) (*GrpcServer, error) {
+func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir string, silent bool) (*GrpcServer, error) {
 	sn := &GrpcServer{
 		db:          db,
 		t:           client,
 		snapshotDir: snapshotDir,
+		silent:      silent,
 	}
 	return sn, nil
 }
@@ -34,7 +35,7 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentCl
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
-	if err := AddTorrentFiles(snapshotDir, torrentClient); err != nil {
+	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient); err != nil {
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {
@@ -50,6 +51,7 @@ type GrpcServer struct {
 	t           *Protocols
 	db          kv.RwDB
 	snapshotDir string
+	silent      bool
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
@@ -58,7 +60,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		//TODO: if hash is empty - create .torrent file from path file (if it exists)
 		infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 	}
-	if err := ResolveAbsentTorrents(ctx, s.t.TorrentClient, infoHashes, s.snapshotDir); err != nil {
+	if err := ResolveAbsentTorrents(ctx, s.t.TorrentClient, infoHashes, s.snapshotDir, s.silent); err != nil {
 		return nil, err
 	}
 	for _, t := range s.t.TorrentClient.Torrents() {

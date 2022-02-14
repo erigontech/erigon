@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -94,7 +94,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 
-		log.Info("TxPool started", "db", path.Join(datadir, "txpool"))
+		log.Info("TxPool started", "db", filepath.Join(datadir, "txpool"))
 
 		sentryClients := make([]direct.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
@@ -111,7 +111,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		cfg := txpool.DefaultConfig
-		cfg.DBDir = path.Join(datadir, "txpool")
+		cfg.DBDir = filepath.Join(datadir, "txpool")
 		cfg.LogEvery = 30 * time.Second
 		cfg.CommitEvery = 30 * time.Second
 		cfg.PendingSubPoolLimit = pendingPoolLimit

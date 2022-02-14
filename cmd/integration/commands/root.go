@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"path"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -20,7 +20,7 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "chaindata")
+			chaindata = filepath.Join(datadir, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

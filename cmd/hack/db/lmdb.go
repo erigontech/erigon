@@ -12,7 +12,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -384,7 +384,7 @@ func (m *mdbx_meta) readMeta(page []byte) error {
 	m.txnID_b = _64(page, pos)
 	pos += 8
 
-	pos += (3 * 8) // pagesRetired, x, y
+	pos += 3 * 8 // pagesRetired, x, y
 
 	return nil
 }
@@ -941,7 +941,7 @@ func Defrag() error {
 func TextInfo(chaindata string, visStream io.Writer) error {
 	log.Info("Text Info", "db", chaindata)
 	fmt.Fprint(visStream, "digraph lmdb {\nrankdir=LR\n")
-	datafile := path.Join(chaindata, MdbxDataFile)
+	datafile := filepath.Join(chaindata, MdbxDataFile)
 
 	f, err := os.Open(datafile)
 	if err != nil {

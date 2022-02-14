@@ -3,6 +3,7 @@ package commands
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -37,7 +38,7 @@ func TestEthSubscribe(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	backend := services.NewRemoteBackend(conn, m.DB, snapshotsync.NewBlockReader())
+	backend := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
 	ff := filters.New(ctx, backend, nil, nil)
 
 	newHeads := make(chan *types.Header)
@@ -53,6 +54,6 @@ func TestEthSubscribe(t *testing.T) {
 
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
-		require.Equal(header.Number.Uint64(), i)
+		require.Equal(i, header.Number.Uint64())
 	}
 }
