@@ -65,8 +65,8 @@ func TestGetBlockByTimeStampLatestTime(t *testing.T) {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block.Header().Time != latestBlockTimeStamp {
-		t.Errorf("Retrieved the wrong block. expected: %s got: %s", latestBlock.Hash(), block.Hash())
+	if block.Header().Time != latestBlockTimeStamp || block.Hash() != latestBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", latestBlock.Hash(), latestBlockTimeStamp, block.Hash(), block.Header().Time)
 	}
 }
 
@@ -156,5 +156,40 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 	if block.Header().Time != middleTimeStamp || block.Hash() != middleBlock.Hash() {
 		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", middleBlock.Hash(), middleTimeStamp, block.Hash(), block.Header().Time)
+	}
+}
+
+func TestGetBlockByTimeStamp(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
+	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
+	if err != nil {
+		t.Errorf("couldn't get block %v", pickedBlock.Number())
+	}
+
+	if pickedBlock == nil {
+		t.Error("couldn't retrieve picked block")
+	}
+
+	pickedBlockTimeStamp := pickedBlock.Header().Time
+
+	block, err := api.GetBlockByTimeStamp(ctx, pickedBlockTimeStamp)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block.Header().Time != pickedBlockTimeStamp || block.Hash() != pickedBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", pickedBlock.Hash(), pickedBlockTimeStamp, block.Hash(), block.Header().Time)
 	}
 }
