@@ -284,7 +284,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 }
 
 // accessListResult returns an optional accesslist
-// Its the result of the `debug_createAccessList` RPC call.
+// Its the result of the `eth_createAccessList` RPC call.
 // It contains an error if the transaction itself failed.
 type accessListResult struct {
 	Accesslist *types.AccessList `json:"accessList"`
@@ -295,7 +295,12 @@ type accessListResult struct {
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
 // If the accesslist creation fails an error is returned.
 // If the transaction itself fails, an vmErr is returned.
-func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash) (*accessListResult, error) {
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -310,7 +315,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 	if api.TevmEnabled {
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
-	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	blockNumber, hash, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +327,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		return nil, nil
 	}
 	var stateReader state.StateReader
-	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+	if num, ok := bNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
 		cacheView, err := api.stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
@@ -358,6 +363,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		}
 		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
 	}
+
 	// Retrieve the precompiles since they don't need to be added to the access list
 	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
 
@@ -388,7 +394,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, contractHasTEVM)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
 		gp := new(core.GasPool).AddGas(msg.Gas())
@@ -401,8 +407,41 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 			if res.Err != nil {
 				errString = res.Err.Error()
 			}
-			return &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}, nil
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			if optimizeGas != nil && *optimizeGas {
+				optimizeToInAccessList(accessList, to)
+			}
+			return accessList, nil
 		}
 		prevTracer = tracer
 	}
+}
+
+// to address is warm already, so we can save by adding it to the access list
+// only if we are adding a lot of its storage slots as well
+func optimizeToInAccessList(accessList *accessListResult, to common.Address) {
+	indexToRemove := -1
+
+	for i := 0; i < len(*accessList.Accesslist); i++ {
+		entry := (*accessList.Accesslist)[i]
+		if entry.Address != to {
+			continue
+		}
+
+		// https://eips.ethereum.org/EIPS/eip-2930#charging-less-for-accesses-in-the-access-list
+		accessListSavingPerSlot := params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929 - params.TxAccessListStorageKeyGas
+
+		numSlots := uint64(len(entry.StorageKeys))
+		if numSlots*accessListSavingPerSlot <= params.TxAccessListAddressGas {
+			indexToRemove = i
+		}
+	}
+
+	if indexToRemove >= 0 {
+		*accessList.Accesslist = removeIndex(*accessList.Accesslist, indexToRemove)
+	}
+}
+
+func removeIndex(s types.AccessList, index int) types.AccessList {
+	return append(s[:index], s[index+1:]...)
 }
