@@ -57,7 +57,7 @@ type PayloadAttributes struct {
 type TransitionConfiguration struct {
 	TerminalTotalDifficulty *hexutil.Big   `json:"terminalTotalDifficulty" gencodec:"required"`
 	TerminalBlockHash       common.Hash    `json:"terminalBlockHash"     gencodec:"required"`
-	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber" gencodec:"requiered"`
+	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber" gencodec:"required"`
 }
 
 // EngineAPI Beacon chain communication endpoint
