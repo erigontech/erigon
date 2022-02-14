@@ -1352,15 +1352,15 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.Snapshot.RetireEnabled = true
 	}
 	torrentVerbosity := lg.Warning
-	if ctx.GlobalBool(TorrentVerbosityFlag.Name) {
+	if ctx.GlobalIsSet(TorrentVerbosityFlag.Name) {
 		torrentVerbosity = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]
 	}
 
 	var downloadRateStr, uploadRateStr string
-	if ctx.GlobalBool(TorrentDownloadRateFlag.Name) {
+	if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
 		downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
 	}
-	if ctx.GlobalBool(TorrentUploadRateFlag.Name) {
+	if ctx.GlobalIsSet(TorrentUploadRateFlag.Name) {
 		uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
 	}
 	var downloadRate, uploadRate datasize.ByteSize
@@ -1371,7 +1371,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		panic(err)
 	}
 	torrentPort := TorrentPortFlag.Value
-	if ctx.GlobalBool(TorrentPortFlag.Name) {
+	if ctx.GlobalIsSet(TorrentPortFlag.Name) {
 		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
 	}
 
