@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -40,5 +41,120 @@ func TestEthCallNonCanonical(t *testing.T) {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
+	}
+}
+
+func TestGetBlockByTimeStampLatestTime(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	latestBlock := rawdb.ReadCurrentBlock(tx)
+	latestBlockTimeStamp := latestBlock.Header().Time
+
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block.Header().Time != latestBlockTimeStamp {
+		t.Errorf("Retrieved the wrong block. expected: %s got: %s", latestBlock.Hash(), block.Hash())
+	}
+}
+
+func TestGetBlockByTimeStampOldestTime(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("failed at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		t.Error("couldn't retrieve oldest block")
+	}
+	oldestBlockTimeStamp := oldestBlock.Header().Time
+
+	block, err := api.GetBlockByTimeStamp(ctx, oldestBlockTimeStamp)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block.Header().Time != 0 || block.Hash() != oldestBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", oldestBlock.Hash(), oldestBlockTimeStamp, block.Hash(), block.Header().Time)
+	}
+}
+
+func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	latestBlock := rawdb.ReadCurrentBlock(tx)
+	latestBlockTimeStamp := latestBlock.Header().Time
+
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp+999999999999)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block.Header().Time != latestBlockTimeStamp || block.Hash() != latestBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", latestBlock.Hash(), latestBlockTimeStamp, block.Hash(), block.Header().Time)
+	}
+}
+
+func TestGetBlockByTimeMiddle(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	oldestHeader := rawdb.ReadHeaderByNumber(tx, 0)
+
+	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
+	middleBlock, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+	if err != nil {
+		t.Error("couldn't retrieve middle block")
+	}
+
+	middleTimeStamp := middleBlock.Header().Time
+
+	block, err := api.GetBlockByTimeStamp(ctx, middleTimeStamp)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block.Header().Time != middleTimeStamp || block.Hash() != middleBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", middleBlock.Hash(), middleTimeStamp, block.Hash(), block.Header().Time)
 	}
 }
