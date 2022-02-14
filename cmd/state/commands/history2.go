@@ -215,7 +215,11 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), hw.trace)
 	if hw.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
+		}
 	}
 	if err != nil {
 		fmt.Printf("%v\n", err)
