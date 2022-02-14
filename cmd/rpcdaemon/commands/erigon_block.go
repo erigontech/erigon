@@ -59,10 +59,10 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	return header, nil
 }
 
-func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64) (types.Block, error) {
+func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64) (*types.Block, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return types.Block{}, err
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -80,24 +80,24 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 	if currenttHeaderTime == timeStamp {
 		block := rawdb.ReadCurrentBlock(tx)
-		return *block, nil
+		return block, nil
 	}
 
 	if firstHeaderTime == timeStamp {
 		block, err := rawdb.ReadBlockByNumber(tx, lowestNumber)
 		if err != nil {
-			return types.Block{}, err
+			return nil, err
 		}
-		return *block, nil
+		return block, nil
 	}
 
 	if middleHeader.Time == timeStamp {
 		block, err := rawdb.ReadBlockByNumber(tx, middleNumber)
 		if err != nil {
-			return types.Block{}, err
+			return nil, err
 		}
 
-		return *block, nil
+		return block, nil
 	}
 
 	for lowestNumber < highestNumber {
@@ -113,23 +113,22 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 		if middleHeader.Time == timeStamp {
 			block, err := rawdb.ReadBlockByNumber(tx, middleNumber)
 			if err != nil {
-				return types.Block{}, err
+				return nil, err
 			}
 
-			return *block, nil
+			return block, nil
 		}
 
 		middleNumber = (highestNumber + lowestNumber) / 2
 		middleHeader = rawdb.ReadHeaderByNumber(tx, middleNumber)
-		fmt.Printf("middleNumber: %d, highestNumber: %d, lowestNumber: %d\n", middleNumber, highestNumber, lowestNumber)
 
 	}
 
 	block, err := rawdb.ReadBlockByNumber(tx, highestNumber)
 	if err != nil {
-		return types.Block{}, err
+		return nil, err
 	}
 
-	return *block, nil
+	return block, nil
 
 }
