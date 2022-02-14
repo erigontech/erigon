@@ -540,7 +540,6 @@ func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*r
 		KeyCount:   count,
 		Enums:      false,
 		BucketSize: 2000,
-		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
@@ -550,6 +549,7 @@ func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*r
 	}); err != nil {
 		return nil, err
 	}
+	defer rs.Close()
 	word := make([]byte, 0, 256)
 	var pos uint64
 	g := d.MakeGetter()
@@ -740,12 +740,13 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 	}
 	bitmapC.Close()
 	bitmapC = nil
-	var bitmapD *compress.Decompressor
-	var bitmapI *recsplit.Index
-	if bitmapD, err = compress.NewDecompressor(bitmapDatPath); err != nil {
+	bitmapD, err := compress.NewDecompressor(bitmapDatPath)
+	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap decompressor: %w", err)
 	}
-	if bitmapI, err = buildIndex(bitmapD, bitmapIdxPath, c.dir, len(bitmapKeys)); err != nil {
+
+	bitmapI, err := buildIndex(bitmapD, bitmapIdxPath, c.dir, len(bitmapKeys))
+	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap buildIndex: %w", err)
 	}
 	return d, index, bitmapD, bitmapI, nil
@@ -1479,7 +1480,6 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 		KeyCount:   count,
 		Enums:      false,
 		BucketSize: 2000,
-		Salt:       0,
 		LeafSize:   8,
 		TmpDir:     a.diffDir,
 		StartSeed: []uint64{0x106393c187cae21a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
