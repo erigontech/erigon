@@ -121,7 +121,6 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 		middleNumber = (highestNumber + lowestNumber) / 2
 		middleHeader = rawdb.ReadHeaderByNumber(tx, middleNumber)
-		fmt.Printf("middleNumber: %d, highestNumber: %d, lowestNumber: %d\n", middleNumber, highestNumber, lowestNumber)
 
 	}
 
