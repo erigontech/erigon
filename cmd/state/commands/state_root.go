@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -59,7 +60,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadir, "staterootdb")
+	stateDbPath := filepath.Join(datadir, "staterootdb")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return err

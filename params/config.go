@@ -24,6 +24,7 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -615,7 +616,9 @@ type ChainConfig struct {
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
-	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
+	TerminalTotalDifficulty *big.Int        `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
+	TerminalBlockHash       *common.Hash    `json:"terminalBlockHash,omitempty"`       // The hash of the last POW block
+	TerminalBlockNumber     *hexutil.Uint64 `json:"terminalBlockNumber,omitempty"`     // The block number of the last POW block
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`

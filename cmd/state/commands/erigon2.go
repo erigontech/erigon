@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ const (
 var (
 	commitmentFrequency int // How many blocks to skip between calculating commitment
 	changesets          bool
+	commitments         bool
 )
 
 func init() {
@@ -45,6 +47,8 @@ func init() {
 	withDatadir(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
+	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -84,7 +88,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := path.Join(datadir, "aggregator")
+	aggPath := filepath.Join(datadir, "aggregator")
 	if block == 0 {
 		if _, err = os.Stat(aggPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -103,6 +107,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer agg.Close()
 	agg.GenerateChangesets(changesets)
+	agg.Commitments(commitments)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
@@ -124,14 +129,18 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if err = w.FinishTx(0, false); err != nil {
 			return err
 		}
-		if rootHash, err = w.ComputeCommitment(false); err != nil {
-			return err
+		if commitments {
+			if rootHash, err = w.ComputeCommitment(false); err != nil {
+				return err
+			}
 		}
 		if err = w.Aggregate(false); err != nil {
 			return err
 		}
-		if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
-			return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
+		if commitments {
+			if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
+				return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
+			}
 		}
 	}
 	var txNum uint64 = 1
@@ -162,6 +171,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 		blockNum++
+		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {
 			return err
@@ -197,7 +207,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
-		if interrupt || blockNum%uint64(commitmentFrequency) == 0 {
+		if commitments && (interrupt || blockNum%uint64(commitmentFrequency) == 0) {
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
 			}

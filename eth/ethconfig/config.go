@@ -21,7 +21,6 @@ import (
 	"math/big"
 	"os"
 	"os/user"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -267,7 +266,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.BorConfig:
 		if chainConfig.Bor != nil {
-			borDbPath := path.Join(dataDir, "bor") // bor consensus path: datadir/bor
+			borDbPath := filepath.Join(dataDir, "bor") // bor consensus path: datadir/bor
 			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
 		}
 	}

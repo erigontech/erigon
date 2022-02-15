@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"path"
+	"path/filepath"
 	"runtime"
 
 	"github.com/holiman/uint256"
@@ -82,8 +83,8 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer cancel()
 
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := path.Join(dataDir, "snapshots")
-	tmpDir := path.Join(dataDir, etl.TmpDirName)
+	snapshotDir := filepath.Join(dataDir, "snapshots")
+	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
@@ -110,11 +111,11 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 		return fmt.Errorf("too small --segment.size %d", segmentSize)
 	}
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := path.Join(dataDir, "snapshots")
-	tmpDir := path.Join(dataDir, etl.TmpDirName)
+	snapshotDir := filepath.Join(dataDir, "snapshots")
+	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
 	common.MustExist(tmpDir)
 
-	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(log.New()).Path(filepath.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapshotDir, tmpDir); err != nil {
@@ -200,7 +201,7 @@ func checkBlockSnapshot(chaindata string) error {
 	_ = chainID
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
-	snapshots := snapshotsync.NewAllSnapshots(cfg, path.Join(dataDir, "snapshots"))
+	snapshots := snapshotsync.NewAllSnapshots(cfg, filepath.Join(dataDir, "snapshots"))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {

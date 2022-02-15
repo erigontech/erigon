@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -66,12 +65,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	var expectedRootHash common.Hash
 	var headerHash common.Hash
 	if cfg.checkRoot {
-		var hash common.Hash
-		hash, err = rawdb.ReadCanonicalHash(tx, to)
-		if err != nil {
-			return trie.EmptyRoot, err
-		}
-		syncHeadHeader, err := cfg.blockReader.Header(ctx, tx, hash, to)
+		syncHeadHeader, err := cfg.blockReader.HeaderByNumber(ctx, tx, to)
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
