@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -27,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -76,12 +79,15 @@ type Flags struct {
 	GRPCPort                int
 	GRPCHealthCheckEnabled  bool
 	StarknetGRPCAddress     string
+	JWTSecretPath           string // Engine API Authentication
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
+
+const JwtTokenExpiry = 5 * time.Second
 
 func RootCommand() (*cobra.Command, *Flags) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
@@ -117,6 +123,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
+	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, "engine.authsecret", "", "Token to ensure safe connection beetwen CL and EL")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -460,7 +467,10 @@ func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
 		wsHandler = srv.WebsocketHandler([]string{"*"}, cfg.WebsocketCompression)
 	}
 
-	apiHandler := createHandler(cfg, defaultAPIList, httpHandler, wsHandler)
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, false)
+	if err != nil {
+		return err
+	}
 
 	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, apiHandler)
 	if err != nil {
@@ -533,7 +543,18 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
+func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, isEngine bool) (http.Handler, error) {
+	var jwtVerificationKey []byte
+	var err error
+
+	if isEngine && cfg.JWTSecretPath != "" {
+		jwtVerificationKey, err = ioutil.ReadFile(cfg.JWTSecretPath)
+		if err != nil {
+			return nil, err
+		}
+		jwtVerificationKey = common.Hex2Bytes(string(jwtVerificationKey))
+	}
+
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
@@ -543,10 +564,33 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 			wsHandler.ServeHTTP(w, r)
 			return
 		}
+
+		if isEngine && cfg.JWTSecretPath != "" {
+			// Check if JWT signature is correct
+			tokenStr := r.Header["Authorization"][0]
+
+			var claims jwt.StandardClaims
+
+			tkn, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+				return jwtVerificationKey, nil
+			})
+			if err != nil || !tkn.Valid {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			// Validate time of iat
+			now := time.Now().Unix()
+
+			if claims.IssuedAt > now+JwtTokenExpiry.Nanoseconds() {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+
 		httpHandler.ServeHTTP(w, r)
 	})
 
-	return handler
+	return handler, nil
 }
 
 func createEngineListener(cfg Flags, engineApi []rpc.API, engineFlag []string) (*http.Server, *rpc.Server, string, error) {
@@ -565,7 +609,10 @@ func createEngineListener(cfg Flags, engineApi []rpc.API, engineFlag []string) (
 	}
 
 	engineHttpHandler := node.NewHTTPHandlerStack(enginesrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-	engineApiHandler := createHandler(cfg, engineApi, engineHttpHandler, nil)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, nil, true)
+	if err != nil {
+		return nil, nil, "", err
+	}
 
 	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
 	if err != nil {
