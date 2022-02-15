@@ -53,12 +53,20 @@ type PayloadAttributes struct {
 	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
 }
 
+// TransitionConfiguration represents the correct configurations of the CL and the EL
+type TransitionConfiguration struct {
+	TerminalTotalDifficulty *hexutil.Big   `json:"terminalTotalDifficulty" gencodec:"required"`
+	TerminalBlockHash       common.Hash    `json:"terminalBlockHash"     gencodec:"required"`
+	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber" gencodec:"required"`
+}
+
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
+	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration) (TransitionConfiguration, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -244,6 +252,59 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 		}
 	}
 	return blockHashToBody, nil
+}
+
+// Gets a transistionConfiguration and pings the execution layer and checks if the execution layer has the correct configurations
+func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration) (TransitionConfiguration, error) {
+	tx, err := e.db.BeginRo(ctx)
+
+	if err != nil {
+		return TransitionConfiguration{}, err
+	}
+
+	defer tx.Rollback()
+	// terminal block number must always be zero
+	if transitionConfiguration.TerminalBlockNumber != 0 {
+		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", transitionConfiguration.TerminalBlockNumber)
+	}
+
+	chainConfig, err := e.BaseAPI.chainConfig(tx)
+
+	if err != nil {
+		return TransitionConfiguration{}, err
+	}
+
+	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
+
+	if terminalTotalDifficulty == nil {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the terminal total difficulty. expected: %v", transitionConfiguration.TerminalTotalDifficulty)
+	}
+
+	if terminalTotalDifficulty.Cmp((*big.Int)(transitionConfiguration.TerminalTotalDifficulty)) != 0 {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %v, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty, terminalTotalDifficulty)
+	}
+
+	if chainConfig.TerminalBlockHash == nil {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the terminal block hash. expected: %s", transitionConfiguration.TerminalBlockHash)
+	}
+
+	if *chainConfig.TerminalBlockHash == (common.Hash{}) {
+		return TransitionConfiguration{
+			TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
+			TerminalBlockHash:       *chainConfig.TerminalBlockHash,
+			TerminalBlockNumber:     0,
+		}, nil
+	}
+
+	if chainConfig.TerminalBlockHash != nil && *chainConfig.TerminalBlockHash != transitionConfiguration.TerminalBlockHash {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, *chainConfig.TerminalBlockHash)
+	}
+
+	return TransitionConfiguration{
+		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
+		TerminalBlockHash:       *chainConfig.TerminalBlockHash,
+		TerminalBlockNumber:     0,
+	}, nil
 }
 
 // NewEngineAPI returns EngineImpl instance
