@@ -204,6 +204,9 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
 		pos += codeHashBytes
 	}
+	if pos >= len(enc) {
+		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
+	}
 	incBytes := int(enc[pos])
 	pos++
 	if incBytes > 0 {
