@@ -66,7 +66,7 @@ type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
-	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration, terminalBlockNumber hexutil.Uint64) (TransitionConfiguration, error)
+	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration) (TransitionConfiguration, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -255,7 +255,7 @@ func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.B
 }
 
 // Gets a transistionConfiguration and pings the execution layer and checks if the execution layer has the correct configurations
-func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration, terminalBlockNumber hexutil.Uint64 /* terminalBlockNumber is always zero */) (TransitionConfiguration, error) {
+func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration) (TransitionConfiguration, error) {
 	tx, err := e.db.BeginRo(ctx)
 
 	if err != nil {
@@ -263,9 +263,9 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 	}
 
 	defer tx.Rollback()
-
-	if terminalBlockNumber != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", terminalBlockNumber)
+	// terminal block number must always be zero
+	if transitionConfiguration.TerminalBlockNumber != 0 {
+		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", transitionConfiguration.TerminalBlockNumber)
 	}
 
 	chainConfig, err := e.BaseAPI.chainConfig(tx)
@@ -274,7 +274,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, err
 	}
 
-	terminalTotalDifficulty := (chainConfig.TerminalTotalDifficulty)
+	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
 
 	if terminalTotalDifficulty == nil {
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the terminal total difficulty. expected: %v", transitionConfiguration.TerminalTotalDifficulty)
