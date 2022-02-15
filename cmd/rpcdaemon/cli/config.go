@@ -581,7 +581,7 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 			// Validate time of iat
 			now := time.Now().Unix()
 
-			if claims.IssuedAt > now+JwtTokenExpiry.Nanoseconds() {
+			if claims.IssuedAt > now+JwtTokenExpiry.Nanoseconds() || claims.IssuedAt < now-JwtTokenExpiry.Nanoseconds() {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
