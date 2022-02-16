@@ -13,6 +13,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -101,7 +102,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 						time.Sleep(time.Second)
 						continue
 					}
-					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, txpool2.ErrPoolDisabled) {
 						time.Sleep(time.Second)
 						continue
 					}
