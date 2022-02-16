@@ -34,6 +34,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/spf13/cobra"
@@ -319,6 +320,25 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: node.DefaultHTTPPort,
 	}
+	EngineAddr = cli.StringFlag{
+		Name:  "engine.addr",
+		Usage: "HTTP-RPC server listening interface for engineAPI",
+		Value: node.DefaultHTTPHost,
+	}
+	EnginePort = cli.UintFlag{
+		Name:  "engine.port",
+		Usage: "HTTP-RPC server listening port for the engineAPI",
+		Value: node.DefaultEngineHTTPPort,
+	}
+
+	HttpCompressionFlag = cli.BoolFlag{
+		Name:  "http.compression",
+		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+	}
+	WsCompressionFlag = cli.BoolFlag{
+		Name:  "ws.compression",
+		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+	}
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
 		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
@@ -332,8 +352,26 @@ var (
 	HTTPApiFlag = cli.StringFlag{
 		Name:  "http.api",
 		Usage: "API's offered over the HTTP-RPC interface",
-		Value: "",
+		Value: "eth,erigon",
 	}
+	RpcBatchConcurrencyFlag = cli.UintFlag{
+		Name:  "rpc.batch.concurrency",
+		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
+		Value: 2,
+	}
+
+	RpcGasCapFlag = cli.UintFlag{
+		Name:  "rpc.gascap",
+		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
+		Value: 50000000,
+	}
+
+	TraceMaxtracesFlag = cli.UintFlag{
+		Name:  "trace.maxtraces",
+		Usage: "Sets a limit on traces that can be returned in trace_filter",
+		Value: 200,
+	}
+
 	HTTPPathPrefixFlag = cli.StringFlag{
 		Name:  "http.rpcprefix",
 		Usage: "HTTP path path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
@@ -398,6 +436,11 @@ var (
 	AllowUnprotectedTxs = cli.BoolFlag{
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non EIP155 signed) transactions to be submitted via RPC",
+	}
+	StateCacheFlag = cli.IntFlag{
+		Name:  "state.cache",
+		Value: kvcache.DefaultCoherentConfig.KeysLimit,
+		Usage: "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).",
 	}
 
 	// Network Settings
@@ -1383,6 +1426,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.Torrent = torrentCfg
 		cfg.TorrentPieceCompletionStorage = pieceCompletion
 	}
+
+	nodeConfig.Http.Snapshot = cfg.Snapshot
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true

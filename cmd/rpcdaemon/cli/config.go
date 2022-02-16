@@ -22,6 +22,7 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
@@ -44,49 +45,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type Flags struct {
-	PrivateApiAddr          string
-	SingleNodeMode          bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
-	Datadir                 string
-	Chaindata               string
-	HttpListenAddress       string
-	EngineHTTPListenAddress string
-	TLSCertfile             string
-	TLSCACert               string
-	TLSKeyFile              string
-	HttpPort                int
-	EnginePort              int
-	HttpCORSDomain          []string
-	HttpVirtualHost         []string
-	HttpCompression         bool
-	API                     []string
-	Gascap                  uint64
-	MaxTraces               uint64
-	WebsocketEnabled        bool
-	WebsocketCompression    bool
-	RpcAllowListFilePath    string
-	RpcBatchConcurrency     uint
-	TraceCompatibility      bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr           string
-	TevmEnabled             bool
-	StateCache              kvcache.CoherentConfig
-	Snapshot                ethconfig.Snapshot
-	GRPCServerEnabled       bool
-	GRPCListenAddress       string
-	GRPCPort                int
-	GRPCHealthCheckEnabled  bool
-	StarknetGRPCAddress     string
-}
-
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-func RootCommand() (*cobra.Command, *Flags) {
+func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
-	cfg := &Flags{StateCache: kvcache.DefaultCoherentConfig}
+	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
@@ -263,7 +230,7 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.SingleNodeMode` (mode when it on 1 machine with Erigon)
-func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCancel context.CancelFunc) (
+func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, borDb kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet *services.StarknetService,
@@ -411,7 +378,7 @@ func RemoteServices(ctx context.Context, cfg Flags, logger log.Logger, rootCance
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }
 
-func StartRpcServer(ctx context.Context, cfg Flags, rpcAPI []rpc.API) error {
+func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
 	var enginesrv *rpc.Server
 	var engineHttpEndpoint string
@@ -532,7 +499,7 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
+func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
@@ -548,7 +515,7 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 	return handler
 }
 
-func createEngineListener(cfg Flags, engineApi []rpc.API, engineFlag []string) (*http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, engineFlag []string) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
 
 	enginesrv := rpc.NewServer(cfg.RpcBatchConcurrency)
