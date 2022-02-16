@@ -936,7 +936,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			if err != nil {
 				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 			}
-			if ch != ancestorHash {
+			if ch == ancestorHash {
 				break
 			}
 			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
