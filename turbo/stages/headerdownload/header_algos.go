@@ -703,7 +703,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				if !skip {
 					_, skip = hd.badHeaders[link.hash]
 				}
-				if !skip {
+				if !skip && !link.persisted {
 					_, skip = hd.badHeaders[link.header.ParentHash]
 				}
 				if !skip {
@@ -733,7 +733,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			for hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
 				link := hd.insertQueue[0]
 				_, bad := hd.badHeaders[link.hash]
-				if !bad {
+				if !bad && !link.persisted {
 					_, bad = hd.badHeaders[link.header.ParentHash]
 				}
 				if bad {
@@ -883,6 +883,10 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 		header:      h.Header,
 		headerRaw:   h.HeaderRaw,
 		persisted:   persisted,
+	}
+	if persisted {
+		link.header = nil // Drop header reference to free memory, as we won't need it anymore
+		link.headerRaw = nil
 	}
 	hd.links[h.Hash] = link
 	if persisted {
@@ -1250,7 +1254,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	return nil
 }
 
-func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlockReader) error {
+func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces.FullBlockReader) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	addPreVerifiedHashes := len(hd.preverifiedHashes) == 0
@@ -1259,7 +1263,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlock
 	}
 
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
-		header, err := r.HeaderByNumber(context.Background(), nil, i)
+		header, err := r.HeaderByNumber(context.Background(), tx, i)
 		if err != nil {
 			return err
 		}

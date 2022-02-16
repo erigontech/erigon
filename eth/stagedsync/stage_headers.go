@@ -1057,7 +1057,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	// Add last headers from snapshots to HeaderDownloader (as persistent links)
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-		if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 			return err
 		}
 		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
@@ -1095,6 +1095,11 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	}
 	log.Info("[Snapshots] Fetching torrent files metadata")
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
 			log.Error("[Snapshots] Can't call downloader", "err", err)
 			time.Sleep(10 * time.Second)
