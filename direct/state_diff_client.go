@@ -21,7 +21,6 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 )
 
@@ -44,43 +43,47 @@ func NewStateDiffClientDirect(server remote.KVServer) *StateDiffClientDirect {
 // -- start StateChanges
 
 func (c *StateDiffClientDirect) StateChanges(ctx context.Context, in *remote.StateChangeRequest, opts ...grpc.CallOption) (remote.KV_StateChangesClient, error) {
-	ch := make(chan *remote.StateChangeBatch, 16384)
-	streamServer := &StateDiffServerStream{messageCh: ch, ctx: ctx}
+	ch := make(chan *stateDiffReply, 16384)
+	streamServer := &StateDiffStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
-		if err := c.server.StateChanges(in, streamServer); err != nil {
-			log.Warn("StateChanges returned", "err", err)
-		}
+		streamServer.Err(c.server.StateChanges(in, streamServer))
 	}()
-	return &StateDiffClientStream{messageCh: ch, ctx: ctx}, nil
+	return &StateDiffStreamC{ch: ch, ctx: ctx}, nil
 }
 
-type StateDiffClientStream struct {
-	messageCh chan *remote.StateChangeBatch
-	ctx       context.Context
+type stateDiffReply struct {
+	r   *remote.StateChangeBatch
+	err error
+}
+
+type StateDiffStreamC struct {
+	ch  chan *stateDiffReply
+	ctx context.Context
 	grpc.ClientStream
 }
 
-func (c *StateDiffClientStream) Recv() (*remote.StateChangeBatch, error) {
-	m := <-c.messageCh
+func (c *StateDiffStreamC) Recv() (*remote.StateChangeBatch, error) {
+	m := <-c.ch
 	if m == nil {
 		return nil, io.EOF
 	}
-	return m, nil
+	return m.r, m.err
 }
-func (c *StateDiffClientStream) Context() context.Context { return c.ctx }
+func (c *StateDiffStreamC) Context() context.Context { return c.ctx }
 
-// StateDiffServerStream implements proto_sentry.Sentry_ReceiveMessagesServer
-type StateDiffServerStream struct {
-	messageCh chan *remote.StateChangeBatch
-	ctx       context.Context
+// StateDiffStreamS implements proto_sentry.Sentry_ReceiveMessagesServer
+type StateDiffStreamS struct {
+	ch  chan *stateDiffReply
+	ctx context.Context
 	grpc.ServerStream
 }
 
-func (s *StateDiffServerStream) Send(m *remote.StateChangeBatch) error {
-	s.messageCh <- m
+func (s *StateDiffStreamS) Send(m *remote.StateChangeBatch) error {
+	s.ch <- &stateDiffReply{r: m}
 	return nil
 }
-func (s *StateDiffServerStream) Context() context.Context { return s.ctx }
+func (s *StateDiffStreamS) Context() context.Context { return s.ctx }
+func (s *StateDiffStreamS) Err(err error)            { s.ch <- &stateDiffReply{err: err} }
 
 // -- end StateChanges

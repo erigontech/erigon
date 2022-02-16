@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -58,47 +57,46 @@ func (s *EthBackendClientDirect) ClientVersion(ctx context.Context, in *remote.C
 // -- start Subscribe
 
 func (s *EthBackendClientDirect) Subscribe(ctx context.Context, in *remote.SubscribeRequest, opts ...grpc.CallOption) (remote.ETHBACKEND_SubscribeClient, error) {
-	ch := make(chan *remote.SubscribeReply, 16384)
-	streamServer := &SubscribeServerStreamDirect{messageCh: ch, ctx: ctx}
+	ch := make(chan *subscribeReply, 16384)
+	streamServer := &SubscribeStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
-		if err := s.server.Subscribe(in, streamServer); err != nil {
-			log.Warn("Messages returned", "err", err)
-		}
+		streamServer.Err(s.server.Subscribe(in, streamServer))
 	}()
-	return &SubscribeClientStreamDirect{messageCh: ch, ctx: ctx}, nil
+	return &SubscribeStreamC{ch: ch, ctx: ctx}, nil
 }
 
-type SubscribeServerStreamDirect struct {
-	messageCh chan *remote.SubscribeReply
-	ctx       context.Context
+type subscribeReply struct {
+	r   *remote.SubscribeReply
+	err error
+}
+type SubscribeStreamS struct {
+	ch  chan *subscribeReply
+	ctx context.Context
 	grpc.ServerStream
 }
 
-func (s *SubscribeServerStreamDirect) Send(m *remote.SubscribeReply) error {
-	s.messageCh <- m
+func (s *SubscribeStreamS) Send(m *remote.SubscribeReply) error {
+	s.ch <- &subscribeReply{r: m}
 	return nil
 }
-func (s *SubscribeServerStreamDirect) Context() context.Context {
-	return s.ctx
-}
+func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
+func (s *SubscribeStreamS) Err(err error)            { s.ch <- &subscribeReply{err: err} }
 
-type SubscribeClientStreamDirect struct {
-	messageCh chan *remote.SubscribeReply
-	ctx       context.Context
+type SubscribeStreamC struct {
+	ch  chan *subscribeReply
+	ctx context.Context
 	grpc.ClientStream
 }
 
-func (c *SubscribeClientStreamDirect) Recv() (*remote.SubscribeReply, error) {
-	m := <-c.messageCh
+func (c *SubscribeStreamC) Recv() (*remote.SubscribeReply, error) {
+	m := <-c.ch
 	if m == nil {
 		return nil, io.EOF
 	}
-	return m, nil
+	return m.r, m.err
 }
-func (c *SubscribeClientStreamDirect) Context() context.Context {
-	return c.ctx
-}
+func (c *SubscribeStreamC) Context() context.Context { return c.ctx }
 
 // -- end Subscribe
 

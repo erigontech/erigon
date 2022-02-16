@@ -6,7 +6,6 @@ import (
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -28,43 +27,45 @@ func (s *MiningClient) Version(ctx context.Context, in *emptypb.Empty, opts ...g
 // -- start OnPendingBlock
 
 func (s *MiningClient) OnPendingBlock(ctx context.Context, in *txpool_proto.OnPendingBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingBlockClient, error) {
-	ch := make(chan *txpool_proto.OnPendingBlockReply, 16384)
-	streamServer := &MiningOnPendingBlockS{messageCh: ch, ctx: ctx}
+	ch := make(chan *onPendigBlockReply, 16384)
+	streamServer := &MiningOnPendingBlockS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
-		if err := s.server.OnPendingBlock(in, streamServer); err != nil {
-			log.Warn("[direct] stream returns", "err", err)
-		}
+		streamServer.Err(s.server.OnPendingBlock(in, streamServer))
 	}()
-	return &MiningOnPendingBlockC{messageCh: ch, ctx: ctx}, nil
+	return &MiningOnPendingBlockC{ch: ch, ctx: ctx}, nil
+}
+
+type onPendigBlockReply struct {
+	r   *txpool_proto.OnPendingBlockReply
+	err error
 }
 
 type MiningOnPendingBlockS struct {
-	messageCh chan *txpool_proto.OnPendingBlockReply
-	ctx       context.Context
+	ch  chan *onPendigBlockReply
+	ctx context.Context
 	grpc.ServerStream
 }
 
 func (s *MiningOnPendingBlockS) Send(m *txpool_proto.OnPendingBlockReply) error {
-	s.messageCh <- m
+	s.ch <- &onPendigBlockReply{r: m}
 	return nil
 }
-func (s *MiningOnPendingBlockS) Context() context.Context {
-	return s.ctx
-}
+func (s *MiningOnPendingBlockS) Context() context.Context { return s.ctx }
+func (s *MiningOnPendingBlockS) Err(err error)            { s.ch <- &onPendigBlockReply{err: err} }
 
 type MiningOnPendingBlockC struct {
-	messageCh chan *txpool_proto.OnPendingBlockReply
-	ctx       context.Context
+	ch  chan *onPendigBlockReply
+	ctx context.Context
 	grpc.ClientStream
 }
 
 func (c *MiningOnPendingBlockC) Recv() (*txpool_proto.OnPendingBlockReply, error) {
-	m := <-c.messageCh
+	m := <-c.ch
 	if m == nil {
 		return nil, io.EOF
 	}
-	return m, nil
+	return m.r, m.err
 }
 func (c *MiningOnPendingBlockC) Context() context.Context {
 	return c.ctx
@@ -74,93 +75,92 @@ func (c *MiningOnPendingBlockC) Context() context.Context {
 // -- start OnMinedBlock
 
 func (s *MiningClient) OnMinedBlock(ctx context.Context, in *txpool_proto.OnMinedBlockRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnMinedBlockClient, error) {
-	ch := make(chan *txpool_proto.OnMinedBlockReply, 16384)
-	streamServer := &MiningOnMinedBlockS{messageCh: ch, ctx: ctx}
+	ch := make(chan *onMinedBlockReply, 16384)
+	streamServer := &MiningOnMinedBlockS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
-		if err := s.server.OnMinedBlock(in, streamServer); err != nil {
-			log.Warn("[direct] stream returns", "err", err)
-		}
+		streamServer.Err(s.server.OnMinedBlock(in, streamServer))
 	}()
-	return &MiningOnMinedBlockC{messageCh: ch, ctx: ctx}, nil
+	return &MiningOnMinedBlockC{ch: ch, ctx: ctx}, nil
+}
+
+type onMinedBlockReply struct {
+	r   *txpool_proto.OnMinedBlockReply
+	err error
 }
 
 type MiningOnMinedBlockS struct {
-	messageCh chan *txpool_proto.OnMinedBlockReply
-	ctx       context.Context
+	ch  chan *onMinedBlockReply
+	ctx context.Context
 	grpc.ServerStream
 }
 
 func (s *MiningOnMinedBlockS) Send(m *txpool_proto.OnMinedBlockReply) error {
-	s.messageCh <- m
+	s.ch <- &onMinedBlockReply{r: m}
 	return nil
 }
-func (s *MiningOnMinedBlockS) Context() context.Context {
-	return s.ctx
-}
+func (s *MiningOnMinedBlockS) Context() context.Context { return s.ctx }
+func (s *MiningOnMinedBlockS) Err(err error)            { s.ch <- &onMinedBlockReply{err: err} }
 
 type MiningOnMinedBlockC struct {
-	messageCh chan *txpool_proto.OnMinedBlockReply
-	ctx       context.Context
+	ch  chan *onMinedBlockReply
+	ctx context.Context
 	grpc.ClientStream
 }
 
 func (c *MiningOnMinedBlockC) Recv() (*txpool_proto.OnMinedBlockReply, error) {
-	m := <-c.messageCh
+	m := <-c.ch
 	if m == nil {
 		return nil, io.EOF
 	}
-	return m, nil
+	return m.r, m.err
 }
-func (c *MiningOnMinedBlockC) Context() context.Context {
-	return c.ctx
-}
+func (c *MiningOnMinedBlockC) Context() context.Context { return c.ctx }
 
 // -- end OnMinedBlock
 // -- end OnPendingLogs
 
 func (s *MiningClient) OnPendingLogs(ctx context.Context, in *txpool_proto.OnPendingLogsRequest, opts ...grpc.CallOption) (txpool_proto.Mining_OnPendingLogsClient, error) {
-	ch := make(chan *txpool_proto.OnPendingLogsReply, 16384)
-	streamServer := &MiningOnPendingLogsS{messageCh: ch, ctx: ctx}
+	ch := make(chan *onPendingLogsReply, 16384)
+	streamServer := &MiningOnPendingLogsS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
-		if err := s.server.OnPendingLogs(in, streamServer); err != nil {
-			log.Warn("[direct] stream returns", "err", err)
-		}
+		streamServer.Err(s.server.OnPendingLogs(in, streamServer))
 	}()
-	return &MiningOnPendingLogsC{messageCh: ch, ctx: ctx}, nil
+	return &MiningOnPendingLogsC{ch: ch, ctx: ctx}, nil
 }
 
+type onPendingLogsReply struct {
+	r   *txpool_proto.OnPendingLogsReply
+	err error
+}
 type MiningOnPendingLogsS struct {
-	messageCh chan *txpool_proto.OnPendingLogsReply
-	ctx       context.Context
+	ch  chan *onPendingLogsReply
+	ctx context.Context
 	grpc.ServerStream
 }
 
 func (s *MiningOnPendingLogsS) Send(m *txpool_proto.OnPendingLogsReply) error {
-	s.messageCh <- m
+	s.ch <- &onPendingLogsReply{r: m}
 	return nil
 }
-func (s *MiningOnPendingLogsS) Context() context.Context {
-	return s.ctx
-}
+func (s *MiningOnPendingLogsS) Context() context.Context { return s.ctx }
+func (s *MiningOnPendingLogsS) Err(err error)            { s.ch <- &onPendingLogsReply{err: err} }
 
 type MiningOnPendingLogsC struct {
-	messageCh chan *txpool_proto.OnPendingLogsReply
-	ctx       context.Context
+	ch  chan *onPendingLogsReply
+	ctx context.Context
 	grpc.ClientStream
 }
 
 func (c *MiningOnPendingLogsC) Recv() (*txpool_proto.OnPendingLogsReply, error) {
-	m := <-c.messageCh
+	m := <-c.ch
 	if m == nil {
 		return nil, io.EOF
 	}
-	return m, nil
+	return m.r, m.err
 }
-func (c *MiningOnPendingLogsC) Context() context.Context {
-	return c.ctx
-}
+func (c *MiningOnPendingLogsC) Context() context.Context { return c.ctx }
 
 // -- end OnPendingLogs
 
