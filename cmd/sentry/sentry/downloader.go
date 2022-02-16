@@ -351,11 +351,14 @@ type ControlServerImpl struct {
 	blockReader interfaces.HeaderAndCanonicalReader
 }
 
-func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig, genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient, window int, blockReader interfaces.HeaderAndCanonicalReader) (*ControlServerImpl, error) {
+func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig,
+	genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient,
+	window int, blockReader interfaces.HeaderAndCanonicalReader) (*ControlServerImpl, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
 		engine,
+		blockReader,
 	)
 
 	if err := hd.RecoverFromDb(db); err != nil {

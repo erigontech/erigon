@@ -173,7 +173,7 @@ func HeadersPOS(
 
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
-	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber)
+	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	if forkChoiceInsteadOfNewPayload {
 		handleForkChoice(&forkChoiceMessage, s, u, ctx, tx, cfg, headerInserter)
@@ -570,7 +570,7 @@ func HeadersPOW(
 	if localTd == nil {
 		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress)
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	var sentToPeer bool
@@ -707,7 +707,7 @@ func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, h
 
 	var ch common.Hash
 	var err error
-	for ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(tx, ancestorHeight) {
+	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
 			return fmt.Errorf("marking canonical header %d %x: %w", ancestorHeight, ancestorHash, err)
 		}

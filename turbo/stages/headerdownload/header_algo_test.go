@@ -37,7 +37,7 @@ func TestInserter1(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	hi := NewHeaderInserter("headers", big.NewInt(0), 0)
+	hi := NewHeaderInserter("headers", big.NewInt(0), 0, snapshotsync.NewBlockReader())
 	h1 := types.Header{
 		Number:     big.NewInt(1),
 		Difficulty: big.NewInt(10),
