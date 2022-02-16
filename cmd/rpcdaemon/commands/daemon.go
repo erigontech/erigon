@@ -5,7 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
@@ -17,7 +17,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend,
 	txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet starknet.CAIROVMClient,
 	filters *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
-	cfg cli.Flags, customAPIList []rpc.API) []rpc.API {
+	cfg httpcfg.HttpCfg, customAPIList []rpc.API) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
