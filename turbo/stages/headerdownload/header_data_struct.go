@@ -8,6 +8,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -251,7 +252,6 @@ type HeaderDownload struct {
 	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
 	links              map[common.Hash]*Link    // Links by header hash
 	engine             consensus.Engine
-	headerReader       consensus.ChainHeaderReader
 	verifyQueue        InsertQueue    // Priority queue of non-peristed links ready for verification
 	insertQueue        InsertQueue    // Priority queue of non-persisted links that are verified and can be inserted
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -270,6 +270,10 @@ type HeaderDownload struct {
 	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
+
+	consensusHeaderReader consensus.ChainHeaderReader
+	headerReader          interfaces.HeaderReader
+
 	// proof-of-stake
 	topSeenHeightPoS     uint64
 	heightToDownloadPoS  uint64
@@ -291,6 +295,7 @@ func NewHeaderDownload(
 	anchorLimit int,
 	linkLimit int,
 	engine consensus.Engine,
+	headerReader interfaces.HeaderAndCanonicalReader,
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
@@ -307,6 +312,7 @@ func NewHeaderDownload(
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
+		headerReader:       headerReader,
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
@@ -387,13 +393,15 @@ type HeaderInserter struct {
 	highest          uint64
 	highestTimestamp uint64
 	canonicalCache   *lru.Cache
+	headerReader     interfaces.HeaderAndCanonicalReader
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader interfaces.HeaderAndCanonicalReader) *HeaderInserter {
 	hi := &HeaderInserter{
-		logPrefix:   logPrefix,
-		localTd:     localTd,
-		unwindPoint: headerProgress,
+		logPrefix:    logPrefix,
+		localTd:      localTd,
+		unwindPoint:  headerProgress,
+		headerReader: headerReader,
 	}
 	hi.canonicalCache, _ = lru.New(1000)
 	return hi

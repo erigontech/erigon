@@ -666,7 +666,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 }
 
 func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
-	return hd.engine.VerifyHeader(hd.headerReader, header, true /* seal */)
+	return hd.engine.VerifyHeader(hd.consensusHeaderReader, header, true /* seal */)
 }
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
@@ -816,7 +816,11 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 		hd.hashToDownloadPoS = header.ParentHash
 		hd.heightToDownloadPoS = header.Number.Uint64() - 1
 
-		if rawdb.ReadHeader(tx, hd.hashToDownloadPoS, hd.heightToDownloadPoS) != nil {
+		hh, err := hd.headerReader.Header(context.Background(), tx, hd.hashToDownloadPoS, hd.heightToDownloadPoS)
+		if err != nil {
+			return err
+		}
+		if hh != nil {
 			hd.synced = true
 			return nil
 		}
@@ -903,7 +907,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
 		ch = fromCache.(common.Hash)
 	} else {
-		if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
+		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
 		}
 	}
@@ -919,18 +923,28 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 			if ch == ancestorHash {
 				break
 			}
-			ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
+			if err != nil {
+				return 0, err
+			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--
 		}
 		// Now look in the DB
-		for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
-			ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
+		for {
+			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			if err != nil {
+				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+			}
+			if ch != ancestorHash {
+				break
+			}
+			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
+			if err != nil {
+				return 0, err
+			}
 			ancestorHash = ancestor.ParentHash
 			ancestorHeight--
-		}
-		if err != nil {
-			return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
 		}
 		// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
 		forkingPoint = ancestorHeight
@@ -943,7 +957,11 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader interf
 		// Skip duplicates
 		return nil, nil
 	}
-	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
+	oldH, err := headerReader.Header(context.Background(), db, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if oldH != nil {
 		// Already inserted, skip
 		return nil, nil
 	}
@@ -1133,7 +1151,7 @@ func (hd *HeaderDownload) UpdateTopSeenHeightPoS(blockHeight uint64) {
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.headerReader = headerReader
+	hd.consensusHeaderReader = headerReader
 }
 
 func (hd *HeaderDownload) EnableRequestChaining() {
