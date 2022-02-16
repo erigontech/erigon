@@ -50,45 +50,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-<<<<<<< HEAD
-type Flags struct {
-	PrivateApiAddr          string
-	SingleNodeMode          bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
-	Datadir                 string
-	Chaindata               string
-	HttpListenAddress       string
-	EngineHTTPListenAddress string
-	TLSCertfile             string
-	TLSCACert               string
-	TLSKeyFile              string
-	HttpPort                int
-	EnginePort              int
-	HttpCORSDomain          []string
-	HttpVirtualHost         []string
-	HttpCompression         bool
-	API                     []string
-	Gascap                  uint64
-	MaxTraces               uint64
-	WebsocketEnabled        bool
-	WebsocketCompression    bool
-	RpcAllowListFilePath    string
-	RpcBatchConcurrency     uint
-	TraceCompatibility      bool // Bug for bug compatibility for trace_ routines with OpenEthereum
-	TxPoolApiAddr           string
-	TevmEnabled             bool
-	StateCache              kvcache.CoherentConfig
-	Snapshot                ethconfig.Snapshot
-	GRPCServerEnabled       bool
-	GRPCListenAddress       string
-	GRPCPort                int
-	GRPCHealthCheckEnabled  bool
-	StarknetGRPCAddress     string
-	JWTSecretPath           string // Engine API Authentication
-	EngineAuthentication    bool
-}
-
-=======
->>>>>>> origin/devel
 var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
