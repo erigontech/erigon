@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -43,8 +44,11 @@ func EncodeStorage(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
 	return nil
 }
 
-func DecodeStorage(dbKey, dbValue []byte) (uint64, []byte, []byte) {
+func DecodeStorage(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 	blockN := binary.BigEndian.Uint64(dbKey)
+	if len(dbValue) < length.Hash {
+		return 0, nil, nil, fmt.Errorf("storage changes purged for block %d", blockN)
+	}
 	k := make([]byte, length.Addr+length.Incarnation+length.Hash)
 	dbKey = dbKey[length.BlockNum:] // remove BlockN bytes
 	copy(k, dbKey)
@@ -54,7 +58,7 @@ func DecodeStorage(dbKey, dbValue []byte) (uint64, []byte, []byte) {
 		v = nil
 	}
 
-	return blockN, k, v
+	return blockN, k, v, nil
 }
 
 func FindStorage(c kv.CursorDupSort, blockNumber uint64, k []byte) ([]byte, error) {

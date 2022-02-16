@@ -314,7 +314,10 @@ Loop:
 			totalGasTmp := new(big.Int).Set(totalGasUsed)
 			elapsed := time.Since(startTime)
 			estimateRatio := float64(cumulativeGas.Sub(cumulativeGas, startGasUsed).Uint64()) / float64(totalGasTmp.Sub(totalGasTmp, startGasUsed).Uint64())
-			estimatedTime := common.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
+			var estimatedTime common.PrettyDuration
+			if estimateRatio != 0 {
+				estimatedTime = common.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
+			}
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, estimatedTime, batch)
 			gas = 0
 			tx.CollectMetrics()
@@ -353,7 +356,9 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"blk/s", speed,
 		"tx/s", speedTx,
 		"Mgas/s", speedMgas,
-		"estimated duration", estimatedTime,
+	}
+	if estimatedTime > 0 {
+		logpairs = append(logpairs, "estimated duration", estimatedTime)
 	}
 	if batch != nil {
 		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
