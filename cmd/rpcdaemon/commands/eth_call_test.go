@@ -60,13 +60,13 @@ func TestGetBlockByTimeStampLatestTime(t *testing.T) {
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 	latestBlockTimeStamp := latestBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp)
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block.Header().Time != latestBlockTimeStamp || block.Hash() != latestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", latestBlock.Hash(), latestBlockTimeStamp, block.Hash(), block.Header().Time)
+	if block["timestamp"] != latestBlockTimeStamp || block["hash"] != latestBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -89,13 +89,13 @@ func TestGetBlockByTimeStampOldestTime(t *testing.T) {
 	}
 	oldestBlockTimeStamp := oldestBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, oldestBlockTimeStamp)
+	block, err := api.GetBlockByTimeStamp(ctx, oldestBlockTimeStamp, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block.Header().Time != 0 || block.Hash() != oldestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", oldestBlock.Hash(), oldestBlockTimeStamp, block.Hash(), block.Header().Time)
+	if block["timestamp"] != 0 || block["hash"] != oldestBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", oldestBlock.Hash(), oldestBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -115,13 +115,13 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 	latestBlockTimeStamp := latestBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp+999999999999)
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp+999999999999, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block.Header().Time != latestBlockTimeStamp || block.Hash() != latestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", latestBlock.Hash(), latestBlockTimeStamp, block.Hash(), block.Header().Time)
+	if block["timestamp"] != latestBlockTimeStamp || block["hash"] != latestBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -149,13 +149,13 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 	middleTimeStamp := middleBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, middleTimeStamp)
+	block, err := api.GetBlockByTimeStamp(ctx, middleTimeStamp,false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block.Header().Time != middleTimeStamp || block.Hash() != middleBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", middleBlock.Hash(), middleTimeStamp, block.Hash(), block.Header().Time)
+	if block["timestamp"] != middleTimeStamp || block["hash"] != middleBlock.Hash(){
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", middleBlock.Hash(), middleTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -184,12 +184,12 @@ func TestGetBlockByTimeStamp(t *testing.T) {
 
 	pickedBlockTimeStamp := pickedBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, pickedBlockTimeStamp)
+	block, err := api.GetBlockByTimeStamp(ctx, pickedBlockTimeStamp, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block.Header().Time != pickedBlockTimeStamp || block.Hash() != pickedBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time samp retrieve: %d", pickedBlock.Hash(), pickedBlockTimeStamp, block.Hash(), block.Header().Time)
+	if block["timestamp"] != pickedBlockTimeStamp || block["hash"] != pickedBlock.Hash() {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", pickedBlock.Hash(), pickedBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
