@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -80,6 +82,7 @@ type Flags struct {
 	GRPCHealthCheckEnabled  bool
 	StarknetGRPCAddress     string
 	JWTSecretPath           string // Engine API Authentication
+	EngineAuthentication    bool
 }
 
 var rootCmd = &cobra.Command{
@@ -87,7 +90,8 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-const JwtTokenExpiry = 5 * time.Second
+const JwtTokenExpiry = 1000 * time.Hour
+const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *Flags) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
@@ -124,6 +128,7 @@ func RootCommand() (*cobra.Command, *Flags) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
 	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, "engine.authsecret", "", "Token to ensure safe connection beetwen CL and EL")
+	rootCmd.PersistentFlags().BoolVar(&cfg.EngineAuthentication, "engine.auth", false, "Enable Authentication accordingly to Klin Specs")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -547,12 +552,31 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 	var jwtVerificationKey []byte
 	var err error
 
-	if isEngine && cfg.JWTSecretPath != "" {
-		jwtVerificationKey, err = ioutil.ReadFile(cfg.JWTSecretPath)
-		if err != nil {
-			return nil, err
+	if isEngine && cfg.EngineAuthentication {
+		// If no file is specified we generate a key in jwt.hex
+		if cfg.JWTSecretPath == "" {
+			jwtVerificationKey := make([]byte, 32)
+			rand.Read(jwtVerificationKey)
+			jwtVerificationKey = []byte(common.Bytes2Hex(jwtVerificationKey))
+			f, err := os.Create(JwtDefaultFile)
+			if err != nil {
+				return nil, err
+			}
+
+			_, err = f.Write(jwtVerificationKey)
+			if err != nil {
+				return nil, err
+			}
+			f.Close()
+		} else {
+			jwtVerificationKey, err = ioutil.ReadFile(cfg.JWTSecretPath)
+			if err != nil {
+				return nil, err
+			}
+			if len(jwtVerificationKey) != 64 {
+				return nil, fmt.Errorf("error: invalid size of verification key in %s", cfg.JWTSecretPath)
+			}
 		}
-		jwtVerificationKey = common.Hex2Bytes(string(jwtVerificationKey))
 	}
 
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -565,13 +589,16 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 			return
 		}
 
-		if isEngine && cfg.JWTSecretPath != "" {
+		if isEngine && cfg.EngineAuthentication {
 			// Check if JWT signature is correct
-			tokenStr := r.Header["Authorization"][0]
+			tokenStr, ok := r.Header["Authorization"]
+			if !ok {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 
-			var claims jwt.StandardClaims
-
-			tkn, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+			claims := jwt.StandardClaims{}
+			tkn, err := jwt.ParseWithClaims(strings.Replace(tokenStr[0], "Bearer ", "", 1), &claims, func(token *jwt.Token) (interface{}, error) {
 				return jwtVerificationKey, nil
 			})
 			if err != nil || !tkn.Valid {
@@ -580,8 +607,7 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 			}
 			// Validate time of iat
 			now := time.Now().Unix()
-
-			if claims.IssuedAt > now+JwtTokenExpiry.Nanoseconds() || claims.IssuedAt < now-JwtTokenExpiry.Nanoseconds() {
+			if claims.IssuedAt > now+JwtTokenExpiry.Nanoseconds() && claims.IssuedAt < now-JwtTokenExpiry.Nanoseconds() {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
