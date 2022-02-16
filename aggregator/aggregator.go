@@ -2608,6 +2608,8 @@ func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int
 	}
 }
 
+// findLargestMerge looks through the state files of the speficied type and determines the largest merge that can be undertaken
+// a state file block [a; b] is valid if its length is a divisor of its starting block, or `(b-a+1) = 0 mod a`
 func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint64) (toAggregate []*byEndBlockItem, pre []*byEndBlockItem, post []*byEndBlockItem, aggFrom uint64, aggTo uint64) {
 	a.fileLocks[fType].RLock()
 	defer a.fileLocks[fType].RUnlock()
@@ -2620,9 +2622,6 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 		maxEndBlock = item.endBlock
 		return false
 	})
-	if fType == CodeBitmap {
-		log.Info("findLargestMerge", "type", fType.String(), "maxTo", maxTo, "maxEndBlock", maxEndBlock)
-	}
 	if maxEndBlock == 0 {
 		return
 	}
@@ -2631,9 +2630,6 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 		if item.decompressor == nil {
 			return true // Skip B-tree based items
 		}
-		if fType == CodeBitmap {
-			log.Info("findLargestMerge", "type", fType.String(), "startBlock", item.startBlock, "endBlock", item.endBlock)
-		}
 		pre = append(pre, item)
 		if aggTo == 0 {
 			var doubleEnd uint64
@@ -2641,9 +2637,6 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 			for nextDouble <= maxEndBlock && nextDouble-item.startBlock < maxSpan {
 				doubleEnd = nextDouble
 				nextDouble = doubleEnd + (doubleEnd - item.startBlock) + 1
-			}
-			if fType == CodeBitmap {
-				log.Info("findLargestMerge", "type", fType.String(), "startBlock", item.startBlock, "endBlock", item.endBlock, "doubleEnd", doubleEnd)
 			}
 			if doubleEnd != item.endBlock {
 				aggFrom = item.startBlock
@@ -2677,7 +2670,7 @@ func (a *Aggregator) computeAggregation(fType FileType,
 	}
 	var err error
 	var count int
-	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, prefixLen, fType.String(), aggFrom, aggTo, a.diffDir, valTransform, fType == Commitment); err != nil {
+	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, prefixLen, fType, aggFrom, aggTo, a.diffDir, valTransform, fType == Commitment); err != nil {
 		return nil, fmt.Errorf("mergeIntoStateFile %s [%d-%d]: %w", fType.String(), aggFrom, aggTo, err)
 	}
 	item2.getter = item2.decompressor.MakeGetter()
@@ -2773,17 +2766,22 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 
 // mergeIntoStateFile assumes that all entries in the cp heap have type FILE_CURSOR
 func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
-	basename string, startBlock, endBlock uint64, dir string,
+	fType FileType, startBlock, endBlock uint64, dir string,
 	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
 	commitments bool,
 ) (*compress.Decompressor, int, error) {
-	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
+	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), startBlock, endBlock))
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
 	if err != nil {
 		return nil, 0, fmt.Errorf("compressor %s: %w", datPath, err)
 	}
 	defer comp.Close()
 	count := 0
+	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
+	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
+	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
+	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
+	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf, transValBuf []byte
 	for cp.Len() > 0 {
 		lastKey := common.Copy((*cp)[0].key)
@@ -2824,11 +2822,32 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 				heap.Pop(cp)
 			}
 		}
-		if startBlock == 0 && len(lastVal) == 0 && len(lastKey) != prefixLen { // Deleted marker can be skipped if we merge into the first file, except for the storage addr marker
+		var skip bool
+		switch fType {
+		case Storage:
+			// Inside storage files, there is a special item with empty value, and the key equal to the contract's address
+			// This special item is inserted before the contract storage items, in order to find them using un-ordered index
+			// (for the purposes of SELF-DESTRUCT and some RPC methods that require enumeration of contract storage)
+			// We will only skip this special item if there are no more corresponding storage items left
+			// (this is checked further down with `bytes.HasPrefix(lastKey, keyBuf)`)
+			skip = startBlock == 0 && len(lastVal) == 0 && len(lastKey) != prefixLen
+		case Commitment:
+			// For commitments, the 3rd and 4th bytes of the value (zero-based 2 and 3) contain so-called `afterMap`
+			// Its bit are set for children that are present in the tree, and unset for those that are not (deleted, for example)
+			// If all bits are zero (check below), this branch can be skipped, since it is empty
+			skip = startBlock == 0 && len(lastVal) >= 4 && lastVal[2] == 0 && lastVal[3] == 0
+		default:
+			// For the rest of types, empty value means deletion
+			skip = startBlock == 0 && len(lastVal) == 0
+		}
+		if skip { // Deleted marker can be skipped if we merge into the first file, except for the storage addr marker
 			if _, ok := a.tracedKeys[string(keyBuf)]; ok {
 				fmt.Printf("skipped key %x for [%d-%d]\n", keyBuf, startBlock, endBlock)
 			}
 		} else {
+			// The check `bytes.HasPrefix(lastKey, keyBuf)` is checking whether the `lastKey` is the first item
+			// of some contract's storage, and `keyBuf` (the item just before that) is the special item with the
+			// key being contract's address. If so, the special item (keyBuf => []) needs to be preserved
 			if keyBuf != nil && (prefixLen == 0 || len(keyBuf) != prefixLen || bytes.HasPrefix(lastKey, keyBuf)) {
 				if err = comp.AddWord(keyBuf); err != nil {
 					return nil, 0, err
