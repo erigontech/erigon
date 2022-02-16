@@ -523,10 +523,13 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-
 	/*
 		// start HTTP API
-		httpRpcCfg := cli.Flags{} // TODO: add rpcdaemon cli flags to Erigon and fill this struct (or break it to smaller config objects)
+		httpRpcCfg := cli.Flags{
+			HttpListenAddress: "0.0.0.0",
+			HttpPort:          8545,
+			API:               []string{"eth", "net", "web3", "txpool", "debug"},
+		} // TODO: add rpcdaemon cli flags to Erigon and fill this struct (or break it to smaller config objects)
 		ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
 			ctx, chainKv, httpRpcCfg.StateCache, blockReader,
 			ethBackendRPC,
@@ -543,11 +546,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		}
 		apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg, nil)
 		go func() {
-			_ = apiList
-			//if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
-			//	log.Error(err.Error())
-			//	return
-			//}
+			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
+				log.Error(err.Error())
+				return
+			}
 		}()
 	*/
 
