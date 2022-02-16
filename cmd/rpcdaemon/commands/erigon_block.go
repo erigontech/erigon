@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -59,10 +61,10 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	return header, nil
 }
 
-func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64) (types.Block, error) {
+func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64, fullTx bool) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return types.Block{}, err
+		return nil, err
 	}
 	defer tx.Rollback()
 
@@ -79,25 +81,30 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 	middleHeader := rawdb.ReadHeaderByNumber(tx, middleNumber)
 
 	if currenttHeaderTime == timeStamp {
-		block := rawdb.ReadCurrentBlock(tx)
-		return *block, nil
+		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
+		if err != nil {
+			return nil, err
+		}
+
+		return blockResponse, nil
 	}
 
 	if firstHeaderTime == timeStamp {
-		block, err := rawdb.ReadBlockByNumber(tx, lowestNumber)
+		blockResponse, err := buildBlockResponse(tx, lowestNumber, fullTx)
 		if err != nil {
-			return types.Block{}, err
+			return nil, err
 		}
-		return *block, nil
+
+		return blockResponse, nil
 	}
 
 	if middleHeader.Time == timeStamp {
-		block, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+		blockResponse, err := buildBlockResponse(tx, middleNumber, fullTx)
 		if err != nil {
-			return types.Block{}, err
+			return nil, err
 		}
 
-		return *block, nil
+		return blockResponse, nil
 	}
 
 	for lowestNumber < highestNumber {
@@ -111,24 +118,46 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 		}
 
 		if middleHeader.Time == timeStamp {
-			block, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+			blockResponse, err := buildBlockResponse(tx, middleNumber, fullTx)
 			if err != nil {
-				return types.Block{}, err
+				return nil, err
 			}
-
-			return *block, nil
+			return blockResponse, nil
 		}
 
 		middleNumber = (highestNumber + lowestNumber) / 2
 		middleHeader = rawdb.ReadHeaderByNumber(tx, middleNumber)
+		if middleHeader == nil {
+			return nil, nil
+		}
 
 	}
 
-	block, err := rawdb.ReadBlockByNumber(tx, highestNumber)
+	blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
 	if err != nil {
-		return types.Block{}, err
+		return nil, err
+	}
+	return blockResponse, nil
+
+}
+
+func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
+	block, err := rawdb.ReadBlockByNumber(db, blockNum)
+	if err != nil {
+		return nil, err
 	}
 
-	return *block, nil
+	if block == nil {
+		return nil, nil
+	}
 
+	response, err := ethapi.RPCMarshalBlock(block, true, fullTx)
+
+	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+	return response, err
 }
