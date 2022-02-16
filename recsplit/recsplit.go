@@ -210,7 +210,7 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
 	rs.maxOffset = 0
 	rs.bucketSizeAcc = rs.bucketSizeAcc[:1] // First entry is always zero
-	rs.bucketPosAcc = rs.bucketPosAcc[:0]   // First entry is always zero
+	rs.bucketPosAcc = rs.bucketPosAcc[:1]   // First entry is always zero
 }
 
 func splitParams(m uint16, leafSize uint16, primaryAggrBound uint16, secondaryAggrBound uint16) (fanout, unit uint16) {

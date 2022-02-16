@@ -68,7 +68,7 @@ func accountWithBalance(i uint64) []byte {
 
 func TestSimpleAggregator(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestSimpleAggregator(t *testing.T) {
 
 func TestLoopAggregator(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestLoopAggregator(t *testing.T) {
 
 func TestRecreateAccountWithStorage(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 
 func TestChangeCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}

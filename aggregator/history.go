@@ -362,8 +362,5 @@ func (h *History) readFromFiles(fType FileType, filekey []byte, trace bool) []by
 		}
 		return true
 	})
-	if len(val) > 0 {
-		return val[1:]
-	}
-	return nil
+	return val
 }

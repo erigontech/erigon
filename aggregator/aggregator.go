@@ -254,16 +254,6 @@ func (cf *ChangeFile) add(word []byte) {
 	cf.wordOffsets = append(cf.wordOffsets, len(cf.words))
 }
 
-func (cf *ChangeFile) update(word []byte) {
-	cf.words = append(cf.words, 0)
-	cf.add(word)
-}
-
-func (cf *ChangeFile) insert(word []byte) {
-	cf.words = append(cf.words, 1)
-	cf.add(word)
-}
-
 func (cf *ChangeFile) finish(txNum uint64) error {
 	// Write out words
 	lastOffset := 0
@@ -413,7 +403,7 @@ func (c *Changes) insert(key, after []byte) {
 	if c.beforeOn {
 		c.before.add(nil)
 	}
-	c.after.insert(after)
+	c.after.add(after)
 }
 
 func (c *Changes) update(key, before, after []byte) {
@@ -421,7 +411,7 @@ func (c *Changes) update(key, before, after []byte) {
 	if c.beforeOn {
 		c.before.add(before)
 	}
-	c.after.update(after)
+	c.after.add(after)
 }
 
 func (c *Changes) delete(key, before []byte) {
@@ -584,12 +574,12 @@ func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*r
 // aggregate gathers changes from the changefiles into a B-tree, and "removes" them from the database
 // This function is time-critical because it needs to be run in the same go-routine (thread) as the general
 // execution (due to read-write tx). After that, we can optimistically execute the rest in the background
-func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, dbTree *btree.BTree) (*btree.BTree, error) {
+func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, dbTree *btree.BTree, commitments bool) (*btree.BTree, error) {
 	if err := c.openFiles(blockTo, false /* write */); err != nil {
 		return nil, fmt.Errorf("open files: %w", err)
 	}
 	bt := btree.New(32)
-	err := c.aggregateToBtree(bt, prefixLen, true)
+	err := c.aggregateToBtree(bt, prefixLen, commitments)
 	if err != nil {
 		return nil, fmt.Errorf("aggregateToBtree: %w", err)
 	}
@@ -755,9 +745,8 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 // aggregateToBtree iterates over all available changes in the change files covered by this instance `c`
 // (there are 3 of them, one for "keys", one for values "before" every change, and one for values "after" every change)
 // and create a B-tree where each key is only represented once, with the value corresponding to the "after" value
-// of the latest change. Also, the first byte of value in the B-tree indicates whether the change has occurred from
-// non-existent (zero) value. In such cases, the fist byte is set to 1 (insertion), otherwise it is 0 (update).
-func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, insertFlag bool) error {
+// of the latest change.
+func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, commitments bool) error {
 	var b bool
 	var e error
 	var key, before, after []byte
@@ -776,20 +765,18 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, insertFlag bo
 			ai.k = key
 			i := bt.Get(&ai)
 			if i == nil {
-				var v []byte
-				if len(after) > 0 {
-					if insertFlag {
-						v = common.Copy(after)
-					} else {
-						v = common.Copy(after[1:])
-					}
-				}
-				item := &AggregateItem{k: common.Copy(key), v: v, count: 1}
+				item := &AggregateItem{k: common.Copy(key), v: common.Copy(after), count: 1}
 				bt.ReplaceOrInsert(item)
 			} else {
 				item := i.(*AggregateItem)
-				if insertFlag && len(item.v) > 0 && len(after) > 0 {
-					item.v[0] = after[0]
+				if commitments {
+					var err error
+					var mergedVal []byte
+					if mergedVal, err = commitment.MergeBranches(after, item.v, nil); err != nil {
+						return fmt.Errorf("merge branches: %w", err)
+					}
+					//fmt.Printf("aggregateToBtree prefix [%x], [%x]+[%x]=>[%x]\n", commitment.CompactToHex(key), after, item.v, mergedVal)
+					item.v = mergedVal
 				}
 				item.count++
 			}
@@ -910,12 +897,13 @@ func (a *Aggregator) scanStateFiles(files []fs.DirEntry) {
 			return false
 		})
 		if foundI == nil || foundI.startBlock > startBlock {
+			log.Info("Load state file", "name", name, "type", fType.String(), "startBlock", startBlock, "endBlock", endBlock)
 			a.files[fType].ReplaceOrInsert(item)
 		}
 	}
 }
 
-func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (*Aggregator, error) {
+func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, changesets, commitments bool) (*Aggregator, error) {
 	a := &Aggregator{
 		diffDir:         diffDir,
 		unwindLimit:     unwindLimit,
@@ -930,6 +918,8 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		mergeError:      make(chan error, 1),
 		historyChannel:  make(chan struct{}, 1),
 		historyError:    make(chan error, 1),
+		changesets:      changesets,
+		commitments:     commitments,
 	}
 	for fType := FirstType; fType < NumberOfTypes; fType++ {
 		a.files[fType] = btree.New(32)
@@ -957,7 +947,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64) (
 		}
 	}
 	// Open decompressor and index files for all items in state trees
-	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
+	for fType := FirstType; fType < NumberOfTypes; fType++ {
 		if err := a.openFiles(fType); err != nil {
 			return nil, fmt.Errorf("opening %s state files: %w", fType.String(), err)
 		}
@@ -1058,7 +1048,7 @@ func (a *Aggregator) rebuildRecentState() error {
 			if changes.openFiles(item.startBlock, false /* write */); err != nil {
 				return false
 			}
-			if err = changes.aggregateToBtree(a.trees[fType], 0, false); err != nil {
+			if err = changes.aggregateToBtree(a.trees[fType], 0, fType == Commitment); err != nil {
 				return false
 			}
 			if err = changes.closeFiles(); err != nil {
@@ -1306,14 +1296,14 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 	if len(val) == 0 {
 		return transValBuf, nil
 	}
-	accountPlainKey, storagePlainKey, err := commitment.ExtractPlainKeys(val[1:])
+	accountPlainKeys, storagePlainKeys, err := commitment.ExtractPlainKeys(val)
 	if err != nil {
 		return nil, err
 	}
-	var transAccountPk []byte
-	var transStoragePk []byte
+	var transAccountPks [][]byte
+	var transStoragePks [][]byte
 	var apkBuf, spkBuf []byte
-	if accountPlainKey != nil {
+	for _, accountPlainKey := range accountPlainKeys {
 		if len(accountPlainKey) == length.Addr {
 			// Non-optimised key originating from a database record
 			apkBuf = append(apkBuf[:0], accountPlainKey...)
@@ -1324,6 +1314,7 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 			g := cvt.pre[Account][fileI].getterMerge
 			g.Reset(offset)
 			apkBuf, _ = g.Next(apkBuf[:0])
+			//fmt.Printf("replacing account [%x] from [%x]\n", apkBuf, accountPlainKey)
 		}
 		// Look up apkBuf in the post account files
 		for j := len(cvt.post[Account]); j > 0; j-- {
@@ -1337,13 +1328,14 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 			if g.HasNext() {
 				if keyMatch, _ := g.Match(apkBuf); keyMatch {
 					accountPlainKey = encodeU64(offset, []byte{byte(j - 1)})
+					//fmt.Printf("replaced account [%x]=>[%x] for file [%d-%d]\n", apkBuf, accountPlainKey, item.startBlock, item.endBlock)
 					break
 				}
 			}
 		}
-		transAccountPk = accountPlainKey
+		transAccountPks = append(transAccountPks, accountPlainKey)
 	}
-	if storagePlainKey != nil {
+	for _, storagePlainKey := range storagePlainKeys {
 		if len(storagePlainKey) == length.Addr+length.Hash {
 			// Non-optimised key originating from a database record
 			spkBuf = append(spkBuf[:0], storagePlainKey...)
@@ -1354,6 +1346,7 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 			g := cvt.pre[Storage][fileI].getterMerge
 			g.Reset(offset)
 			spkBuf, _ = g.Next(spkBuf[:0])
+			//fmt.Printf("replacing storage [%x] from [%x]\n", spkBuf, storagePlainKey)
 		}
 		// Lookup spkBuf in the post storage files
 		for j := len(cvt.post[Storage]); j > 0; j-- {
@@ -1367,14 +1360,14 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 			if g.HasNext() {
 				if keyMatch, _ := g.Match(spkBuf); keyMatch {
 					storagePlainKey = encodeU64(offset, []byte{byte(j - 1)})
+					//fmt.Printf("replaced storage [%x]=>[%x]\n", spkBuf, storagePlainKey)
 					break
 				}
 			}
 		}
-		transStoragePk = storagePlainKey
+		transStoragePks = append(transStoragePks, storagePlainKey)
 	}
-	transValBuf = append(transValBuf, val[0])
-	if transValBuf, err = commitment.ReplacePlainKeys(val[1:], transAccountPk, transStoragePk, transValBuf); err != nil {
+	if transValBuf, err = commitment.ReplacePlainKeys(val, transAccountPks, transStoragePks, transValBuf); err != nil {
 		return nil, err
 	}
 	return transValBuf, nil
@@ -1420,7 +1413,11 @@ func (a *Aggregator) backgroundMerge() {
 				if fType == Commitment {
 					valTransform = cvt.commitmentValTransform
 				}
-				if newItems[fType], err = a.computeAggregation(fType.String(), toRemove[fType], from, to, valTransform, true /* withIndex */); err != nil {
+				var prefixLen int
+				if fType == Storage {
+					prefixLen = length.Addr
+				}
+				if newItems[fType], err = a.computeAggregation(fType, toRemove[fType], from, to, valTransform, true /* withIndex */, prefixLen); err != nil {
 					a.mergeError <- fmt.Errorf("computeAggreation %s: %w", fType.String(), err)
 					return
 				}
@@ -1566,8 +1563,8 @@ func (a *Aggregator) backgroundHistoryMerge() {
 				}
 			}
 			if len(toRemove[fType]) > 1 {
-				if newItems[fType], err = a.computeAggregation(fType.String(), toRemove[fType], from, to, nil, /* valTransform */
-					!finalMerge || fType == AccountBitmap || fType == StorageBitmap || fType == CodeBitmap /* withIndex */); err != nil {
+				if newItems[fType], err = a.computeAggregation(fType, toRemove[fType], from, to, nil, /* valTransform */
+					!finalMerge || fType == AccountBitmap || fType == StorageBitmap || fType == CodeBitmap /* withIndex */, 0 /* prefixLen */); err != nil {
 					a.historyError <- fmt.Errorf("computeAggreation %s: %w", fType.String(), err)
 					return
 				}
@@ -1605,22 +1602,6 @@ func (a *Aggregator) backgroundHistoryMerge() {
 			log.Info("Long history merge", "from", blockFrom, "to", blockTo, "files", removed, "time", time.Since(t))
 		}
 	}
-}
-
-func (a *Aggregator) GenerateChangesets(on bool) {
-	if !a.changesets && on {
-		a.historyWg.Add(1)
-		go a.backgroundHistoryMerge()
-	}
-	if a.changesets && !on {
-		close(a.historyChannel)
-		a.historyWg.Wait()
-	}
-	a.changesets = on
-}
-
-func (a *Aggregator) Commitments(on bool) {
-	a.commitments = on
 }
 
 // checkOverlaps does not lock tree, because it is only called from the constructor of aggregator
@@ -1681,13 +1662,23 @@ func (a *Aggregator) closeFiles(fType FileType) {
 
 func (a *Aggregator) Close() {
 	close(a.aggChannel)
-	a.aggWg.Wait()
+	a.aggWg.Wait() // Need to wait for the background aggregation to finish because itsends to merge channels
+	// Drain channel before closing
+	select {
+	case <-a.mergeChannel:
+	default:
+	}
 	close(a.mergeChannel)
-	a.mergeWg.Wait()
 	if a.changesets {
+		// Drain channel before closing
+		select {
+		case <-a.historyChannel:
+		default:
+		}
 		close(a.historyChannel)
 		a.historyWg.Wait()
 	}
+	a.mergeWg.Wait()
 	// Closing state files only after background aggregation goroutine is finished
 	for fType := FirstType; fType < NumberOfTypes; fType++ {
 		a.closeFiles(fType)
@@ -1705,12 +1696,20 @@ func checkOverlapWithMinStart(treeName string, tree *btree.BTree, minStart uint6
 	return nil
 }
 
-func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, filekey []byte, trace bool) []byte {
+func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, filekey []byte, trace bool) ([]byte, uint64) {
 	if lock {
-		a.fileLocks[fType].RLock()
-		defer a.fileLocks[fType].RUnlock()
+		if fType == Commitment {
+			for lockFType := FirstType; lockFType < NumberOfStateTypes; lockFType++ {
+				a.fileLocks[lockFType].RLock()
+				defer a.fileLocks[lockFType].RUnlock()
+			}
+		} else {
+			a.fileLocks[fType].RLock()
+			defer a.fileLocks[fType].RUnlock()
+		}
 	}
 	var val []byte
+	var startBlock uint64
 	a.files[fType].DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if trace {
@@ -1722,6 +1721,7 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 				return true
 			}
 			val = ai.(*AggregateItem).v
+			startBlock = item.startBlock
 			return false
 		}
 		if item.index.Empty() {
@@ -1736,15 +1736,53 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 				if trace {
 					fmt.Printf("read %s %x: found [%x] in file [%d-%d]\n", fType.String(), filekey, val, item.startBlock, item.endBlock)
 				}
+				startBlock = item.startBlock
 				return false
 			}
 		}
 		return true
 	})
-	if len(val) > 0 {
-		return val[1:]
+	if fType == Commitment {
+		// Transform references
+		if len(val) > 0 {
+			accountPlainKeys, storagePlainKeys, err := commitment.ExtractPlainKeys(val)
+			if err != nil {
+				panic(err)
+			}
+			var transAccountPks [][]byte
+			var transStoragePks [][]byte
+			for _, accountPlainKey := range accountPlainKeys {
+				var apkBuf []byte
+				if len(accountPlainKey) == length.Addr {
+					// Non-optimised key originating from a database record
+					apkBuf = accountPlainKey
+				} else {
+					// Optimised key referencing a state file record (file number and offset within the file)
+					fileI := int(accountPlainKey[0])
+					offset := decodeU64(accountPlainKey[1:])
+					apkBuf, _ = a.readByOffset(Account, fileI, offset)
+				}
+				transAccountPks = append(transAccountPks, apkBuf)
+			}
+			for _, storagePlainKey := range storagePlainKeys {
+				var spkBuf []byte
+				if len(storagePlainKey) == length.Addr+length.Hash {
+					// Non-optimised key originating from a database record
+					spkBuf = storagePlainKey
+				} else {
+					// Optimised key referencing a state file record (file number and offset within the file)
+					fileI := int(storagePlainKey[0])
+					offset := decodeU64(storagePlainKey[1:])
+					spkBuf, _ = a.readByOffset(Storage, fileI, offset)
+				}
+				transStoragePks = append(transStoragePks, spkBuf)
+			}
+			if val, err = commitment.ReplacePlainKeys(val, transAccountPks, transStoragePks, nil); err != nil {
+				panic(err)
+			}
+		}
 	}
-	return nil
+	return val, startBlock
 }
 
 // readByOffset is assumed to be invoked under a read lock
@@ -1763,10 +1801,7 @@ func (a *Aggregator) readByOffset(fType FileType, fileI int, offset uint64) ([]b
 		val, _ = g.Next(nil)
 		return false
 	})
-	if len(val) > 0 {
-		return key, val[1:]
-	}
-	return key, nil
+	return key, val
 }
 
 func (a *Aggregator) MakeStateReader(blockNum uint64) *Reader {
@@ -1789,7 +1824,8 @@ func (r *Reader) ReadAccountData(addr []byte, trace bool) []byte {
 	if vi := r.a.trees[Account].Get(&r.search); vi != nil {
 		return vi.(*AggregateItem).v
 	}
-	return r.a.readFromFiles(Account, true /* lock */, r.blockNum, addr, trace)
+	val, _ := r.a.readFromFiles(Account, true /* lock */, r.blockNum, addr, trace)
+	return val
 }
 
 func (r *Reader) ReadAccountStorage(addr []byte, loc []byte, trace bool) *uint256.Int {
@@ -1802,7 +1838,7 @@ func (r *Reader) ReadAccountStorage(addr []byte, loc []byte, trace bool) *uint25
 	if vi := r.a.trees[Storage].Get(&r.search); vi != nil {
 		v = vi.(*AggregateItem).v
 	} else {
-		v = r.a.readFromFiles(Storage, true /* lock */, r.blockNum, dbkey, trace)
+		v, _ = r.a.readFromFiles(Storage, true /* lock */, r.blockNum, dbkey, trace)
 	}
 	if v != nil {
 		return new(uint256.Int).SetBytes(v)
@@ -1817,7 +1853,8 @@ func (r *Reader) ReadAccountCode(addr []byte, trace bool) []byte {
 		return vi.(*AggregateItem).v
 	}
 	// Look in the files
-	return r.a.readFromFiles(Code, true /* lock */, r.blockNum, addr, trace)
+	val, _ := r.a.readFromFiles(Code, true /* lock */, r.blockNum, addr, trace)
+	return val
 }
 
 func (r *Reader) ReadAccountCodeSize(addr []byte, trace bool) int {
@@ -1827,7 +1864,8 @@ func (r *Reader) ReadAccountCodeSize(addr []byte, trace bool) int {
 		return len(vi.(*AggregateItem).v)
 	}
 	// Look in the files. TODO - use specialised function to only lookup size
-	return len(r.a.readFromFiles(Code, true /* lock */, r.blockNum, addr, trace))
+	val, _ := r.a.readFromFiles(Code, true /* lock */, r.blockNum, addr, trace)
+	return len(val)
 }
 
 type Writer struct {
@@ -1910,13 +1948,44 @@ func (w *Writer) unlockFn() {
 }
 
 func (w *Writer) branchFn(prefix []byte) []byte {
+	for lockFType := FirstType; lockFType < NumberOfStateTypes; lockFType++ {
+		w.a.fileLocks[lockFType].RLock()
+		defer w.a.fileLocks[lockFType].RUnlock()
+	}
+	var mergedVal []byte
 	// Look in the summary table first
 	w.search.k = prefix
 	if vi := w.a.trees[Commitment].Get(&w.search); vi != nil {
-		return vi.(*AggregateItem).v
+		mergedVal = vi.(*AggregateItem).v
 	}
-	// Look in the files
-	return w.a.readFromFiles(Commitment, false /* lock */, w.blockNum, prefix, false /* trace */)
+	// Look in the files and merge, while it becomes complete
+	var startBlock uint64 = w.blockNum + 1
+	for mergedVal == nil || !commitment.IsComplete(mergedVal) {
+		if startBlock == 0 {
+			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactToHex(prefix), mergedVal, startBlock))
+		}
+		var val []byte
+		val, startBlock = w.a.readFromFiles(Commitment, false /* lock */, startBlock-1, prefix, false /* trace */)
+		if val == nil {
+			if mergedVal == nil {
+				return nil
+			}
+			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactToHex(prefix), mergedVal, startBlock))
+		}
+		var err error
+		//fmt.Printf("Pre-merge prefix [%x] [%x]+[%x], startBlock %d\n", commitment.CompactToHex(prefix), val, mergedVal, startBlock)
+		if mergedVal == nil {
+			mergedVal = val
+		} else if mergedVal, err = commitment.MergeBranches(val, mergedVal, nil); err != nil {
+			panic(err)
+		}
+		//fmt.Printf("Post-merge prefix [%x] [%x], startBlock %d\n", commitment.CompactToHex(prefix), mergedVal, startBlock)
+	}
+	if mergedVal == nil {
+		return nil
+	}
+	//fmt.Printf("Returning branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactToHex(prefix), mergedVal, startBlock)
+	return mergedVal[2:] // Skip touchMap but keep afterMap
 }
 
 func bytesToUint64(buf []byte) (x uint64) {
@@ -1931,19 +2000,13 @@ func bytesToUint64(buf []byte) (x uint64) {
 
 func (w *Writer) accountFn(plainKey []byte, cell *commitment.Cell) []byte {
 	var enc []byte
-	if len(plainKey) != length.Addr { // Accessing account key and value via "thin reference" to the state file and offset
-		fileI := int(plainKey[0])
-		offset := decodeU64(plainKey[1:])
-		plainKey, _ = w.a.readByOffset(Account, fileI, offset)
-	}
-	// Full account key is provided, search as usual
 	// Look in the summary table first
 	w.search.k = plainKey
 	if encI := w.a.trees[Account].Get(&w.search); encI != nil {
 		enc = encI.(*AggregateItem).v
 	} else {
 		// Look in the files
-		enc = w.a.readFromFiles(Account, false /* lock */, w.blockNum, plainKey, false /* trace */)
+		enc, _ = w.a.readFromFiles(Account, true /* lock */, w.blockNum, plainKey, false /* trace */)
 	}
 	cell.Nonce = 0
 	cell.Balance.Clear()
@@ -1968,7 +2031,7 @@ func (w *Writer) accountFn(plainKey []byte, cell *commitment.Cell) []byte {
 		enc = encI.(*AggregateItem).v
 	} else {
 		// Look in the files
-		enc = w.a.readFromFiles(Code, false /* lock */, w.blockNum, plainKey, false /* trace */)
+		enc, _ = w.a.readFromFiles(Code, true /* lock */, w.blockNum, plainKey, false /* trace */)
 	}
 	if len(enc) > 0 {
 		w.a.keccak.Reset()
@@ -1980,19 +2043,13 @@ func (w *Writer) accountFn(plainKey []byte, cell *commitment.Cell) []byte {
 
 func (w *Writer) storageFn(plainKey []byte, cell *commitment.Cell) []byte {
 	var enc []byte
-	if len(plainKey) != length.Addr+length.Hash { // Accessing storage key and value via "thin reference" to the state file and offset
-		fileI := int(plainKey[0])
-		offset := decodeU64(plainKey[1:])
-		plainKey, _ = w.a.readByOffset(Storage, fileI, offset)
-	}
-	// Full storage key is provided, search as usual
 	// Look in the summary table first
 	w.search.k = plainKey
 	if encI := w.a.trees[Storage].Get(&w.search); encI != nil {
 		enc = encI.(*AggregateItem).v
 	} else {
 		// Look in the files
-		enc = w.a.readFromFiles(Storage, false /* lock */, w.blockNum, plainKey, false /* trace */)
+		enc, _ = w.a.readFromFiles(Storage, true /* lock */, w.blockNum, plainKey, false /* trace */)
 	}
 	cell.StorageLen = len(enc)
 	copy(cell.Storage[:], enc)
@@ -2006,9 +2063,6 @@ func (w *Writer) captureCommitmentType(fType FileType, trace bool, f func(commTr
 		offsetVal := w.changes[fType].after.wordOffsets[i]
 		key := w.changes[fType].keys.words[lastOffsetKey:offsetKey]
 		val := w.changes[fType].after.words[lastOffsetVal:offsetVal]
-		if len(val) > 0 {
-			val = val[1:]
-		}
 		if trace {
 			fmt.Printf("captureCommitmentData %s [%x]=>[%x]\n", fType.String(), key, val)
 		}
@@ -2141,6 +2195,9 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 		return nil, err
 	}
 	for prefixStr, branchNodeUpdate := range branchNodeUpdates {
+		if branchNodeUpdate == nil {
+			continue
+		}
 		prefix := []byte(prefixStr)
 		w.search.k = prefix
 		var prevV *AggregateItem
@@ -2150,10 +2207,20 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 
 		var original []byte
 		if prevV == nil {
-			original = w.a.readFromFiles(Commitment, true /* lock */, w.blockNum, prefix, false)
+			original, _ = w.a.readFromFiles(Commitment, true /* lock */, w.blockNum, prefix, false)
 		} else {
 			original = prevV.v
 		}
+		if original != nil {
+			var mergedVal []byte
+			if mergedVal, err = commitment.MergeBranches(original, branchNodeUpdate, nil); err == nil {
+				//fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", commitment.CompactToHex(prefix), original, branchNodeUpdate, mergedVal)
+				branchNodeUpdate = mergedVal
+			} else {
+				return nil, err
+			}
+		}
+		//fmt.Printf("computeCommitment set [%x] [%x]\n", commitment.CompactToHex(prefix), branchNodeUpdate)
 		if prevV == nil {
 			w.a.trees[Commitment].ReplaceOrInsert(&AggregateItem{k: prefix, v: branchNodeUpdate, count: 1})
 		} else {
@@ -2229,7 +2296,7 @@ func (w *Writer) UpdateAccountData(addr []byte, account []byte, trace bool) {
 	}
 	var original []byte
 	if prevV == nil {
-		original = w.a.readFromFiles(Account, true /* lock */, w.blockNum, addr, trace)
+		original, _ = w.a.readFromFiles(Account, true /* lock */, w.blockNum, addr, trace)
 	} else {
 		original = prevV.v
 	}
@@ -2262,7 +2329,7 @@ func (w *Writer) UpdateAccountCode(addr []byte, code []byte, trace bool) {
 	}
 	var original []byte
 	if prevV == nil {
-		original = w.a.readFromFiles(Code, true /* lock */, w.blockNum, addr, trace)
+		original, _ = w.a.readFromFiles(Code, true /* lock */, w.blockNum, addr, trace)
 	} else {
 		original = prevV.v
 	}
@@ -2339,7 +2406,7 @@ func (w *Writer) deleteAccount(addr []byte, trace bool) bool {
 	}
 	var original []byte
 	if prevV == nil {
-		original = w.a.readFromFiles(Account, true /* lock */, w.blockNum, addr, trace)
+		original, _ = w.a.readFromFiles(Account, true /* lock */, w.blockNum, addr, trace)
 		if original == nil {
 			return false
 		}
@@ -2364,7 +2431,7 @@ func (w *Writer) deleteCode(addr []byte, trace bool) {
 	}
 	var original []byte
 	if prevV == nil {
-		original = w.a.readFromFiles(Code, true /* lock */, w.blockNum, addr, trace)
+		original, _ = w.a.readFromFiles(Code, true /* lock */, w.blockNum, addr, trace)
 		if original == nil {
 			// Nothing to do
 			return
@@ -2385,23 +2452,25 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 	if deleted := w.deleteAccount(addr, trace); !deleted {
 		return
 	}
+	w.a.fileLocks[Storage].RLock()
+	defer w.a.fileLocks[Storage].RUnlock()
 	w.deleteCode(addr, trace)
 	// Find all storage items for this address
 	var cp CursorHeap
 	heap.Init(&cp)
 	w.search.k = addr
-	found := false
+	foundInTree := false
 	var k, v []byte
 	w.a.trees[Storage].AscendGreaterOrEqual(&w.search, func(i btree.Item) bool {
 		item := i.(*AggregateItem)
 		if bytes.HasPrefix(item.k, addr) {
-			found = true
+			foundInTree = true
 			k = item.k
 			v = item.v
 		}
 		return false
 	})
-	if found {
+	if foundInTree {
 		heap.Push(&cp, &CursorItem{t: TREE_CURSOR, key: common.Copy(k), val: common.Copy(v), tree: w.a.trees[Storage], endBlock: w.blockNum})
 	}
 	w.a.files[Storage].Ascend(func(i btree.Item) bool {
@@ -2428,6 +2497,7 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 		g.Reset(offset)
 		if g.HasNext() {
 			if keyMatch, _ := g.Match(addr); !keyMatch {
+				//fmt.Printf("DeleteAccount %x - not found anchor in file [%d-%d]\n", addr, item.startBlock, item.endBlock)
 				return true
 			}
 			g.Skip()
@@ -2436,9 +2506,6 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 			key, _ := g.Next(nil)
 			if bytes.HasPrefix(key, addr) {
 				val, _ := g.Next(nil)
-				if len(val) > 0 {
-					val = val[1:]
-				}
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endBlock: item.endBlock})
 			}
 		}
@@ -2456,10 +2523,6 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
 					if bytes.HasPrefix(ci1.key, addr) {
 						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
-						if len(ci1.val) > 0 {
-							copy(ci1.val, ci1.val[1:])
-							ci1.val = ci1.val[:len(ci1.val)-1]
-						}
 						heap.Fix(&cp, 0)
 					} else {
 						heap.Pop(&cp)
@@ -2517,7 +2580,7 @@ func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int
 	}
 	var original []byte
 	if prevV == nil {
-		original = w.a.readFromFiles(Storage, true /* lock */, w.blockNum, dbkey, trace)
+		original, _ = w.a.readFromFiles(Storage, true /* lock */, w.blockNum, dbkey, trace)
 	} else {
 		original = prevV.v
 	}
@@ -2557,6 +2620,9 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 		maxEndBlock = item.endBlock
 		return false
 	})
+	if fType == CodeBitmap {
+		log.Info("findLargestMerge", "type", fType.String(), "maxTo", maxTo, "maxEndBlock", maxEndBlock)
+	}
 	if maxEndBlock == 0 {
 		return
 	}
@@ -2565,6 +2631,9 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 		if item.decompressor == nil {
 			return true // Skip B-tree based items
 		}
+		if fType == CodeBitmap {
+			log.Info("findLargestMerge", "type", fType.String(), "startBlock", item.startBlock, "endBlock", item.endBlock)
+		}
 		pre = append(pre, item)
 		if aggTo == 0 {
 			var doubleEnd uint64
@@ -2572,6 +2641,9 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 			for nextDouble <= maxEndBlock && nextDouble-item.startBlock < maxSpan {
 				doubleEnd = nextDouble
 				nextDouble = doubleEnd + (doubleEnd - item.startBlock) + 1
+			}
+			if fType == CodeBitmap {
+				log.Info("findLargestMerge", "type", fType.String(), "startBlock", item.startBlock, "endBlock", item.endBlock, "doubleEnd", doubleEnd)
 			}
 			if doubleEnd != item.endBlock {
 				aggFrom = item.startBlock
@@ -2587,10 +2659,10 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 	return
 }
 
-func (a *Aggregator) computeAggregation(treeName string,
+func (a *Aggregator) computeAggregation(fType FileType,
 	toAggregate []*byEndBlockItem, aggFrom uint64, aggTo uint64,
 	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
-	withIndex bool) (*byEndBlockItem, error) {
+	withIndex bool, prefixLen int) (*byEndBlockItem, error) {
 	var item2 = &byEndBlockItem{startBlock: aggFrom, endBlock: aggTo}
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -2605,15 +2677,15 @@ func (a *Aggregator) computeAggregation(treeName string,
 	}
 	var err error
 	var count int
-	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, 0, treeName, aggFrom, aggTo, a.diffDir, valTransform); err != nil {
-		return nil, fmt.Errorf("mergeIntoStateFile %s [%d-%d]: %w", treeName, aggFrom, aggTo, err)
+	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, prefixLen, fType.String(), aggFrom, aggTo, a.diffDir, valTransform, fType == Commitment); err != nil {
+		return nil, fmt.Errorf("mergeIntoStateFile %s [%d-%d]: %w", fType.String(), aggFrom, aggTo, err)
 	}
 	item2.getter = item2.decompressor.MakeGetter()
 	item2.getterMerge = item2.decompressor.MakeGetter()
 	if withIndex {
-		idxPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", treeName, aggFrom, aggTo))
+		idxPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", fType.String(), aggFrom, aggTo))
 		if item2.index, err = buildIndex(item2.decompressor, idxPath, a.diffDir, count); err != nil {
-			return nil, fmt.Errorf("mergeIntoStateFile buildIndex %s [%d-%d]: %w", treeName, aggFrom, aggTo, err)
+			return nil, fmt.Errorf("mergeIntoStateFile buildIndex %s [%d-%d]: %w", fType.String(), aggFrom, aggTo, err)
 		}
 		item2.indexReader = recsplit.NewIndexReader(item2.index)
 		item2.readerMerge = recsplit.NewIndexReader(item2.index)
@@ -2680,7 +2752,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		if fType == Storage {
 			prefixLen = length.Addr
 		}
-		if aggTask.bt[fType], err = aggTask.changes[fType].aggregate(blockFrom, blockTo, prefixLen, w.a.trees[fType]); err != nil {
+		if aggTask.bt[fType], err = aggTask.changes[fType].aggregate(blockFrom, blockTo, prefixLen, w.a.trees[fType], fType == Commitment); err != nil {
 			return fmt.Errorf("aggregate %sChanges: %w", fType.String(), err)
 		}
 	}
@@ -2703,6 +2775,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 	basename string, startBlock, endBlock uint64, dir string,
 	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
+	commitments bool,
 ) (*compress.Decompressor, int, error) {
 	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", basename, startBlock, endBlock))
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
@@ -2715,12 +2788,12 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 	for cp.Len() > 0 {
 		lastKey := common.Copy((*cp)[0].key)
 		lastVal := common.Copy((*cp)[0].val)
+		var mergedOnce bool
 		if a.trace {
 			if _, ok := a.tracedKeys[string(lastKey)]; ok {
 				fmt.Printf("looking at key %x val [%x] endBlock %d to merge into [%d-%d]\n", lastKey, lastVal, (*cp)[0].endBlock, startBlock, endBlock)
 			}
 		}
-		var first, firstDelete, firstInsert bool
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal((*cp)[0].key, lastKey) {
 			ci1 := (*cp)[0]
@@ -2732,9 +2805,17 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 			if ci1.t != FILE_CURSOR {
 				return nil, 0, fmt.Errorf("mergeIntoStateFile: cursor of unexpected type: %d", ci1.t)
 			}
-			first = true
-			firstDelete = len(ci1.val) == 0
-			firstInsert = !firstDelete && ci1.val[0] != 0
+			if commitments {
+				if mergedOnce {
+					//fmt.Printf("mergeIntoStateFile pre-merge prefix [%x], [%x]+[%x]\n", commitment.CompactToHex(lastKey), ci1.val, lastVal)
+					if lastVal, err = commitment.MergeBranches(ci1.val, lastVal, nil); err != nil {
+						return nil, 0, fmt.Errorf("mergeIntoStateFile: merge commitments: %w", err)
+					}
+					//fmt.Printf("mergeIntoStateFile post-merge  prefix [%x], [%x]\n", commitment.CompactToHex(lastKey), lastVal)
+				} else {
+					mergedOnce = true
+				}
+			}
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(ci1.key[:0])
 				ci1.val, _ = ci1.dg.Next(ci1.val[:0])
@@ -2743,28 +2824,11 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 				heap.Pop(cp)
 			}
 		}
-		lastDelete := len(lastVal) == 0
-		lastInsert := !lastDelete && lastVal[0] != 0
-		var skip bool
-		if first {
-			if firstInsert {
-				if lastDelete {
-					// Insert => Delete
-					skip = true
-				}
-			} else if firstDelete {
-				if lastInsert {
-					// Delete => Insert equivalent to Update
-					lastVal[0] = 0
-				}
-			} else {
-				if lastInsert {
-					// Update => Insert equivalent to Update
-					lastVal[0] = 0
-				}
+		if startBlock == 0 && len(lastVal) == 0 && len(lastKey) != prefixLen { // Deleted marker can be skipped if we merge into the first file, except for the storage addr marker
+			if _, ok := a.tracedKeys[string(keyBuf)]; ok {
+				fmt.Printf("skipped key %x for [%d-%d]\n", keyBuf, startBlock, endBlock)
 			}
-		}
-		if startBlock != 0 || !skip {
+		} else {
 			if keyBuf != nil && (prefixLen == 0 || len(keyBuf) != prefixLen || bytes.HasPrefix(lastKey, keyBuf)) {
 				if err = comp.AddWord(keyBuf); err != nil {
 					return nil, 0, err
@@ -2788,10 +2852,6 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
-		} else if a.trace {
-			if _, ok := a.tracedKeys[string(keyBuf)]; ok {
-				fmt.Printf("skipped key %x for [%d-%d]\n", keyBuf, startBlock, endBlock)
-			}
 		}
 	}
 	if keyBuf != nil {
