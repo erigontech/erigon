@@ -681,7 +681,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 				if !skip {
 					_, skip = hd.badHeaders[link.hash]
 				}
-				if !skip {
+				if !skip && !link.persisted {
 					_, skip = hd.badHeaders[link.header.ParentHash]
 				}
 				if !skip {
@@ -711,7 +711,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 			for hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
 				link := hd.insertQueue[0]
 				_, bad := hd.badHeaders[link.hash]
-				if !bad {
+				if !bad && !link.persisted {
 					_, bad = hd.badHeaders[link.header.ParentHash]
 				}
 				if bad {
