@@ -529,8 +529,9 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 
 	// start HTTP API
 	httpRpcCfg := cli.Flags{
-		HttpPort: 8545,
-		API:      []string{"eth", "net", "web3", "txpool", "debug"},
+		HttpListenAddress: "0.0.0.0",
+		HttpPort:          8545,
+		API:               []string{"eth", "net", "web3", "txpool", "debug"},
 	} // TODO: add rpcdaemon cli flags to Erigon and fill this struct (or break it to smaller config objects)
 	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
 		ctx, chainKv, httpRpcCfg.StateCache, blockReader,
