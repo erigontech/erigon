@@ -13,11 +13,9 @@ import (
 )
 
 // APIList describes the list of available RPC apis
-func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend,
-	txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	starknet starknet.CAIROVMClient,
-	filters *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
-	cfg httpcfg.HttpCfg, customAPIList []rpc.API) []rpc.API {
+func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet starknet.CAIROVMClient, filters *filters.Filters, stateCache kvcache.Cache,
+	blockReader interfaces.BlockAndTxnReader, cfg httpcfg.HttpCfg) []rpc.API {
 	var defaultAPIList []rpc.API
 
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
@@ -134,5 +132,5 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend,
 		}
 	}
 
-	return append(defaultAPIList, customAPIList...)
+	return defaultAPIList
 }
