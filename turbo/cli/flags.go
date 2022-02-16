@@ -301,7 +301,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
 		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
 
-		WebsocketEnabled:    ctx.GlobalBool(utils.WSEnabledFlag.Name),
+		WebsocketEnabled:    ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency: ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
 		Gascap:              ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
 		MaxTraces:           ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
