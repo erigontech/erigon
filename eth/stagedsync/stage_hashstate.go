@@ -335,7 +335,10 @@ type Promoter struct {
 func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _ := decode(dbKey, dbValue)
+		_, k, _, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		// ignoring value un purpose, we want the latest one and it is in PlainState
 		value, err := db.GetOne(kv.PlainState, k)
 		if err != nil {
@@ -353,7 +356,10 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _ := decode(dbKey, dbValue)
+		_, k, _, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		value, err := db.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
@@ -389,7 +395,10 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -401,7 +410,10 @@ func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -432,14 +444,16 @@ func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		if len(v) == 0 {
 			return nil
 		}
 		var (
 			newK     []byte
 			codeHash []byte
-			err      error
 		)
 		incarnation, err := accounts.DecodeIncarnationFromStorage(v)
 		if err != nil {

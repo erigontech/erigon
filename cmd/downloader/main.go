@@ -129,11 +129,11 @@ func Downloader(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer protocols.Close()
 	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.TorrentClient.PeerID()))
 	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
-	defer protocols.Close()
 
 	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
 
