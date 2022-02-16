@@ -149,12 +149,12 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 
 	middleTimeStamp := middleBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, middleTimeStamp,false)
+	block, err := api.GetBlockByTimeStamp(ctx, middleTimeStamp, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block["timestamp"] != middleTimeStamp || block["hash"] != middleBlock.Hash(){
+	if block["timestamp"] != middleTimeStamp || block["hash"] != middleBlock.Hash() {
 		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", middleBlock.Hash(), middleTimeStamp, block["hash"], block["timestamp"])
 	}
 }
