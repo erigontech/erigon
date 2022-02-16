@@ -3,6 +3,7 @@ package changeset
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -12,7 +13,7 @@ import (
 )
 
 type Encoder func(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error
-type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte)
+type Decoder func(dbKey, dbValue []byte) (blockN uint64, k, v []byte, err error)
 
 func NewAccountChangeSet() *ChangeSet {
 	return &ChangeSet{
@@ -35,12 +36,14 @@ func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) erro
 	return nil
 }
 
-func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte) {
+func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 	blockN := binary.BigEndian.Uint64(dbKey)
+	if len(dbValue) < length.Addr {
+		return 0, nil, nil, fmt.Errorf("account changes purged for block %d", blockN)
+	}
 	k := dbValue[:length.Addr]
 	v := dbValue[length.Addr:]
-
-	return blockN, k, v
+	return blockN, k, v, nil
 }
 
 func FindAccount(c kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error) {
@@ -49,7 +52,10 @@ func FindAccount(c kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	_, k, v = DecodeAccounts(k, v)
+	_, k, v, err = DecodeAccounts(k, v)
+	if err != nil {
+		return nil, err
+	}
 	if !bytes.HasPrefix(k, key) {
 		return nil, nil
 	}
