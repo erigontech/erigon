@@ -49,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -529,11 +528,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
 
 	// start HTTP API
-	httpRpcCfg := httpcfg.HttpCfg{
-		HttpListenAddress: "0.0.0.0",
-		HttpPort:          8545,
-		API:               []string{"eth", "net", "web3", "txpool", "debug"},
-	} // TODO: add rpcdaemon cli flags to Erigon and fill this struct (or break it to smaller config objects)
+	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
 		ctx, chainKv, httpRpcCfg.StateCache, blockReader,
 		ethBackendRPC,
