@@ -48,14 +48,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/parlia"
@@ -526,34 +523,35 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-
-	// start HTTP API
-	httpRpcCfg := cli.Flags{
-		HttpListenAddress: "0.0.0.0",
-		HttpPort:          8545,
-		API:               []string{"eth", "net", "web3", "txpool", "debug"},
-	} // TODO: add rpcdaemon cli flags to Erigon and fill this struct (or break it to smaller config objects)
-	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
-		ctx, chainKv, httpRpcCfg.StateCache, blockReader,
-		ethBackendRPC,
-		backend.txPool2GrpcServer,
-		miningRPC,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var borDb kv.RoDB
-	if casted, ok := backend.engine.(*bor.Bor); ok {
-		borDb = casted.DB
-	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg, nil)
-	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
-			log.Error(err.Error())
-			return
+	/*
+		// start HTTP API
+		httpRpcCfg := cli.Flags{
+			HttpListenAddress: "0.0.0.0",
+			HttpPort:          8545,
+			API:               []string{"eth", "net", "web3", "txpool", "debug"},
+		} // TODO: add rpcdaemon cli flags to Erigon and fill this struct (or break it to smaller config objects)
+		ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
+			ctx, chainKv, httpRpcCfg.StateCache, blockReader,
+			ethBackendRPC,
+			backend.txPool2GrpcServer,
+			miningRPC,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}()
+
+		var borDb kv.RoDB
+		if casted, ok := backend.engine.(*bor.Bor); ok {
+			borDb = casted.DB
+		}
+		apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg, nil)
+		go func() {
+			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
+				log.Error(err.Error())
+				return
+			}
+		}()
+	*/
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
