@@ -1057,7 +1057,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	// Add last headers from snapshots to HeaderDownloader (as persistent links)
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-		if err := cfg.hd.AddHeaderFromSnapshot(cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 			return err
 		}
 		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {

@@ -1250,7 +1250,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	return nil
 }
 
-func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlockReader) error {
+func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces.FullBlockReader) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	addPreVerifiedHashes := len(hd.preverifiedHashes) == 0
@@ -1259,7 +1259,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(n uint64, r interfaces.FullBlock
 	}
 
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
-		header, err := r.HeaderByNumber(context.Background(), nil, i)
+		header, err := r.HeaderByNumber(context.Background(), tx, i)
 		if err != nil {
 			return err
 		}
