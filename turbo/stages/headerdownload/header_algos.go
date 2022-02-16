@@ -890,6 +890,10 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 		headerRaw:   h.HeaderRaw,
 		persisted:   persisted,
 	}
+	if persisted {
+		link.header = nil // Drop header reference to free memory, as we won't need it anymore
+		link.headerRaw = nil
+	}
 	hd.links[h.Hash] = link
 	if persisted {
 		hd.moveLinkToQueue(link, PersistedQueueID)
