@@ -703,7 +703,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				if !skip {
 					_, skip = hd.badHeaders[link.hash]
 				}
-				if !skip {
+				if !skip && !link.persisted {
 					_, skip = hd.badHeaders[link.header.ParentHash]
 				}
 				if !skip {
