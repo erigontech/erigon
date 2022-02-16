@@ -512,8 +512,7 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-<<<<<<< HEAD
-func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, isEngine bool) (http.Handler, error) {
+func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, isEngine bool) (http.Handler, error) {
 	var jwtVerificationKey []byte
 	var err error
 
@@ -544,9 +543,6 @@ func createHandler(cfg Flags, apiList []rpc.API, httpHandler http.Handler, wsHan
 		}
 	}
 
-=======
-func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
->>>>>>> origin/devel
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
