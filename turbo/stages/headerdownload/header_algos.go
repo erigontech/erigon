@@ -734,6 +734,10 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				link := hd.insertQueue[0]
 				_, bad := hd.badHeaders[link.hash]
 				if !bad {
+					fmt.Printf("a: %t\n", hd == nil)
+					fmt.Printf("a: %t\n", hd.badHeaders == nil)
+					fmt.Printf("a: %t\n", link == nil)
+					fmt.Printf("a: %t\n", link.header == nil)
 					_, bad = hd.badHeaders[link.header.ParentHash]
 				}
 				if bad {
