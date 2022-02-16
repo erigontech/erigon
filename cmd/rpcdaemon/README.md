@@ -223,7 +223,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_submitWork                             | Yes     |                                            |
 |                                            |         |                                            |
 | eth_subscribe                              | Limited | Websock Only - newHeads,                   |
-|                                            |         | newPendingTransaction                      |
+|                                            |         | newPendingTransactions                     |
 | eth_unsubscribe                            | Yes     | Websock Only                               |
 |                                            |         |                                            |
 | debug_accountRange                         | Yes     | Private Erigon debug module                |
