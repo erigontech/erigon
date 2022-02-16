@@ -108,6 +108,9 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
 func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]ChainSegment, Penalty, error) {
+	if header == nil {
+		panic("alex")
+	}
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 
@@ -734,10 +737,10 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				link := hd.insertQueue[0]
 				_, bad := hd.badHeaders[link.hash]
 				if !bad {
-					fmt.Printf("a: %t\n", hd == nil)
-					fmt.Printf("a: %t\n", hd.badHeaders == nil)
-					fmt.Printf("a: %t\n", link == nil)
-					fmt.Printf("a: %t\n", link.header == nil)
+					fmt.Printf("a1: %t\n", hd == nil)
+					fmt.Printf("a2: %t\n", hd.badHeaders == nil)
+					fmt.Printf("a3: %t\n", link == nil)
+					fmt.Printf("a4: %t\n", link.header == nil)
 					_, bad = hd.badHeaders[link.header.ParentHash]
 				}
 				if bad {
@@ -881,6 +884,9 @@ func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
 func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) *Link {
+	if h.Header == nil {
+		panic("alex")
+	}
 	link := &Link{
 		blockHeight: h.Number,
 		hash:        h.Hash,
