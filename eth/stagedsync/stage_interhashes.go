@@ -179,7 +179,10 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	decode := changeset.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -266,7 +269,10 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	decode := changeset.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err

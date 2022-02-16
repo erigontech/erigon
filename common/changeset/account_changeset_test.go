@@ -38,7 +38,11 @@ func TestEncodingAccount(t *testing.T) {
 
 	ch2 := m.New()
 	err = m.Encode(1, ch, func(k, v []byte) error {
-		_, k, v = m.Decode(k, v)
+		var err error
+		_, k, v, err = m.Decode(k, v)
+		if err != nil {
+			return err
+		}
 		return ch2.Add(k, v)
 	})
 	if err != nil {
