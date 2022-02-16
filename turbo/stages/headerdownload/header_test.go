@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func newCSHeaders(headers ...*types.Header) []ChainSegmentHeader {
@@ -26,7 +27,7 @@ func newCSHeaders(headers ...*types.Header) []ChainSegmentHeader {
 
 func TestSplitIntoSegments(t *testing.T) {
 	engine := ethash.NewFaker()
-	hd := NewHeaderDownload(100, 100, engine)
+	hd := NewHeaderDownload(100, 100, engine, snapshotsync.NewBlockReader())
 
 	// Empty message
 	if chainSegments, penalty, err := hd.SplitIntoSegments([]ChainSegmentHeader{}); err == nil {
@@ -161,7 +162,7 @@ func TestSplitIntoSegments(t *testing.T) {
 
 func TestSingleHeaderAsSegment(t *testing.T) {
 	engine := ethash.NewFaker()
-	hd := NewHeaderDownload(100, 100, engine)
+	hd := NewHeaderDownload(100, 100, engine, snapshotsync.NewBlockReader())
 	var h types.Header
 	h.Number = big.NewInt(5)
 	headerRaw, _ := rlp.EncodeToBytes(h)
