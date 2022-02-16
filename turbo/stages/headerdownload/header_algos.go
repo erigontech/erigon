@@ -108,9 +108,6 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
 func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]ChainSegment, Penalty, error) {
-	if header == nil {
-		panic("alex")
-	}
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 
@@ -880,9 +877,6 @@ func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
 func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) *Link {
-	if h.Header == nil {
-		panic("alex")
-	}
 	link := &Link{
 		blockHeight: h.Number,
 		hash:        h.Hash,

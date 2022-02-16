@@ -472,9 +472,6 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 		if number > highestBlock {
 			highestBlock = number
 		}
-		if header == nil {
-			panic("alex")
-		}
 		csHeaders = append(csHeaders, headerdownload.ChainSegmentHeader{
 			Header:    header,
 			HeaderRaw: headerRaw,
