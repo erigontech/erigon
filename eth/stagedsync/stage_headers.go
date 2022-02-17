@@ -1114,6 +1114,11 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 	// Print download progress until all segments are available
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 			log.Warn("Error while waiting for snapshots progress", "err", err)
 		} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
