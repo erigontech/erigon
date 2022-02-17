@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -103,7 +103,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir, err := locked.OpenDir(filepath.Join(datadir, "snapshots"))
+	snapshotDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
 	if err != nil {
 		return err
 	}
@@ -167,7 +167,7 @@ var printTorrentHashes = &cobra.Command{
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			lockedSnapshotDir, err := locked.OpenDir(snapshotDir)
+			lockedSnapshotDir, err := dir.OpenRw(snapshotDir)
 			if err != nil {
 				return err
 			}
@@ -221,7 +221,7 @@ var printTorrentHashes = &cobra.Command{
 	},
 }
 
-func removeChunksStorage(snapshotDir *locked.Dir) {
+func removeChunksStorage(snapshotDir *dir.Rw) {
 	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db"))
 	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.bolt.db"))
 	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db-shm"))

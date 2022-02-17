@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -57,7 +57,7 @@ type MockSentry struct {
 	cancel        context.CancelFunc
 	DB            kv.RwDB
 	tmpdir        string
-	snapshotDir   *locked.Dir
+	snapshotDir   *dir.Rw
 	Engine        consensus.Engine
 	ChainConfig   *params.ChainConfig
 	Sync          *stagedsync.Sync
@@ -177,7 +177,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	snapshotDir, err := locked.OpenDir(filepath.Join(tmpdir, "snapshots"))
+	snapshotDir, err := dir.OpenRw(filepath.Join(tmpdir, "snapshots"))
 	if err != nil {
 		t.Fatal(err)
 	}

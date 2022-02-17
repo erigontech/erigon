@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -94,7 +94,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		lockedSnapshotDir, err := locked.OpenDir(snapshotDir)
+		lockedSnapshotDir, err := dir.OpenRw(snapshotDir)
 		if err != nil {
 			return err
 		}
@@ -128,7 +128,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *locked.Dir, tmpDir string, from uint64) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 

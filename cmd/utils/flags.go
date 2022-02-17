@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -1388,7 +1388,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	snDir, err := locked.OpenDir(filepath.Join(nodeConfig.DataDir, "snapshots"))
+	snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
 	if err != nil {
 		panic(err)
 	}

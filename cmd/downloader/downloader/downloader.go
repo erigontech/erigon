@@ -12,7 +12,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -23,7 +23,7 @@ type Protocols struct {
 	DB            kv.RwDB
 }
 
-func New(cfg *torrent.ClientConfig, snapshotDir *locked.Dir) (*Protocols, error) {
+func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw) (*Protocols, error) {
 	db := mdbx.MustOpen(filepath.Join(snapshotDir.Path, "db"))
 
 	peerID, err := readPeerID(db)
@@ -208,7 +208,7 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir *locked.Dir, torrentClient *torrent.Client) error {
+func AddTorrentFiles(ctx context.Context, snapshotsDir *dir.Rw, torrentClient *torrent.Client) error {
 	files, err := AllTorrentPaths(snapshotsDir.Path)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir *locked.Dir, torrentClien
 }
 
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir *locked.Dir, silent bool) error {
+func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir *dir.Rw, silent bool) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, infoHash := range preverifiedHashes {
 		if _, ok := torrentClient.Torrent(infoHash); ok {

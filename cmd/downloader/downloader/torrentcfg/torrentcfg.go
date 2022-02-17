@@ -9,7 +9,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"golang.org/x/time/rate"
 )
 
@@ -41,7 +41,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir *locked.Dir, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, io.Closer, error) {
+func New(snapshotsDir *dir.Rw, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, io.Closer, error) {
 	torrentConfig := Default()
 	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = true

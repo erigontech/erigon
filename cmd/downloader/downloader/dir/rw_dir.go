@@ -1,4 +1,4 @@
-package locked
+package dir
 
 import (
 	"errors"
@@ -11,7 +11,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type Dir struct {
+// Rw - type to represent Read-Write access to directory
+// if some code accept this typ - it can be sure: dir exists, no other process now write there
+// We have no specific Ro type, just use `string` for Ro directory path
+type Rw struct {
 	dirLock *flock.Flock // prevents concurrent use of instance directory
 	Path    string
 }
@@ -29,7 +32,7 @@ var (
 	ErrDirUsed = errors.New("datadir already used by another process")
 )
 
-func OpenDir(dir string) (*Dir, error) {
+func OpenRw(dir string) (*Rw, error) {
 	common.MustExist(dir)
 
 	// Lock the instance directory to prevent concurrent use by another instance as well as
@@ -42,9 +45,9 @@ func OpenDir(dir string) (*Dir, error) {
 	if !locked {
 		return nil, fmt.Errorf("%w: %s\n", ErrDirUsed, dir)
 	}
-	return &Dir{dirLock: l, Path: dir}, nil
+	return &Rw{dirLock: l, Path: dir}, nil
 }
-func (t *Dir) Close() {
+func (t *Rw) Close() {
 	// Release instance directory lock.
 	if t.dirLock != nil {
 		if err := t.dirLock.Unlock(); err != nil {

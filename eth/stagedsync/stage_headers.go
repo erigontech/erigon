@@ -17,7 +17,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -51,7 +51,7 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
-	snapshotDir           *locked.Dir
+	snapshotDir           *dir.Rw
 	newPayloadCh          chan privateapi.PayloadMessage
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
@@ -79,7 +79,7 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
-	snapshotDir *locked.Dir,
+	snapshotDir *dir.Rw,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                    db,
