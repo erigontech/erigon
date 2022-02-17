@@ -66,7 +66,7 @@ func TestGetBlockByTimeStampLatestTime(t *testing.T) {
 	}
 
 	if block["timestamp"] != latestBlockTimeStamp || block["hash"] != latestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -95,7 +95,7 @@ func TestGetBlockByTimeStampOldestTime(t *testing.T) {
 	}
 
 	if block["timestamp"] != 0 || block["hash"] != oldestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", oldestBlock.Hash(), oldestBlockTimeStamp, block["hash"], block["timestamp"])
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", oldestBlock.Hash(), oldestBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -121,7 +121,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	}
 
 	if block["timestamp"] != latestBlockTimeStamp || block["hash"] != latestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -155,7 +155,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	}
 
 	if block["timestamp"] != middleTimeStamp || block["hash"] != middleBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", middleBlock.Hash(), middleTimeStamp, block["hash"], block["timestamp"])
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", middleBlock.Hash(), middleTimeStamp, block["hash"], block["timestamp"])
 	}
 }
 
@@ -190,6 +190,6 @@ func TestGetBlockByTimeStamp(t *testing.T) {
 	}
 
 	if block["timestamp"] != pickedBlockTimeStamp || block["hash"] != pickedBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected time stamp: %d\nblock hash retrieved: %s time stamp retrieved: %d", pickedBlock.Hash(), pickedBlockTimeStamp, block["hash"], block["timestamp"])
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", pickedBlock.Hash(), pickedBlockTimeStamp, block["hash"], block["timestamp"])
 	}
 }
