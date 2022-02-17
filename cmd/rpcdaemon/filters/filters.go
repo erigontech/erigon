@@ -224,7 +224,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 
 func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 	b := &types.Block{}
-	if len(reply.RplBlock) == 0 {
+	if reply == nil || len(reply.RplBlock) == 0 {
 		return
 	}
 	if err := rlp.Decode(bytes.NewReader(reply.RplBlock), b); err != nil {
