@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -16,8 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -65,7 +62,6 @@ type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error)
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
-	GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration TransitionConfiguration) (TransitionConfiguration, error)
 }
 
@@ -198,60 +194,6 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}, nil
-}
-
-// GetPayloadBodiesV1 gets a list of blockHashes and returns a map of blockhash => block body
-func (e *EngineImpl) GetPayloadBodiesV1(ctx context.Context, blockHashes []rpc.BlockNumberOrHash) (map[common.Hash]ExecutionPayload, error) {
-	tx, err := e.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockHashToBody := make(map[common.Hash]ExecutionPayload)
-
-	for _, blockHash := range blockHashes {
-		hash := *blockHash.BlockHash
-		block, err := e.blockByHashWithSenders(tx, hash)
-		if err != nil {
-			return nil, err
-		}
-		if block == nil {
-			continue
-		}
-
-		var bloom types.Bloom = block.Bloom()
-		buf := bytes.NewBuffer(nil)
-		var encodedTransactions []hexutil.Bytes
-
-		for _, tx := range block.Transactions() {
-			buf.Reset()
-
-			err := rlp.Encode(buf, tx)
-			if err != nil {
-				return nil, fmt.Errorf("broken tx rlp: %w", err)
-			}
-			encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
-		}
-
-		blockHashToBody[hash] = ExecutionPayload{
-			ParentHash:    block.ParentHash(),
-			FeeRecipient:  block.Coinbase(),
-			StateRoot:     block.Header().Root,
-			ReceiptsRoot:  block.ReceiptHash(),
-			LogsBloom:     bloom.Bytes(),
-			Random:        block.Header().MixDigest,
-			BlockNumber:   hexutil.Uint64(block.NumberU64()),
-			GasLimit:      hexutil.Uint64(block.GasLimit()),
-			GasUsed:       hexutil.Uint64(block.GasUsed()),
-			Timestamp:     hexutil.Uint64(block.Header().Time),
-			ExtraData:     block.Extra(),
-			BaseFeePerGas: (*hexutil.Big)(block.BaseFee()),
-			BlockHash:     block.Hash(),
-			Transactions:  encodedTransactions,
-		}
-	}
-	return blockHashToBody, nil
 }
 
 // Gets a transistionConfiguration and pings the execution layer and checks if the execution layer has the correct configurations
