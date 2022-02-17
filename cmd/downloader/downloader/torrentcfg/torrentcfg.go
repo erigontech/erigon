@@ -2,12 +2,14 @@ package torrentcfg
 
 import (
 	"fmt"
+	"io"
 	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
 	"golang.org/x/time/rate"
 )
 
@@ -39,11 +41,11 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, storage.PieceCompletion, error) {
+func New(snapshotsDir *locked.Dir, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, io.Closer, error) {
 	torrentConfig := Default()
 	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = true
-	torrentConfig.DataDir = snapshotsDir
+	torrentConfig.DataDir = snapshotsDir.Path
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
@@ -56,10 +58,11 @@ func New(snapshotsDir string, verbosity lg.Level, downloadRate, uploadRate datas
 	}
 	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
 
-	c, err := storage.NewBoltPieceCompletion(snapshotsDir)
+	c, err := storage.NewBoltPieceCompletion(snapshotsDir.Path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
 	}
-	torrentConfig.DefaultStorage = storage.NewMMapWithCompletion(snapshotsDir, c)
-	return torrentConfig, c, nil
+	m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
+	torrentConfig.DefaultStorage = m
+	return torrentConfig, m, nil
 }

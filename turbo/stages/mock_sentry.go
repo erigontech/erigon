@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -55,6 +57,7 @@ type MockSentry struct {
 	cancel        context.CancelFunc
 	DB            kv.RwDB
 	tmpdir        string
+	snapshotDir   *locked.Dir
 	Engine        consensus.Engine
 	ChainConfig   *params.ChainConfig
 	Sync          *stagedsync.Sync
@@ -89,6 +92,7 @@ func (ms *MockSentry) Close() {
 		ms.txPoolDB.Close()
 	}
 	ms.DB.Close()
+	ms.snapshotDir.Close()
 }
 
 // Stream returns stream, waiting if necessary
@@ -173,6 +177,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
+	snapshotDir, err := locked.OpenDir(filepath.Join(tmpdir, "snapshots"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -183,6 +191,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		t:           t,
 		Log:         log.New(),
 		tmpdir:      tmpdir,
+		snapshotDir: snapshotDir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
@@ -200,7 +209,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
-	var err error
 
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) (enode.ID, bool) { return enode.ID{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
@@ -271,10 +279,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 	}
 
-	var allSnapshots *snapshotsync.AllSnapshots
+	var allSnapshots *snapshotsync.RoSnapshots
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	isBor := mock.ChainConfig.Bor != nil
+
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(
@@ -294,6 +303,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				snapshotsDownloader,
 				blockReader,
 				mock.tmpdir,
+				mock.snapshotDir,
 			),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),

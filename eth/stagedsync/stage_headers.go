@@ -17,6 +17,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -50,11 +51,12 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
+	snapshotDir           *locked.Dir
 	newPayloadCh          chan privateapi.PayloadMessage
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
-	snapshots          *snapshotsync.AllSnapshots
+	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
@@ -73,10 +75,11 @@ func StageHeadersCfg(
 	newPayloadCh chan privateapi.PayloadMessage,
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
-	snapshots *snapshotsync.AllSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
+	snapshotDir *locked.Dir,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                    db,
@@ -96,6 +99,7 @@ func StageHeadersCfg(
 		snapshotDownloader:    snapshotDownloader,
 		blockReader:           blockReader,
 		snapshotHashesCfg:     snapshothashes.KnownConfig(chainConfig.ChainName),
+		snapshotDir:           snapshotDir,
 	}
 }
 
@@ -995,7 +999,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir, 0); err != nil {
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, 0); err != nil {
 				return err
 			}
 		}

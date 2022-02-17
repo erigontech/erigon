@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -93,7 +94,11 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir, from); err != nil {
+		lockedSnapshotDir, err := locked.OpenDir(snapshotDir)
+		if err != nil {
+			return err
+		}
+		if err := rebuildIndices(ctx, chainDB, cfg, lockedSnapshotDir, tmpDir, from); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -123,23 +128,15 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string, from uint64) error {
-	common.MustExist(snapshotDir)
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *locked.Dir, tmpDir string, from uint64) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	allSnapshots := snapshotsync.NewAllSnapshots(cfg, snapshotDir)
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir.Path)
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	//idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
-	//if err != nil {
-	//	return err
-	//}
-	//for _, f := range idxFilesList {
-	//	_ = os.Remove(f)
-	//}
-	if err := allSnapshots.BuildIndices(ctx, *chainID, tmpDir, from); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from); err != nil {
 		return err
 	}
 	return nil
@@ -201,7 +198,7 @@ func checkBlockSnapshot(chaindata string) error {
 	_ = chainID
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
-	snapshots := snapshotsync.NewAllSnapshots(cfg, filepath.Join(dataDir, "snapshots"))
+	snapshots := snapshotsync.NewRoSnapshots(cfg, filepath.Join(dataDir, "snapshots"))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {

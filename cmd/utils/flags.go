@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -1387,7 +1388,11 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
+	snDir, err := locked.OpenDir(filepath.Join(nodeConfig.DataDir, "snapshots"))
+	if err != nil {
+		panic(err)
+	}
+	cfg.SnapshotDir = snDir
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
 	}
@@ -1419,12 +1424,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 
 	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			panic(err)
 		}
 		cfg.Torrent = torrentCfg
-		cfg.TorrentPieceCompletionStorage = pieceCompletion
+		cfg.TorrentDirCloser = dirCloser
 	}
 
 	nodeConfig.Http.Snapshot = cfg.Snapshot
