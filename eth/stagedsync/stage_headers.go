@@ -125,6 +125,34 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
+	pendingHeaderHash, pendingHeaderHeight := cfg.hd.GetPendingHeader()
+	if pendingHeaderHeight != 0 { // some work left to do after unwind
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		if err := fixCanonicalChain(s.LogPrefix(), logEvery, pendingHeaderHeight, pendingHeaderHash, tx, cfg.blockReader); err != nil {
+			return err
+		}
+
+		if err := rawdb.WriteHeadHeaderHash(tx, pendingHeaderHash); err != nil {
+			return err
+		}
+
+		if err := s.Update(tx, pendingHeaderHeight); err != nil {
+			return err
+		}
+
+		if !useExternalTx {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+
+		cfg.hd.ClearPendingHeader()
+
+		return nil
+	}
+
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
@@ -253,20 +281,9 @@ func handleForkChoice(
 
 	u.UnwindTo(forkingPoint, common.Hash{})
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
+	cfg.hd.SetPendingHeader(headerHash, headerNumber)
 
-	err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader)
-	if err != nil {
-		return err
-	}
-
-	err = rawdb.WriteHeadHeaderHash(tx, headerHash)
-	if err != nil {
-		return err
-	}
-
-	return s.Update(tx, headerNumber)
+	return nil
 }
 
 func handleNewPayload(

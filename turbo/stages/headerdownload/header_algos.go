@@ -1239,6 +1239,26 @@ func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.pendingPayloadStatus = common.Hash{}
 }
 
+func (hd *HeaderDownload) GetPendingHeader() (common.Hash, uint64) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingHeaderHash, hd.pendingHeaderHeight
+}
+
+func (hd *HeaderDownload) SetPendingHeader(blockHash common.Hash, blockHeight uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingHeaderHash = blockHash
+	hd.pendingHeaderHeight = blockHeight
+}
+
+func (hd *HeaderDownload) ClearPendingHeader() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingHeaderHash = common.Hash{}
+	hd.pendingHeaderHeight = 0
+}
+
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	buf := bytes.NewBuffer(nil)
 	if err := header.EncodeRLP(buf); err != nil {
