@@ -37,32 +37,6 @@ About "key-value-style": Modern key-value databases don't provide Get/Put/Delete
             |           Allows experiment with another database implementations.                           |
             |          Supports context.Context for cancelation. Any operation can return error)           |
             +----------------------------------------------------------------------------------------------+
-                 |                                        |                                      |
-                 |                                        |                                      |
-                 v                                        v                                      v
-+-----------------------------------+   +-----------------------------------+   +-----------------------------------+
-|       ethdb/object_db.go          |   |          ethdb/tx_db.go           |   |    ethdb/remote/remotedbserver    |                
-|     (thread-safe, stateless,      |   | (non-thread-safe, more performant |   | (grpc server, using kv_abstract,  |  
-|   opens/close short transactions  |   |   than object_db, method Begin    |   |   kv_remote call this server, 1   |
-|      internally when need)        |   |  DOESN'T create new TxDb object)  |   | transaction maps on 1 grpc stream |
-+-----------------------------------+   +-----------------------------------+   +-----------------------------------+
-                |                                          |                                     
-                |                                          |                                     
-                v                                          v                                     
-            +-----------------------------------------------------------------------------------------------+
-            |                                    ethdb/interface.go                                         |  
-            |     (Common DB interfaces. ethdb.Database and ethdb.DbWithPendingMutations are widely used)   |
-            +-----------------------------------------------------------------------------------------------+
-                |                      
-                |                      
-                v                      
-+--------------------------------------------------+ 
-|             ethdb/mutation.go                    |                 
-| (also known as "batch", recording all writes and |  
-|   them flush to DB in sorted way only when call  | 
-|     .Commit(), use it to avoid random-writes.    | 
-|   It use and satisfy ethdb.Database in same time |
-+--------------------------------------------------+ 
 
 ```
 
