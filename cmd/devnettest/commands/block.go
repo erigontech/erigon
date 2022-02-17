@@ -3,6 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/contracts"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"strings"
 	"time"
@@ -145,4 +148,13 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 	}
 
 	return false, nil
+}
+
+func testLogEvents() {
+	contractBackend := backends.NewSimulatedBackendWithConfig(nil, *params.AllCliqueProtocolChanges, params.TxGas)
+	transactOpts := bind.NewKeyedTransactor(devnetSignPrivateKey)
+	_, _, _, err := contracts.DeploySubscription(transactOpts, contractBackend)
+	if err != nil {
+		panic(err)
+	}
 }
