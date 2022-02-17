@@ -204,6 +204,9 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
 		pos += codeHashBytes
 	}
+	if pos >= len(enc) {
+		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
+	}
 	incBytes := int(enc[pos])
 	pos++
 	if incBytes > 0 {
@@ -215,7 +218,11 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), hw.trace)
 	if hw.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
+		}
 	}
 	if err != nil {
 		fmt.Printf("%v\n", err)

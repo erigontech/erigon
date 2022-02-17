@@ -27,6 +27,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -166,6 +167,8 @@ type Config struct {
 
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
+
+	Http httpcfg.HttpCfg
 }
 
 // IPCEndpoint resolves an IPC endpoint based on a configured value, taking into
