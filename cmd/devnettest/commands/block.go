@@ -151,7 +151,7 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 }
 
 func testLogEvents() {
-	contractBackend := backends.NewSimulatedBackendWithConfig(nil, *params.AllCliqueProtocolChanges, params.TxGas)
+	contractBackend := backends.NewSimulatedBackendWithConfig(nil, params.AllCliqueProtocolChanges, params.TxGas)
 	transactOpts := bind.NewKeyedTransactor(devnetSignPrivateKey)
 	_, _, _, err := contracts.DeploySubscription(transactOpts, contractBackend)
 	if err != nil {
