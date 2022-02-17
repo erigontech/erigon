@@ -80,7 +80,7 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 	middleHeader := rawdb.ReadHeaderByNumber(tx, middleNumber)
 
-	if currenttHeaderTime == timeStamp {
+	if currenttHeaderTime <= timeStamp {
 		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
@@ -89,7 +89,7 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 		return blockResponse, nil
 	}
 
-	if firstHeaderTime == timeStamp {
+	if firstHeaderTime >= timeStamp {
 		blockResponse, err := buildBlockResponse(tx, lowestNumber, fullTx)
 		if err != nil {
 			return nil, err
