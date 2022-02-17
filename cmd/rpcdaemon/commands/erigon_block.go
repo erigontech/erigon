@@ -133,7 +133,7 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 	}
 
-	blockResponse, err := buildBlockResponse(tx, lowestNumber, fullTx)
+	blockResponse, err := buildBlockResponse(tx, lowestNumber-1, fullTx)
 	if err != nil {
 		return nil, err
 	}
