@@ -756,7 +756,7 @@ func (s *Ethereum) Stop() error {
 		sentryServer.Close()
 	}
 	s.chainDB.Close()
-	if s.config.TxPool.V2 {
+	if s.config.TxPool.V2 && s.txPool2DB != nil {
 		s.txPool2DB.Close()
 	}
 	return nil
