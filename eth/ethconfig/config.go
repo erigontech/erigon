@@ -30,7 +30,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 
 	"github.com/ledgerwatch/erigon/common"

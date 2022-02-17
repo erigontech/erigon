@@ -9,7 +9,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"golang.org/x/time/rate"
 )
 

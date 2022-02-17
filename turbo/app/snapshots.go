@@ -10,10 +10,10 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -119,7 +119,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	dataDir := cliCtx.String(utils.DataDirFlag.Name)
 	snapshotDir := filepath.Join(dataDir, "snapshots")
 	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
-	common.MustExist(tmpDir)
+	dir.MustExist(tmpDir)
 
 	chainDB := mdbx.NewMDBX(log.New()).Path(filepath.Join(dataDir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
@@ -176,7 +176,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		}
 	}
 
-	common.MustExist(snapshotDir)
+	dir.MustExist(snapshotDir)
 
 	log.Info("Last body number", "last", last)
 	workers := runtime.NumCPU() - 1
