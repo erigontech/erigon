@@ -87,6 +87,9 @@ func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} 
 }
 
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
+	log.Info("Received ForkchoiceUpdated", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
+		"build", payloadAttributes != nil)
+
 	var prepareParameters *remote.EnginePayloadAttributes
 	if payloadAttributes != nil {
 		prepareParameters = &remote.EnginePayloadAttributes{
@@ -98,8 +101,8 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	reply, err := e.api.EngineForkchoiceUpdatedV1(ctx, &remote.EngineForkChoiceUpdatedRequest{
 		ForkchoiceState: &remote.EngineForkChoiceState{
 			HeadBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.HeadHash),
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 			SafeBlockHash:      gointerfaces.ConvertHashToH256(forkChoiceState.SafeBlockHash),
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(forkChoiceState.FinalizedBlockHash),
 		},
 		PayloadAttributes: prepareParameters,
 	})
@@ -122,6 +125,8 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
+	log.Info("Received NewPayload", "height", payload.BlockNumber, "hash", payload.BlockHash)
+
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
 		var overflow bool
@@ -130,7 +135,6 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 			return nil, fmt.Errorf("invalid request")
 		}
 	}
-	log.Info("Received Payload from beacon-chain")
 
 	// Convert slice of hexutil.Bytes to a slice of slice of bytes
 	transactions := make([][]byte, len(payload.Transactions))
@@ -162,6 +166,8 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error) {
 	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	log.Info("Received GetPayload", "payloadId", decodedPayloadId)
+
 	payload, err := e.api.EngineGetPayloadV1(ctx, decodedPayloadId)
 	if err != nil {
 		return nil, err

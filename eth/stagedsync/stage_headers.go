@@ -127,6 +127,8 @@ func SpawnStageHeaders(
 
 	pendingHeaderHash, pendingHeaderHeight := cfg.hd.GetPendingHeader()
 	if pendingHeaderHeight != 0 { // some work left to do after unwind
+		log.Info(fmt.Sprintf("[%s] Pending header after unwind", s.LogPrefix()), "height", pendingHeaderHeight, "hash", pendingHeaderHash)
+
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
@@ -174,7 +176,7 @@ func HeadersPOS(
 	cfg HeadersCfg,
 	useExternalTx bool,
 ) error {
-	log.Info("Waiting for beacon chain...")
+	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
@@ -230,6 +232,7 @@ func handleForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
 	headerHash := forkChoiceMessage.HeadBlockHash
+	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
@@ -297,6 +300,8 @@ func handleNewPayload(
 	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
+
+	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
@@ -441,7 +446,7 @@ func downloadMissingPoSHeaders(
 	cfg.hd.SetHashToDownloadPoS(hashToDownloadPoS)
 	cfg.hd.SetHeightToDownloadPoS(heightToDownload)
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()))
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownloadPoS)
 
 	stopped := false
 	prevProgress := uint64(0)
