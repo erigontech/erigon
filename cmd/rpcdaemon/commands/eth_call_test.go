@@ -58,15 +58,26 @@ func TestGetBlockByTimeStampLatestTime(t *testing.T) {
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
-	latestBlockTimeStamp := latestBlock.Header().Time
+	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
 
-	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp, false)
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block["timestamp"] != latestBlockTimeStamp || block["hash"] != latestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
 }
 
@@ -87,15 +98,27 @@ func TestGetBlockByTimeStampOldestTime(t *testing.T) {
 	if err != nil {
 		t.Error("couldn't retrieve oldest block")
 	}
-	oldestBlockTimeStamp := oldestBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, oldestBlockTimeStamp, false)
+	response, err := ethapi.RPCMarshalBlock(oldestBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, oldestBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block["timestamp"] != 0 || block["hash"] != oldestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", oldestBlock.Hash(), oldestBlockTimeStamp, block["hash"], block["timestamp"])
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
 }
 
@@ -113,15 +136,27 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
-	latestBlockTimeStamp := latestBlock.Header().Time
 
-	block, err := api.GetBlockByTimeStamp(ctx, latestBlockTimeStamp+999999999999, false)
+	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlock.Header().Time+999999999999, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block["timestamp"] != latestBlockTimeStamp || block["hash"] != latestBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", latestBlock.Hash(), latestBlockTimeStamp, block["hash"], block["timestamp"])
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
 }
 
@@ -147,15 +182,26 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		t.Error("couldn't retrieve middle block")
 	}
 
-	middleTimeStamp := middleBlock.Header().Time
+	response, err := ethapi.RPCMarshalBlock(middleBlock, true, false)
 
-	block, err := api.GetBlockByTimeStamp(ctx, middleTimeStamp, false)
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, middleBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block["timestamp"] != middleTimeStamp || block["hash"] != middleBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", middleBlock.Hash(), middleTimeStamp, block["hash"], block["timestamp"])
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
 }
 
@@ -181,15 +227,25 @@ func TestGetBlockByTimeStamp(t *testing.T) {
 	if pickedBlock == nil {
 		t.Error("couldn't retrieve picked block")
 	}
+	response, err := ethapi.RPCMarshalBlock(pickedBlock, true, false)
 
-	pickedBlockTimeStamp := pickedBlock.Header().Time
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
 
-	block, err := api.GetBlockByTimeStamp(ctx, pickedBlockTimeStamp, false)
+	if err == nil && rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, pickedBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
 
-	if block["timestamp"] != pickedBlockTimeStamp || block["hash"] != pickedBlock.Hash() {
-		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", pickedBlock.Hash(), pickedBlockTimeStamp, block["hash"], block["timestamp"])
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
 }
