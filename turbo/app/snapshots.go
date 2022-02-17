@@ -94,11 +94,12 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		lockedSnapshotDir, err := dir.OpenRw(snapshotDir)
+		rwSnapshotDir, err := dir.OpenRw(snapshotDir)
 		if err != nil {
 			return err
 		}
-		if err := rebuildIndices(ctx, chainDB, cfg, lockedSnapshotDir, tmpDir, from); err != nil {
+		defer rwSnapshotDir.Close()
+		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}

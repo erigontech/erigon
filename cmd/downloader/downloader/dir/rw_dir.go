@@ -3,11 +3,11 @@ package dir
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"syscall"
 
 	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -33,7 +33,7 @@ var (
 )
 
 func OpenRw(dir string) (*Rw, error) {
-	common.MustExist(dir)
+	MustExist(dir)
 
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
@@ -54,5 +54,12 @@ func (t *Rw) Close() {
 			log.Error("Can't release snapshot dir lock", "err", err)
 		}
 		t.dirLock = nil
+	}
+}
+
+func MustExist(path string) {
+	const perm = 0764 // user rwx, group rw, other r
+	if err := os.MkdirAll(path, perm); err != nil {
+		panic(err)
 	}
 }

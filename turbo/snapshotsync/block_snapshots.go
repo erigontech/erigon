@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/locked"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/dir"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -317,7 +317,7 @@ func (s *RoSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, foun
 	return snapshot, false
 }
 
-func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *locked.Dir, chainID uint256.Int, tmpDir string, from uint64) error {
+func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 

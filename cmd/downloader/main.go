@@ -107,6 +107,7 @@ func Downloader(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	defer snapshotDir.Close()
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
