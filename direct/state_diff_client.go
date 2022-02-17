@@ -64,8 +64,8 @@ type StateDiffStreamC struct {
 }
 
 func (c *StateDiffStreamC) Recv() (*remote.StateChangeBatch, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err
@@ -84,6 +84,11 @@ func (s *StateDiffStreamS) Send(m *remote.StateChangeBatch) error {
 	return nil
 }
 func (s *StateDiffStreamS) Context() context.Context { return s.ctx }
-func (s *StateDiffStreamS) Err(err error)            { s.ch <- &stateDiffReply{err: err} }
+func (s *StateDiffStreamS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &stateDiffReply{err: err}
+}
 
 // -- end StateChanges

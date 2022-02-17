@@ -71,8 +71,13 @@ func (s *TxPoolOnAddS) Send(m *txpool_proto.OnAddReply) error {
 	s.ch <- &onAddReply{r: m}
 	return nil
 }
-func (s *TxPoolOnAddS) Err(err error)            { s.ch <- &onAddReply{err: err} }
 func (s *TxPoolOnAddS) Context() context.Context { return s.ctx }
+func (s *TxPoolOnAddS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &onAddReply{err: err}
+}
 
 type TxPoolOnAddC struct {
 	ch  chan *onAddReply
@@ -81,8 +86,8 @@ type TxPoolOnAddC struct {
 }
 
 func (c *TxPoolOnAddC) Recv() (*txpool_proto.OnAddReply, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err

@@ -52,7 +52,12 @@ func (s *MiningOnPendingBlockS) Send(m *txpool_proto.OnPendingBlockReply) error 
 	return nil
 }
 func (s *MiningOnPendingBlockS) Context() context.Context { return s.ctx }
-func (s *MiningOnPendingBlockS) Err(err error)            { s.ch <- &onPendigBlockReply{err: err} }
+func (s *MiningOnPendingBlockS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &onPendigBlockReply{err: err}
+}
 
 type MiningOnPendingBlockC struct {
 	ch  chan *onPendigBlockReply
@@ -61,15 +66,13 @@ type MiningOnPendingBlockC struct {
 }
 
 func (c *MiningOnPendingBlockC) Recv() (*txpool_proto.OnPendingBlockReply, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err
 }
-func (c *MiningOnPendingBlockC) Context() context.Context {
-	return c.ctx
-}
+func (c *MiningOnPendingBlockC) Context() context.Context { return c.ctx }
 
 // -- end OnPendingBlock
 // -- start OnMinedBlock
@@ -100,7 +103,12 @@ func (s *MiningOnMinedBlockS) Send(m *txpool_proto.OnMinedBlockReply) error {
 	return nil
 }
 func (s *MiningOnMinedBlockS) Context() context.Context { return s.ctx }
-func (s *MiningOnMinedBlockS) Err(err error)            { s.ch <- &onMinedBlockReply{err: err} }
+func (s *MiningOnMinedBlockS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &onMinedBlockReply{err: err}
+}
 
 type MiningOnMinedBlockC struct {
 	ch  chan *onMinedBlockReply
@@ -109,8 +117,8 @@ type MiningOnMinedBlockC struct {
 }
 
 func (c *MiningOnMinedBlockC) Recv() (*txpool_proto.OnMinedBlockReply, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err
@@ -145,7 +153,12 @@ func (s *MiningOnPendingLogsS) Send(m *txpool_proto.OnPendingLogsReply) error {
 	return nil
 }
 func (s *MiningOnPendingLogsS) Context() context.Context { return s.ctx }
-func (s *MiningOnPendingLogsS) Err(err error)            { s.ch <- &onPendingLogsReply{err: err} }
+func (s *MiningOnPendingLogsS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &onPendingLogsReply{err: err}
+}
 
 type MiningOnPendingLogsC struct {
 	ch  chan *onPendingLogsReply
@@ -154,8 +167,8 @@ type MiningOnPendingLogsC struct {
 }
 
 func (c *MiningOnPendingLogsC) Recv() (*txpool_proto.OnPendingLogsReply, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err

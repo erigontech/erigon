@@ -228,7 +228,12 @@ func (s *SentryMessagesStreamS) Send(m *sentry.InboundMessage) error {
 	return nil
 }
 func (s *SentryMessagesStreamS) Context() context.Context { return s.ctx }
-func (s *SentryMessagesStreamS) Err(err error)            { s.ch <- &inboundMessageReply{err: err} }
+func (s *SentryMessagesStreamS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &inboundMessageReply{err: err}
+}
 
 type SentryMessagesStreamC struct {
 	ch  chan *inboundMessageReply
@@ -237,8 +242,8 @@ type SentryMessagesStreamC struct {
 }
 
 func (c *SentryMessagesStreamC) Recv() (*sentry.InboundMessage, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err
@@ -275,7 +280,12 @@ func (s *SentryPeersStreamS) Send(m *sentry.PeersReply) error {
 	return nil
 }
 func (s *SentryPeersStreamS) Context() context.Context { return s.ctx }
-func (s *SentryPeersStreamS) Err(err error)            { s.ch <- &peersReply{err: err} }
+func (s *SentryPeersStreamS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &peersReply{err: err}
+}
 
 type SentryPeersStreamC struct {
 	ch  chan *peersReply
@@ -284,8 +294,8 @@ type SentryPeersStreamC struct {
 }
 
 func (c *SentryPeersStreamC) Recv() (*sentry.PeersReply, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err

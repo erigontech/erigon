@@ -81,7 +81,12 @@ func (s *SubscribeStreamS) Send(m *remote.SubscribeReply) error {
 	return nil
 }
 func (s *SubscribeStreamS) Context() context.Context { return s.ctx }
-func (s *SubscribeStreamS) Err(err error)            { s.ch <- &subscribeReply{err: err} }
+func (s *SubscribeStreamS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.ch <- &subscribeReply{err: err}
+}
 
 type SubscribeStreamC struct {
 	ch  chan *subscribeReply
@@ -90,8 +95,8 @@ type SubscribeStreamC struct {
 }
 
 func (c *SubscribeStreamC) Recv() (*remote.SubscribeReply, error) {
-	m := <-c.ch
-	if m == nil {
+	m, ok := <-c.ch
+	if !ok || m == nil {
 		return nil, io.EOF
 	}
 	return m.r, m.err
