@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -67,11 +66,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					return
 				default:
 				}
-				doLog := !grpcutil.IsEndOfStream(err)
-				if doLog {
-					log.Warn("rpc filters: error subscribing to events", "err", err)
+				if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+					time.Sleep(3 * time.Second)
+					continue
 				}
-				time.Sleep(3 * time.Second)
+				log.Warn("rpc filters: error subscribing to events", "err", err)
 			}
 		}
 	}()
@@ -90,11 +89,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 						return
 					default:
 					}
-					doLog := !grpcutil.IsEndOfStream(err) && !grpcutil.ErrIs(err, txpool2.ErrPoolDisabled)
-					if doLog {
-						log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
+					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+						time.Sleep(3 * time.Second)
+						continue
 					}
-					time.Sleep(3 * time.Second)
+					log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
 				}
 			}
 		}()
@@ -112,11 +111,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 							return
 						default:
 						}
-						doLog := !grpcutil.IsEndOfStream(err)
-						if doLog {
-							log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
+						if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+							time.Sleep(3 * time.Second)
+							continue
 						}
-						time.Sleep(3 * time.Second)
+						log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
 					}
 				}
 			}()
@@ -133,11 +132,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 							return
 						default:
 						}
-						doLog := !grpcutil.IsEndOfStream(err)
-						if doLog {
-							log.Warn("rpc filters: error subscribing to pending logs", "err", err)
+						if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+							time.Sleep(3 * time.Second)
+							continue
 						}
-						time.Sleep(3 * time.Second)
+						log.Warn("rpc filters: error subscribing to pending logs", "err", err)
 					}
 				}
 			}()
