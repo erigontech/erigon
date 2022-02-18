@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -130,7 +131,7 @@ func IsEndOfStream(err error) bool {
 		return true
 	}
 	if s, ok := status.FromError(err); ok {
-		return s.Code() == codes.Canceled || s.Message() == context.Canceled.Error()
+		return s.Code() == codes.Canceled || strings.Contains(s.Message(), context.Canceled.Error())
 	}
 	return false
 }
@@ -141,7 +142,7 @@ func ErrIs(err, target error) bool {
 		return true
 	}
 	if s, ok := status.FromError(err); ok { // remote clients do return GRPC-style errors
-		return s.Message() == target.Error()
+		return strings.Contains(s.Message(), target.Error())
 	}
 	return false
 }
