@@ -179,7 +179,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	snapshotDir, err := dir.OpenRw(filepath.Join(tmpdir, "snapshots"))
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
 
 	db := memdb.New()
