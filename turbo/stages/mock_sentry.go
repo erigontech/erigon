@@ -177,10 +177,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	snapshotDir, err := dir.OpenRw(filepath.Join(tmpdir, "snapshots"))
-	if err != nil {
-		panic(err)
-	}
+	snapshotDir := &dir.Rw{Path: filepath.Join(tmpdir, "snapshots")} // we don't really lock here, to allow parallel tests
+	var err error
 
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
