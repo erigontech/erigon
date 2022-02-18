@@ -714,8 +714,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -761,8 +759,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -1055,8 +1051,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case networkname.SokolChainName:
 		return filepath.Join(datadir, "sokol")
-	case networkname.KovanChainName:
-		return filepath.Join(datadir, "kovan")
 	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
 	case networkname.MumbaiChainName:
@@ -1541,11 +1535,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 42
-		}
-		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1212120
@@ -1645,8 +1634,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case networkname.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
 	case networkname.MumbaiChainName:
