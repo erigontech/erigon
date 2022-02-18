@@ -31,7 +31,7 @@ type BodiesCfg struct {
 	timeout         int
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
-	snapshots       *snapshotsync.AllSnapshots
+	snapshots       *snapshotsync.RoSnapshots
 	blockReader     interfaces.FullBlockReader
 }
 
@@ -44,7 +44,7 @@ func StageBodiesCfg(
 	timeout int,
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
-	snapshots *snapshotsync.AllSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	blockReader interfaces.FullBlockReader,
 ) BodiesCfg {
 	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}

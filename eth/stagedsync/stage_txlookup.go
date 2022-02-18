@@ -23,7 +23,7 @@ type TxLookupCfg struct {
 	db        kv.RwDB
 	prune     prune.Mode
 	tmpdir    string
-	snapshots *snapshotsync.AllSnapshots
+	snapshots *snapshotsync.RoSnapshots
 	isBor     bool
 }
 
@@ -31,7 +31,7 @@ func StageTxLookupCfg(
 	db kv.RwDB,
 	prune prune.Mode,
 	tmpdir string,
-	snapshots *snapshotsync.AllSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	isBor bool,
 ) TxLookupCfg {
 	return TxLookupCfg{

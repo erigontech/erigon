@@ -6,6 +6,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -21,7 +22,7 @@ var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir string, silent bool) (*GrpcServer, error) {
+func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir *dir.Rw, silent bool) (*GrpcServer, error) {
 	sn := &GrpcServer{
 		db:          db,
 		t:           client,
@@ -31,7 +32,7 @@ func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir string, silent boo
 	return sn, nil
 }
 
-func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir string, torrentClient *torrent.Client) error {
+func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir *dir.Rw, torrentClient *torrent.Client) error {
 	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
 		return err
 	}
@@ -50,7 +51,7 @@ type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	t           *Protocols
 	db          kv.RwDB
-	snapshotDir string
+	snapshotDir *dir.Rw
 	silent      bool
 }
 

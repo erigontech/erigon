@@ -182,11 +182,11 @@ func (back *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash c
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
-	sn   *AllSnapshots
+	sn   *RoSnapshots
 	lock sync.RWMutex
 }
 
-func NewBlockReaderWithSnapshots(snapshots *AllSnapshots) *BlockReaderWithSnapshots {
+func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
 }
 func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
