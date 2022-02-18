@@ -110,7 +110,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	vmConfig := vm.Config{}
 
 	interrupt := false
-	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
 	var rootHash []byte
 	if block == 0 {
@@ -141,6 +140,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			}
 		}
 	}
+	blockNum := 0
 	var txNum uint64 = 1
 	trace := false
 	logEvery := time.NewTicker(logInterval)
@@ -182,6 +182,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if b == nil {
 			break
+		}
+		if blockNum < block {
+			// Skip that block, but increase txNum
+			txNum += uint64(len(b.Transactions())) + 1
+			continue
 		}
 		r := agg.MakeStateReader(blockNum)
 		if err = w.Reset(blockNum); err != nil {
