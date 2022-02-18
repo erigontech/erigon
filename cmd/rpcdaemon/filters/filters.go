@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -89,7 +90,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 						return
 					default:
 					}
-					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) || grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
 						time.Sleep(3 * time.Second)
 						continue
 					}
