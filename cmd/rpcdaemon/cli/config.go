@@ -51,7 +51,7 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-const JwtTokenExpiry = 1000 * time.Hour
+const JwtTokenExpiry = 5 * time.Second
 const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
