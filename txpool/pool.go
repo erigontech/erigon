@@ -22,9 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"math"
 	"runtime"
 	"sort"
@@ -40,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -47,7 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
-	"google.golang.org/grpc/status"
 )
 
 var (
@@ -1300,13 +1298,8 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 			}
 
 			if err := p.processRemoteTxs(ctx); err != nil {
-				if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-					continue
-				}
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-					continue
-				}
-				if stopped := common.Stopped(ctx.Done()); stopped != nil {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
 					continue
 				}
 

@@ -18,23 +18,20 @@ package txpool
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -117,11 +114,8 @@ func (f *Fetch) ConnectCore() {
 			default:
 			}
 			if err := f.handleStateChanges(f.ctx, f.stateChangesClient); err != nil {
-				if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-					time.Sleep(time.Second)
-					continue
-				}
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
 					continue
 				}
 				log.Warn("[txpool.handleStateChanges]", "err", err)
@@ -138,11 +132,8 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 		default:
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
 				continue
 			}
 			// Report error and wait more
@@ -151,11 +142,8 @@ func (f *Fetch) receiveMessageLoop(sentryClient sentry.SentryClient) {
 		}
 
 		if err := f.receiveMessage(f.ctx, sentryClient); err != nil {
-			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
 				continue
 			}
 			log.Warn("[txpool.recvMessage]", "err", err)
@@ -195,11 +183,8 @@ func (f *Fetch) receiveMessage(ctx context.Context, sentryClient sentry.SentryCl
 			return nil
 		}
 		if err := f.handleInboundMessage(streamCtx, req, sentryClient); err != nil {
-			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
 				continue
 			}
 
@@ -357,10 +342,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	return nil
 }
 
-func retryLater(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.Canceled || code == codes.ResourceExhausted
-}
-
 func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 	for {
 		select {
@@ -369,11 +350,8 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 		default:
 		}
 		if _, err := sentryClient.HandShake(f.ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
 				continue
 			}
 			// Report error and wait more
@@ -382,11 +360,8 @@ func (f *Fetch) receivePeerLoop(sentryClient sentry.SentryClient) {
 			continue
 		}
 		if err := f.receivePeer(sentryClient); err != nil {
-			if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-				time.Sleep(time.Second)
-				continue
-			}
-			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
 				continue
 			}
 

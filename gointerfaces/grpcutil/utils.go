@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"time"
 
@@ -119,6 +121,27 @@ func IsRetryLater(err error) bool {
 	if s, ok := status.FromError(err); ok {
 		code := s.Code()
 		return code == codes.Unavailable || code == codes.Canceled || code == codes.ResourceExhausted
+	}
+	return false
+}
+
+func IsEndOfStream(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	if s, ok := status.FromError(err); ok {
+		return s.Code() == codes.Canceled || s.Message() == context.Canceled.Error()
+	}
+	return false
+}
+
+// ErrIs - like `errors.Is` but for grpc errors
+func ErrIs(err, target error) bool {
+	if errors.Is(err, target) { // direct clients do return Go-style errors
+		return true
+	}
+	if s, ok := status.FromError(err); ok { // remote clients do return GRPC-style errors
+		return s.Message() == target.Error()
 	}
 	return false
 }
