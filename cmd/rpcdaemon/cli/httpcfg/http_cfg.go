@@ -38,5 +38,4 @@ type HttpCfg struct {
 	GRPCHealthCheckEnabled  bool
 	StarknetGRPCAddress     string
 	JWTSecretPath           string // Engine API Authentication
-	EngineAuthentication    bool
 }

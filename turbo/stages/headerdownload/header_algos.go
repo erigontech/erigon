@@ -1040,6 +1040,10 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 
+	if err = db.Put(kv.HeaderNumber, hash[:], dbutils.EncodeBlockNumber(blockHeight)); err != nil {
+		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+
 	hi.highest = blockHeight
 	hi.highestHash = hash
 	hi.highestTimestamp = header.Time
@@ -1237,6 +1241,26 @@ func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingPayloadStatus = common.Hash{}
+}
+
+func (hd *HeaderDownload) GetPendingHeader() (common.Hash, uint64) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingHeaderHash, hd.pendingHeaderHeight
+}
+
+func (hd *HeaderDownload) SetPendingHeader(blockHash common.Hash, blockHeight uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingHeaderHash = blockHash
+	hd.pendingHeaderHeight = blockHeight
+}
+
+func (hd *HeaderDownload) ClearPendingHeader() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingHeaderHash = common.Hash{}
+	hd.pendingHeaderHeight = 0
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {

@@ -1053,13 +1053,13 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 }
 
 var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *snapshotsync.AllSnapshots
+var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
-func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
+func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, false)
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
+			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}

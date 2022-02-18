@@ -101,13 +101,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep)
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
 	defer agg.Close()
-	agg.GenerateChangesets(changesets)
-	agg.Commitments(commitments)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
@@ -171,6 +169,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			)
 		}
 		blockNum++
+		//fmt.Printf("block %d\n", blockNum)
 		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
 		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
 		if err != nil {

@@ -37,11 +37,11 @@ type SendersCfg struct {
 	tmpdir            string
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
-	snapshots         *snapshotsync.AllSnapshots
+	snapshots         *snapshotsync.RoSnapshots
 	snapshotHashesCfg *snapshothashes.Config
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.AllSnapshots) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.RoSnapshots) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 

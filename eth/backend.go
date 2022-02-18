@@ -315,7 +315,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			return nil, err
 		}
 
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, config.SnapshotDir)
+		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -849,8 +849,8 @@ func (s *Ethereum) Stop() error {
 	if s.downloadProtocols != nil {
 		s.downloadProtocols.Close()
 	}
-	if s.config.TorrentPieceCompletionStorage != nil {
-		s.config.TorrentPieceCompletionStorage.Close() //nolint
+	if s.config.TorrentDirCloser != nil {
+		s.config.TorrentDirCloser.Close() //nolint
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)

@@ -32,7 +32,7 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -658,7 +658,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
-		common2.MustExist(path.Dir(file))
+		dir.MustExist(path.Dir(file))
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -1387,7 +1387,11 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
+	snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
+	if err != nil {
+		panic(err)
+	}
+	cfg.SnapshotDir = snDir
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
 	}
@@ -1419,12 +1423,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 
 	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			panic(err)
 		}
 		cfg.Torrent = torrentCfg
-		cfg.TorrentPieceCompletionStorage = pieceCompletion
+		cfg.TorrentDirCloser = dirCloser
 	}
 
 	nodeConfig.Http.Snapshot = cfg.Snapshot

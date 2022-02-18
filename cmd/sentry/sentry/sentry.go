@@ -19,6 +19,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -601,7 +602,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
-	libcommon.MustExist(datadir)
+	dir.MustExist(datadir)
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS

@@ -19,6 +19,7 @@ import (
 
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -75,7 +76,7 @@ func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(f
 
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
-type AllSnapshots struct {
+type RoSnapshots struct {
 	indicesReady      atomic.Bool
 	segmentsReady     atomic.Bool
 	blocks            []*BlocksSnapshot
@@ -85,31 +86,30 @@ type AllSnapshots struct {
 	cfg               ethconfig.Snapshot
 }
 
-// NewAllSnapshots - opens all snapshots. But to simplify everything:
+// NewRoSnapshots - opens all snapshots. But to simplify everything:
 //  - it opens snapshots only on App start and immutable after
 //  - all snapshots of given blocks range must exist - to make this blocks range available
 //  - gaps are not allowed
 //  - segment have [from:to) semantic
-func NewAllSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *AllSnapshots {
-	common2.MustExist(snapshotDir)
-	return &AllSnapshots{dir: snapshotDir, cfg: cfg}
+func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
+	return &RoSnapshots{dir: snapshotDir, cfg: cfg}
 }
 
-func (s *AllSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
-func (s *AllSnapshots) Dir() string              { return s.dir }
-func (s *AllSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
-func (s *AllSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable }
-func (s *AllSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
-func (s *AllSnapshots) IndicesAvailable() uint64 { return s.idxAvailable }
+func (s *RoSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
+func (s *RoSnapshots) Dir() string              { return s.dir }
+func (s *RoSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable }
+func (s *RoSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
+func (s *RoSnapshots) IndicesAvailable() uint64 { return s.idxAvailable }
 
-func (s *AllSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
+func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
 	}
 	return nil
 }
 
-func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
+func (s *RoSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
 	if headers, err = latestSegment(s.dir, Headers); err != nil {
 		return
 	}
@@ -121,7 +121,7 @@ func (s *AllSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err 
 	}
 	return
 }
-func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error) {
+func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error) {
 	if headers, err = latestIdx(s.dir, Headers); err != nil {
 		return
 	}
@@ -134,9 +134,9 @@ func (s *AllSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error
 	return
 }
 
-func (s *AllSnapshots) ReopenIndices() error { return s.ReopenSomeIndices(AllSnapshotTypes...) }
+func (s *RoSnapshots) ReopenIndices() error { return s.ReopenSomeIndices(AllSnapshotTypes...) }
 
-func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
+func (s *RoSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	for _, bs := range s.blocks {
 		for _, snapshotType := range types {
 			switch snapshotType {
@@ -191,7 +191,7 @@ func (s *AllSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	return nil
 }
 
-func (s *AllSnapshots) AsyncOpenAll(ctx context.Context) {
+func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 	go func() {
 		for !s.segmentsReady.Load() || !s.indicesReady.Load() {
 			select {
@@ -210,7 +210,7 @@ func (s *AllSnapshots) AsyncOpenAll(ctx context.Context) {
 	}()
 }
 
-func (s *AllSnapshots) ReopenSegments() error {
+func (s *RoSnapshots) ReopenSegments() error {
 	dir := s.dir
 	files, err := segmentsOfType(dir, Headers)
 	if err != nil {
@@ -278,7 +278,7 @@ func (s *AllSnapshots) ReopenSegments() error {
 	return nil
 }
 
-func (s *AllSnapshots) Close() {
+func (s *RoSnapshots) Close() {
 	for _, s := range s.blocks {
 		if s.HeaderHashIdx != nil {
 			s.HeaderHashIdx.Close()
@@ -301,7 +301,7 @@ func (s *AllSnapshots) Close() {
 	}
 }
 
-func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
+func (s *RoSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
 	if !s.indicesReady.Load() {
 		return nil, false
 	}
@@ -317,7 +317,7 @@ func (s *AllSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, fou
 	return snapshot, false
 }
 
-func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tmpDir string, from uint64) error {
+func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -325,7 +325,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		if sn.From < from {
 			continue
 		}
-		f := filepath.Join(s.dir, SegmentFileName(sn.From, sn.To, Headers))
+		f := filepath.Join(snapshotDir.Path, SegmentFileName(sn.From, sn.To, Headers))
 		if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -335,7 +335,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 		if sn.From < from {
 			continue
 		}
-		f := filepath.Join(s.dir, SegmentFileName(sn.From, sn.To, Bodies))
+		f := filepath.Join(snapshotDir.Path, SegmentFileName(sn.From, sn.To, Bodies))
 		if err := BodiesIdx(ctx, f, sn.From, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func (s *AllSnapshots) BuildIndices(ctx context.Context, chainID uint256.Int, tm
 			}
 			expectedTxsAmount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 		}
-		f := filepath.Join(s.dir, SegmentFileName(sn.From, sn.To, Transactions))
+		f := filepath.Join(snapshotDir.Path, SegmentFileName(sn.From, sn.To, Transactions))
 		if err := TransactionsHashIdx(ctx, chainID, sn, firstBody.BaseTxId, sn.From, expectedTxsAmount, f, tmpDir, logEvery); err != nil {
 			return err
 		}
@@ -1097,7 +1097,7 @@ RETRY:
 	return nil
 }
 
-func ForEachHeader(ctx context.Context, s *AllSnapshots, walker func(header *types.Header) error) error {
+func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *types.Header) error) error {
 	r := bytes.NewReader(nil)
 	for _, sn := range s.blocks {
 		ch := forEachAsync(ctx, sn.Headers)
