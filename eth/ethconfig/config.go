@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"io"
 	"math/big"
 	"os"
 	"os/user"
@@ -27,9 +28,9 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -171,8 +172,8 @@ type Config struct {
 	Snapshot Snapshot
 	Torrent  *torrent.ClientConfig
 
-	TorrentPieceCompletionStorage storage.PieceCompletion
-	SnapshotDir                   string
+	TorrentDirCloser io.Closer
+	SnapshotDir      *dir.Rw
 
 	BlockDownloaderWindow int
 

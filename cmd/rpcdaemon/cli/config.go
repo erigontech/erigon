@@ -306,7 +306,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
