@@ -183,7 +183,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if b == nil {
 			break
 		}
-		if blockNum < block {
+		if blockNum <= block {
 			// Skip that block, but increase txNum
 			txNum += uint64(len(b.Transactions())) + 1
 			continue
