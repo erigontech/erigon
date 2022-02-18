@@ -53,8 +53,8 @@ type PayloadAttributes struct {
 // TransitionConfiguration represents the correct configurations of the CL and the EL
 type TransitionConfiguration struct {
 	TerminalTotalDifficulty *hexutil.Big   `json:"terminalTotalDifficulty" gencodec:"required"`
-	TerminalBlockHash       common.Hash    `json:"terminalBlockHash"     gencodec:"required"`
-	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber" gencodec:"required"`
+	TerminalBlockHash       common.Hash    `json:"terminalBlockHash"       gencodec:"required"`
+	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
 // EngineAPI Beacon chain communication endpoint
@@ -232,26 +232,14 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, tran
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %v, but instead got: %d", transitionConfiguration.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
-	if chainConfig.TerminalBlockHash == nil {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the terminal block hash. expected: %s", transitionConfiguration.TerminalBlockHash)
-	}
-
-	if *chainConfig.TerminalBlockHash == (common.Hash{}) {
-		return TransitionConfiguration{
-			TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-			TerminalBlockHash:       *chainConfig.TerminalBlockHash,
-			TerminalBlockNumber:     0,
-		}, nil
-	}
-
-	if chainConfig.TerminalBlockHash != nil && *chainConfig.TerminalBlockHash != transitionConfiguration.TerminalBlockHash {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, *chainConfig.TerminalBlockHash)
+	if chainConfig.TerminalBlockHash != transitionConfiguration.TerminalBlockHash {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", transitionConfiguration.TerminalBlockHash, chainConfig.TerminalBlockHash)
 	}
 
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-		TerminalBlockHash:       *chainConfig.TerminalBlockHash,
-		TerminalBlockNumber:     0,
+		TerminalBlockHash:       chainConfig.TerminalBlockHash,
+		TerminalBlockNumber:     hexutil.Uint64(chainConfig.TerminalBlockNumber),
 	}, nil
 }
 
