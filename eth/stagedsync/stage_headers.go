@@ -394,11 +394,6 @@ func verifyAndSaveNewPoSHeader(
 		return
 	}
 
-	err = rawdb.WriteHeaderNumber(tx, headerHash, headerNumber)
-	if err != nil {
-		return
-	}
-
 	headBlockHash := rawdb.ReadHeadBlockHash(tx)
 	if headBlockHash == header.ParentHash {
 		// OK, we're on the canonical chain
