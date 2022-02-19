@@ -148,6 +148,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	defer logEvery.Stop()
 	prevBlock := blockNum
 	prevTime := time.Now()
+	var prevHits, prevMisses uint64
 	var m runtime.MemStats
 	for !interrupt {
 		select {
@@ -162,6 +163,14 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
 			prevBlock = blockNum
 			prevTime = currentTime
+			hits := aStats.Hits - prevHits
+			misses := aStats.Misses - prevMisses
+			prevHits = aStats.Hits
+			prevMisses = aStats.Misses
+			var hitRatio float64
+			if hits+misses > 0 {
+				hitRatio = float64(hits) / float64(hits+misses)
+			}
 			runtime.ReadMemStats(&m)
 			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
 				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
@@ -169,6 +178,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
 				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
 				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+				"hit ratio", hitRatio, "hits+misses", hits+misses,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
 		}
