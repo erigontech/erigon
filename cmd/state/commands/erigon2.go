@@ -179,6 +179,12 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
+		if blockNum <= block {
+			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
+			// Skip that block, but increase txNum
+			txNum += uint64(txAmount) + 1
+			continue
+		}
 		var b *types.Block
 		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, blockNum)
 		if err != nil {
@@ -186,11 +192,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if b == nil {
 			break
-		}
-		if blockNum <= block {
-			// Skip that block, but increase txNum
-			txNum += uint64(len(b.Transactions())) + 1
-			continue
 		}
 		r := agg.MakeStateReader(blockNum)
 		if err = w.Reset(blockNum); err != nil {
