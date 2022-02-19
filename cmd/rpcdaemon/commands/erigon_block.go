@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -70,15 +71,10 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	currenttHeaderTime := currentHeader.Time
-
-	var lowestNumber uint64 = 0
 	highestNumber := currentHeader.Number.Uint64()
-	middleNumber := (highestNumber + lowestNumber) / 2
 
-	firstHeader := rawdb.ReadHeaderByNumber(tx, lowestNumber)
+	firstHeader := rawdb.ReadHeaderByNumber(tx, 0)
 	firstHeaderTime := firstHeader.Time
-
-	middleHeader := rawdb.ReadHeaderByNumber(tx, middleNumber)
 
 	if currenttHeaderTime <= timeStamp {
 		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
@@ -90,7 +86,7 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 	}
 
 	if firstHeaderTime >= timeStamp {
-		blockResponse, err := buildBlockResponse(tx, lowestNumber, fullTx)
+		blockResponse, err := buildBlockResponse(tx, 0, fullTx)
 		if err != nil {
 			return nil, err
 		}
@@ -98,47 +94,28 @@ func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64
 		return blockResponse, nil
 	}
 
-	if middleHeader.Time == timeStamp {
-		blockResponse, err := buildBlockResponse(tx, middleNumber, fullTx)
+	blockNum := sort.Search(int(currentHeader.Number.Uint64()), func(blockNum int) bool {
+		currentHeader := rawdb.ReadHeaderByNumber(tx, uint64(blockNum))
+
+		return currentHeader.Time >= timeStamp
+	})
+
+	resultingHeader := rawdb.ReadHeaderByNumber(tx, uint64(blockNum))
+
+	if resultingHeader.Time > timeStamp {
+		response, err := buildBlockResponse(tx, uint64(blockNum)-1, fullTx)
 		if err != nil {
 			return nil, err
 		}
-
-		return blockResponse, nil
+		return response, nil
 	}
 
-	for lowestNumber < highestNumber {
-
-		if middleHeader.Time < timeStamp {
-			lowestNumber = middleNumber + 1
-		}
-
-		if middleHeader.Time > timeStamp {
-			highestNumber = middleNumber - 1
-		}
-
-		if middleHeader.Time == timeStamp {
-			blockResponse, err := buildBlockResponse(tx, middleNumber, fullTx)
-			if err != nil {
-				return nil, err
-			}
-			return blockResponse, nil
-		}
-
-		middleNumber = (highestNumber + lowestNumber) / 2
-		middleHeader = rawdb.ReadHeaderByNumber(tx, middleNumber)
-		if middleHeader == nil {
-			return nil, nil
-		}
-
-	}
-
-	blockResponse, err := buildBlockResponse(tx, lowestNumber-1, fullTx)
+	response, err := buildBlockResponse(tx, uint64(blockNum), fullTx)
 	if err != nil {
 		return nil, err
 	}
-	return blockResponse, nil
 
+	return response, nil
 }
 
 func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]interface{}, error) {
