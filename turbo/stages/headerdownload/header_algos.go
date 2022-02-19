@@ -1040,6 +1040,10 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
 	}
 
+	if err = db.Put(kv.HeaderNumber, hash[:], dbutils.EncodeBlockNumber(blockHeight)); err != nil {
+		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+
 	hi.highest = blockHeight
 	hi.highestHash = hash
 	hi.highestTimestamp = header.Time
