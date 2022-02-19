@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -147,6 +148,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	defer logEvery.Stop()
 	prevBlock := blockNum
 	prevTime := time.Now()
+	var m runtime.MemStats
 	for !interrupt {
 		select {
 		default:
@@ -160,12 +162,14 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
 			prevBlock = blockNum
 			prevTime = currentTime
+			runtime.ReadMemStats(&m)
 			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
 				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
 				"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
 				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
 				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
 				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
 		}
 		blockNum++
