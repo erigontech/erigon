@@ -633,10 +633,8 @@ github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3P
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220220100945-3bf2dd266575 h1:xnskAuWJhjID6trahjU/2VYJKsdNebLzr3JyA0OJ4a4=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220220100945-3bf2dd266575/go.mod h1:CLR1VTnXI+wwORAP2QFONE5/kRh05FIUSrNTUlBcPzg=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220220102549-11c4c60f377b h1:yqCebf/WCt6ZT6drZcUotWu1yNFRR9aRrxDEaFOJh+k=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220220102549-11c4c60f377b/go.mod h1:CLR1VTnXI+wwORAP2QFONE5/kRh05FIUSrNTUlBcPzg=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220220102846-3c10fa7f1132 h1:yMK1UZc+6O0DK4ONyRPYiQK7v8uNkr2LFSUgfbaHo3o=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220220102846-3c10fa7f1132/go.mod h1:CLR1VTnXI+wwORAP2QFONE5/kRh05FIUSrNTUlBcPzg=
 github.com/ledgerwatch/log/v3 v3.4.0 h1:SEIOcv5a2zkG3PmoT5jeTU9m/0nEUv0BJS5bzsjwKCI=
 github.com/ledgerwatch/log/v3 v3.4.0/go.mod h1:VXcz6Ssn6XEeU92dCMc39/g1F0OYAjw1Mt+dGP5DjXY=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
