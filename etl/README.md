@@ -58,7 +58,7 @@ Data could be transformed in two places along the pipeline:
 
 `type ExtractFunc func(k []byte, v []byte, next ExtractNextFunc) error`
 
-Transform on extraction function receives the currenk key and value from the
+Transform on extraction function receives the current key and value from the
 source bucket.
 
 ### Transform On Loading
