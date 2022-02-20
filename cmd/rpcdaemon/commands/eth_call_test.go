@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -39,5 +40,211 @@ func TestEthCallNonCanonical(t *testing.T) {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
+	}
+}
+
+func TestGetBlockByTimeStampLatestTime(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	latestBlock := rawdb.ReadCurrentBlock(tx)
+	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlock.Header().Time, false)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
+	}
+}
+
+func TestGetBlockByTimeStampOldestTime(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("failed at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+	if err != nil {
+		t.Error("couldn't retrieve oldest block")
+	}
+
+	response, err := ethapi.RPCMarshalBlock(oldestBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(oldestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, oldestBlock.Header().Time, false)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
+	}
+}
+
+func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	latestBlock := rawdb.ReadCurrentBlock(tx)
+
+	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(latestBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, latestBlock.Header().Time+999999999999, false)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
+	}
+}
+
+func TestGetBlockByTimeMiddle(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	oldestHeader := rawdb.ReadHeaderByNumber(tx, 0)
+
+	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
+	middleBlock, err := rawdb.ReadBlockByNumber(tx, middleNumber)
+	if err != nil {
+		t.Error("couldn't retrieve middle block")
+	}
+
+	response, err := ethapi.RPCMarshalBlock(middleBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(middleBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, middleBlock.Header().Time, false)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
+	}
+}
+
+func TestGetBlockByTimeStamp(t *testing.T) {
+	ctx := context.Background()
+	db := rpcdaemontest.CreateTestKV(t)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		t.Errorf("fail at beginning tx")
+	}
+	defer tx.Rollback()
+
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+
+	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
+	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
+	if err != nil {
+		t.Errorf("couldn't get block %v", pickedBlock.Number())
+	}
+
+	if pickedBlock == nil {
+		t.Error("couldn't retrieve picked block")
+	}
+	response, err := ethapi.RPCMarshalBlock(pickedBlock, true, false)
+
+	if err != nil {
+		t.Error("couldn't get the rpc marshal block")
+	}
+
+	if err == nil && rpc.BlockNumber(pickedBlock.NumberU64()) == rpc.PendingBlockNumber {
+		// Pending blocks need to nil out a few fields
+		for _, field := range []string{"hash", "nonce", "miner"} {
+			response[field] = nil
+		}
+	}
+
+	block, err := api.GetBlockByTimeStamp(ctx, pickedBlock.Header().Time, false)
+	if err != nil {
+		t.Errorf("couldn't retrieve block %v", err)
+	}
+
+	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
+		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
 }

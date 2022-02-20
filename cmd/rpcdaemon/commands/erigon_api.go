@@ -19,6 +19,7 @@ type ErigonAPI interface {
 	// Blocks related (see ./erigon_blocks.go)
 	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
+	GetBlockByTimeStamp(ctx context.Context, timeStamp uint64, fullTx bool) (map[string]interface{}, error)
 
 	// Receipt related (see ./erigon_receipts.go)
 	GetLogsByHash(ctx context.Context, hash common.Hash) ([][]*types.Log, error)
