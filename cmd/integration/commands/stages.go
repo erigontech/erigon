@@ -1108,6 +1108,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	} else if chainConfig.Parlia != nil {
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
 		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
+	} else if chainConfig.Bor != nil {
+		consensusConfig := &config.Bor
+		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
 	} else { //ethash
 		engine = ethash.NewFaker()
 	}
