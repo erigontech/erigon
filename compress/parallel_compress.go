@@ -643,13 +643,17 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 	defer completion.Done()
 	var dictVal [8]byte
 	dictKey := make([]byte, maxPatternLen)
-	sa := make([]int32, superstringLimit)
+	var lcp, sa, inv []int32
 	divsufsort, err := transform.NewDivSufSort()
 	if err != nil {
 		log.Error("processSuperstring", "create divsufsoet", err)
 	}
 	for superstring := range superstringCh {
-		sa = sa[:len(superstring)]
+		if cap(sa) < len(superstring) {
+			sa = make([]int32, len(superstring))
+		} else {
+			sa = sa[:len(superstring)]
+		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
 		divsufsort.ComputeSuffixArray(superstring, sa)
@@ -671,15 +675,23 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				inv[filtered[i]] = int32(i)
 			}
 		*/
-		inv := make([]int32, n)
+		if cap(inv) < n {
+			inv = make([]int32, n)
+		} else {
+			inv = inv[:n]
+		}
 		for i := 0; i < n; i++ {
 			inv[filtered[i]] = int32(i)
 		}
 		//log.Info("Inverted array done")
-		lcp := make([]int32, n)
 		var k int
 		// Process all suffixes one by one starting from
 		// first suffix in txt[]
+		if cap(lcp) < n {
+			lcp = make([]int32, n)
+		} else {
+			lcp = lcp[:n]
+		}
 		for i := 0; i < n; i++ {
 			/* If the current suffix is at n-1, then we don’t
 			   have next substring to consider. So lcp is not

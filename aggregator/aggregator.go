@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -46,6 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -148,29 +150,32 @@ func ParseFileType(s string) (FileType, bool) {
 }
 
 type Aggregator struct {
-	diffDir         string // Directory where the state diff files are stored
-	files           [NumberOfTypes]*btree.BTree
-	fileLocks       [NumberOfTypes]sync.RWMutex
-	unwindLimit     uint64              // How far the chain may unwind
-	aggregationStep uint64              // How many items (block, but later perhaps txs or changes) are required to form one state diff file
-	changesBtree    *btree.BTree        // btree of ChangesItem
-	trace           bool                // Turns on tracing for specific accounts and locations
-	tracedKeys      map[string]struct{} // Set of keys being traced during aggregations
-	hph             *commitment.HexPatriciaHashed
-	keccak          hash.Hash
-	changesets      bool // Whether to generate changesets (off by default)
-	commitments     bool // Whether to calculate commitments
-	aggChannel      chan *AggregationTask
-	aggBackCh       chan struct{} // Channel for acknoledgement of AggregationTask
-	aggError        chan error
-	aggWg           sync.WaitGroup
-	mergeChannel    chan struct{}
-	mergeError      chan error
-	mergeWg         sync.WaitGroup
-	historyChannel  chan struct{}
-	historyError    chan error
-	historyWg       sync.WaitGroup
-	trees           [NumberOfStateTypes]*btree.BTree
+	diffDir              string // Directory where the state diff files are stored
+	files                [NumberOfTypes]*btree.BTree
+	fileLocks            [NumberOfTypes]sync.RWMutex
+	unwindLimit          uint64              // How far the chain may unwind
+	aggregationStep      uint64              // How many items (block, but later perhaps txs or changes) are required to form one state diff file
+	changesBtree         *btree.BTree        // btree of ChangesItem
+	trace                bool                // Turns on tracing for specific accounts and locations
+	tracedKeys           map[string]struct{} // Set of keys being traced during aggregations
+	hph                  *commitment.HexPatriciaHashed
+	keccak               hash.Hash
+	changesets           bool // Whether to generate changesets (off by default)
+	commitments          bool // Whether to calculate commitments
+	aggChannel           chan *AggregationTask
+	aggBackCh            chan struct{} // Channel for acknoledgement of AggregationTask
+	aggError             chan error
+	aggWg                sync.WaitGroup
+	mergeChannel         chan struct{}
+	mergeError           chan error
+	mergeWg              sync.WaitGroup
+	historyChannel       chan struct{}
+	historyError         chan error
+	historyWg            sync.WaitGroup
+	trees                [NumberOfStateTypes]*btree.BTree
+	fileHits, fileMisses uint64                       // Counters for state file hit ratio
+	arches               [NumberOfStateTypes][]uint32 // Over-arching hash tables containing the block number of last aggregation
+	archHasher           murmur3.Hash128
 }
 
 type ChangeFile struct {
@@ -617,6 +622,31 @@ func (c *Changes) aggregate(blockFrom, blockTo uint64, prefixLen int, dbTree *bt
 	return bt, nil
 }
 
+func (a *Aggregator) updateArch(bt *btree.BTree, fType FileType, blockNum32 uint32) {
+	arch := a.arches[fType]
+	h := a.archHasher
+	n := uint64(len(arch))
+	if n == 0 {
+		return
+	}
+	bt.Ascend(func(i btree.Item) bool {
+		item := i.(*AggregateItem)
+		if item.count == 0 {
+			return true
+		}
+		h.Reset()
+		h.Write(item.k) //nolint:errcheck
+		p, _ := h.Sum128()
+		p = p % n
+		v := atomic.LoadUint32(&arch[p])
+		if v < blockNum32 {
+			//fmt.Printf("Updated %s arch [%x]=%d %d\n", fType.String(), item.k, p, blockNum32)
+			atomic.StoreUint32(&arch[p], blockNum32)
+		}
+		return true
+	})
+}
+
 type AggregateItem struct {
 	k, v  []byte
 	count uint32
@@ -903,7 +933,7 @@ func (a *Aggregator) scanStateFiles(files []fs.DirEntry) {
 	}
 }
 
-func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, changesets, commitments bool) (*Aggregator, error) {
+func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, changesets, commitments bool, minArch uint64) (*Aggregator, error) {
 	a := &Aggregator{
 		diffDir:         diffDir,
 		unwindLimit:     unwindLimit,
@@ -920,6 +950,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 		historyError:    make(chan error, 1),
 		changesets:      changesets,
 		commitments:     commitments,
+		archHasher:      murmur3.New128WithSeed(0), // TODO: Randomise salt
 	}
 	for fType := FirstType; fType < NumberOfTypes; fType++ {
 		a.files[fType] = btree.New(32)
@@ -948,7 +979,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 	}
 	// Open decompressor and index files for all items in state trees
 	for fType := FirstType; fType < NumberOfTypes; fType++ {
-		if err := a.openFiles(fType); err != nil {
+		if err := a.openFiles(fType, minArch); err != nil {
 			return nil, fmt.Errorf("opening %s state files: %w", fType.String(), err)
 		}
 	}
@@ -1151,6 +1182,9 @@ func (a *Aggregator) backgroundAggregation() {
 			typesLimit = AccountHistory
 		}
 		for fType := FirstType; fType < typesLimit; fType++ {
+			if fType < NumberOfStateTypes {
+				a.updateArch(aggTask.bt[fType], fType, uint32(aggTask.blockTo))
+			}
 			a.addLocked(fType, &byEndBlockItem{startBlock: aggTask.blockFrom, endBlock: aggTask.blockTo, tree: aggTask.bt[fType]})
 		}
 		a.aggBackCh <- struct{}{}
@@ -1626,8 +1660,9 @@ func checkOverlaps(treeName string, tree *btree.BTree) error {
 	return err
 }
 
-func (a *Aggregator) openFiles(fType FileType) error {
+func (a *Aggregator) openFiles(fType FileType, minArch uint64) error {
 	var err error
+	var totalKeys uint64
 	a.files[fType].Ascend(func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
 		if item.decompressor, err = compress.NewDecompressor(path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), item.startBlock, item.endBlock))); err != nil {
@@ -1636,12 +1671,47 @@ func (a *Aggregator) openFiles(fType FileType) error {
 		if item.index, err = recsplit.OpenIndex(path.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", fType.String(), item.startBlock, item.endBlock))); err != nil {
 			return false
 		}
+		totalKeys += item.index.KeyCount()
 		item.getter = item.decompressor.MakeGetter()
 		item.getterMerge = item.decompressor.MakeGetter()
 		item.indexReader = recsplit.NewIndexReader(item.index)
 		item.readerMerge = recsplit.NewIndexReader(item.index)
 		return true
 	})
+	if fType >= NumberOfStateTypes {
+		return nil
+	}
+	log.Info("Creating arch...", "type", fType.String(), "total keys in all state files", totalKeys)
+	// Allocate arch of double of total keys
+	n := totalKeys * 2
+	if n < minArch {
+		n = minArch
+	}
+	a.arches[fType] = make([]uint32, n)
+	arch := a.arches[fType]
+	var key []byte
+	h := a.archHasher
+	collisions := 0
+	a.files[fType].Ascend(func(i btree.Item) bool {
+		item := i.(*byEndBlockItem)
+		g := item.getter
+		g.Reset(0)
+		blockNum := uint32(item.endBlock)
+		for g.HasNext() {
+			key, _ = g.Next(key[:0])
+			h.Reset()
+			h.Write(key) //nolint:errcheck
+			p, _ := h.Sum128()
+			p = p % n
+			if arch[p] != 0 {
+				collisions++
+			}
+			arch[p] = blockNum
+			g.Skip()
+		}
+		return true
+	})
+	log.Info("Created arch", "type", fType.String(), "collisions", collisions)
 	return err
 }
 
@@ -1708,6 +1778,27 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 			defer a.fileLocks[fType].RUnlock()
 		}
 	}
+	h := a.archHasher
+	arch := a.arches[fType]
+	n := uint64(len(arch))
+	if n > 0 {
+		h.Reset()
+		h.Write(filekey) //nolint:errcheck
+		p, _ := h.Sum128()
+		p = p % n
+		v := uint64(atomic.LoadUint32(&arch[p]))
+		//fmt.Printf("Reading from %s arch key [%x]=%d, %d\n", fType.String(), filekey, p, arch[p])
+		if v == 0 {
+			return nil, 0
+		}
+		a.files[fType].AscendGreaterOrEqual(&byEndBlockItem{startBlock: v, endBlock: v}, func(i btree.Item) bool {
+			item := i.(*byEndBlockItem)
+			if item.endBlock < blockNum {
+				blockNum = item.endBlock
+			}
+			return false
+		})
+	}
 	var val []byte
 	var startBlock uint64
 	a.files[fType].DescendLessOrEqual(&byEndBlockItem{endBlock: blockNum}, func(i btree.Item) bool {
@@ -1737,9 +1828,11 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 					fmt.Printf("read %s %x: found [%x] in file [%d-%d]\n", fType.String(), filekey, val, item.startBlock, item.endBlock)
 				}
 				startBlock = item.startBlock
+				atomic.AddUint64(&a.fileHits, 1)
 				return false
 			}
 		}
+		atomic.AddUint64(&a.fileMisses, 1)
 		return true
 	})
 	if fType == Commitment {
@@ -2936,6 +3029,8 @@ type FilesStats struct {
 	CommitmentCount   int
 	CommitmentDatSize int64
 	CommitmentIdxSize int64
+	Hits              uint64
+	Misses            uint64
 }
 
 func (a *Aggregator) Stats() FilesStats {
@@ -2944,5 +3039,7 @@ func (a *Aggregator) Stats() FilesStats {
 	fs.CodeCount, fs.CodeDatSize, fs.CodeIdxSize = a.stats(Code)
 	fs.StorageCount, fs.StorageDatSize, fs.StorageIdxSize = a.stats(Storage)
 	fs.CommitmentCount, fs.CommitmentDatSize, fs.CommitmentIdxSize = a.stats(Commitment)
+	fs.Hits = atomic.LoadUint64(&a.fileHits)
+	fs.Misses = atomic.LoadUint64(&a.fileMisses)
 	return fs
 }

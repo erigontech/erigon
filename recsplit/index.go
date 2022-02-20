@@ -174,6 +174,10 @@ func (idx *Index) Empty() bool {
 	return idx.keyCount == 0
 }
 
+func (idx *Index) KeyCount() uint64 {
+	return idx.keyCount
+}
+
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	if idx.keyCount == 0 {

@@ -19,7 +19,6 @@ package etl
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"reflect"
 	"runtime"
 	"time"
@@ -28,17 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ugorji/go/codec"
 )
-
-var (
-	cbor codec.CborHandle
-)
-
-type Decoder interface {
-	Reset(reader io.Reader)
-	Decode(interface{}) error
-}
 
 type CurrentTableReader interface {
 	Get([]byte) ([]byte, error)

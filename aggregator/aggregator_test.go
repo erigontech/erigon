@@ -68,7 +68,7 @@ func accountWithBalance(i uint64) []byte {
 
 func TestSimpleAggregator(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestSimpleAggregator(t *testing.T) {
 
 func TestLoopAggregator(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,24 +124,11 @@ func TestLoopAggregator(t *testing.T) {
 		}
 		account1 = accountWithBalance(blockNum + 2)
 	}
-	blockNum := uint64(1000)
-	r := a.MakeStateReader(blockNum)
-	for i := uint64(0); i < blockNum/10+1; i++ {
-		accountKey := int160(i)
-		var expected []byte
-		if i > 0 {
-			expected = accountWithBalance(i * 10)
-		}
-		acc := r.ReadAccountData(accountKey, false /* trace */)
-		if !bytes.Equal(acc, expected) {
-			t.Errorf("read account %x, expected account %x for block %d", acc, expected, i)
-		}
-	}
 }
 
 func TestRecreateAccountWithStorage(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +207,7 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 
 func TestChangeCode(t *testing.T) {
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
