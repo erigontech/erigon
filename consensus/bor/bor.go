@@ -225,7 +225,6 @@ type Bor struct {
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
 
-	sysCall consensus.SystemCall
 }
 
 // New creates a Matic Bor consensus engine.
@@ -399,28 +398,28 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 	}
 
 	/*
-			// Retrieve the snapshot needed to verify this header and cache it
-			snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-			if err != nil {
-				return err
-			}
+		// Retrieve the snapshot needed to verify this header and cache it
+		snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+		if err != nil {
+			return err
+		}
 
-			// verify the validator list in the last sprint block
-			if isSprintStart(number, c.config.Sprint) {
-				parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
-				validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
+		// verify the validator list in the last sprint block
+		if isSprintStart(number, c.config.Sprint) {
+			parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
+			validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
 
-				currentValidators := snap.ValidatorSet.Copy().Validators
-				// sort validator by address
-				sort.Sort(ValidatorsByAddress(currentValidators))
-				for i, validator := range currentValidators {
-					copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
-				}
-				// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
-				if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
-					return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
-				}
+			currentValidators := snap.ValidatorSet.Copy().Validators
+			// sort validator by address
+			sort.Sort(ValidatorsByAddress(currentValidators))
+			for i, validator := range currentValidators {
+				copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
 			}
+			// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
+			if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
+				return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
+			}
+		}
 
 		// All basic checks passed, verify the seal and return
 		return c.verifySeal(chain, header, parents)
@@ -429,7 +428,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
-func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
+func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header, syscall consensus.SystemCall) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -464,7 +463,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 				hash := checkpoint.Hash()
 
 				// get validators and current span
-				validators, err := c.GetCurrentValidators(number + 1)
+				validators, err := c.GetCurrentValidators(number+1, syscall)
 				if err != nil {
 					return nil, err
 				}
@@ -539,14 +538,14 @@ func (c *Bor) VerifyUncles(chain consensus.ChainReader, header *types.Header, un
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *Bor) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return c.verifySeal(chain, header, nil)
+	return c.verifySeal(chain, header, nil, nil)
 }
 
 // verifySeal checks whether the signature contained in the header satisfies the
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
-func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, syscall consensus.SystemCall) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -559,7 +558,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents, syscall)
 	if err != nil {
 		return err
 	}
@@ -597,7 +596,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
+func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -605,7 +604,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	number := header.Number.Uint64()
 	// Assemble the validator snapshot to check which votes make sense
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil, syscall)
 	if err != nil {
 		return err
 	}
@@ -621,7 +620,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	// get validator set if number
 	if (number+1)%c.config.Sprint == 0 {
-		newValidators, err := c.GetCurrentValidators(number + 1)
+		newValidators, err := c.GetCurrentValidators(number+1, syscall)
 		if err != nil {
 			return errors.New("unknown validators")
 		}
@@ -672,7 +671,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 	if headerNumber%c.config.Sprint == 0 {
 		cx := chainContext{Chain: chain, Bor: c}
 		// check and commit span
-		if err := c.checkAndCommitSpan(state, header, cx); err != nil {
+		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
 			log.Error("Error while committing span", "error", err)
 			return nil, types.Receipts{}, err
 		}
@@ -741,7 +740,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 		cx := chainContext{Chain: chain, Bor: c}
 
 		// check and commit span
-		err := c.checkAndCommitSpan(state, header, cx)
+		err := c.checkAndCommitSpan(state, header, cx, syscall)
 		if err != nil {
 			log.Error("Error while committing span", "error", err)
 			return nil, nil, types.Receipts{}, err
@@ -796,7 +795,7 @@ func (c *Bor) Authorize(signer common.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
+func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}, syscall consensus.SystemCall) error {
 	header := block.Header()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
@@ -813,7 +812,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	signer, signFn := c.signer, c.signFn
 	c.lock.RUnlock()
 
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil, syscall)
 	if err != nil {
 		return err
 	}
@@ -884,9 +883,9 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 // 	return new(big.Int).SetUint64(snap.Difficulty(c.signer))
 // }
 
-func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ []rlp.RawValue) *big.Int {
+func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ []rlp.RawValue, syscall consensus.SystemCall) *big.Int {
 
-	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
+	snap, err := c.snapshot(chain, parentNumber, parentHash, nil, syscall)
 	if err != nil {
 		return nil
 	}
@@ -916,7 +915,7 @@ func (c *Bor) Close() error {
 }
 
 // GetCurrentSpan get current span from contract
-func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain chainContext) (*Span, error) {
+func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain chainContext, syscall consensus.SystemCall) (*Span, error) {
 
 	// method
 	method := "getCurrentSpan"
@@ -926,7 +925,7 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 		return nil, err
 	}
 
-	result, err := c.sysCall(common.HexToAddress(c.config.ValidatorContract), data)
+	result, err := syscall(common.HexToAddress(c.config.ValidatorContract), data)
 	if err != nil {
 		return nil, err
 	}
@@ -952,7 +951,7 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 }
 
 // GetCurrentValidators get current validators
-func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) { // method
+func (c *Bor) GetCurrentValidators(blockNumber uint64, syscall consensus.SystemCall) ([]*Validator, error) { // method
 	method := "getBorValidators"
 
 	data, err := c.validatorSetABI.Pack(method, big.NewInt(0).SetUint64(blockNumber))
@@ -961,7 +960,7 @@ func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) { /
 		return nil, err
 	}
 
-	result, err := c.sysCall(common.HexToAddress(c.config.ValidatorContract), data)
+	result, err := syscall(common.HexToAddress(c.config.ValidatorContract), data)
 	if err != nil {
 		panic(err)
 	}
@@ -994,14 +993,15 @@ func (c *Bor) checkAndCommitSpan(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) error {
 	headerNumber := header.Number.Uint64()
-	span, err := c.GetCurrentSpan(header, state, chain)
+	span, err := c.GetCurrentSpan(header, state, chain, syscall)
 	if err != nil {
 		return err
 	}
 	if c.needToCommitSpan(span, headerNumber) {
-		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain)
+		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain, syscall)
 		return err
 	}
 	return nil
@@ -1031,11 +1031,12 @@ func (c *Bor) fetchAndCommitSpan(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) error {
 	var heimdallSpan HeimdallSpan
 
 	if c.WithoutHeimdall {
-		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain)
+		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain, syscall)
 		if err != nil {
 			return err
 		}
@@ -1103,7 +1104,7 @@ func (c *Bor) fetchAndCommitSpan(
 		return err
 	}
 
-	_, err = c.sysCall(common.HexToAddress(c.config.ValidatorContract), data)
+	_, err = syscall(common.HexToAddress(c.config.ValidatorContract), data)
 	// apply message
 	return err
 }
@@ -1185,15 +1186,16 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) (*HeimdallSpan, error) {
 	headerNumber := header.Number.Uint64()
-	span, err := c.GetCurrentSpan(header, state, chain)
+	span, err := c.GetCurrentSpan(header, state, chain, syscall)
 	if err != nil {
 		return nil, err
 	}
 
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain.Chain, headerNumber-1, header.ParentHash, nil)
+	snap, err := c.snapshot(chain.Chain, headerNumber-1, header.ParentHash, nil, syscall)
 	if err != nil {
 		return nil, err
 	}

@@ -219,7 +219,10 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 
-	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
+	syscall := func(contract common.Address, data []byte) ([]byte, error) {
+		return core.SysCallContract(contract, data, cfg.chainConfig, ibs, header, cfg.engine)
+	}
+	if err = cfg.engine.Prepare(chain, header, ibs, syscall); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
 			"headerNumber", header.Number.Uint64(),
