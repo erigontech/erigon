@@ -1061,7 +1061,6 @@ func (c *Bor) fetchAndCommitSpan(
 	// get validators bytes
 	var validators []MinimalVal
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
-		log.Info("Validator", "addr", val)
 		validators = append(validators, val.MinimalVal())
 	}
 	validatorBytes, err := rlp.EncodeToBytes(validators)
