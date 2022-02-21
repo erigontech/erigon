@@ -262,6 +262,9 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	}
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Nonce = nonce
+	if nonce > 0 {
+		fmt.Printf("account nonce %x = %d\n", keyHex, nonce)
+	}
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
