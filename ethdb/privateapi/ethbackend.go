@@ -35,7 +35,7 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 // 3.0.0 - adding PoS interfaces
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
-const MaxPendingPayloads = 128
+const MaxPendingPayloads = 1024
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
