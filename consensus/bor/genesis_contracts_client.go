@@ -61,7 +61,7 @@ func (gc *GenesisContractsClient) CommitState(
 		log.Error("Unable to pack tx for commitState", "error", err)
 		return err
 	}
-	log.Trace("→ committing new state", "eventRecord", event.String())
+	log.Info("→ committing new state", "eventRecord", event.String())
 	_, err = syscall(common.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return err
