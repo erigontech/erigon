@@ -262,9 +262,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	}
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Nonce = nonce
-	if nonce > 0 {
-		fmt.Printf("account nonce %x = %d\n", keyHex, nonce)
-	}
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
 	hb.acc.Incarnation = incarnation
@@ -272,7 +269,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	popped := 0
 	if fieldSet&AccountFieldStorageOnly != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
-		fmt.Printf("account storage root %x = %x\n", keyHex, hb.acc.Root)
 		popped++
 	} else {
 		copy(hb.acc.Root[:], EmptyRoot[:])
@@ -280,7 +276,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 
 	if fieldSet&AccountFieldCodeOnly != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
-		fmt.Printf("account code hash %x = %x\n", keyHex, hb.acc.CodeHash)
 		popped++
 	} else {
 		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
