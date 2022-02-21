@@ -43,7 +43,7 @@ func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *Plai
 }
 
 func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	fmt.Printf("UpdateAccountData [%x] balance = %x\n", address, &account.Balance)
+	fmt.Printf("UpdateAccountData [%x] balance = %x, nonce = %d\n", address, &account.Balance, account.Nonce)
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(address, original, account); err != nil {
 			return err
