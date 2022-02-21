@@ -223,14 +223,21 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_submitWork                             | Yes     |                                            |
 |                                            |         |                                            |
 | eth_subscribe                              | Limited | Websock Only - newHeads,                   |
-|                                            |         | newPendingTransaction                      |
+|                                            |         | newPendingTransactions                     |
 | eth_unsubscribe                            | Yes     | Websock Only                               |
+|                                            |         |                                            |
+| engine_newPayloadV1                        | Yes     |                                            |
+| engine_forkchoiceUpdatedV1                 | Yes     |                                            |
+| engine_getPayloadV1                        | Yes     |                                            |
+| engine_exchangeTransitionConfigurationV1   | Yes     |                                            |
 |                                            |         |                                            |
 | debug_accountRange                         | Yes     | Private Erigon debug module                |
 | debug_accountAt                            | Yes     | Private Erigon debug module                |
 | debug_getModifiedAccountsByNumber          | Yes     |                                            |
 | debug_getModifiedAccountsByHash            | Yes     |                                            |
 | debug_storageRangeAt                       | Yes     |                                            |
+| debug_traceBlockByHash                     | Yes     | Streaming (can handle huge results)        |
+| debug_traceBlockByNumber                   | Yes     | Streaming (can handle huge results)        |
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)        |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)        |
 |                                            |         |                                            |
@@ -262,17 +269,18 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_getLogsByHash                       | Yes     | Erigon only                                |
 | erigon_forks                               | Yes     | Erigon only                                |
 | erigon_issuance                            | Yes     | Erigon only                                |
+| erigon_getBlockByTimeStamp                 | Yes     | Erigon only                                |
 |                                            |         |                                            |
 | starknet_call                              | Yes     | Starknet only                              |
-|                                            |         |                                      |
-| bor_getSnapshot                            | Yes     | Bor only                             |
-| bor_getAuthor                              | Yes     | Bor only                             |
-| bor_getSnapshotAtHash                      | Yes     | Bor only                             |
-| bor_getSigners                             | Yes     | Bor only                             |
-| bor_getSignersAtHash                       | Yes     | Bor only                             |
-| bor_getCurrentProposer                     | Yes     | Bor only                             |
-| bor_getCurrentValidators                   | Yes     | Bor only                             |
-| bor_getRootHash                            | Yes     | Bor only                             |
+|                                            |         |                                            |
+| bor_getSnapshot                            | Yes     | Bor only                                   |
+| bor_getAuthor                              | Yes     | Bor only                                   |
+| bor_getSnapshotAtHash                      | Yes     | Bor only                                   |
+| bor_getSigners                             | Yes     | Bor only                                   |
+| bor_getSignersAtHash                       | Yes     | Bor only                                   |
+| bor_getCurrentProposer                     | Yes     | Bor only                                   |
+| bor_getCurrentValidators                   | Yes     | Bor only                                   |
+| bor_getRootHash                            | Yes     | Bor only                                   |
 
 This table is constantly updated. Please visit again.
 

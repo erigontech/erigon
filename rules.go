@@ -50,6 +50,12 @@ func closeCollector(m dsl.Matcher) {
 		Report(`Add "defer $c.Close()" right after collector creation`)
 }
 
+func closeLockedDir(m dsl.Matcher) {
+	m.Match(`$c := dir.OpenRw($*_); $close`).
+		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
+		Report(`Add "defer $c.Close()" after locked.OpenDir`)
+}
+
 func passValuesByContext(m dsl.Matcher) {
 	m.Match(`ctx.WithValue($*_)`).Report(`Don't pass app-level parameters by context, pass them as-is or as typed objects`)
 }

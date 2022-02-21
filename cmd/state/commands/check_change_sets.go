@@ -120,17 +120,19 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if err != nil {
 			return err
 		}
-		var block *types.Block
-		block, _, err = rawdb.ReadBlockWithSenders(rwtx, blockHash, blockNum)
+		var b *types.Block
+		b, _, err = rawdb.ReadBlockWithSenders(rwtx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
-		if block == nil {
+		if b == nil {
 			break
 		}
 
-		intraBlockState := state.New(state.NewPlainState(historyTx, block.NumberU64()-1))
-		csw := state.NewChangeSetWriterPlain(nil /* db */, block.NumberU64()-1)
+		reader := state.NewPlainState(historyTx, blockNum)
+		reader.SetTrace(blockNum == uint64(block))
+		intraBlockState := state.New(reader)
+		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)
 		var blockWriter state.StateWriter
 		if nocheck {
 			blockWriter = noOpWriter
@@ -140,19 +142,19 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
 		contractHasTEVM := ethdb.GetHasTEVM(rwtx)
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
+		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig)
 		if err1 != nil {
 			return err1
 		}
 		if writeReceipts {
-			if chainConfig.IsByzantium(block.NumberU64()) {
+			if chainConfig.IsByzantium(blockNum) {
 				receiptSha := types.DeriveSha(receipts)
-				if receiptSha != block.ReceiptHash() {
-					return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
+				if receiptSha != b.ReceiptHash() {
+					return fmt.Errorf("mismatched receipt headers for block %d", blockNum)
 				}
 			}
 
-			if err := rawdb.AppendReceipts(rwtx, block.NumberU64(), receipts); err != nil {
+			if err := rawdb.AppendReceipts(rwtx, blockNum, receipts); err != nil {
 				return err
 			}
 		}
@@ -226,7 +228,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			fmt.Println("interrupted, please wait for cleanup...")
 		case <-commitEvery.C:
 			if writeReceipts {
-				log.Info("Committing receipts", "up to block", block.NumberU64())
+				log.Info("Committing receipts", "up to block", b.NumberU64())
 				if err = rwtx.Commit(); err != nil {
 					return err
 				}

@@ -3,6 +3,7 @@ package privateapi
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -142,7 +143,9 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	log.Info("new subscription to newHeaders established")
 	defer func() {
 		if err != nil {
-			log.Warn("subscription to newHeaders closed", "reason", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Warn("subscription to newHeaders closed", "reason", err)
+			}
 		} else {
 			log.Warn("subscription to newHeaders closed")
 		}
@@ -259,7 +262,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
 		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)),
+		TxHash:      types.DeriveSha(types.RawTransactions(req.Transactions)), // TODO(yperbasis): prohibit EIP-2718 txn wrapped as RLP strings
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)

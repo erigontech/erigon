@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -52,6 +54,7 @@ func init() {
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	rootCmd.AddCommand(erigon2Cmd)
 }
 
@@ -91,7 +94,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		return err1
 	}
 	defer historyTx.Rollback()
-	aggPath := path.Join(datadir, "aggregator")
+	aggPath := filepath.Join(datadir, "aggregator")
 	if block == 0 {
 		if _, err = os.Stat(aggPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -104,13 +107,11 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep)
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
 	defer agg.Close()
-	agg.GenerateChangesets(changesets)
-	agg.Commitments(commitments)
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
@@ -129,7 +130,6 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	}
 
 	interrupt := false
-	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
 	var rootHash []byte
 	if block == 0 {
@@ -160,12 +160,15 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			}
 		}
 	}
+	blockNum := uint64(0)
 	var txNum uint64 = 1
 	trace := false
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	prevBlock := blockNum
 	prevTime := time.Now()
+	var prevHits, prevMisses uint64
+	var m runtime.MemStats
 	for !interrupt {
 		select {
 		default:
@@ -179,18 +182,37 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
 			prevBlock = blockNum
 			prevTime = currentTime
+			hits := aStats.Hits - prevHits
+			misses := aStats.Misses - prevMisses
+			prevHits = aStats.Hits
+			prevMisses = aStats.Misses
+			var hitRatio float64
+			if hits+misses > 0 {
+				hitRatio = float64(hits) / float64(hits+misses)
+			}
+			runtime.ReadMemStats(&m)
 			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
 				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
 				"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
 				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
 				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
 				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+				"hit ratio", hitRatio, "hits+misses", hits+misses,
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
 		}
 		blockNum++
+		//fmt.Printf("block %d\n", blockNum)
+		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
 		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
 		if err != nil {
 			return err
+		}
+		if blockNum <= block {
+			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
+			// Skip that block, but increase txNum
+			txNum += uint64(txAmount) + 1
+			continue
 		}
 		var b *types.Block
 		b, _, err = blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)

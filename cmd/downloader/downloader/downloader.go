@@ -10,6 +10,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -22,8 +23,8 @@ type Protocols struct {
 	DB            kv.RwDB
 }
 
-func New(cfg *torrent.ClientConfig, snapshotDir string) (*Protocols, error) {
-	db := mdbx.MustOpen(filepath.Join(snapshotDir, "db"))
+func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw) (*Protocols, error) {
+	db := mdbx.MustOpen(filepath.Join(snapshotDir.Path, "db"))
 
 	peerID, err := readPeerID(db)
 	if err != nil {
@@ -207,8 +208,8 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *torrent.Client) error {
-	files, err := AllTorrentPaths(snapshotsDir)
+func AddTorrentFiles(ctx context.Context, snapshotsDir *dir.Rw, torrentClient *torrent.Client) error {
+	files, err := AllTorrentPaths(snapshotsDir.Path)
 	if err != nil {
 		return err
 	}
@@ -240,7 +241,7 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir string, torrentClient *to
 }
 
 // ResolveAbsentTorrents - add hard-coded hashes (if client doesn't have) as magnet links and download everything
-func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir string, silent bool) error {
+func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, preverifiedHashes []metainfo.Hash, snapshotDir *dir.Rw, silent bool) error {
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, infoHash := range preverifiedHashes {
 		if _, ok := torrentClient.Torrent(infoHash); ok {

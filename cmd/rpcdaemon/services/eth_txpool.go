@@ -3,9 +3,12 @@ package services
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -27,8 +30,13 @@ func NewTxPoolService(client txpool.TxpoolClient) *TxPoolService {
 }
 
 func (s *TxPoolService) EnsureVersionCompatibility() bool {
+Start:
 	versionReply, err := s.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
+		if grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
+			time.Sleep(3 * time.Second)
+			goto Start
+		}
 		s.log.Error("ensure version", "error", err)
 		return false
 	}

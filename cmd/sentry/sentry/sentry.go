@@ -19,6 +19,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -121,6 +122,8 @@ func (pi *PeerInfo) ClearDeadlines(now time.Time, givePermit bool) int {
 }
 
 func (pi *PeerInfo) Remove() {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
 	pi.removeOnce.Do(func() {
 		close(pi.removed)
 		close(pi.tasks)
@@ -128,6 +131,8 @@ func (pi *PeerInfo) Remove() {
 }
 
 func (pi *PeerInfo) Async(f func()) {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
 	select {
 	case <-pi.removed: // noop if peer removed
 	case pi.tasks <- f:
@@ -177,8 +182,6 @@ func makeP2PServer(
 		urls = params.RinkebyBootnodes
 	case params.SokolGenesisHash:
 		urls = params.SokolBootnodes
-	case params.KovanGenesisHash:
-		urls = params.KovanBootnodes
 	case params.FermionGenesisHash:
 		urls = params.FermionBootnodes
 	case params.MumbaiGenesisHash:
@@ -597,7 +600,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
-	libcommon.MustExist(datadir)
+	dir.MustExist(datadir)
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS

@@ -8,12 +8,23 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
+)
+
+type QueueID uint8
+
+const (
+	NoQueue QueueID = iota
+	EntryQueueID
+	VerifyQueueID
+	InsertQueueID
+	PersistedQueueID
 )
 
 // Link is a chain link that can be connect to other chain links
@@ -27,9 +38,10 @@ type Link struct {
 	next        []*Link     // Allows iteration over links in ascending block height order
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
-	persisted   bool // Whether this link comes from the database record
-	preverified bool // Ancestor of pre-verified header
-	idx         int  // Index in the heap
+	persisted   bool    // Whether this link comes from the database record
+	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
+	idx         int     // Index in the heap
+	queueId     QueueID // which queue this link belongs to
 }
 
 // LinkQueue is the priority queue of links. It is instantiated once for persistent links, and once for non-persistent links
@@ -74,6 +86,8 @@ func (lq *LinkQueue) Pop() interface{} {
 	old := *lq
 	n := len(old)
 	x := old[n-1]
+	x.idx = -1
+	x.queueId = NoQueue
 	*lq = old[0 : n-1]
 	return x
 }
@@ -197,17 +211,52 @@ type Announce struct {
 type VerifySealFunc func(header *types.Header) error
 type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
 
+// InsertQueue keeps the links before they are inserted in the database
+// It priorities them by block height (the lowest block height on the top),
+// and if block heights are the same, by the verification status (verified/preverified on the top)
+type InsertQueue []*Link
+
+func (iq InsertQueue) Len() int {
+	return len(iq)
+}
+
+func (iq InsertQueue) Less(i, j int) bool {
+	return iq[i].blockHeight < iq[j].blockHeight
+}
+
+func (iq InsertQueue) Swap(i, j int) {
+	iq[i], iq[j] = iq[j], iq[i]
+	iq[i].idx, iq[j].idx = i, j // Restore indices after the swap
+}
+
+func (iq *InsertQueue) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	x.(*Link).idx = len(*iq)
+	*iq = append(*iq, x.(*Link))
+}
+
+func (iq *InsertQueue) Pop() interface{} {
+	old := *iq
+	n := len(old)
+	x := old[n-1]
+	*iq = old[0 : n-1]
+	x.idx = -1
+	x.queueId = NoQueue
+	return x
+}
+
 type HeaderDownload struct {
 	badHeaders         map[common.Hash]struct{}
 	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
 	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
 	links              map[common.Hash]*Link    // Links by header hash
 	engine             consensus.Engine
-	headerReader       consensus.ChainHeaderReader
-	insertList         []*Link        // List of non-persisted links that can be inserted (their parent is persisted)
+	verifyQueue        InsertQueue    // Priority queue of non-peristed links ready for verification
+	insertQueue        InsertQueue    // Priority queue of non-persisted links that are verified and can be inserted
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
-	persistedLinkQueue *LinkQueue     // Priority queue of persisted links used to limit their number
-	linkQueue          *LinkQueue     // Priority queue of non-persisted links used to limit their number
+	persistedLinkQueue LinkQueue      // Priority queue of persisted links used to limit their number
+	linkQueue          LinkQueue      // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue   // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
 	SkipCycleHack      chan struct{} // devenet will signal to this channel to skip sync cycle and release write db transaction. It's temporary solution - later we will do mining without write transaction.
@@ -221,6 +270,10 @@ type HeaderDownload struct {
 	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetching           bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
+
+	consensusHeaderReader consensus.ChainHeaderReader
+	headerReader          interfaces.HeaderReader
+
 	// proof-of-stake
 	topSeenHeightPoS     uint64
 	heightToDownloadPoS  uint64
@@ -230,6 +283,8 @@ type HeaderDownload struct {
 	headersCollector     *etl.Collector                // ETL collector for headers
 	PayloadStatusCh      chan privateapi.PayloadStatus // Channel to report payload validation/execution status (engine_newPayloadV1/forkchoiceUpdatedV1 response)
 	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
+	pendingHeaderHeight  uint64                        // Header to process after unwind (height)
+	pendingHeaderHash    common.Hash                   // Header to process after unwind (hash)
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -242,6 +297,7 @@ func NewHeaderDownload(
 	anchorLimit int,
 	linkLimit int,
 	engine consensus.Engine,
+	headerReader interfaces.HeaderAndCanonicalReader,
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
@@ -253,17 +309,18 @@ func NewHeaderDownload(
 		engine:             engine,
 		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
-		persistedLinkQueue: &LinkQueue{},
-		linkQueue:          &LinkQueue{},
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
+		headerReader:       headerReader,
 	}
-	heap.Init(hd.persistedLinkQueue)
-	heap.Init(hd.linkQueue)
+	heap.Init(&hd.persistedLinkQueue)
+	heap.Init(&hd.linkQueue)
 	heap.Init(hd.anchorQueue)
+	heap.Init(&hd.verifyQueue)
+	heap.Init(&hd.insertQueue)
 	return hd
 }
 
@@ -294,6 +351,37 @@ func (pp PeerPenalty) String() string {
 	return fmt.Sprintf("peerPenalty{peer: %d, penalty: %s, err: %v}", pp.peerHandle, pp.penalty, pp.err)
 }
 
+func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
+	if link.queueId == queueId {
+		return
+	}
+	// Remove
+	switch link.queueId {
+	case NoQueue:
+	case EntryQueueID:
+		heap.Remove(&hd.linkQueue, link.idx)
+	case VerifyQueueID:
+		heap.Remove(&hd.verifyQueue, link.idx)
+	case InsertQueueID:
+		heap.Remove(&hd.insertQueue, link.idx)
+	case PersistedQueueID:
+		heap.Remove(&hd.persistedLinkQueue, link.idx)
+	}
+	// Push
+	switch queueId {
+	case NoQueue:
+	case EntryQueueID:
+		heap.Push(&hd.linkQueue, link)
+	case VerifyQueueID:
+		heap.Push(&hd.verifyQueue, link)
+	case InsertQueueID:
+		heap.Push(&hd.insertQueue, link)
+	case PersistedQueueID:
+		heap.Push(&hd.persistedLinkQueue, link)
+	}
+	link.queueId = queueId
+}
+
 // HeaderInserter encapsulates necessary variable for inserting header records to the database, abstracting away the source of these headers
 // The headers are "fed" by repeatedly calling the FeedHeader function.
 type HeaderInserter struct {
@@ -307,13 +395,15 @@ type HeaderInserter struct {
 	highest          uint64
 	highestTimestamp uint64
 	canonicalCache   *lru.Cache
+	headerReader     interfaces.HeaderAndCanonicalReader
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader interfaces.HeaderAndCanonicalReader) *HeaderInserter {
 	hi := &HeaderInserter{
-		logPrefix:   logPrefix,
-		localTd:     localTd,
-		unwindPoint: headerProgress,
+		logPrefix:    logPrefix,
+		localTd:      localTd,
+		unwindPoint:  headerProgress,
+		headerReader: headerReader,
 	}
 	hi.canonicalCache, _ = lru.New(1000)
 	return hi

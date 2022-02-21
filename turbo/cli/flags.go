@@ -2,12 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -61,7 +64,7 @@ var (
 
 	PruneFlag = cli.StringFlag{
 		Name: "prune",
-		Usage: `Choose which ancient data delete from DB: 
+		Usage: `Choose which ancient data delete from DB:
 	h - prune history (ChangeSets, HistoryIndices - used by historical state access)
 	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 	t - prune transaction by it's hash index
@@ -277,7 +280,60 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setPrivateApi(ctx, cfg)
+	setEmbeddedRpcDaemon(ctx, cfg)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
+}
+
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
+	c := &httpcfg.HttpCfg{
+		Datadir:   cfg.DataDir,
+		Chaindata: filepath.Join(cfg.DataDir, "chaindata"),
+
+		TLSKeyFile:  cfg.TLSKeyFile,
+		TLSCACert:   cfg.TLSCACert,
+		TLSCertfile: cfg.TLSCertFile,
+
+		HttpListenAddress:       ctx.GlobalString(utils.HTTPListenAddrFlag.Name),
+		HttpPort:                ctx.GlobalInt(utils.HTTPPortFlag.Name),
+		EngineHTTPListenAddress: ctx.GlobalString(utils.EngineAddr.Name),
+		EnginePort:              ctx.GlobalInt(utils.EnginePort.Name),
+		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
+		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
+		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
+
+		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcAllowListFilePath: ctx.GlobalString(utils.RpcAccessListFlag.Name),
+		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
+		MaxTraces:            ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:   ctx.GlobalBool(utils.RpcTraceCompatFlag.Name),
+		StarknetGRPCAddress:  ctx.GlobalString(utils.StarknetGrpcAddressFlag.Name),
+		TevmEnabled:          ctx.GlobalBool(utils.TevmFlag.Name),
+
+		TxPoolApiAddr: ctx.GlobalString(utils.TxpoolApiAddrFlag.Name),
+
+		StateCache: kvcache.DefaultCoherentConfig,
+	}
+	if ctx.GlobalIsSet(utils.HttpCompressionFlag.Name) {
+		c.HttpCompression = ctx.GlobalBool(utils.HttpCompressionFlag.Name)
+	} else {
+		c.HttpCompression = true
+	}
+	if ctx.GlobalIsSet(utils.WsCompressionFlag.Name) {
+		c.WebsocketCompression = ctx.GlobalBool(utils.WsCompressionFlag.Name)
+	} else {
+		c.WebsocketCompression = true
+	}
+
+	c.StateCache.CodeKeysLimit = ctx.GlobalInt(utils.StateCacheFlag.Name)
+
+	/*
+		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
+		rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
+		rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
+		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
+	*/
+	cfg.Http = *c
 }
 
 // setPrivateApi populates configuration fields related to the remote

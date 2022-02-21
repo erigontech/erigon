@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -55,6 +57,7 @@ type MockSentry struct {
 	cancel        context.CancelFunc
 	DB            kv.RwDB
 	tmpdir        string
+	snapshotDir   *dir.Rw
 	Engine        consensus.Engine
 	ChainConfig   *params.ChainConfig
 	Sync          *stagedsync.Sync
@@ -89,6 +92,7 @@ func (ms *MockSentry) Close() {
 		ms.txPoolDB.Close()
 	}
 	ms.DB.Close()
+	ms.snapshotDir.Close()
 }
 
 // Stream returns stream, waiting if necessary
@@ -173,6 +177,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
+	snapshotDir := &dir.Rw{Path: filepath.Join(tmpdir, "snapshots")} // we don't really lock here, to allow parallel tests
+	var err error
 
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -183,6 +189,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		t:           t,
 		Log:         log.New(),
 		tmpdir:      tmpdir,
+		snapshotDir: snapshotDir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,
@@ -200,7 +207,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
-	var err error
 
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) (enode.ID, bool) { return enode.ID{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
@@ -271,10 +277,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		}
 	}
 
-	var allSnapshots *snapshotsync.AllSnapshots
+	var allSnapshots *snapshotsync.RoSnapshots
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	isBor := mock.ChainConfig.Bor != nil
+
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(
@@ -294,6 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				snapshotsDownloader,
 				blockReader,
 				mock.tmpdir,
+				mock.snapshotDir,
 			),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
@@ -460,7 +468,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err := StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {

@@ -32,8 +32,9 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/spf13/cobra"
@@ -319,6 +320,25 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: node.DefaultHTTPPort,
 	}
+	EngineAddr = cli.StringFlag{
+		Name:  "engine.addr",
+		Usage: "HTTP-RPC server listening interface for engineAPI",
+		Value: node.DefaultHTTPHost,
+	}
+	EnginePort = cli.UintFlag{
+		Name:  "engine.port",
+		Usage: "HTTP-RPC server listening port for the engineAPI",
+		Value: node.DefaultEngineHTTPPort,
+	}
+
+	HttpCompressionFlag = cli.BoolFlag{
+		Name:  "http.compression",
+		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+	}
+	WsCompressionFlag = cli.BoolFlag{
+		Name:  "ws.compression",
+		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+	}
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
 		Usage: "Comma separated list of domains from which to accept cross origin requests (browser enforced)",
@@ -332,8 +352,49 @@ var (
 	HTTPApiFlag = cli.StringFlag{
 		Name:  "http.api",
 		Usage: "API's offered over the HTTP-RPC interface",
-		Value: "",
+		Value: "eth,erigon",
 	}
+	RpcBatchConcurrencyFlag = cli.UintFlag{
+		Name:  "rpc.batch.concurrency",
+		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
+		Value: 2,
+	}
+	RpcAccessListFlag = cli.StringFlag{
+		Name:  "rpc.accessList",
+		Usage: "Specify granular (method-by-method) API allowlist",
+	}
+
+	RpcGasCapFlag = cli.UintFlag{
+		Name:  "rpc.gascap",
+		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
+		Value: 50000000,
+	}
+	RpcTraceCompatFlag = cli.BoolFlag{
+		Name:  "trace.compat",
+		Usage: "Bug for bug compatibility with OE for trace_ routines",
+	}
+
+	StarknetGrpcAddressFlag = cli.StringFlag{
+		Name:  "starknet.grpc.address",
+		Usage: "Starknet GRPC address",
+		Value: "127.0.0.1:6066",
+	}
+
+	TevmFlag = cli.BoolFlag{
+		Name:  "experimental.tevm",
+		Usage: "Enables Transpiled EVM experiment",
+	}
+	TxpoolApiAddrFlag = cli.StringFlag{
+		Name:  "txpool.api.addr",
+		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
+	}
+
+	TraceMaxtracesFlag = cli.UintFlag{
+		Name:  "trace.maxtraces",
+		Usage: "Sets a limit on traces that can be returned in trace_filter",
+		Value: 200,
+	}
+
 	HTTPPathPrefixFlag = cli.StringFlag{
 		Name:  "http.rpcprefix",
 		Usage: "HTTP path path prefix on which JSON-RPC is served. Use '/' to serve on all paths.",
@@ -398,6 +459,11 @@ var (
 	AllowUnprotectedTxs = cli.BoolFlag{
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non EIP155 signed) transactions to be submitted via RPC",
+	}
+	StateCacheFlag = cli.IntFlag{
+		Name:  "state.cache",
+		Value: kvcache.DefaultCoherentConfig.KeysLimit,
+		Usage: "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).",
 	}
 
 	// Network Settings
@@ -574,10 +640,10 @@ var (
 		Value: 42069,
 		Usage: "port to listen and serve BitTorrent protocol",
 	}
-	DbPageSizeFlag = cli.Uint64Flag{
+	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "can set mdbx pagesize when on db creation: must be power of 2 and '256 < pagesize < 64*1024' ",
-		Value: 4096,
+		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb' ",
+		Value: "4kb",
 	}
 
 	HealthCheckFlag = cli.BoolFlag{
@@ -615,7 +681,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
-		common2.MustExist(path.Dir(file))
+		dir.MustExist(path.Dir(file))
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -671,8 +737,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -718,8 +782,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -796,11 +858,11 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
-		enodeDBPath = path.Join(datadir, "nodes", "eth66")
+		enodeDBPath = filepath.Join(datadir, "nodes", "eth66")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
-	serverKey := nodeKey(path.Join(datadir, "nodekey"))
+	serverKey := nodeKey(filepath.Join(datadir, "nodekey"))
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
@@ -1012,8 +1074,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case networkname.SokolChainName:
 		return filepath.Join(datadir, "sokol")
-	case networkname.KovanChainName:
-		return filepath.Join(datadir, "kovan")
 	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
 	case networkname.MumbaiChainName:
@@ -1037,8 +1097,21 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 	}
 
 	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		cfg.MdbxPageSize = ctx.GlobalUint64(DbPageSizeFlag.Name)
+		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+			panic(err)
+		}
+		sz := cfg.MdbxPageSize.Bytes()
+		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
+		}
 	}
+}
+
+func isPowerOfTwo(n uint64) bool {
+	if n == 0 { //corner case: if n is zero it will also consider as power 2
+		return true
+	}
+	return n&(n-1) == 0
 }
 
 func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
@@ -1147,7 +1220,7 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(EthashDatasetDirFlag.Name) {
 		cfg.Ethash.DatasetDir = ctx.GlobalString(EthashDatasetDirFlag.Name)
 	} else {
-		cfg.Ethash.DatasetDir = path.Join(datadir, "ethash-dags")
+		cfg.Ethash.DatasetDir = filepath.Join(datadir, "ethash-dags")
 	}
 	if ctx.GlobalIsSet(EthashCachesInMemoryFlag.Name) {
 		cfg.Ethash.CachesInMem = ctx.GlobalInt(EthashCachesInMemoryFlag.Name)
@@ -1219,18 +1292,18 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 	cfg.InmemorySnapshots = ctx.GlobalInt(CliqueSnapshotInmemorySnapshotsFlag.Name)
 	cfg.InmemorySignatures = ctx.GlobalInt(CliqueSnapshotInmemorySignaturesFlag.Name)
 	if ctx.GlobalIsSet(CliqueDataDirFlag.Name) {
-		cfg.DBPath = path.Join(ctx.GlobalString(CliqueDataDirFlag.Name), "clique/db")
+		cfg.DBPath = filepath.Join(ctx.GlobalString(CliqueDataDirFlag.Name), "clique", "db")
 	} else {
-		cfg.DBPath = path.Join(datadir, "clique/db")
+		cfg.DBPath = filepath.Join(datadir, "clique", "db")
 	}
 }
 
 func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
-	cfg.DBPath = path.Join(datadir, "aura")
+	cfg.DBPath = filepath.Join(datadir, "aura")
 }
 
 func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
-	cfg.DBPath = path.Join(datadir, "parlia")
+	cfg.DBPath = filepath.Join(datadir, "parlia")
 }
 
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1331,23 +1404,29 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	cfg.SnapshotDir = path.Join(nodeConfig.DataDir, "snapshots")
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
+	}
+	if cfg.Snapshot.Enabled {
+		snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
+		if err != nil {
+			panic(err)
+		}
+		cfg.SnapshotDir = snDir
 	}
 	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
 		cfg.Snapshot.RetireEnabled = true
 	}
 	torrentVerbosity := lg.Warning
-	if ctx.GlobalBool(TorrentVerbosityFlag.Name) {
+	if ctx.GlobalIsSet(TorrentVerbosityFlag.Name) {
 		torrentVerbosity = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]
 	}
 
 	var downloadRateStr, uploadRateStr string
-	if ctx.GlobalBool(TorrentDownloadRateFlag.Name) {
+	if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
 		downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
 	}
-	if ctx.GlobalBool(TorrentUploadRateFlag.Name) {
+	if ctx.GlobalIsSet(TorrentUploadRateFlag.Name) {
 		uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
 	}
 	var downloadRate, uploadRate datasize.ByteSize
@@ -1358,18 +1437,20 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		panic(err)
 	}
 	torrentPort := TorrentPortFlag.Value
-	if ctx.GlobalBool(TorrentPortFlag.Name) {
+	if ctx.GlobalIsSet(TorrentPortFlag.Name) {
 		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
 	}
 
 	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			panic(err)
 		}
 		cfg.Torrent = torrentCfg
-		cfg.TorrentPieceCompletionStorage = pieceCompletion
+		cfg.TorrentDirCloser = dirCloser
 	}
+
+	nodeConfig.Http.Snapshot = cfg.Snapshot
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true
@@ -1479,11 +1560,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 42
-		}
-		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1212120
@@ -1583,8 +1659,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case networkname.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
 	case networkname.MumbaiChainName:

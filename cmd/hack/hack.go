@@ -15,9 +15,12 @@ import (
 	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"os/signal"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -2380,6 +2383,136 @@ func junkdb() error {
 	return nil
 }
 
+func histStats() error {
+	files, err := os.ReadDir(".")
+	if err != nil {
+		return err
+	}
+	endBlockMap := map[uint64]struct{}{}
+	pageMap := map[string]map[uint64]uint64{}
+	keys := []string{"ahistory", "shistory", "abitmap", "sbitmap"}
+	for _, k := range keys {
+		pageMap[k] = map[uint64]uint64{}
+	}
+	re := regexp.MustCompile(`(ahistory|shistory|abitmap|sbitmap).([0-9]+).txt`)
+	for _, f := range files {
+		name := f.Name()
+		subs := re.FindStringSubmatch(name)
+		if len(subs) != 3 {
+			if len(subs) != 0 {
+				log.Warn("File ignored by changes scan, more than 3 submatches", "name", name, "submatches", len(subs))
+			}
+			continue
+		}
+		var endBlock uint64
+		if endBlock, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+			return err
+		}
+		endBlockMap[endBlock] = struct{}{}
+		var ff *os.File
+		if ff, err = os.Open(name); err != nil {
+			return err
+		}
+		scanner := bufio.NewScanner(ff)
+		// Skip 5 lines
+		for i := 0; i < 5; i++ {
+			scanner.Scan()
+		}
+		var totalPages uint64
+		for i := 0; i < 3; i++ {
+			scanner.Scan()
+			line := scanner.Text()
+			p := strings.Index(line, ": ")
+			var pages uint64
+			if pages, err = strconv.ParseUint(line[p+2:], 10, 64); err != nil {
+				return err
+			}
+			totalPages += pages
+		}
+		pageMap[subs[1]][endBlock] = totalPages
+		ff.Close()
+	}
+	var endBlocks []uint64
+	for endBlock := range endBlockMap {
+		endBlocks = append(endBlocks, endBlock)
+	}
+	sort.Slice(endBlocks, func(i, j int) bool {
+		return endBlocks[i] < endBlocks[j]
+	})
+	var lastEndBlock uint64
+	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
+	for _, endBlock := range endBlocks {
+		fmt.Printf("%d", endBlock)
+		for _, k := range keys {
+			if lastEndBlock == 0 {
+				fmt.Printf(",%.3f", float64(pageMap[k][endBlock])/256.0/1024.0)
+			} else {
+				fmt.Printf(",%.3f", float64(pageMap[k][endBlock]-pageMap[k][lastEndBlock])/256.0/1024.0)
+			}
+		}
+		fmt.Printf("\n")
+		lastEndBlock = endBlock
+	}
+	return nil
+}
+
+func histStat1(chaindata string) error {
+	files, err := os.ReadDir(chaindata)
+	if err != nil {
+		return err
+	}
+	endBlockMap := map[uint64]struct{}{}
+	sizeMap := map[string]map[uint64]uint64{}
+	keys := []string{"ahistory", "shistory", "chistory", "abitmap", "sbitmap", "cbitmap"}
+	for _, k := range keys {
+		sizeMap[k] = map[uint64]uint64{}
+	}
+	re := regexp.MustCompile(fmt.Sprintf("(%s).([0-9]+)-([0-9]+).(dat|idx)", strings.Join(keys, "|")))
+	for _, f := range files {
+		name := f.Name()
+		subs := re.FindStringSubmatch(name)
+		if len(subs) != 5 {
+			if len(subs) != 0 {
+				log.Warn("File ignored by changes scan, more than 5 submatches", "name", name, "submatches", len(subs))
+			}
+			continue
+		}
+		var startBlock uint64
+		if startBlock, err = strconv.ParseUint(subs[2], 10, 64); err != nil {
+			return err
+		}
+		var endBlock uint64
+		if endBlock, err = strconv.ParseUint(subs[3], 10, 64); err != nil {
+			return err
+		}
+		if endBlock-startBlock < 499_999 {
+			continue
+		}
+		endBlockMap[endBlock] = struct{}{}
+		if fileInfo, err1 := os.Stat(filepath.Join(chaindata, name)); err1 == nil {
+			sizeMap[subs[1]][endBlock] += uint64(fileInfo.Size())
+		} else {
+			return err1
+		}
+	}
+	var endBlocks []uint64
+	for endBlock := range endBlockMap {
+		endBlocks = append(endBlocks, endBlock)
+	}
+	sort.Slice(endBlocks, func(i, j int) bool {
+		return endBlocks[i] < endBlocks[j]
+	})
+	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
+	for _, endBlock := range endBlocks {
+		fmt.Printf("%d", endBlock)
+		for _, k := range keys {
+			fmt.Printf(",%.3f", float64(sizeMap[k][endBlock])/1024.0/1024.0/1024.0)
+		}
+		fmt.Printf("\n")
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -2553,6 +2686,10 @@ func main() {
 		err = mainnetGenesis()
 	case "junkdb":
 		err = junkdb()
+	case "histStats":
+		err = histStats()
+	case "histStat1":
+		err = histStat1(*chaindata)
 	}
 
 	if err != nil {

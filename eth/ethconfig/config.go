@@ -18,19 +18,19 @@
 package ethconfig
 
 import (
+	"io"
 	"math/big"
 	"os"
 	"os/user"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -172,8 +172,8 @@ type Config struct {
 	Snapshot Snapshot
 	Torrent  *torrent.ClientConfig
 
-	TorrentPieceCompletionStorage storage.PieceCompletion
-	SnapshotDir                   string
+	TorrentDirCloser io.Closer
+	SnapshotDir      *dir.Rw
 
 	BlockDownloaderWindow int
 
@@ -267,7 +267,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.BorConfig:
 		if chainConfig.Bor != nil {
-			borDbPath := path.Join(dataDir, "bor") // bor consensus path: datadir/bor
+			borDbPath := filepath.Join(dataDir, "bor") // bor consensus path: datadir/bor
 			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
 		}
 	}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -36,7 +36,7 @@ var rootCmd = &cobra.Command{
 			genesis = genesisFromFile(genesisPath)
 		}
 		if chaindata == "" {
-			chaindata = path.Join(datadir, "chaindata")
+			chaindata = filepath.Join(datadir, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
