@@ -219,8 +219,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	}
 	var prevTo uint64
 	for i := range files {
-		f := files[i]
-		from, to, _, err := ParseFileName(f, ".seg")
+		from, to, _, err := ParseFileName(files[i], ".seg")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
@@ -232,8 +231,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 		}
 
 		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
-			f1 := files[j]
-			from1, to1, _, err := ParseFileName(f1, ".seg")
+			from1, to1, _, err := ParseFileName(files[j], ".seg")
 			if err != nil {
 				if errors.Is(ErrInvalidCompressedFileName, err) {
 					continue
@@ -243,7 +241,6 @@ func (s *RoSnapshots) ReopenSegments() error {
 			if from1 > from {
 				break
 			}
-			f = f1
 			to = to1
 			from = from1
 			i++
