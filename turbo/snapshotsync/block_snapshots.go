@@ -211,13 +211,15 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 }
 
 func (s *RoSnapshots) ReopenSegments() error {
+	s.blocks = nil
 	dir := s.dir
 	files, err := segmentsOfType(dir, Headers)
 	if err != nil {
 		return err
 	}
 	var prevTo uint64
-	for _, f := range files {
+	for i := range files {
+		f := files[i]
 		from, to, _, err := ParseFileName(f, ".seg")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
@@ -225,9 +227,28 @@ func (s *RoSnapshots) ReopenSegments() error {
 			}
 			return err
 		}
-		if to == prevTo {
+		if to <= prevTo {
 			continue
 		}
+
+		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
+			f1 := files[j]
+			from1, to1, _, err := ParseFileName(f1, ".seg")
+			if err != nil {
+				if errors.Is(ErrInvalidCompressedFileName, err) {
+					continue
+				}
+				return err
+			}
+			if from1 > from {
+				break
+			}
+			f = f1
+			to = to1
+			from = from1
+			i++
+		}
+
 		if from != prevTo { // no gaps
 			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, from)
 			//log.Debug("[open snapshots] snapshot missed before", "file", f)
@@ -554,10 +575,25 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string,
 	if err := snapshots.ReopenSegments(); err != nil {
 		return err
 	}
+
+	if err := findAndMergeBlockSegments(ctx, snapshots, tmpDir); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenSegments(); err != nil {
+		return err
+	}
+	chainID := uint256.NewInt(1)
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, *chainID, tmpDir, blockFrom); err != nil {
+		return err
+	}
 	if err := snapshots.ReopenIndices(); err != nil {
 		return err
 	}
 
+	return nil
+}
+
+func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string) error {
 	var toMergeBodies, toMergeHeaders, toMergeTxs []string
 	var from, to, stopAt uint64
 	// merge segments
@@ -569,6 +605,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string,
 			from = sn.From
 			stopAt = chooseSegmentEnd(from, from+DEFAULT_SEGMENT_SIZE, DEFAULT_SEGMENT_SIZE)
 		}
+
 		if sn.To > stopAt {
 			break
 		}
@@ -577,31 +614,28 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string,
 		toMergeHeaders = append(toMergeHeaders, sn.Headers.FilePath())
 		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
 	}
+
 	if len(toMergeBodies) > 0 {
-		if err := mergeSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir); err != nil {
+		if err := mergeByAppendSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir); err != nil {
 			return err
 		}
-		if err := mergeSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir); err != nil {
+		if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir); err != nil {
 			return err
 		}
-		if err := mergeSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir); err != nil {
+		if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir); err != nil {
 			return err
 		}
-
 	}
-
 	return nil
 }
-
-func mergeSegments(ctx context.Context, toMerge []string, targetFile string, tmpDir string) error {
-	f, err := compress.NewCompressor(ctx, "Bodies", targetFile, tmpDir, compress.MinPatternScore, 1)
+func mergeByAppendSegments(ctx context.Context, toMerge []string, targetFile string, tmpDir string) error {
+	f, err := compress.NewCompressor(ctx, "merge", targetFile, tmpDir, compress.MinPatternScore, 1)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	var word = make([]byte, 0, 4096)
 	for _, cFile := range toMerge {
-		fmt.Printf("toMerge: %s\n", cFile)
 		d, err := compress.NewDecompressor(cFile)
 		if err != nil {
 			return err
@@ -621,13 +655,11 @@ func mergeSegments(ctx context.Context, toMerge []string, targetFile string, tmp
 		}
 		d.Close()
 	}
-	fmt.Printf("start compress: %s\n", targetFile)
-
 	if err = f.Compress(); err != nil {
 		return err
 	}
-	fmt.Printf("compress done: %s, ratio=%s\n", targetFile, f.Ratio.String())
 	f.Close()
+
 	return nil
 }
 
