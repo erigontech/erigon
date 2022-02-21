@@ -1032,17 +1032,7 @@ func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
 
-	headerRaw, err := rlp.EncodeToBytes(header)
-	if err != nil {
-		return fmt.Errorf("[%s] failed to to RLP encode header %x %d: %v", hi.logPrefix, hash, blockHeight, err)
-	}
-	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
-		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
-	}
-
-	if err = db.Put(kv.HeaderNumber, hash[:], dbutils.EncodeBlockNumber(blockHeight)); err != nil {
-		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
-	}
+	rawdb.WriteHeader(db, header)
 
 	hi.highest = blockHeight
 	hi.highestHash = hash
