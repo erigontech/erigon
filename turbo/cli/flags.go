@@ -301,10 +301,16 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
 		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
 
-		WebsocketEnabled:    ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
-		RpcBatchConcurrency: ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
-		Gascap:              ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
-		MaxTraces:           ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
+		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcAllowListFilePath: ctx.GlobalString(utils.RpcAccessListFlag.Name),
+		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
+		MaxTraces:            ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:   ctx.GlobalBool(utils.RpcTraceCompatFlag.Name),
+		StarknetGRPCAddress:  ctx.GlobalString(utils.StarknetGrpcAddressFlag.Name),
+		TevmEnabled:          ctx.GlobalBool(utils.TevmFlag.Name),
+
+		TxPoolApiAddr: ctx.GlobalString(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache: kvcache.DefaultCoherentConfig,
 	}
@@ -322,15 +328,10 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 	c.StateCache.CodeKeysLimit = ctx.GlobalInt(utils.StateCacheFlag.Name)
 
 	/*
-		rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
-		rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
-		rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
-		rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
 		rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
 		rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
-		rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
 	*/
 	cfg.Http = *c
 }
