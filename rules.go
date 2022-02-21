@@ -51,7 +51,7 @@ func closeCollector(m dsl.Matcher) {
 }
 
 func closeLockedDir(m dsl.Matcher) {
-	m.Match(`$c := locked.OpenDir($*_); $close`).
+	m.Match(`$c := dir.OpenRw($*_); $close`).
 		Where(!m["close"].Text.Matches(`defer .*\.Close()`)).
 		Report(`Add "defer $c.Close()" after locked.OpenDir`)
 }
