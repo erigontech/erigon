@@ -13,6 +13,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -50,11 +51,12 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
+	snapshotDir           *dir.Rw
 	newPayloadCh          chan privateapi.PayloadMessage
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
-	snapshots          *snapshotsync.AllSnapshots
+	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
@@ -73,10 +75,11 @@ func StageHeadersCfg(
 	newPayloadCh chan privateapi.PayloadMessage,
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
-	snapshots *snapshotsync.AllSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
+	snapshotDir *dir.Rw,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                    db,
@@ -96,6 +99,7 @@ func StageHeadersCfg(
 		snapshotDownloader:    snapshotDownloader,
 		blockReader:           blockReader,
 		snapshotHashesCfg:     snapshothashes.KnownConfig(chainConfig.ChainName),
+		snapshotDir:           snapshotDir,
 	}
 }
 
@@ -125,6 +129,36 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
+	pendingHeaderHash, pendingHeaderHeight := cfg.hd.GetPendingHeader()
+	if pendingHeaderHeight != 0 { // some work left to do after unwind
+		log.Info(fmt.Sprintf("[%s] Pending header after unwind", s.LogPrefix()), "height", pendingHeaderHeight, "hash", pendingHeaderHash)
+
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		if err := fixCanonicalChain(s.LogPrefix(), logEvery, pendingHeaderHeight, pendingHeaderHash, tx, cfg.blockReader); err != nil {
+			return err
+		}
+
+		if err := rawdb.WriteHeadHeaderHash(tx, pendingHeaderHash); err != nil {
+			return err
+		}
+
+		if err := s.Update(tx, pendingHeaderHeight); err != nil {
+			return err
+		}
+
+		if !useExternalTx {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+
+		cfg.hd.ClearPendingHeader()
+
+		return nil
+	}
+
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
 	if err != nil {
 		return err
@@ -146,7 +180,7 @@ func HeadersPOS(
 	cfg HeadersCfg,
 	useExternalTx bool,
 ) error {
-	log.Info("Waiting for beacon chain...")
+	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
@@ -202,6 +236,7 @@ func handleForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
 	headerHash := forkChoiceMessage.HeadBlockHash
+	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
@@ -224,11 +259,7 @@ func handleForkChoice(
 			return nil
 		}
 
-		// FIXME(yperbasis): HeaderNumber is only populated at Stage 3
-		header, err = rawdb.ReadHeaderByHash(tx, headerHash)
-		if err != nil {
-			return err
-		}
+		header = rawdb.ReadHeader(tx, headerHash, headerInserter.GetHighest())
 	}
 
 	headerNumber := header.Number.Uint64()
@@ -247,7 +278,7 @@ func handleForkChoice(
 	if !repliedWithSyncStatus {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
 			// Short range re-org
-			// TODO(yperbasis): what if some bodies are missing?
+			// TODO(yperbasis): what if some bodies are missing and we have to download them?
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
 			// Long range re-org
@@ -257,20 +288,9 @@ func handleForkChoice(
 
 	u.UnwindTo(forkingPoint, common.Hash{})
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
+	cfg.hd.SetPendingHeader(headerHash, headerNumber)
 
-	err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader)
-	if err != nil {
-		return err
-	}
-
-	err = rawdb.WriteHeadHeaderHash(tx, headerHash)
-	if err != nil {
-		return err
-	}
-
-	return s.Update(tx, headerNumber)
+	return nil
 }
 
 func handleNewPayload(
@@ -284,6 +304,8 @@ func handleNewPayload(
 	header := payloadMessage.Header
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
+
+	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
@@ -428,7 +450,7 @@ func downloadMissingPoSHeaders(
 	cfg.hd.SetHashToDownloadPoS(hashToDownloadPoS)
 	cfg.hd.SetHeightToDownloadPoS(heightToDownload)
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()))
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownloadPoS)
 
 	stopped := false
 	prevProgress := uint64(0)
@@ -995,7 +1017,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir, 0); err != nil {
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, 0); err != nil {
 				return err
 			}
 		}
@@ -1110,6 +1132,11 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 	// Print download progress until all segments are available
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 			log.Warn("Error while waiting for snapshots progress", "err", err)
 		} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {

@@ -104,6 +104,12 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
+		if blockNum <= block {
+			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
+			// Skip that block, but increase txNum
+			txNum += uint64(txAmount) + 1
+			continue
+		}
 		var b *types.Block
 		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, blockNum)
 		if err != nil {
@@ -111,11 +117,6 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		if b == nil {
 			break
-		}
-		if blockNum < block {
-			// Skip that block, but increase txNum
-			txNum += uint64(len(b.Transactions())) + 1
-			continue
 		}
 		r := h.MakeHistoryReader()
 		readWrapper := &HistoryWrapper{r: r}
@@ -204,6 +205,9 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
 		pos += codeHashBytes
 	}
+	if pos >= len(enc) {
+		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
+	}
 	incBytes := int(enc[pos])
 	pos++
 	if incBytes > 0 {
@@ -215,7 +219,11 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), hw.trace)
 	if hw.trace {
-		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
+		if enc == nil {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
+		} else {
+			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc.Bytes())
+		}
 	}
 	if err != nil {
 		fmt.Printf("%v\n", err)

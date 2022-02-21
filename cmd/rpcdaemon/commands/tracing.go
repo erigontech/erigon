@@ -19,6 +19,82 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
+// TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
+func (api *PrivateDebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), config, stream)
+}
+
+// TraceBlockByHash implements debug_traceBlockByHash. Returns Geth style block traces.
+func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
+}
+
+func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	defer tx.Rollback()
+	var block *types.Block
+	if number, ok := blockNrOrHash.Number(); ok {
+		block, err = api.blockByRPCNumber(number, tx)
+	} else if hash, ok := blockNrOrHash.Hash(); ok {
+		block, err = api.blockByHashWithSenders(tx, hash)
+	} else {
+		return fmt.Errorf("invalid arguments; neither block nor hash specified")
+	}
+
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		return rawdb.ReadHeader(tx, hash, number)
+	}
+
+	_, blockCtx, txCtx, ibs, reader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
+	signer := types.MakeSigner(chainConfig, block.NumberU64())
+	stream.WriteArrayStart()
+	for idx, tx := range block.Transactions() {
+		select {
+		default:
+		case <-ctx.Done():
+			stream.WriteNil()
+			return ctx.Err()
+		}
+		ibs.Prepare(tx.Hash(), block.Hash(), idx)
+		msg, _ := tx.AsMessage(*signer, block.BaseFee())
+
+		transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
+		_ = ibs.FinalizeTx(chainConfig.Rules(blockCtx.BlockNumber), reader)
+		if idx != len(block.Transactions())-1 {
+			stream.WriteMore()
+		}
+		stream.Flush()
+	}
+	stream.WriteArrayEnd()
+	stream.Flush()
+	return nil
+}
+
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
@@ -27,7 +103,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	defer tx.Rollback()
-
 	// Retrieve the transaction and assemble its EVM context
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {

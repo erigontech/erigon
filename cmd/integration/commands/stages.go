@@ -586,6 +586,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		vmConfig.Tracer = nil
 		vmConfig.Debug = true
 	}
+	vmConfig.TraceJumpDest = true
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -1036,9 +1037,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		chainConfig = params.KovanChainConfig
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
@@ -1053,13 +1051,13 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 }
 
 var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *snapshotsync.AllSnapshots
+var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
-func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
+func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, false)
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
+			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}

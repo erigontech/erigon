@@ -3,9 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -39,10 +37,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/status"
 )
 
 var rootCmd = &cobra.Command{
@@ -67,7 +63,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface: eth,erigon,web3,net,debug,trace,txpool,db,starknet. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface: eth,engine,erigon,web3,net,debug,trace,txpool,db,starknet. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50000000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
@@ -75,8 +71,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 2, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
-	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "127.0.0.1:9090", "txpool api network address, for example: 127.0.0.1:9090")
-	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
+	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
+	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, ethconfig.FlagSnapshot, false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
@@ -109,6 +105,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 			}
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled)
 		}
+		if cfg.TxPoolApiAddr == "" {
+			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
+		}
 		return nil
 	}
 	rootCmd.PersistentPostRunE = func(cmd *cobra.Command, args []string) error {
@@ -134,21 +133,14 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 			default:
 			}
 			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
-				if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-					time.Sleep(time.Second)
-					continue
-				}
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
 					continue
 				}
 				log.Warn("[txpool.handleStateChanges]", "err", err)
 			}
 		}
 	}()
-}
-
-func retryLater(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.Canceled || code == codes.ResourceExhausted
 }
 
 func subscribeToStateChanges(ctx context.Context, client StateChangesClient, cache kvcache.Cache) error {
@@ -303,7 +295,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {

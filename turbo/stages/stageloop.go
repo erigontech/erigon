@@ -255,9 +255,9 @@ func NewStagedSync(
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
-	var allSnapshots *snapshotsync.AllSnapshots
+	var allSnapshots *snapshotsync.RoSnapshots
 	if cfg.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewAllSnapshots(cfg.Snapshot, cfg.SnapshotDir)
+		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.SnapshotDir.Path)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
@@ -286,6 +286,7 @@ func NewStagedSync(
 				snapshotDownloader,
 				blockReader,
 				tmpdir,
+				cfg.SnapshotDir,
 			),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
