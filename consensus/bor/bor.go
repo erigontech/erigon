@@ -678,7 +678,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 
 		if !c.WithoutHeimdall {
 			// commit states
-			_, err = c.CommitStates(state, header, cx)
+			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
 				log.Error("Error while committing states", "error", err)
 				return nil, types.Receipts{}, err
@@ -748,7 +748,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 
 		if !c.WithoutHeimdall {
 			// commit states
-			_, err = c.CommitStates(state, header, cx)
+			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
 				log.Error("Error while committing states", "error", err)
 				return nil, nil, types.Receipts{}, err
@@ -1115,10 +1115,11 @@ func (c *Bor) CommitStates(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) ([]*types.StateSyncData, error) {
 	stateSyncs := make([]*types.StateSyncData, 0)
 	number := header.Number.Uint64()
-	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, c)
+	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, c, syscall)
 	if err != nil {
 		return nil, err
 	}
@@ -1158,7 +1159,7 @@ func (c *Bor) CommitStates(
 		}
 		stateSyncs = append(stateSyncs, &stateData)
 
-		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c); err != nil {
+		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c, syscall); err != nil {
 			return nil, err
 		}
 		lastStateID++
