@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -122,7 +123,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		if err != nil {
 			return err
 		}
-		allSnapshots := snapshotsync.NewAllSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
+		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
