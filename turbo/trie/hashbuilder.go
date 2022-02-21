@@ -277,6 +277,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 
 	if fieldSet&AccountFieldCodeOnly != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		fmt.Printf("account code hash %x = %x\n", keyHex, hb.acc.CodeHash)
 		popped++
 	} else {
 		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
