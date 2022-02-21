@@ -663,9 +663,6 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (types.Transactions, types.Receipts, error) {
-
-	// Update sysCall
-
 	var err error
 	headerNumber := header.Number.Uint64()
 	if headerNumber%c.config.Sprint == 0 {
@@ -1064,6 +1061,7 @@ func (c *Bor) fetchAndCommitSpan(
 	// get validators bytes
 	var validators []MinimalVal
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
+		log.Info("Validator", "addr", val)
 		validators = append(validators, val.MinimalVal())
 	}
 	validatorBytes, err := rlp.EncodeToBytes(validators)
@@ -1141,6 +1139,7 @@ func (c *Bor) CommitStates(
 	}
 
 	chainID := c.chainConfig.ChainID.String()
+	log.Info("Event records", "count", len(eventRecords))
 	for _, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateID {
 			continue
