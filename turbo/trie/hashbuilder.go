@@ -269,6 +269,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 	popped := 0
 	if fieldSet&AccountFieldStorageOnly != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		fmt.Printf("account storage root %x = %x\n", keyHex, hb.acc.Root)
 		popped++
 	} else {
 		copy(hb.acc.Root[:], EmptyRoot[:])
