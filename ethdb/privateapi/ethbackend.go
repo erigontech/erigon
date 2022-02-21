@@ -230,7 +230,7 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	for i := 1; i < 10; i++ {
+	for i := 0; i < 10; i++ {
 		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 			// This might happen, for example, in the following scenario:
 			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated
