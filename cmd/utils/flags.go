@@ -359,11 +359,34 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	RpcAccessListFlag = cli.StringFlag{
+		Name:  "rpc.accessList",
+		Usage: "Specify granular (method-by-method) API allowlist",
+	}
 
 	RpcGasCapFlag = cli.UintFlag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
 		Value: 50000000,
+	}
+	RpcTraceCompatFlag = cli.BoolFlag{
+		Name:  "trace.compat",
+		Usage: "Bug for bug compatibility with OE for trace_ routines",
+	}
+
+	StarknetGrpcAddressFlag = cli.StringFlag{
+		Name:  "starknet.grpc.address",
+		Usage: "Starknet GRPC address",
+		Value: "127.0.0.1:6066",
+	}
+
+	TevmFlag = cli.BoolFlag{
+		Name:  "experimental.tevm",
+		Usage: "Enables Transpiled EVM experiment",
+	}
+	TxpoolApiAddrFlag = cli.StringFlag{
+		Name:  "txpool.api.addr",
+		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
 	}
 
 	TraceMaxtracesFlag = cli.UintFlag{

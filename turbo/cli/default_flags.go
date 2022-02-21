@@ -60,7 +60,12 @@ var DefaultFlags = []cli.Flag{
 	utils.WsCompressionFlag,
 	utils.StateCacheFlag,
 	utils.RpcBatchConcurrencyFlag,
+	utils.RpcAccessListFlag,
+	utils.RpcTraceCompatFlag,
 	utils.RpcGasCapFlag,
+	utils.StarknetGrpcAddressFlag,
+	utils.TevmFlag,
+	utils.TxpoolApiAddrFlag,
 	utils.TraceMaxtracesFlag,
 
 	utils.SnapshotSyncFlag,

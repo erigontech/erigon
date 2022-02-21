@@ -310,6 +310,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 		StarknetGRPCAddress:  ctx.GlobalString(utils.StarknetGrpcAddressFlag.Name),
 		TevmEnabled:          ctx.GlobalBool(utils.TevmFlag.Name),
 
+		TxPoolApiAddr: ctx.GlobalString(utils.TxpoolApiAddrFlag.Name),
+
 		StateCache: kvcache.DefaultCoherentConfig,
 	}
 	if ctx.GlobalIsSet(utils.HttpCompressionFlag.Name) {
