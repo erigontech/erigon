@@ -531,10 +531,112 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 }
 
 const DEFAULT_SEGMENT_SIZE = 500_000
+const MIN_SEGMENT_SIZE = 1_000
+
+func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
+	next := (from/blocksPerFile + 1) * blocksPerFile
+	to = min(next, to)
+	return to - (to % MIN_SEGMENT_SIZE) // round down to the nearest 1k
+}
+
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int) error {
+	// in future we will do it in background
+	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenSegments(); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenIndices(); err != nil {
+		return err
+	}
+
+	var toMergeBodies, toMergeHeaders, toMergeTxs []string
+	var from, to, stopAt uint64
+	// merge segments
+	for _, sn := range snapshots.blocks {
+		if sn.To-sn.From >= DEFAULT_SEGMENT_SIZE {
+			continue
+		}
+		if from == 0 {
+			from = sn.From
+			stopAt = chooseSegmentEnd(from, from+DEFAULT_SEGMENT_SIZE, DEFAULT_SEGMENT_SIZE)
+		}
+		if sn.To > stopAt {
+			break
+		}
+		to = sn.To
+		toMergeBodies = append(toMergeBodies, sn.Bodies.FilePath())
+		toMergeHeaders = append(toMergeHeaders, sn.Headers.FilePath())
+		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
+	}
+	if len(toMergeBodies) > 0 {
+		if err := mergeSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir); err != nil {
+			return err
+		}
+		if err := mergeSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir); err != nil {
+			return err
+		}
+		if err := mergeSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir); err != nil {
+			return err
+		}
+
+	}
+
+	return nil
+}
+
+func mergeSegments(ctx context.Context, toMerge []string, targetFile string, tmpDir string) error {
+	f, err := compress.NewCompressor(ctx, "Bodies", targetFile, tmpDir, compress.MinPatternScore, 1)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var word = make([]byte, 0, 4096)
+	for _, cFile := range toMerge {
+		fmt.Printf("toMerge: %s\n", cFile)
+		d, err := compress.NewDecompressor(cFile)
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.WithReadAhead(func() error {
+			g := d.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				if err := f.AddWord(word); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		d.Close()
+	}
+	fmt.Printf("start compress: %s\n", targetFile)
+
+	if err = f.Compress(); err != nil {
+		return err
+	}
+	fmt.Printf("compress done: %s, ratio=%s\n", targetFile, f.Ratio.String())
+	f.Close()
+	return nil
+}
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
-	for i := blockFrom; i < blockTo; i += blocksPerFile {
-		if err := dumpBlocksRange(ctx, i, i+blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+	if blocksPerFile == 0 {
+		return nil
+	}
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, i+blocksPerFile, blocksPerFile) {
+		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, i+blocksPerFile, blocksPerFile), tmpDir, snapshotDir, chainDB, workers); err != nil {
 			return err
 		}
 	}
@@ -558,7 +660,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	return nil
 }
 
-// DumpTxs -
+// DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockFrom, blockTo uint64, workers int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
@@ -670,6 +772,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	return firstTxID, nil
 }
 
+// DumpHeaders - [from, to)
 func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -730,6 +833,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	return nil
 }
 
+// DumpBodies - [from, to)
 func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
