@@ -1035,7 +1035,7 @@ func (c *Bor) fetchAndCommitSpan(
 ) error {
 	var heimdallSpan HeimdallSpan
 
-	fmt.Printf("fetchAndCommitSpan %d\n", header.Number.Uint64())
+	fmt.Printf("fetchAndCommitSpan %d, without heimdall %t\n", header.Number.Uint64(), c.WithoutHeimdall)
 	if c.WithoutHeimdall {
 		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain, syscall)
 		if err != nil {
