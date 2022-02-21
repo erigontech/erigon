@@ -9,7 +9,6 @@ const (
 	DevChainName        = "dev"
 	ErigonMineName      = "erigonmine"
 	SokolChainName      = "sokol"
-	KovanChainName      = "kovan"
 	FermionChainName    = "fermion"
 	BSCChainName        = "bsc"
 	ChapelChainName     = "chapel"

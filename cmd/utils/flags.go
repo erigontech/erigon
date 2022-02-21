@@ -359,11 +359,34 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	RpcAccessListFlag = cli.StringFlag{
+		Name:  "rpc.accessList",
+		Usage: "Specify granular (method-by-method) API allowlist",
+	}
 
 	RpcGasCapFlag = cli.UintFlag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
 		Value: 50000000,
+	}
+	RpcTraceCompatFlag = cli.BoolFlag{
+		Name:  "trace.compat",
+		Usage: "Bug for bug compatibility with OE for trace_ routines",
+	}
+
+	StarknetGrpcAddressFlag = cli.StringFlag{
+		Name:  "starknet.grpc.address",
+		Usage: "Starknet GRPC address",
+		Value: "127.0.0.1:6066",
+	}
+
+	TevmFlag = cli.BoolFlag{
+		Name:  "experimental.tevm",
+		Usage: "Enables Transpiled EVM experiment",
+	}
+	TxpoolApiAddrFlag = cli.StringFlag{
+		Name:  "txpool.api.addr",
+		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
 	}
 
 	TraceMaxtracesFlag = cli.UintFlag{
@@ -714,8 +737,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -761,8 +782,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -1055,8 +1074,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case networkname.SokolChainName:
 		return filepath.Join(datadir, "sokol")
-	case networkname.KovanChainName:
-		return filepath.Join(datadir, "kovan")
 	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
 	case networkname.MumbaiChainName:
@@ -1387,13 +1404,15 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
-	if err != nil {
-		panic(err)
-	}
-	cfg.SnapshotDir = snDir
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
+	}
+	if cfg.Snapshot.Enabled {
+		snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
+		if err != nil {
+			panic(err)
+		}
+		cfg.SnapshotDir = snDir
 	}
 	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
 		cfg.Snapshot.RetireEnabled = true
@@ -1541,11 +1560,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 42
-		}
-		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1212120
@@ -1645,8 +1659,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case networkname.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
 	case networkname.MumbaiChainName:

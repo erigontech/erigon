@@ -41,6 +41,11 @@ func (g *RequestGenerator) storageRangeAt(hash common.Hash, i int, to *common.Ad
 	return fmt.Sprintf(template, hash, i, to, nextKey, 1024, g.reqID)
 }
 
+func (g *RequestGenerator) traceBlockByHash(hash string) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByHash","params":["%s"],"id":%d}`
+	return fmt.Sprintf(template, hash, g.reqID)
+}
+
 func (g *RequestGenerator) traceTransaction(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID)

@@ -586,6 +586,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		vmConfig.Tracer = nil
 		vmConfig.Debug = true
 	}
+	vmConfig.TraceJumpDest = true
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -1036,9 +1037,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		chainConfig = params.KovanChainConfig
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
