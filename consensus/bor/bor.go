@@ -1052,9 +1052,9 @@ func (c *Bor) fetchAndCommitSpan(
 	// check if chain id matches with heimdall span
 	if heimdallSpan.ChainID != c.chainConfig.ChainID.String() {
 		return fmt.Errorf(
-			"Chain id proposed span, %s, and bor chain id, %s, doesn't match",
+			"chain id proposed span, %s, and bor chain id, %s, doesn't match",
 			heimdallSpan.ChainID,
-			c.chainConfig.ChainID,
+			c.chainConfig.ChainID.String(),
 		)
 	}
 

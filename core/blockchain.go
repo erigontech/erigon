@@ -361,7 +361,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 			false,
 		)
 		if err != nil {
-			return nil, err
+			return nil, nil
 		}
 		return ret, nil
 	}
