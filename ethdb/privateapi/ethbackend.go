@@ -230,16 +230,18 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
-		// This might happen, for example, in the following scenario:
-		// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated
-		// 2) We happily process NewPayload and stage loop is at the end
-		// 3) We start processing ForkChoiceUpdated,
-		// but the stage looped hasn't yet moved from the end to the beginning of HeadersPOS
-		// and thus waitingForBeaconChain is not set yet.
+	for i := 1; i < 10; i++ {
+		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+			// This might happen, for example, in the following scenario:
+			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated
+			// 2) We happily process NewPayload and stage loop is at the end
+			// 3) We start processing ForkChoiceUpdated,
+			// but the stage looped hasn't yet moved from the end to the beginning of HeadersPOS
+			// and thus waitingForBeaconChain is not set yet.
 
-		// TODO(yperbasis): find a more elegant solution
-		time.Sleep(10 * time.Millisecond)
+			// TODO(yperbasis): find a more elegant solution
+			time.Sleep(time.Millisecond)
+		}
 	}
 	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
 }
