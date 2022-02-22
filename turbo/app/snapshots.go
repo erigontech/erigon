@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -172,11 +173,20 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 }
 
 func recompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
 	allFiles, err := snapshotsync.Segments(snapshotDir.Path)
 	if err != nil {
 		return err
 	}
 	for _, f := range allFiles {
+		select {
+		default:
+		case <-ctx.Done():
+		case <-logEvery.C:
+			log.Info("[snapshots] Recompress", "file", f)
+		}
+
 		f = filepath.Join(snapshotDir.Path, f)
 		outFile := f + ".tmp2"
 		if err := cpSegmentByWords(ctx, f, outFile, tmpDir); err != nil {
