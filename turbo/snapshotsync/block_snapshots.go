@@ -1290,3 +1290,71 @@ func assertSegment(segmentFile string) {
 		panic(err)
 	}
 }
+
+func RecompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
+	allFiles, err := Segments(snapshotDir.Path)
+	if err != nil {
+		return err
+	}
+	for _, f := range allFiles {
+		f = filepath.Join(snapshotDir.Path, f)
+		outFile := f + ".tmp2"
+		if err := cpSegmentByWords(ctx, f, outFile, tmpDir); err != nil {
+			return err
+		}
+		if err = os.Remove(f); err != nil {
+			return err
+		}
+		if err = os.Rename(outFile, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
+	workers := runtime.NumCPU() - 1
+	if workers < 1 {
+		workers = 1
+	}
+	buf := make([]byte, 4096)
+	d, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	out, err := compress.NewCompressor(ctx, "", dstF, tmpDir, compress.MinPatternScore, workers)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	i := 0
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := out.AddWord(buf); err != nil {
+				return err
+			}
+
+			select {
+			default:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[snapshots] Recompress", "file", srcF, "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(d.Count())))
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := out.Compress(); err != nil {
+		return err
+	}
+	return nil
+}
