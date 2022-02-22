@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -36,6 +37,8 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
 const MaxPendingPayloads = 1024
+
+var UnknownPayload = rpc.CustomError{Code: -32001, Message: "Unknown payload"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -333,7 +336,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	for {
 		payload, ok := s.pendingPayloads[req.PayloadId]
 		if !ok {
-			return nil, fmt.Errorf("unknown payload")
+			return nil, &UnknownPayload
 		}
 
 		if payload.BlockNumber != 0 {
