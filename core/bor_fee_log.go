@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -106,4 +108,10 @@ func addTransferLog(
 		},
 		Data: data,
 	})
+	fmt.Printf("AddLog address=[%x], Topics: %x, data: [%x]\n", feeAddress, []common.Hash{
+		eventSig,
+		feeAddress.Hash(),
+		sender.Hash(),
+		recipient.Hash(),
+	}, data)
 }
