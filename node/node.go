@@ -289,7 +289,7 @@ func (n *Node) openDataDir() error {
 		return convertFileLockError(err)
 	}
 	if !locked {
-		return fmt.Errorf("%w: %s\n", ErrDatadirUsed, instdir)
+		return fmt.Errorf("%w: %s\n", ErrDataDirUsed, instdir)
 	}
 	n.dirLock = l
 	return nil

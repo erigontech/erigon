@@ -40,10 +40,10 @@ func WithBlock(block uint64, key []byte) []byte {
 }
 func TestMatreshkaStream(t *testing.T) {
 	t.Skip()
-	chaindataDir := "/media/b00ris/nvme/fresh_sync/tg/chaindata"
+	chaindatadir := "/media/b00ris/nvme/fresh_sync/tg/chaindata"
 	tmpDbDir := "/home/b00ris/event_stream"
 
-	chaindata, err := mdbx.Open(chaindataDir, log.New(), true)
+	chaindata, err := mdbx.Open(chaindatadir, log.New(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
