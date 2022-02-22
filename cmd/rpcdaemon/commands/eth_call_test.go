@@ -43,7 +43,7 @@ func TestEthCallNonCanonical(t *testing.T) {
 	}
 }
 
-func TestGetBlockByTimeStampLatestTime(t *testing.T) {
+func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	db := rpcdaemontest.CreateTestKV(t)
 
@@ -70,7 +70,7 @@ func TestGetBlockByTimeStampLatestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimeStamp(ctx, latestBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, latestBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -80,7 +80,7 @@ func TestGetBlockByTimeStampLatestTime(t *testing.T) {
 	}
 }
 
-func TestGetBlockByTimeStampOldestTime(t *testing.T) {
+func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	ctx := context.Background()
 	db := rpcdaemontest.CreateTestKV(t)
 
@@ -111,7 +111,7 @@ func TestGetBlockByTimeStampOldestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimeStamp(ctx, oldestBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, oldestBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -149,7 +149,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimeStamp(ctx, latestBlock.Header().Time+999999999999, false)
+	block, err := api.GetBlockByTimestamp(ctx, latestBlock.Header().Time+999999999999, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -194,7 +194,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimeStamp(ctx, middleBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, middleBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -204,7 +204,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	}
 }
 
-func TestGetBlockByTimeStamp(t *testing.T) {
+func TestGetBlockByTimestamp(t *testing.T) {
 	ctx := context.Background()
 	db := rpcdaemontest.CreateTestKV(t)
 
@@ -239,7 +239,7 @@ func TestGetBlockByTimeStamp(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimeStamp(ctx, pickedBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, pickedBlock.Header().Time, false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
