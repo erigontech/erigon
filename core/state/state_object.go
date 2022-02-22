@@ -156,6 +156,11 @@ func (so *stateObject) touch() {
 
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		*out = so.fakeStorage[*key]
+		return
+	}
 	value, dirty := so.dirtyStorage[*key]
 	if dirty {
 		*out = value
@@ -167,6 +172,11 @@ func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		*out = so.fakeStorage[*key]
+		return
+	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[*key]
@@ -197,6 +207,11 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 
 // SetState updates a value in account storage.
 func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
+	// If the fake storage is set, put the temporary state update here.
+	if so.fakeStorage != nil {
+		so.fakeStorage[*key] = value
+		return
+	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	so.GetState(key, &prev)

@@ -336,7 +336,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 	} else {
 		stateReader = state.NewPlainState(tx, blockNumber)
 	}
-	state := state.New(stateReader)
 
 	header := block.Header()
 	// If the gas amount is not set, extract this as it will depend on access
@@ -373,6 +372,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, *args.From, to, precompiles)
 	}
 	for {
+		state := state.New(stateReader)
 		// Retrieve the current access list to expand
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
