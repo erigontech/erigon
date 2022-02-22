@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -42,6 +43,7 @@ func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *Plai
 }
 
 func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	fmt.Printf("UpdateAccountData %x balance = %x, nonce = %d\n", address, &account.Balance, account.Nonce)
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(address, original, account); err != nil {
 			return err
