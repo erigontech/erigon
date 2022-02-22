@@ -1080,7 +1080,7 @@ func (c *Bor) fetchAndCommitSpan(
 
 	// method
 	method := "commitSpan"
-	log.Info("✅ Committing new span",
+	log.Debug("✅ Committing new span",
 		"id", heimdallSpan.ID,
 		"startBlock", heimdallSpan.StartBlock,
 		"endBlock", heimdallSpan.EndBlock,
