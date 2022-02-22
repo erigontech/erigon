@@ -58,6 +58,7 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	fmt.Printf("UpdateAccountCode %x\n", address)
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 			return err
