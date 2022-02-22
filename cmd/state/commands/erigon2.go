@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -47,6 +48,8 @@ var (
 	changesets          bool
 	commitments         bool
 )
+
+var blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 
 func init() {
 	withBlock(erigon2Cmd)
@@ -271,6 +274,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 }
 
 func runBlock2(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWrapper, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+	defer blockExecutionTimer.UpdateDuration(time.Now())
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
