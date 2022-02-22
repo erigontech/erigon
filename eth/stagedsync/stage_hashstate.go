@@ -266,6 +266,7 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 	case length.Addr:
 		// account
 		hash, err := common.HashData(key)
+		fmt.Printf("[%x] => [%x]\n", key, hash)
 		return hash[:], err
 	case length.Addr + length.Incarnation + length.Hash:
 		// storage
