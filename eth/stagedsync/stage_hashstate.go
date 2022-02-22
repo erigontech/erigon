@@ -177,6 +177,7 @@ func readPlainStateOnce(
 
 	convertAccFunc := func(key []byte) ([]byte, error) {
 		hash, err := common.HashData(key)
+		fmt.Printf("[%x] => [%x]\n", key, hash)
 		return hash[:], err
 	}
 
