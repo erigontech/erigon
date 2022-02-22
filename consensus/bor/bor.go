@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -223,8 +224,8 @@ type Bor struct {
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
-	fakeDiff bool // Skip difficulty verifications
-
+	fakeDiff  bool // Skip difficulty verifications
+	spanCache *btree.BTree
 }
 
 // New creates a Matic Bor consensus engine.
@@ -260,6 +261,7 @@ func New(
 		GenesisContractsClient: genesisContractsClient,
 		HeimdallClient:         heimdallClient,
 		WithoutHeimdall:        withoutHeimdall,
+		spanCache:              btree.New(32),
 	}
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
@@ -397,38 +399,35 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return ErrInvalidTimestamp
 	}
 
-	/*
-		// Retrieve the snapshot needed to verify this header and cache it
-		snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-		if err != nil {
-			return err
+	// Retrieve the snapshot needed to verify this header and cache it
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
+	if err != nil {
+		return err
+	}
+
+	// verify the validator list in the last sprint block
+	if isSprintStart(number, c.config.Sprint) {
+		parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
+		validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
+
+		currentValidators := snap.ValidatorSet.Copy().Validators
+		// sort validator by address
+		sort.Sort(ValidatorsByAddress(currentValidators))
+		for i, validator := range currentValidators {
+			copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
 		}
-
-		// verify the validator list in the last sprint block
-		if isSprintStart(number, c.config.Sprint) {
-			parentValidatorBytes := parent.Extra[extraVanity : len(parent.Extra)-extraSeal]
-			validatorsBytes := make([]byte, len(snap.ValidatorSet.Validators)*validatorHeaderBytesLength)
-
-			currentValidators := snap.ValidatorSet.Copy().Validators
-			// sort validator by address
-			sort.Sort(ValidatorsByAddress(currentValidators))
-			for i, validator := range currentValidators {
-				copy(validatorsBytes[i*validatorHeaderBytesLength:], validator.HeaderBytes())
-			}
-			// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
-			if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
-				return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
-			}
+		// len(header.Extra) >= extraVanity+extraSeal has already been validated in validateHeaderExtraField, so this won't result in a panic
+		if !bytes.Equal(parentValidatorBytes, validatorsBytes) {
+			return &MismatchingValidatorsError{number - 1, validatorsBytes, parentValidatorBytes}
 		}
+	}
 
-		// All basic checks passed, verify the seal and return
-		return c.verifySeal(chain, header, parents)
-	*/
-	return nil
+	// All basic checks passed, verify the seal and return
+	return c.verifySeal(chain, header, parents)
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
-func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header, syscall consensus.SystemCall) (*Snapshot, error) {
+func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -463,7 +462,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 				hash := checkpoint.Hash()
 
 				// get validators and current span
-				validators, err := c.GetCurrentValidators(number+1, syscall)
+				validators, err := c.GetCurrentValidators(number + 1)
 				if err != nil {
 					return nil, err
 				}
@@ -538,14 +537,14 @@ func (c *Bor) VerifyUncles(chain consensus.ChainReader, header *types.Header, un
 // VerifySeal implements consensus.Engine, checking whether the signature contained
 // in the header satisfies the consensus protocol requirements.
 func (c *Bor) VerifySeal(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return c.verifySeal(chain, header, nil, nil)
+	return c.verifySeal(chain, header, nil)
 }
 
 // verifySeal checks whether the signature contained in the header satisfies the
 // consensus protocol requirements. The method accepts an optional list of parent
 // headers that aren't yet part of the local blockchain to generate the snapshots
 // from.
-func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, syscall consensus.SystemCall) error {
+func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
 	// Verifying the genesis block is not supported
 	number := header.Number.Uint64()
 	if number == 0 {
@@ -558,7 +557,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents, syscall)
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
 	if err != nil {
 		return err
 	}
@@ -604,7 +603,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	number := header.Number.Uint64()
 	// Assemble the validator snapshot to check which votes make sense
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil, syscall)
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
@@ -948,42 +947,12 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 }
 
 // GetCurrentValidators get current validators
-func (c *Bor) GetCurrentValidators(blockNumber uint64, syscall consensus.SystemCall) ([]*Validator, error) { // method
-	method := "getBorValidators"
-
-	data, err := c.validatorSetABI.Pack(method, big.NewInt(0).SetUint64(blockNumber))
+func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
+	span, err := c.getSpanForBlock(blockNumber)
 	if err != nil {
-		log.Error("Unable to pack tx for getValidator", "error", err)
 		return nil, err
 	}
-
-	result, err := syscall(common.HexToAddress(c.config.ValidatorContract), data)
-	if err != nil {
-		panic(err)
-	}
-
-	var (
-		ret0 = new([]common.Address)
-		ret1 = new([]*big.Int)
-	)
-	out := &[]interface{}{
-		ret0,
-		ret1,
-	}
-
-	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
-		return nil, err
-	}
-
-	valz := make([]*Validator, len(*ret0))
-	for i, a := range *ret0 {
-		valz[i] = &Validator{
-			Address:     a,
-			VotingPower: (*ret1)[i].Int64(),
-		}
-	}
-
-	return valz, nil
+	return span.ValidatorSet.Validators, nil
 }
 
 func (c *Bor) checkAndCommitSpan(
@@ -1021,6 +990,50 @@ func (c *Bor) needToCommitSpan(span *Span, headerNumber uint64) bool {
 	}
 
 	return false
+}
+
+func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
+	var span *HeimdallSpan
+	c.spanCache.AscendGreaterOrEqual(&HeimdallSpan{Span: Span{EndBlock: blockNum}}, func(item btree.Item) bool {
+		span = item.(*HeimdallSpan)
+		return false
+	})
+	if span == nil {
+		// Span with high enough block number is not loaded
+		var spanID uint64
+		if c.spanCache.Len() > 0 {
+			spanID = c.spanCache.Max().(*HeimdallSpan).ID + 1
+		}
+		for span == nil || span.EndBlock >= blockNum {
+			var heimdallSpan HeimdallSpan
+			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(response.Result, &heimdallSpan); err != nil {
+				return nil, err
+			}
+			span = &heimdallSpan
+			c.spanCache.ReplaceOrInsert(span)
+			spanID++
+		}
+	} else {
+		for span.StartBlock > blockNum {
+			// Span wit low enough block number is not loaded
+			var spanID uint64 = span.ID - 1
+			var heimdallSpan HeimdallSpan
+			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(response.Result, &heimdallSpan); err != nil {
+				return nil, err
+			}
+			span = &heimdallSpan
+			c.spanCache.ReplaceOrInsert(span)
+		}
+	}
+	return span, nil
 }
 
 func (c *Bor) fetchAndCommitSpan(
@@ -1193,7 +1206,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	}
 
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain.Chain, headerNumber-1, header.ParentHash, nil, syscall)
+	snap, err := c.snapshot(chain.Chain, headerNumber-1, header.ParentHash, nil)
 	if err != nil {
 		return nil, err
 	}

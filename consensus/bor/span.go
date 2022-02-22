@@ -1,5 +1,9 @@
 package bor
 
+import (
+	"github.com/google/btree"
+)
+
 // Span represents a current bor span
 type Span struct {
 	ID         uint64 `json:"span_id" yaml:"span_id"`
@@ -13,4 +17,13 @@ type HeimdallSpan struct {
 	ValidatorSet      ValidatorSet `json:"validator_set" yaml:"validator_set"`
 	SelectedProducers []Validator  `json:"selected_producers" yaml:"selected_producers"`
 	ChainID           string       `json:"bor_chain_id" yaml:"bor_chain_id"`
+}
+
+func (hs *HeimdallSpan) Less(other btree.Item) bool {
+	otherHs := other.(*HeimdallSpan)
+	if hs.EndBlock == 0 || otherHs.EndBlock == 0 {
+		// if endblock is not specified in one of the items, allow search by ID
+		return hs.ID < otherHs.ID
+	}
+	return hs.EndBlock < otherHs.EndBlock
 }
