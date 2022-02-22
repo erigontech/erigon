@@ -254,7 +254,7 @@ func TestStartRPC(t *testing.T) {
 
 			// Apply some sane defaults.
 			config := test.cfg //nolint:scopelint
-			// config.Logger = testlog.Logger(t, log.LvlDebug)
+			// config.Log = testlog.Log(t, log.LvlDebug)
 			config.P2P.NoDiscovery = true
 
 			// Create Node.

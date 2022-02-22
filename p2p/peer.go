@@ -204,7 +204,7 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
+func newPeer(logger log.Logger, conn *conn, protocols []Protocol) *Peer {
 	protomap := matchProtocols(protocols, conn.caps, conn)
 	p := &Peer{
 		rw:       conn,
@@ -213,7 +213,7 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 		disc:     make(chan DiscReason),
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
-		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
+		log:      logger.New("id", conn.node.ID(), "conn", conn.flags),
 	}
 	return p
 }

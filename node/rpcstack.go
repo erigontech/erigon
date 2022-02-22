@@ -81,8 +81,8 @@ type httpServer struct {
 	handlerNames map[string]string
 }
 
-func newHTTPServer(log log.Logger, timeouts rpc.HTTPTimeouts) *httpServer {
-	h := &httpServer{log: log, timeouts: timeouts, handlerNames: make(map[string]string)}
+func newHTTPServer(logger log.Logger, timeouts rpc.HTTPTimeouts) *httpServer {
+	h := &httpServer{log: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
 
 	h.httpHandler.Store((*rpcHandler)(nil))
 	h.wsHandler.Store((*rpcHandler)(nil))

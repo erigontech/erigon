@@ -155,8 +155,8 @@ type Config struct {
 	// whenever a message is sent to or received from a peer
 	EnableMsgEvents bool
 
-	// Logger is a custom logger to use with the p2p.Server.
-	Logger log.Logger `toml:",omitempty"`
+	// Log is a custom logger to use with the p2p.Server.
+	Log log.Logger `toml:",omitempty"`
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
@@ -459,7 +459,7 @@ func (srv *Server) Start() error {
 		return errors.New("server already running")
 	}
 
-	srv.log = srv.Config.Logger
+	srv.log = srv.Config.Log
 	if srv.log == nil {
 		srv.log = log.Root()
 	}
@@ -640,7 +640,7 @@ func (srv *Server) setupDialScheduler() {
 		self:           srv.localnode.ID(),
 		maxDialPeers:   srv.maxDialedConns(),
 		maxActiveDials: srv.MaxPendingPeers,
-		log:            srv.Logger,
+		log:            srv.Log,
 		netRestrict:    srv.NetRestrict,
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
