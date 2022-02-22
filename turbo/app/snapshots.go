@@ -173,20 +173,11 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 }
 
 func recompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
 	allFiles, err := snapshotsync.Segments(snapshotDir.Path)
 	if err != nil {
 		return err
 	}
 	for _, f := range allFiles {
-		select {
-		default:
-		case <-ctx.Done():
-		case <-logEvery.C:
-			log.Info("[snapshots] Recompress", "file", f)
-		}
-
 		f = filepath.Join(snapshotDir.Path, f)
 		outFile := f + ".tmp2"
 		if err := cpSegmentByWords(ctx, f, outFile, tmpDir); err != nil {
@@ -203,6 +194,9 @@ func recompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string)
 }
 
 func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
 	workers := runtime.NumCPU() - 1
 	if workers < 1 {
 		workers = 1
@@ -219,6 +213,7 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 	}
 	defer out.Close()
 
+	i := 0
 	if err := d.WithReadAhead(func() error {
 		g := d.MakeGetter()
 		for g.HasNext() {
@@ -228,6 +223,13 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 			}
 		}
 
+		select {
+		default:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info("[snapshots] Recompress", "file", srcF, "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(d.Count())))
+		}
 		return nil
 	}); err != nil {
 		return err
