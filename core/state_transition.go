@@ -429,7 +429,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	if st.isParlia {
 		st.state.AddBalance(consensus.SystemAddress, amount)
-	} else if st.isBor {
+	} else {
+		st.state.AddBalance(st.evm.Context().Coinbase, amount)
+	}
+	if st.isBor {
 		if london {
 			burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
@@ -451,8 +454,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			output1.Sub(output1, amount),
 			output2.Add(output2, amount),
 		)
-	} else {
-		st.state.AddBalance(st.evm.Context().Coinbase, amount)
 	}
 
 	return &ExecutionResult{
