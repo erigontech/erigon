@@ -902,7 +902,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 			return discardReasons, err
 		}
 		onSenderStateChange(senderID, nonce, balance, byNonce,
-			protocolBaseFee, blockGasLimit, pending, baseFee, queued, false, discard)
+			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard)
 	}
 
 	promote(pending, baseFee, queued, pendingBaseFee, discard)
@@ -967,7 +967,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 			return err
 		}
 		onSenderStateChange(senderID, nonce, balance, byNonce,
-			protocolBaseFee, blockGasLimit, pending, baseFee, queued, true, discard)
+			protocolBaseFee, blockGasLimit, pending, baseFee, queued, discard)
 	}
 
 	return nil
@@ -1100,7 +1100,7 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*TxSlot, pending *Pending
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, byNonce *BySenderAndNonce,
-	protocolBaseFee, blockGasLimit uint64, pending *PendingPool, baseFee, queued *SubPool, unsafe bool, discard func(*metaTx, DiscardReason)) {
+	protocolBaseFee, blockGasLimit uint64, pending *PendingPool, baseFee, queued *SubPool, discard func(*metaTx, DiscardReason)) {
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint64(math.MaxUint64)
@@ -1190,18 +1190,14 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderId=%d subPool=%b", mt.Tx.IdHash, mt.Tx.senderID, mt.subPool))
 		}
 
-		// 5. Local transaction. Set to 1 if transaction is local.
-		// can't change
-
-		if !unsafe {
-			switch mt.currentSubPool {
-			case PendingSubPool:
-				pending.Updated(mt)
-			case BaseFeeSubPool:
-				baseFee.Updated(mt)
-			case QueuedSubPool:
-				queued.Updated(mt)
-			}
+		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
+		switch mt.currentSubPool {
+		case PendingSubPool:
+			pending.Updated(mt)
+		case BaseFeeSubPool:
+			baseFee.Updated(mt)
+		case QueuedSubPool:
+			queued.Updated(mt)
 		}
 		return true
 	})
