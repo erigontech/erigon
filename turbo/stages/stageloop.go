@@ -138,7 +138,6 @@ func StageLoopStep(
 
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
 
-	time.Sleep(10 * time.Millisecond)
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
 		tx, err = db.BeginRw(context.Background())
