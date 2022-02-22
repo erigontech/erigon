@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -41,6 +43,15 @@ var snapshotCommand = cli.Command{
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
+			}, debug.Flags...),
+		},
+		{
+			Name:   "recompress",
+			Action: doRecompressCommand,
+			Usage:  "Recompress existing .seg files to apply new compression rules",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
+				utils.DataDirFlag,
 			}, debug.Flags...),
 		},
 		{
@@ -129,6 +140,23 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
+func doRecompressCommand(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	dataDir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir, err := dir.OpenRw(filepath.Join(dataDir, "snapshots"))
+	if err != nil {
+		return err
+	}
+	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
+	dir.MustExist(tmpDir)
+
+	if err := recompressSegments(ctx, snapshotDir, tmpDir); err != nil {
+		log.Error("Error", "err", err)
+	}
+	return nil
+}
 func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
@@ -140,6 +168,66 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from); err != nil {
 		return err
 	}
+	return nil
+}
+
+func recompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
+	allFiles, err := snapshotsync.Segments(snapshotDir.Path)
+	if err != nil {
+		return err
+	}
+	for _, f := range allFiles {
+		f = filepath.Join(snapshotDir.Path, f)
+		outFile := f + ".tmp2"
+		if err := cpSegmentByWords(ctx, f, outFile, tmpDir); err != nil {
+			return err
+		}
+		if err = os.Remove(f); err != nil {
+			return err
+		}
+		if err = os.Rename(outFile, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
+	workers := runtime.NumCPU() - 1
+	if workers < 1 {
+		workers = 1
+	}
+	buf := make([]byte, 4096)
+	d, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	out, err := compress.NewCompressor(ctx, "", dstF, tmpDir, compress.MinPatternScore, workers)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := out.AddWord(buf); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := out.Compress(); err != nil {
+		return err
+	}
+	out.Close()
+	_ = d.Close()
+
 	return nil
 }
 
