@@ -5,12 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -93,6 +95,20 @@ func TestMerge(t *testing.T) {
 	defer d.Close()
 	a = d.Count()
 	require.Equal(5, a)
+}
+
+func TestRecompress(t *testing.T) {
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64) { createTestSegmentFile(t, from, to, Headers, dir) }
+
+	createFile(0, 1_000)
+	err := RecompressSegments(context.Background(), &dir2.Rw{Path: dir}, dir)
+	require.NoError(err)
+
+	d, err := compress.NewDecompressor(filepath.Join(dir, SegmentFileName(0, 1_000, Headers)))
+	require.NoError(err)
+	defer d.Close()
+	assert.Equal(t, 1, d.Count())
 }
 
 func TestOpenAllSnapshot(t *testing.T) {
