@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -32,7 +33,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 		}
 	*/
 	blockNumber := block.NumberU64()
-	stateReader, err := CreateStateReader(ctx, tx, blockNrOrHash, blockNumber, stateCache)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, blockNumber, stateCache)
 	if err != nil {
 		return nil, err
 	}
