@@ -48,7 +48,7 @@ func init() {
 	flags := append(debug.Flags, utils.MetricFlags...)
 	utils.CobraFlags(rootCmd, flags)
 
-	withDatadir(rootCmd)
+	withDataDir(rootCmd)
 
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
@@ -56,7 +56,7 @@ func init() {
 	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "8mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
-	withDatadir(printTorrentHashes)
+	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
@@ -64,7 +64,7 @@ func init() {
 	rootCmd.AddCommand(printTorrentHashes)
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)

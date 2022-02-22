@@ -33,7 +33,7 @@ var (
 
 func init() {
 	withBlock(history2Cmd)
-	withDatadir(history2Cmd)
+	withDataDir(history2Cmd)
 	history2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	history2Cmd.Flags().IntVar(&blockTo, "blockto", 0, "block number to stop replay of history at")
 	rootCmd.AddCommand(history2Cmd)
