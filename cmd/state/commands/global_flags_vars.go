@@ -13,6 +13,7 @@ var (
 	block           uint64
 	changeSetBucket string
 	indexBucket     string
+	snapshotBlocks  bool
 )
 
 func must(err error) {
@@ -44,4 +45,8 @@ func withCSBucket(cmd *cobra.Command) {
 
 func withIndexBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.AccountsHistory, kv.AccountsHistory+" for account and "+kv.StorageHistory+" for storage")
+}
+
+func withSnapshotBlocks(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&snapshotBlocks, "experimental.snapshot", false, "")
 }

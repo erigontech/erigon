@@ -44,6 +44,15 @@ var snapshotCommand = cli.Command{
 			}, debug.Flags...),
 		},
 		{
+			Name:   "recompress",
+			Action: doRecompressCommand,
+			Usage:  "Recompress existing .seg files to apply new compression rules",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
+				utils.DataDirFlag,
+			}, debug.Flags...),
+		},
+		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
@@ -129,6 +138,23 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
+func doRecompressCommand(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	dataDir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir, err := dir.OpenRw(filepath.Join(dataDir, "snapshots"))
+	if err != nil {
+		return err
+	}
+	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
+	dir.MustExist(tmpDir)
+
+	if err := snapshotsync.RecompressSegments(ctx, snapshotDir, tmpDir); err != nil {
+		log.Error("Error", "err", err)
+	}
+	return nil
+}
 func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
@@ -184,7 +210,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		workers = 1
 	}
 	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
-		panic(err)
+		return err
 	}
 	return nil
 }

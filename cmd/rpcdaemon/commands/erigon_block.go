@@ -62,7 +62,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	return header, nil
 }
 
-func (api *ErigonImpl) GetBlockByTimeStamp(ctx context.Context, timeStamp uint64, fullTx bool) (map[string]interface{}, error) {
+func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp uint64, fullTx bool) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

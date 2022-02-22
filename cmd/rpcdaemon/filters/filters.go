@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -160,7 +161,7 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 	}
 	for {
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
@@ -186,7 +187,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 		}
 
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
@@ -230,7 +231,7 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 		}
 
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
