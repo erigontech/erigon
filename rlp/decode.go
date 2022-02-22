@@ -1057,7 +1057,7 @@ func (s *Stream) readFull(buf []byte) (err error) {
 		nn, err = s.r.Read(buf[n:])
 		n += nn
 	}
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		if n < len(buf) {
 			err = io.ErrUnexpectedEOF
 		} else {
@@ -1074,7 +1074,7 @@ func (s *Stream) readByte() (byte, error) {
 		return 0, err
 	}
 	b, err := s.r.ReadByte()
-	if err == io.EOF {
+	if errors.Is(err, io.EOF) {
 		err = io.ErrUnexpectedEOF
 	}
 	return b, err

@@ -130,7 +130,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		}
 
 		txs, err = types.DecodeTransactions(txSlots.Txs)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 
