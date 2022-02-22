@@ -156,7 +156,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	err = s.ReopenSegments()
-	require.Error(err)
+	require.NoError(err)
 }
 
 func TestParseCompressedFileName(t *testing.T) {
