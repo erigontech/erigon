@@ -134,7 +134,10 @@ func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error)
 	return
 }
 
-func (s *RoSnapshots) ReopenIndices() error { return s.ReopenSomeIndices(AllSnapshotTypes...) }
+func (s *RoSnapshots) ReopenIndices() error {
+	s.closeIndices()
+	return s.ReopenSomeIndices(AllSnapshotTypes...)
+}
 
 func (s *RoSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	for _, bs := range s.blocks {
@@ -211,6 +214,8 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 }
 
 func (s *RoSnapshots) ReopenSegments() error {
+	s.closeSegements()
+	s.closeIndices()
 	s.blocks = nil
 	dir := s.dir
 	files, err := segmentsOfType(dir, Headers)
@@ -297,24 +302,37 @@ func (s *RoSnapshots) ReopenSegments() error {
 }
 
 func (s *RoSnapshots) Close() {
+	s.closeSegements()
+	s.closeIndices()
+	s.blocks = nil
+}
+
+func (s *RoSnapshots) closeSegements() {
 	for _, s := range s.blocks {
-		if s.HeaderHashIdx != nil {
-			s.HeaderHashIdx.Close()
-		}
 		if s.Headers != nil {
 			s.Headers.Close()
-		}
-		if s.BodyNumberIdx != nil {
-			s.BodyNumberIdx.Close()
 		}
 		if s.Bodies != nil {
 			s.Bodies.Close()
 		}
+		if s.Transactions != nil {
+			s.Transactions.Close()
+		}
+	}
+}
+func (s *RoSnapshots) closeIndices() {
+	for _, s := range s.blocks {
+		if s.HeaderHashIdx != nil {
+			s.HeaderHashIdx.Close()
+		}
+		if s.BodyNumberIdx != nil {
+			s.BodyNumberIdx.Close()
+		}
 		if s.TxnHashIdx != nil {
 			s.TxnHashIdx.Close()
 		}
-		if s.Transactions != nil {
-			s.Transactions.Close()
+		if s.TxnHash2BlockNumIdx != nil {
+			s.TxnHash2BlockNumIdx.Close()
 		}
 	}
 }

@@ -53,8 +53,6 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name SnapshotType, dir
 }
 
 func TestMerge(t *testing.T) {
-	t.Skip("to close files on win")
-
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range AllSnapshotTypes {
