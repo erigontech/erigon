@@ -221,14 +221,14 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 			if err := out.AddWord(buf); err != nil {
 				return err
 			}
-		}
 
-		select {
-		default:
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[snapshots] Recompress", "file", srcF, "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(d.Count())))
+			select {
+			default:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[snapshots] Recompress", "file", srcF, "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(d.Count())))
+			}
 		}
 		return nil
 	}); err != nil {
