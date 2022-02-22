@@ -247,6 +247,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	s.ref.len = 32
+	fmt.Printf("keyHex %x, hash = [%x]\n", keyHex, s.ref.data[:])
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
