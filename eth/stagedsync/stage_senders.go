@@ -378,9 +378,9 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		blockFrom := cfg.snapshots.BlocksAvailable() + 1
 		blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
-		if blockTo-blockFrom > 10_000 {
+		if blockTo-blockFrom > 1000 {
 			// in future we will do it in background
-			if err := snapshotsync.DumpBlocks(ctx, blockFrom, blockTo, snapshotsync.DEFAULT_SEGMENT_SIZE, cfg.tmpdir, cfg.snapshots.Dir(), cfg.db, 1); err != nil {
+			if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, cfg.tmpdir, cfg.snapshots, cfg.db, 1); err != nil {
 				return err
 			}
 			if err := cfg.snapshots.ReopenSegments(); err != nil {
@@ -389,9 +389,10 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			if err := cfg.snapshots.ReopenIndices(); err != nil {
 				return err
 			}
-			if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
-				return nil
-			}
+			//if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
+			//	return nil
+			//}
+			fmt.Printf("sn runtime dump: %d-%d\n", blockFrom, blockTo)
 		}
 	}
 

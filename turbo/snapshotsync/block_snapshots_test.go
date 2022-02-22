@@ -14,32 +14,89 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func createTestSegmentFile(t *testing.T, from, to uint64, name SnapshotType, dir string) {
+	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
+	require.NoError(t, err)
+	defer c.Close()
+	err = c.AddWord([]byte{1})
+	require.NoError(t, err)
+	err = c.Compress()
+	require.NoError(t, err)
+	idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   1,
+		BucketSize: 10,
+		TmpDir:     dir,
+		IndexFile:  filepath.Join(dir, IdxFileName(from, to, name)),
+		LeafSize:   8,
+	})
+	require.NoError(t, err)
+	err = idx.AddKey([]byte{1}, 0)
+	require.NoError(t, err)
+	err = idx.Build()
+	require.NoError(t, err)
+	if name == Transactions {
+		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   1,
+			BucketSize: 10,
+			TmpDir:     dir,
+			IndexFile:  filepath.Join(dir, IdxFileName(from, to, Transactions2Block)),
+			LeafSize:   8,
+		})
+		require.NoError(t, err)
+		err = idx.AddKey([]byte{1}, 0)
+		require.NoError(t, err)
+		err = idx.Build()
+		require.NoError(t, err)
+	}
+}
+
+func TestMerge(t *testing.T) {
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64) {
+		for _, snT := range AllSnapshotTypes {
+			createTestSegmentFile(t, from, to, snT, dir)
+		}
+	}
+
+	N := uint64(15)
+	createFile(0, 500_000)
+	for i := uint64(500_000); i < 500_000+N*50_000; i += 50_000 {
+		createFile(i, i+50_000)
+	}
+	cfg := ethconfig.Snapshot{Enabled: true}
+	s := NewRoSnapshots(cfg, dir)
+	defer s.Close()
+
+	require.NoError(s.ReopenSegments())
+	err := findAndMergeBlockSegments(context.Background(), s, dir)
+	require.NoError(err)
+	require.NoError(s.ReopenSegments())
+
+	expectedFileName := SegmentFileName(500_000, 1_000_000, Transactions)
+	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	require.NoError(err)
+	defer d.Close()
+	a := d.Count()
+	require.Equal(10, a)
+
+	err = findAndMergeBlockSegments(context.Background(), s, dir)
+	require.NoError(err)
+	require.NoError(s.ReopenSegments())
+
+	expectedFileName = SegmentFileName(1_000_000, 1_250_000, Transactions)
+	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	require.NoError(err)
+	defer d.Close()
+	a = d.Count()
+	require.Equal(5, a)
+}
+
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
-	createFile := func(from, to uint64, name SnapshotType) {
-		c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
-		require.NoError(err)
-		defer c.Close()
-		err = c.AddWord([]byte{1})
-		require.NoError(err)
-		err = c.Compress()
-		require.NoError(err)
-		idx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:   1,
-			BucketSize: 10,
-			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, IdxFileName(from, to, name)),
-			LeafSize:   8,
-		})
-		require.NoError(err)
-		err = idx.AddKey([]byte{1}, 0)
-		require.NoError(err)
-		err = idx.Build()
-		require.NoError(err)
-	}
+	createFile := func(from, to uint64, name SnapshotType) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	err := s.ReopenSegments()
@@ -99,7 +156,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	err = s.ReopenSegments()
-	require.Error(err)
+	require.NoError(err)
 }
 
 func TestParseCompressedFileName(t *testing.T) {
