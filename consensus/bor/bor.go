@@ -1138,7 +1138,6 @@ func (c *Bor) CommitStates(
 	}
 
 	chainID := c.chainConfig.ChainID.String()
-	log.Info("Event records", "count", len(eventRecords))
 	for _, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateID {
 			continue
