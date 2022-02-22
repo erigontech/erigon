@@ -128,9 +128,9 @@ type reply struct {
 	matched chan<- bool
 }
 
-func ListenV4(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
+func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 	cfg = cfg.withDefaults()
-	closeCtx, cancel := context.WithCancel(context.Background())
+	closeCtx, cancel := context.WithCancel(ctx)
 	t := &UDPv4{
 		conn:            c,
 		priv:            cfg.PrivateKey,

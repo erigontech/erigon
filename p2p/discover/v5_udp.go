@@ -123,8 +123,8 @@ type callTimeout struct {
 }
 
 // ListenV5 listens on the given connection.
-func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	t, err := newUDPv5(conn, ln, cfg)
+func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	t, err := newUDPv5(ctx, conn, ln, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -136,8 +136,8 @@ func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 }
 
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
-func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
+func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	closeCtx, cancelCloseCtx := context.WithCancel(ctx)
 	cfg = cfg.withDefaults()
 	t := &UDPv5{
 		// static fields
