@@ -397,6 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	// proof-of-stake mining
 	assembleBlockPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
+		miningStatePos.MiningConfig.Etherbase = suggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.BlockProposerParametersPOS{
@@ -532,27 +533,29 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
-		ctx, chainKv, httpRpcCfg.StateCache, blockReader,
-		ethBackendRPC,
-		backend.txPool2GrpcServer,
-		miningRPC,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var borDb kv.RoDB
-	if casted, ok := backend.engine.(*bor.Bor); ok {
-		borDb = casted.DB
-	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
-	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
-			log.Error(err.Error())
-			return
+	if httpRpcCfg.Enabled {
+		ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
+			ctx, chainKv, httpRpcCfg.StateCache, blockReader,
+			ethBackendRPC,
+			backend.txPool2GrpcServer,
+			miningRPC,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}()
+
+		var borDb kv.RoDB
+		if casted, ok := backend.engine.(*bor.Bor); ok {
+			borDb = casted.DB
+		}
+		apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
+		go func() {
+			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
+				log.Error(err.Error())
+				return
+			}
+		}()
+	}
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())

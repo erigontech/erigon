@@ -286,6 +286,7 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
 
 func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 	c := &httpcfg.HttpCfg{
+		Enabled:   ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
 		Datadir:   cfg.DataDir,
 		Chaindata: filepath.Join(cfg.DataDir, "chaindata"),
 

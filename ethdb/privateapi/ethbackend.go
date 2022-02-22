@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -228,6 +229,23 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 	return &reply
 }
 
+func (s *EthBackendServer) stageLoopIsBusy() bool {
+	for i := 0; i < 10; i++ {
+		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+			// This might happen, for example, in the following scenario:
+			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
+			// 2) We happily process NewPayload and stage loop is at the end.
+			// 3) We start processing ForkChoiceUpdated,
+			// but the stage loop hasn't moved yet from the end to the beginning of HeadersPOS
+			// and thus waitingForBeaconChain is not set yet.
+
+			// TODO(yperbasis): find a more elegant solution
+			time.Sleep(time.Millisecond)
+		}
+	}
+	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
+}
+
 // EngineNewPayloadV1, validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	s.syncCond.L.Lock()
@@ -271,7 +289,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	// If another payload is already commissioned then we just reply with syncing
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+	if s.stageLoopIsBusy() {
 		// We are still syncing a commissioned payload
 		// TODO(yperbasis): not entirely correct since per the spec:
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
@@ -341,7 +359,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// (i.e. it references an old block).
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
 
-	if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+	if s.stageLoopIsBusy() {
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil

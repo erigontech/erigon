@@ -134,7 +134,10 @@ func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error)
 	return
 }
 
-func (s *RoSnapshots) ReopenIndices() error { return s.ReopenSomeIndices(AllSnapshotTypes...) }
+func (s *RoSnapshots) ReopenIndices() error {
+	s.closeIndices()
+	return s.ReopenSomeIndices(AllSnapshotTypes...)
+}
 
 func (s *RoSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
 	for _, bs := range s.blocks {
@@ -211,23 +214,43 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 }
 
 func (s *RoSnapshots) ReopenSegments() error {
+	s.closeSegements()
+	s.closeIndices()
+	s.blocks = nil
 	dir := s.dir
 	files, err := segmentsOfType(dir, Headers)
 	if err != nil {
 		return err
 	}
 	var prevTo uint64
-	for _, f := range files {
-		from, to, _, err := ParseFileName(f, ".seg")
+	for i := range files {
+		from, to, _, err := ParseFileName(files[i], ".seg")
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
 			}
 			return err
 		}
-		if to == prevTo {
+		if to <= prevTo {
 			continue
 		}
+
+		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
+			from1, to1, _, err := ParseFileName(files[j], ".seg")
+			if err != nil {
+				if errors.Is(ErrInvalidCompressedFileName, err) {
+					continue
+				}
+				return err
+			}
+			if from1 > from {
+				break
+			}
+			to = to1
+			from = from1
+			i++
+		}
+
 		if from != prevTo { // no gaps
 			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, from)
 			//log.Debug("[open snapshots] snapshot missed before", "file", f)
@@ -279,24 +302,37 @@ func (s *RoSnapshots) ReopenSegments() error {
 }
 
 func (s *RoSnapshots) Close() {
+	s.closeSegements()
+	s.closeIndices()
+	s.blocks = nil
+}
+
+func (s *RoSnapshots) closeSegements() {
 	for _, s := range s.blocks {
-		if s.HeaderHashIdx != nil {
-			s.HeaderHashIdx.Close()
-		}
 		if s.Headers != nil {
 			s.Headers.Close()
-		}
-		if s.BodyNumberIdx != nil {
-			s.BodyNumberIdx.Close()
 		}
 		if s.Bodies != nil {
 			s.Bodies.Close()
 		}
+		if s.Transactions != nil {
+			s.Transactions.Close()
+		}
+	}
+}
+func (s *RoSnapshots) closeIndices() {
+	for _, s := range s.blocks {
+		if s.HeaderHashIdx != nil {
+			s.HeaderHashIdx.Close()
+		}
+		if s.BodyNumberIdx != nil {
+			s.BodyNumberIdx.Close()
+		}
 		if s.TxnHashIdx != nil {
 			s.TxnHashIdx.Close()
 		}
-		if s.Transactions != nil {
-			s.Transactions.Close()
+		if s.TxnHash2BlockNumIdx != nil {
+			s.TxnHash2BlockNumIdx.Close()
 		}
 	}
 }
@@ -531,10 +567,123 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 }
 
 const DEFAULT_SEGMENT_SIZE = 500_000
+const MIN_SEGMENT_SIZE = 1_000
+
+func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
+	next := (from/blocksPerFile + 1) * blocksPerFile
+	to = min(next, to)
+	return to - (to % MIN_SEGMENT_SIZE) // round down to the nearest 1k
+}
+
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int) error {
+	// in future we will do it in background
+	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenSegments(); err != nil {
+		return err
+	}
+
+	if err := findAndMergeBlockSegments(ctx, snapshots, tmpDir); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenSegments(); err != nil {
+		return err
+	}
+	chainID := uint256.NewInt(1)
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, *chainID, tmpDir, blockFrom); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenIndices(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string) error {
+	var toMergeBodies, toMergeHeaders, toMergeTxs []string
+	var from, to, stopAt uint64
+	// merge segments
+	for _, sn := range snapshots.blocks {
+		if sn.To-sn.From >= DEFAULT_SEGMENT_SIZE {
+			continue
+		}
+		if from == 0 {
+			from = sn.From
+			stopAt = chooseSegmentEnd(from, from+DEFAULT_SEGMENT_SIZE, DEFAULT_SEGMENT_SIZE)
+		}
+
+		if sn.To > stopAt {
+			break
+		}
+		to = sn.To
+		toMergeBodies = append(toMergeBodies, sn.Bodies.FilePath())
+		toMergeHeaders = append(toMergeHeaders, sn.Headers.FilePath())
+		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
+	}
+
+	if len(toMergeBodies) > 0 {
+		if err := mergeByAppendSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir); err != nil {
+			return err
+		}
+		if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir); err != nil {
+			return err
+		}
+		if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func mergeByAppendSegments(ctx context.Context, toMerge []string, targetFile string, tmpDir string) error {
+	f, err := compress.NewCompressor(ctx, "merge", targetFile, tmpDir, compress.MinPatternScore, 1)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var word = make([]byte, 0, 4096)
+	for _, cFile := range toMerge {
+		d, err := compress.NewDecompressor(cFile)
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.WithReadAhead(func() error {
+			g := d.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				if err := f.AddWord(word); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		d.Close()
+	}
+	if err = f.Compress(); err != nil {
+		return err
+	}
+	f.Close()
+
+	return nil
+}
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int) error {
-	for i := blockFrom; i < blockTo; i += blocksPerFile {
-		if err := dumpBlocksRange(ctx, i, i+blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+	if blocksPerFile == 0 {
+		return nil
+	}
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, i+blocksPerFile, blocksPerFile) {
+		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, i+blocksPerFile, blocksPerFile), tmpDir, snapshotDir, chainDB, workers); err != nil {
 			return err
 		}
 	}
@@ -558,7 +707,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	return nil
 }
 
-// DumpTxs -
+// DumpTxs - [from, to)
 // Format: hash[0]_1byte + sender_address_2bytes + txnRlp
 func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockFrom, blockTo uint64, workers int) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
@@ -670,6 +819,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	return firstTxID, nil
 }
 
+// DumpHeaders - [from, to)
 func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -730,6 +880,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	return nil
 }
 
+// DumpBodies - [from, to)
 func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string, blockFrom, blockTo uint64, workers int) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -1156,4 +1307,72 @@ func assertSegment(segmentFile string) {
 	}); err != nil {
 		panic(err)
 	}
+}
+
+func RecompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
+	allFiles, err := Segments(snapshotDir.Path)
+	if err != nil {
+		return err
+	}
+	for _, f := range allFiles {
+		f = filepath.Join(snapshotDir.Path, f)
+		outFile := f + ".tmp2"
+		if err := cpSegmentByWords(ctx, f, outFile, tmpDir); err != nil {
+			return err
+		}
+		if err = os.Remove(f); err != nil {
+			return err
+		}
+		if err = os.Rename(outFile, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
+	workers := runtime.NumCPU() - 1
+	if workers < 1 {
+		workers = 1
+	}
+	buf := make([]byte, 4096)
+	d, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	out, err := compress.NewCompressor(ctx, "", dstF, tmpDir, compress.MinPatternScore, workers)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	i := 0
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+			if err := out.AddWord(buf); err != nil {
+				return err
+			}
+
+			select {
+			default:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[snapshots] Recompress", "file", srcF, "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(d.Count())))
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := out.Compress(); err != nil {
+		return err
+	}
+	return nil
 }
