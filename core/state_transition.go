@@ -429,10 +429,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	if st.isParlia {
 		st.state.AddBalance(consensus.SystemAddress, amount)
-	} else if london && st.isBor {
-		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
-		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
-		st.state.AddBalance(burntContractAddress, burnAmount)
+	} else if st.isBor {
+		if london {
+			burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
+			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
+			st.state.AddBalance(burntContractAddress, burnAmount)
+		}
 		// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 		// add transfer log
 		output1 := input1.Clone()
