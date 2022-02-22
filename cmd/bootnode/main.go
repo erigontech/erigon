@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"net"
 	"os"
 
@@ -129,12 +130,16 @@ func main() {
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
 	}
+
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
 	if *runv5 {
-		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

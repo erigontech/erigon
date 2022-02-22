@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"errors"
@@ -82,10 +83,14 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 			return newTestTransport(remoteKey, fd, dialDest)
 		},
 	}
-	if err := server.Start(); err != nil {
+	if err := server.TestStart(); err != nil {
 		t.Fatalf("Could not start server: %v", err)
 	}
 	return server
+}
+
+func (srv *Server) TestStart() error {
+	return srv.Start(context.Background())
 }
 
 func TestServerListen(t *testing.T) {
@@ -219,11 +224,11 @@ func TestServerRemovePeerDisconnect(t *testing.T) {
 		ListenAddr:  "127.0.0.1:0",
 		Log:         testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
-	if err := srv1.Start(); err != nil {
+	if err := srv1.TestStart(); err != nil {
 		t.Fatal("cant start srv1")
 	}
 	defer srv1.Stop()
-	if err := srv2.Start(); err != nil {
+	if err := srv2.TestStart(); err != nil {
 		t.Fatal("cant start srv2")
 	}
 	defer srv2.Stop()
@@ -252,7 +257,7 @@ func TestServerAtCap(t *testing.T) {
 			Log:          testlog.Logger(t, log.LvlTrace),
 		},
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatalf("could not start: %v", err)
 	}
 	defer srv.Stop()
@@ -329,7 +334,7 @@ func TestServerPeerLimits(t *testing.T) {
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return tp },
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatalf("couldn't start server: %v", err)
 	}
 	defer srv.Stop()
@@ -440,7 +445,7 @@ func TestServerSetupConn(t *testing.T) {
 				log:          cfg.Log,
 			}
 			if !test.dontstart {
-				if err := srv.Start(); err != nil {
+				if err := srv.TestStart(); err != nil {
 					t.Fatalf("couldn't start server: %v", err)
 				}
 				defer srv.Stop()
@@ -530,7 +535,7 @@ func TestServerInboundThrottle(t *testing.T) {
 			return listenFakeAddr(network, laddr, fakeAddr)
 		},
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatal("can't start: ", err)
 	}
 	defer srv.Stop()

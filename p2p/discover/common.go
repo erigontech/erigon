@@ -17,6 +17,7 @@
 package discover
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"net"
 
@@ -63,8 +64,8 @@ func (cfg Config) withDefaults() Config {
 }
 
 // ListenUDP starts listening for discovery packets on the given UDP socket.
-func ListenUDP(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
-	return ListenV4(c, ln, cfg)
+func ListenUDP(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
+	return ListenV4(ctx, c, ln, cfg)
 }
 
 // ReadPacket is a packet that couldn't be handled. Those packets are sent to the unhandled
