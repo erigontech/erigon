@@ -193,8 +193,14 @@ func HeadersPOS(
 	select {
 	case <-ctx.Done():
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		if !useExternalTx {
+			return tx.Commit()
+		}
 		return nil
 	case <-cfg.hd.SkipCycleHack:
+		if !useExternalTx {
+			return tx.Commit()
+		}
 		return nil
 	case forkChoiceMessage = <-cfg.forkChoiceCh:
 		forkChoiceInsteadOfNewPayload = true
