@@ -101,7 +101,7 @@ func (s *SimAdapter) NewNode(config *NodeConfig) (Node, error) {
 			EnableMsgEvents: config.EnableMsgEvents,
 		},
 		// Convert node ID to string once, rather than for every log line
-		Logger: log.New("node.id", id.String()),
+		Log: log.New("node.id", id.String()),
 	})
 	if err != nil {
 		return nil, err

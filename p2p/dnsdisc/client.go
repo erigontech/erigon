@@ -50,7 +50,7 @@ type Config struct {
 	RateLimit       float64            // maximum DNS requests / second (default 3)
 	ValidSchemes    enr.IdentityScheme // acceptable ENR identity schemes (default enode.ValidSchemes)
 	Resolver        Resolver           // the DNS resolver to use (defaults to system DNS)
-	Logger          log.Logger         // destination of client log messages (defaults to root logger)
+	Log             log.Logger         // destination of client log messages (defaults to root logger)
 }
 
 // Resolver is a DNS resolver that can query TXT records.
@@ -83,8 +83,8 @@ func (cfg Config) withDefaults() Config {
 	if cfg.Resolver == nil {
 		cfg.Resolver = new(net.Resolver)
 	}
-	if cfg.Logger == nil {
-		cfg.Logger = log.Root()
+	if cfg.Log == nil {
+		cfg.Log = log.Root()
 	}
 	return cfg
 }
@@ -131,7 +131,7 @@ func (c *Client) NewIterator(urls ...string) (enode.Iterator, error) {
 // resolveRoot retrieves a root entry via DNS.
 func (c *Client) resolveRoot(ctx context.Context, loc *linkEntry) (rootEntry, error) {
 	txts, err := c.cfg.Resolver.LookupTXT(ctx, loc.domain)
-	c.cfg.Logger.Trace("Updating DNS discovery root", "tree", loc.domain, "err", err)
+	c.cfg.Log.Trace("Updating DNS discovery root", "tree", loc.domain, "err", err)
 	if err != nil {
 		return rootEntry{}, err
 	}
@@ -177,7 +177,7 @@ func (c *Client) doResolveEntry(ctx context.Context, domain, hash string) (entry
 	}
 	name := hash + "." + domain
 	txts, err := c.cfg.Resolver.LookupTXT(ctx, hash+"."+domain)
-	c.cfg.Logger.Trace("DNS discovery lookup", "name", name, "err", err)
+	c.cfg.Log.Trace("DNS discovery lookup", "name", name, "err", err)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func (it *randomIterator) nextNode() *enode.Node {
 			if err == it.ctx.Err() {
 				return nil // context canceled.
 			}
-			it.c.cfg.Logger.Trace("Error in DNS random node sync", "tree", ct.loc.domain, "err", err)
+			it.c.cfg.Log.Trace("Error in DNS random node sync", "tree", ct.loc.domain, "err", err)
 			continue
 		}
 		if n != nil {
@@ -349,7 +349,7 @@ func (it *randomIterator) waitForRootUpdates(trees []*clientTree) bool {
 	}
 
 	sleep := nextCheck.Sub(it.c.clock.Now())
-	it.c.cfg.Logger.Trace("DNS iterator waiting for root updates", "sleep", sleep, "tree", minTree.loc.domain)
+	it.c.cfg.Log.Trace("DNS iterator waiting for root updates", "sleep", sleep, "tree", minTree.loc.domain)
 	timeout := it.c.clock.NewTimer(sleep)
 	defer timeout.Stop()
 	select {

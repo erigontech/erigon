@@ -100,7 +100,7 @@ type bucket struct {
 	ips          netutil.DistinctNetSet
 }
 
-func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, log log.Logger) (*Table, error) {
+func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, logger log.Logger) (*Table, error) {
 	tab := &Table{
 		net:        t,
 		db:         db,
@@ -110,7 +110,7 @@ func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, log log.Logger
 		closed:     make(chan struct{}),
 		rand:       mrand.New(mrand.NewSource(0)),
 		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
-		log:        log,
+		log:        logger,
 	}
 	if err := tab.setFallbackNodes(bootnodes); err != nil {
 		return nil, err

@@ -871,7 +871,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,
 		Name:         nodeName,
-		Logger:       log.New(),
+		Log:          log.New(),
 		NodeDatabase: enodeDBPath,
 	}
 	if netRestrict != "" {
