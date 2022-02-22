@@ -30,6 +30,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name SnapshotType, dir
 		LeafSize:   8,
 	})
 	require.NoError(t, err)
+	defer idx.Close()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
 	err = idx.Build()
@@ -47,6 +48,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name SnapshotType, dir
 		require.NoError(t, err)
 		err = idx.Build()
 		require.NoError(t, err)
+		defer idx.Close()
 	}
 }
 
