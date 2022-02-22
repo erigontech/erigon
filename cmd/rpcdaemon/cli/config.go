@@ -88,7 +88,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
-	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, "jwt-secret", "", "Token to ensure safe connection beetwen CL and EL")
+	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, "jwt-secret", "", "Token to ensure safe connection between CL and EL")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -523,12 +523,12 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 			if err != nil {
 				return nil, err
 			}
+			defer f.Close()
 
 			_, err = f.Write(jwtVerificationKey)
 			if err != nil {
 				return nil, err
 			}
-			f.Close()
 		} else {
 			jwtVerificationKey, err = ioutil.ReadFile(cfg.JWTSecretPath)
 			if err != nil {
