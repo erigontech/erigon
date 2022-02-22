@@ -237,9 +237,6 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 	if err := out.Compress(); err != nil {
 		return err
 	}
-	out.Close()
-	_ = d.Close()
-
 	return nil
 }
 
