@@ -825,7 +825,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		return 0, err
 	}
 	if lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID != count {
-		fmt.Printf("prevTxID: %d\n", prevTxID)
 		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
 	}
 	if err := f.Compress(); err != nil {
