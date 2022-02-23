@@ -507,7 +507,9 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
 
+	fmt.Printf("applying %d headers to snapshot\n", len(headers))
 	snap, err := snap.apply(headers)
+	fmt.Printf("done.\n")
 	if err != nil {
 		return nil, err
 	}
