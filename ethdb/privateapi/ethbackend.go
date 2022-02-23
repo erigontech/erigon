@@ -419,14 +419,16 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	currentHeader := rawdb.ReadCurrentHeader(tx)
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
+	headHeader := rawdb.ReadHeader(tx, headHash, *headNumber)
 	tx.Rollback()
 
-	if currentHeader.Hash() != forkChoiceMessage.HeadBlockHash {
-		return nil, fmt.Errorf("unexpected head hash: %x vs %x", currentHeader.Hash(), forkChoiceMessage.HeadBlockHash)
+	if headHeader.Hash() != forkChoiceMessage.HeadBlockHash {
+		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoiceMessage.HeadBlockHash)
 	}
 
-	emptyHeader := core.MakeEmptyHeader(currentHeader, s.config, req.PayloadAttributes.Timestamp, nil)
+	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.Random)
 
@@ -477,7 +479,7 @@ func (s *EthBackendServer) StartProposer() {
 					log.Error("Error while opening txn in block proposer", "err", err.Error())
 					return
 				}
-				headHash := rawdb.ReadHeadHeaderHash(tx)
+				headHash := rawdb.ReadHeadBlockHash(tx)
 				tx.Rollback()
 
 				for id, payload := range s.pendingPayloads {
