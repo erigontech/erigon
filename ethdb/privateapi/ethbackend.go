@@ -249,7 +249,7 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 			// and thus waitingForBeaconChain is not set yet.
 
 			// TODO(yperbasis): find a more elegant solution
-			time.Sleep(time.Millisecond)
+			time.Sleep(2 * time.Millisecond)
 		}
 	}
 	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
