@@ -503,12 +503,13 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 			}
 			if n%checkpointInterval == 0 && len(headers) > 0 {
 				headersList = append(headersList, headers)
+				if len(headersList) > limit {
+					headersList = headersList[1:]
+					cont = true
+				}
 				headers = nil
 			}
-			if len(headersList) > limit {
-				headersList = headersList[1:]
-				cont = true
-			}
+			headers = append(headers, header)
 			n--
 			h = header.ParentHash
 		}
@@ -516,6 +517,9 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		// check if snapshot is nil
 		if snap == nil {
 			return nil, fmt.Errorf("unknown error while retrieving snapshot at block number %v", n)
+		}
+		if len(headers) > 0 {
+			headersList = append(headersList, headers)
 		}
 
 		// Previous snapshot found, apply any pending headers on top of it
