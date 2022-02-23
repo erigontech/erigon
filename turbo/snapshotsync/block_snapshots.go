@@ -432,47 +432,22 @@ func IdxFiles(dir string) (res []FMeta, err error) {
 	if err != nil {
 		return nil, err
 	}
-	var prevTo uint64
-	for i := range files {
-		f, err := ParseFileName(files[i], ".idx")
-		if err != nil {
-			if errors.Is(ErrInvalidCompressedFileName, err) {
-				continue
-			}
-			return nil, err
-		}
-		if f.From == f.To || f.To <= prevTo {
-			continue
-		}
-
-		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
-			f2, err := ParseFileName(files[j], ".seg")
-			if err != nil {
-				if errors.Is(ErrInvalidCompressedFileName, err) {
-					continue
-				}
-				return nil, err
-			}
-			if f2.From > f.From {
-				break
-			}
-			f = f2
-			i++
-		}
-
-		res = append(res, f)
-	}
-	return res, nil
+	return parseAndSkipOverlaps(files)
 }
 func Segments(dir string) (res []FMeta, err error) {
 	files, err := filesWithExt(dir, ".seg")
 	if err != nil {
 		return nil, err
 	}
+	return parseAndSkipOverlaps(files)
+}
 
+// parseAndSkipOverlaps - does parse list of files to []FMeta, also it does skip file ranges overlaps
+// to get only largest ranges and avoid overlap
+func parseAndSkipOverlaps(files []string) (res []FMeta, err error) {
 	var prevTo uint64
 	for i := range files {
-		f, err := ParseFileName(files[i], ".seg")
+		f, err := ParseFileName(files[i])
 		if err != nil {
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
@@ -484,7 +459,7 @@ func Segments(dir string) (res []FMeta, err error) {
 		}
 
 		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
-			f2, err := ParseFileName(files[j], ".seg")
+			f2, err := ParseFileName(files[j])
 			if err != nil {
 				if errors.Is(ErrInvalidCompressedFileName, err) {
 					continue
@@ -558,12 +533,9 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
-func ParseFileName(filePath, expectedExt string) (res FMeta, err error) {
+func ParseFileName(filePath string) (res FMeta, err error) {
 	_, fileName := filepath.Split(filePath)
 	ext := filepath.Ext(fileName)
-	if ext != expectedExt {
-		return res, fmt.Errorf("%w. Ext: %s", ErrInvalidCompressedFileName, ext)
-	}
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
 	if len(parts) != 4 {
