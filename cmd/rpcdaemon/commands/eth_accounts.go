@@ -110,7 +110,10 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	if err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
 	}
-	reader := adapter.NewStateReader(tx, blockNumber)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, blockNumber, api.stateCache)
+	if err != nil {
+		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+	}
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
