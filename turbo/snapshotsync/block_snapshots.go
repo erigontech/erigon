@@ -423,16 +423,19 @@ type FileInfo struct {
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".seg") }
-func noGaps(in []FileInfo) (out []FileInfo) {
+func noGaps(in []FileInfo) (out []FileInfo, err error) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
 		}
+		if f.From != prevTo { // no gaps
+			return nil, fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, f.From)
+		}
 		prevTo = f.To
 		out = append(out, f)
 	}
-	return out
+	return out, nil
 }
 func parseDir(dir string) (res []FileInfo, err error) {
 	files, err := ioutil.ReadDir(dir)
@@ -508,7 +511,7 @@ func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
 		}
 		res = append(res, f)
 	}
-	return noGaps(noOverlaps(res)), nil
+	return noGaps(noOverlaps(res))
 }
 
 func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
@@ -522,7 +525,7 @@ func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
 		}
 		res = append(res, f)
 	}
-	return noGaps(noOverlaps(res)), nil
+	return noGaps(noOverlaps(res))
 }
 
 func filterExt(in []FileInfo, expectExt string) (out []FileInfo) {
@@ -1319,7 +1322,6 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 	buf := make([]byte, 4096)
 	d, err := compress.NewDecompressor(srcF)
 	if err != nil {
-		panic(err)
 		return err
 	}
 	defer d.Close()
