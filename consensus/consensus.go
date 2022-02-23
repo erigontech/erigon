@@ -91,7 +91,7 @@ type Engine interface {
 
 	// Prepare initializes the consensus fields of a block header according to the
 	// rules of a particular engine. The changes are executed inline.
-	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall SystemCall) error
+	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)

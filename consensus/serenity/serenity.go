@@ -100,13 +100,13 @@ func (s *Serenity) VerifyUncles(chain consensus.ChainReader, header *types.Heade
 }
 
 // Prepare makes sure difficulty and nonce are correct
-func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
+func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	reached, err := IsTTDReached(chain, header.ParentHash, header.Number.Uint64()-1)
 	if err != nil {
 		return err
 	}
 	if !reached {
-		return s.eth1Engine.Prepare(chain, header, state, syscall)
+		return s.eth1Engine.Prepare(chain, header, state)
 	}
 	header.Difficulty = SerenityDifficulty
 	header.Nonce = SerenityNonce

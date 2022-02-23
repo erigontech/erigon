@@ -585,7 +585,7 @@ func (p *Parlia) VerifyUncles(chain consensus.ChainReader, header *types.Header,
 
 // Prepare initializes the consensus fields of a block header according to the
 // rules of a particular engine. The changes are executed inline.
-func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState, syscall consensus.SystemCall) error {
+func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) error {
 	header.Coinbase = p.val
 	header.Nonce = types.BlockNonce{}
 
