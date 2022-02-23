@@ -1,12 +1,15 @@
 package rpchelper
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -81,4 +84,18 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
 	reader := adapter.NewStateReader(tx, blockNumber)
 	return reader.ReadAccountData(address)
+}
+
+func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, blockNumber uint64, stateCache kvcache.Cache) (state.StateReader, error) {
+	var stateReader state.StateReader
+	if num, ok := blockNrOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+		cacheView, err := stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
+	} else {
+		stateReader = state.NewPlainState(tx, blockNumber)
+	}
+	return stateReader, nil
 }
