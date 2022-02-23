@@ -37,7 +37,7 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 // 3.0.0 - adding PoS interfaces
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
-const MaxPendingPayloads = 1024
+const MaxPendingPayloads = 128
 
 var UnknownPayload = rpc.CustomError{Code: -32001, Message: "Unknown payload"}
 
@@ -389,11 +389,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	s.forkChoiceCh <- ForkChoiceMessage{
+	forkChoiceMessage := ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
+	s.forkChoiceCh <- forkChoiceMessage
 
 	payloadStatus := <-s.statusCh
 	if payloadStatus.CriticalError != nil {
@@ -418,8 +419,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
 	currentHeader := rawdb.ReadCurrentHeader(tx)
+	tx.Rollback()
+
+	if currentHeader.Hash() != forkChoiceMessage.HeadBlockHash {
+		return nil, fmt.Errorf("unexpected head hash: %x vs %x", currentHeader.Hash(), forkChoiceMessage.HeadBlockHash)
+	}
 
 	emptyHeader := core.MakeEmptyHeader(currentHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
@@ -458,34 +463,51 @@ func (s *EthBackendServer) StartProposer() {
 		defer s.syncCond.L.Unlock()
 
 		for {
-			// Wait until we have to process new payloads
-			s.syncCond.Wait()
+			var payloadToBuild *types.Block
+			var payloadId uint64
 
-			if s.shutdown {
-				return
-			}
-
-			// Go over each payload and re-update them
-			for id, payload := range s.pendingPayloads {
-				// If we already assembled this block, let's just skip it
-				if len(payload.Transactions()) != 0 {
-					continue
-				}
-
-				random := payload.MixDigest()
-				coinbase := payload.Header().Coinbase
-				timestamp := payload.Header().Time
-
-				// Tell the stage headers to leave space for the write transaction for mining stages
-				s.skipCycleHack <- struct{}{}
-
-				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
-				if err != nil {
-					log.Warn("Error during block assembling", "err", err.Error())
+		FindPayloadToBuild:
+			for {
+				if s.shutdown {
 					return
 				}
 
-				s.pendingPayloads[id] = block
+				tx, err := s.db.BeginRo(s.ctx)
+				if err != nil {
+					log.Error("Error while opening txn in block proposer", "err", err.Error())
+					return
+				}
+				headHash := rawdb.ReadHeadHeaderHash(tx)
+				tx.Rollback()
+
+				for id, payload := range s.pendingPayloads {
+					// Non-empty transactions mean we've already assembled this block
+					if len(payload.Transactions()) == 0 && payload.ParentHash() == headHash {
+						payloadToBuild = payload
+						payloadId = id
+						break FindPayloadToBuild
+					}
+				}
+
+				// Wait until we have to process new payloads
+				s.syncCond.Wait()
+			}
+
+			// Tell the stage headers to leave space for the write transaction for mining stages
+			s.skipCycleHack <- struct{}{}
+
+			random := payloadToBuild.MixDigest()
+			coinbase := payloadToBuild.Header().Coinbase
+			timestamp := payloadToBuild.Header().Time
+
+			s.syncCond.L.Unlock()
+			block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
+			s.syncCond.L.Lock()
+
+			if err != nil {
+				log.Warn("Error during block assembling", "err", err.Error())
+			} else {
+				s.pendingPayloads[payloadId] = block
 			}
 		}
 	}()
