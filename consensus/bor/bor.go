@@ -518,12 +518,16 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 			headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 		}
 
-		fmt.Printf("applying %d headers to snapshot\n", len(headers))
+		if cont {
+			log.Info("Applying headers to snapshot", "from", headers[0].Number.Uint64(), "to", headers[len(headers)-1].Number.Uint64())
+		}
 		snap, err := snap.apply(headers)
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("done.\n")
+		if cont {
+			log.Info("Done applying headers to snapshot")
+		}
 		c.recents.Add(snap.Hash, snap)
 		// If we've generated a new checkpoint snapshot, save to disk
 		if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
