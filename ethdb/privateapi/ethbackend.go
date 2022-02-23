@@ -52,7 +52,7 @@ type EthBackendServer struct {
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
-	pendingPayloads map[uint64]pendingPayload
+	pendingPayloads map[uint64]*pendingPayload
 	// Send new Beacon Chain payloads to staged sync
 	newPayloadCh chan<- PayloadMessage
 	// Send Beacon Chain fork choice updates to staged sync
@@ -109,7 +109,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]pendingPayload), skipCycleHack: skipCycleHack,
+		pendingPayloads: make(map[uint64]*pendingPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
@@ -344,6 +344,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, &UnknownPayload
 	}
 
+	// getPayload should stop the build process
+	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.7/src/engine/specification.md#payload-building
+	payload.built = true
+
 	block := payload.block
 
 	var baseFeeReply *types2.H256
@@ -439,7 +443,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.Random)
 
-	s.pendingPayloads[s.payloadId] = pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
+	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
 	// Unpause assemble process
 	s.syncCond.Broadcast()
@@ -518,7 +522,7 @@ func (s *EthBackendServer) StartProposer() {
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
 			} else {
-				s.pendingPayloads[payloadId] = pendingPayload{block: block, built: true}
+				s.pendingPayloads[payloadId] = &pendingPayload{block: block, built: true}
 			}
 		}
 	}()
