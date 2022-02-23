@@ -1288,45 +1288,6 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	return nil
 }
 
-//nolint
-func assertAllSegments(blocks []*BlocksSnapshot, root string) {
-	wg := sync.WaitGroup{}
-	for _, sn := range blocks {
-		wg.Add(1)
-		go func(sn *BlocksSnapshot) {
-			defer wg.Done()
-			f := filepath.Join(root, SegmentFileName(sn.From, sn.To, Headers))
-			assertSegment(f)
-			f = filepath.Join(root, SegmentFileName(sn.From, sn.To, Bodies))
-			assertSegment(f)
-			f = filepath.Join(root, SegmentFileName(sn.From, sn.To, Transactions))
-			assertSegment(f)
-			fmt.Printf("done:%s\n", f)
-		}(sn)
-	}
-	wg.Wait()
-	panic("success")
-}
-
-//nolint
-func assertSegment(segmentFile string) {
-	d, err := compress.NewDecompressor(segmentFile)
-	if err != nil {
-		panic(err)
-	}
-	defer d.Close()
-	var buf []byte
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-}
-
 func RecompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
 	allFiles, err := Segments(snapshotDir.Path)
 	if err != nil {
@@ -1393,4 +1354,43 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 		return err
 	}
 	return nil
+}
+
+//nolint
+func assertAllSegments(blocks []*BlocksSnapshot, root string) {
+	wg := sync.WaitGroup{}
+	for _, sn := range blocks {
+		wg.Add(1)
+		go func(sn *BlocksSnapshot) {
+			defer wg.Done()
+			f := filepath.Join(root, SegmentFileName(sn.From, sn.To, Headers))
+			assertSegment(f)
+			f = filepath.Join(root, SegmentFileName(sn.From, sn.To, Bodies))
+			assertSegment(f)
+			f = filepath.Join(root, SegmentFileName(sn.From, sn.To, Transactions))
+			assertSegment(f)
+			fmt.Printf("done:%s\n", f)
+		}(sn)
+	}
+	wg.Wait()
+	panic("success")
+}
+
+//nolint
+func assertSegment(segmentFile string) {
+	d, err := compress.NewDecompressor(segmentFile)
+	if err != nil {
+		panic(err)
+	}
+	defer d.Close()
+	var buf []byte
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		for g.HasNext() {
+			buf, _ = g.Next(buf[:0])
+		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 }
