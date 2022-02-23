@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -666,34 +664,19 @@ var (
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
 
-// setNodeKey creates a node key from set command line flags, either loading it
-// from a file or as a specified hex value. If neither flags were provided, this
-// method returns nil and an emphemeral key is to be generated.
-func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
-	cfg.Name = nodeName
-	var (
-		hex  = ctx.GlobalString(NodeKeyHexFlag.Name)
-		file = ctx.GlobalString(NodeKeyFileFlag.Name)
-		key  *ecdsa.PrivateKey
-		err  error
-	)
-	switch {
-	case file != "" && hex != "":
-		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
-	case file != "":
-		dir.MustExist(path.Dir(file))
-		if key, err = crypto.LoadECDSA(file); err != nil {
-			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
-		}
-		cfg.PrivateKey = key
-	case hex != "":
-		if key, err = crypto.HexToECDSA(hex); err != nil {
-			Fatalf("Option %q: %v", NodeKeyHexFlag.Name, err)
-		}
-		cfg.PrivateKey = key
-	default:
-		cfg.PrivateKey = nodeKey(path.Join(datadir, "nodekey"))
+// setNodeKey loads a node key from command line flags if provided,
+// otherwise it tries to load it from datadir,
+// otherwise it generates a new key in datadir.
+func setNodeKey(ctx *cli.Context, cfg *p2p.Config, datadir string) {
+	file := ctx.GlobalString(NodeKeyFileFlag.Name)
+	hex := ctx.GlobalString(NodeKeyHexFlag.Name)
+
+	config := p2p.NodeKeyConfig{}
+	key, err := config.LoadOrParseOrGenerateAndSave(file, hex, datadir)
+	if err != nil {
+		Fatalf("%v", err)
 	}
+	cfg.PrivateKey = key
 }
 
 // setNodeUserIdent creates the user identifier from CLI flags.
@@ -862,7 +845,11 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
-	serverKey := nodeKey(filepath.Join(datadir, "nodekey"))
+
+	serverKey, err := nodeKey(datadir)
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
@@ -900,22 +887,12 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	return cfg, nil
 }
 
-func nodeKey(keyfile string) *ecdsa.PrivateKey {
-	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil {
-		panic(err)
-	}
-	if key, err := crypto.LoadECDSA(keyfile); err == nil {
-		return key
-	}
-	// No persistent key found, generate and store a new one.
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
-	}
-	if err := crypto.SaveECDSA(keyfile, key); err != nil {
-		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
-	}
-	return key
+// nodeKey loads a node key from datadir if it exists,
+// otherwise it generates a new key in datadir.
+func nodeKey(datadir string) (*ecdsa.PrivateKey, error) {
+	config := p2p.NodeKeyConfig{}
+	keyfile := config.DefaultPath(datadir)
+	return config.LoadOrGenerateAndSave(keyfile)
 }
 
 // setListenAddress creates a TCP listening address string from set command
@@ -1000,7 +977,8 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
-	setNodeKey(ctx, cfg, nodeName, datadir)
+	cfg.Name = nodeName
+	setNodeKey(ctx, cfg, datadir)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)
