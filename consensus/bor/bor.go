@@ -1016,7 +1016,7 @@ func (c *Bor) needToCommitSpan(span *Span, headerNumber uint64) bool {
 }
 
 func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
-	fmt.Printf("Getting span for block %d\n", blockNum)
+	log.Info("Getting span", "for block", blockNum)
 	var span *HeimdallSpan
 	c.spanCache.AscendGreaterOrEqual(&HeimdallSpan{Span: Span{EndBlock: blockNum}}, func(item btree.Item) bool {
 		span = item.(*HeimdallSpan)
@@ -1030,7 +1030,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 		}
 		for span == nil || span.EndBlock < blockNum {
 			var heimdallSpan HeimdallSpan
-			fmt.Printf("span with high enough block number is not loaded, fetching span %d\n", spanID)
+			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
 			if err != nil {
 				return nil, err
@@ -1047,7 +1047,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 			// Span wit low enough block number is not loaded
 			var spanID uint64 = span.ID - 1
 			var heimdallSpan HeimdallSpan
-			fmt.Printf("span with low enough block number is not loaded, fetching span %d\n", spanID)
+			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
 			if err != nil {
 				return nil, err
