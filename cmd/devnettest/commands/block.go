@@ -148,6 +148,12 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 		}
 	}
 
+	// TODO: Adding the below code to keep the 'testLogEvents' function in use
+	useFunction := false
+	if useFunction {
+		testLogEvents()
+	}
+
 	return false, nil
 }
 
