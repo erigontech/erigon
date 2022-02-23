@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -379,8 +380,10 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		blockFrom := cfg.snapshots.BlocksAvailable() + 1
 		blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
 		if blockTo-blockFrom > 1000 {
+			log.Info("[snapshots] Retire blocks", "from", blockFrom, "to", to)
+			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			// in future we will do it in background
-			if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, cfg.tmpdir, cfg.snapshots, cfg.db, 1); err != nil {
+			if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, *chainID, cfg.tmpdir, cfg.snapshots, cfg.db, 1); err != nil {
 				return err
 			}
 			if err := cfg.snapshots.ReopenSegments(); err != nil {
@@ -389,6 +392,9 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			if err := cfg.snapshots.ReopenIndices(); err != nil {
 				return err
 			}
+			// RoSnapshots must be atomic? Or we can create new instance?
+			// seed new 500K files
+
 			//if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
 			//	return nil
 			//}
