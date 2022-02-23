@@ -9,8 +9,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon/core/state"
-
 	mapset "github.com/deckarep/golang-set"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -21,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
@@ -83,6 +82,34 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params
 		tmpdir:                  tmpdir,
 		blockProposerParameters: blockProposerParameters,
 	}
+}
+
+func MakeEmptyHeader(parent *types.Header, chainConfig *params.ChainConfig, timestamp uint64, targetGasLimit *uint64) *types.Header {
+	num := parent.Number
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		Root:       parent.Root,
+		Number:     num.Add(num, common.Big1),
+		Difficulty: common.Big0,
+		Time:       timestamp,
+	}
+
+	parentGasLimit := parent.GasLimit
+	// Set baseFee and GasLimit if we are on an EIP-1559 chain
+	if chainConfig.IsLondon(header.Number.Uint64()) {
+		header.Eip1559 = true
+		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
+		if !chainConfig.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		}
+	}
+	if targetGasLimit != nil {
+		header.GasLimit = core.CalcGasLimit(parentGasLimit, *targetGasLimit)
+	} else {
+		header.GasLimit = parentGasLimit
+	}
+
+	return header
 }
 
 // SpawnMiningCreateBlockStage
@@ -187,39 +214,22 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	// re-written miner/worker.go:commitNewWork
-	var timestamp int64
-	// If we are on proof-of-stake timestamp should be already set for us
+	var timestamp uint64
 	if !isTrans {
-		timestamp = time.Now().Unix()
-		if parent.Time >= uint64(timestamp) {
-			timestamp = int64(parent.Time + 1)
+		timestamp = uint64(time.Now().Unix())
+		if parent.Time >= timestamp {
+			timestamp = parent.Time + 1
 		}
+	} else {
+		// If we are on proof-of-stake timestamp should be already set for us
+		timestamp = cfg.blockProposerParameters.Timestamp
 	}
 
-	num := parent.Number
-	header := &types.Header{
-		ParentHash: parent.Hash(),
-		Number:     num.Add(num, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasLimit, cfg.miner.MiningConfig.GasLimit),
-		Extra:      cfg.miner.MiningConfig.ExtraData,
-		Time:       uint64(timestamp),
-	}
-
-	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if cfg.chainConfig.IsLondon(header.Number.Uint64()) {
-		header.Eip1559 = true
-		header.BaseFee = misc.CalcBaseFee(&cfg.chainConfig, parent)
-		if !cfg.chainConfig.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit := parent.GasLimit * params.ElasticityMultiplier
-			header.GasLimit = core.CalcGasLimit(parentGasLimit, cfg.miner.MiningConfig.GasLimit)
-		}
-	}
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-
-	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
-	//if w.isRunning() {
+	header := MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
 	header.Coinbase = coinbase
-	//}
+	header.Extra = cfg.miner.MiningConfig.ExtraData
+
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
@@ -237,9 +247,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	if isTrans {
-		// We apply pre-made fields
 		header.MixDigest = cfg.blockProposerParameters.Random
-		header.Time = cfg.blockProposerParameters.Timestamp
 
 		current.Header = header
 		current.Uncles = nil
