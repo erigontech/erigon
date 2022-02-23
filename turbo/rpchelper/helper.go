@@ -58,7 +58,6 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			}
 		} else {
 			blockNumber = uint64(number.Int64())
-			latest = blockNumber == latestBlockNumber
 		}
 		hash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
 		if err != nil {
