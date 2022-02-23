@@ -53,12 +53,6 @@ func NewMiningState(cfg *params.MiningConfig) MiningState {
 	}
 }
 
-type BlockProposerParametersPOS struct {
-	Random                common.Hash
-	SuggestedFeeRecipient common.Address // For now, we apply a suggested recipient only if etherbase is unset
-	Timestamp             uint64
-}
-
 type MiningCreateBlockCfg struct {
 	db                      kv.RwDB
 	miner                   MiningState
@@ -67,10 +61,10 @@ type MiningCreateBlockCfg struct {
 	txPool2                 *txpool.TxPool
 	txPool2DB               kv.RoDB
 	tmpdir                  string
-	blockProposerParameters *BlockProposerParametersPOS
+	blockProposerParameters *core.BlockProposerParametersPOS
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockProposerParameters *BlockProposerParametersPOS, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockProposerParameters *core.BlockProposerParametersPOS, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:                      db,
 		miner:                   miner,
@@ -104,6 +98,10 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+	}
+
+	if cfg.blockProposerParameters != nil && cfg.blockProposerParameters.ParentHash != parent.Hash() {
+		return fmt.Errorf(fmt.Sprintf("[%s] Wrong head block", logPrefix), "headBlock", parent.Hash(), "requested", cfg.blockProposerParameters.ParentHash)
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
@@ -218,7 +216,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	if isTrans {
-		header.MixDigest = cfg.blockProposerParameters.Random
+		header.MixDigest = cfg.blockProposerParameters.PrevRandao
 
 		current.Header = header
 		current.Uncles = nil

@@ -28,7 +28,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error)
+type assemblePayloadPOSFunc func(param *core.BlockProposerParametersPOS) (*types.Block, error)
 
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
@@ -496,12 +496,15 @@ func (s *EthBackendServer) StartProposer() {
 			// Tell the stage headers to leave space for the write transaction for mining stages
 			s.skipCycleHack <- struct{}{}
 
-			random := payloadToBuild.MixDigest()
-			coinbase := payloadToBuild.Header().Coinbase
-			timestamp := payloadToBuild.Header().Time
+			param := core.BlockProposerParametersPOS{
+				ParentHash:            payloadToBuild.ParentHash(),
+				Timestamp:             payloadToBuild.Header().Time,
+				PrevRandao:            payloadToBuild.MixDigest(),
+				SuggestedFeeRecipient: payloadToBuild.Header().Coinbase,
+			}
 
 			s.syncCond.L.Unlock()
-			block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
+			block, err := s.assemblePayloadPOS(&param)
 			s.syncCond.L.Lock()
 
 			if err != nil {
