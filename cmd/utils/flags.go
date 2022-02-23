@@ -669,7 +669,7 @@ var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, Me
 // setNodeKey creates a node key from set command line flags, either loading it
 // from a file or as a specified hex value. If neither flags were provided, this
 // method returns nil and an emphemeral key is to be generated.
-func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
+func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 	cfg.Name = nodeName
 	var (
 		hex  = ctx.GlobalString(NodeKeyHexFlag.Name)
@@ -692,7 +692,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		}
 		cfg.PrivateKey = key
 	default:
-		cfg.PrivateKey = nodeKey(path.Join(dataDir, "nodekey"))
+		cfg.PrivateKey = nodeKey(path.Join(datadir, "nodekey"))
 	}
 }
 
@@ -871,7 +871,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,
 		Name:         nodeName,
-		Logger:       log.New(),
+		Log:          log.New(),
 		NodeDatabase: enodeDBPath,
 	}
 	if netRestrict != "" {
@@ -999,8 +999,8 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
-	setNodeKey(ctx, cfg, nodeName, dataDir)
+func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
+	setNodeKey(ctx, cfg, nodeName, datadir)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)

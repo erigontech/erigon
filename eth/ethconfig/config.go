@@ -224,7 +224,7 @@ type Config struct {
 	WithoutHeimdall bool
 }
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, dataDir string) consensus.Engine {
+func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -267,7 +267,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.BorConfig:
 		if chainConfig.Bor != nil {
-			borDbPath := filepath.Join(dataDir, "bor") // bor consensus path: datadir/bor
+			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
 			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
 		}
 	}

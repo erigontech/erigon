@@ -18,6 +18,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
@@ -75,7 +76,8 @@ func newUDPTest(t *testing.T) *udpTest {
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey)
-	test.udp, _ = ListenV4(test.pipe, ln, Config{
+	ctx := context.Background()
+	test.udp, _ = ListenV4(ctx, test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlError),
 	})
@@ -584,7 +586,8 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV4(socket, ln, cfg)
+	ctx := context.Background()
+	udp, err := ListenV4(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,7 +44,7 @@ geth: erigon
 
 erigon: go-version git-submodules
 	@echo "Building Erigon"
-	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
+	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
 	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
 
@@ -79,7 +79,7 @@ integration: git-submodules
 
 sentry: git-submodules
 	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
-	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
+	@rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
 	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
 
 cons: git-submodules
@@ -161,5 +161,6 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
-	# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule update --init --recursive --force || true
+	@echo "Updating git submodules"
+	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule update --quiet --init --recursive --force || true

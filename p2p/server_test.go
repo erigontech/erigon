@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"errors"
@@ -73,7 +74,7 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 		ListenAddr:  "127.0.0.1:0",
 		NoDiscovery: true,
 		PrivateKey:  newkey(),
-		Logger:      testlog.Logger(t, log.LvlError),
+		Log:         testlog.Logger(t, log.LvlError),
 	}
 	server := &Server{
 		Config:      config,
@@ -82,10 +83,14 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 			return newTestTransport(remoteKey, fd, dialDest)
 		},
 	}
-	if err := server.Start(); err != nil {
+	if err := server.TestStart(); err != nil {
 		t.Fatalf("Could not start server: %v", err)
 	}
 	return server
+}
+
+func (srv *Server) TestStart() error {
+	return srv.Start(context.Background())
 }
 
 func TestServerListen(t *testing.T) {
@@ -209,7 +214,7 @@ func TestServerRemovePeerDisconnect(t *testing.T) {
 		PrivateKey:  newkey(),
 		MaxPeers:    1,
 		NoDiscovery: true,
-		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "1"),
+		Log:         testlog.Logger(t, log.LvlTrace).New("server", "1"),
 	}}
 	srv2 := &Server{Config: Config{
 		PrivateKey:  newkey(),
@@ -217,13 +222,13 @@ func TestServerRemovePeerDisconnect(t *testing.T) {
 		NoDiscovery: true,
 		NoDial:      true,
 		ListenAddr:  "127.0.0.1:0",
-		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "2"),
+		Log:         testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
-	if err := srv1.Start(); err != nil {
+	if err := srv1.TestStart(); err != nil {
 		t.Fatal("cant start srv1")
 	}
 	defer srv1.Stop()
-	if err := srv2.Start(); err != nil {
+	if err := srv2.TestStart(); err != nil {
 		t.Fatal("cant start srv2")
 	}
 	defer srv2.Stop()
@@ -249,10 +254,10 @@ func TestServerAtCap(t *testing.T) {
 			NoDial:       true,
 			NoDiscovery:  true,
 			TrustedNodes: []*enode.Node{newNode(trustedID, "")},
-			Logger:       testlog.Logger(t, log.LvlTrace),
+			Log:          testlog.Logger(t, log.LvlTrace),
 		},
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatalf("could not start: %v", err)
 	}
 	defer srv.Stop()
@@ -325,11 +330,11 @@ func TestServerPeerLimits(t *testing.T) {
 			NoDial:      true,
 			NoDiscovery: true,
 			Protocols:   []Protocol{discard},
-			Logger:      testlog.Logger(t, log.LvlTrace),
+			Log:         testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return tp },
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatalf("couldn't start server: %v", err)
 	}
 	defer srv.Stop()
@@ -432,15 +437,15 @@ func TestServerSetupConn(t *testing.T) {
 				NoDial:      true,
 				NoDiscovery: true,
 				Protocols:   []Protocol{discard},
-				Logger:      testlog.Logger(t, log.LvlTrace),
+				Log:         testlog.Logger(t, log.LvlTrace),
 			}
 			srv := &Server{
 				Config:       cfg,
 				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt }, //nolint:scopelint
-				log:          cfg.Logger,
+				log:          cfg.Log,
 			}
 			if !test.dontstart {
-				if err := srv.Start(); err != nil {
+				if err := srv.TestStart(); err != nil {
 					t.Fatalf("couldn't start server: %v", err)
 				}
 				defer srv.Stop()
@@ -519,7 +524,7 @@ func TestServerInboundThrottle(t *testing.T) {
 			NoDial:      true,
 			NoDiscovery: true,
 			Protocols:   []Protocol{discard},
-			Logger:      testlog.Logger(t, log.LvlTrace),
+			Log:         testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport {
 			newTransportCalled <- struct{}{}
@@ -530,7 +535,7 @@ func TestServerInboundThrottle(t *testing.T) {
 			return listenFakeAddr(network, laddr, fakeAddr)
 		},
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatal("can't start: ", err)
 	}
 	defer srv.Stop()

@@ -92,7 +92,7 @@ type Config = ethconfig.Config
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *ethconfig.Config
-	logger log.Logger
+	log    log.Logger
 
 	// DB interfaces
 	chainDB    kv.RwDB
@@ -197,7 +197,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
 		config:               config,
-		logger:               logger,
+		log:                  logger,
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -498,7 +498,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,

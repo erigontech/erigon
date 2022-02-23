@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withDatadir(checkEncCmd)
+	withDataDir(checkEncCmd)
 	withStatsfile(checkEncCmd)
 	rootCmd.AddCommand(checkEncCmd)
 }
