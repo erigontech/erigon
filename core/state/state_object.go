@@ -209,6 +209,11 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
+		so.db.journal.append(storageChange{
+			account:  &so.address,
+			key:      *key,
+			prevalue: so.fakeStorage[*key],
+		})
 		so.fakeStorage[*key] = value
 		return
 	}
