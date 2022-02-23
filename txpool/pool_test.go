@@ -17,6 +17,7 @@
 package txpool
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"fmt"
@@ -106,6 +107,7 @@ func TestNonceFromAddress(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		DatabaseViewID:      txID,
 		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
@@ -229,6 +231,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		DatabaseViewID:      txID,
 		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
@@ -349,6 +352,7 @@ func TestReverseNonces(t *testing.T) {
 	change := &remote.StateChangeBatch{
 		DatabaseViewID:      txID,
 		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
 		ChangeBatch: []*remote.StateChange{
 			{BlockHeight: 0, BlockHash: h1},
 		},
@@ -447,5 +451,139 @@ func TestReverseNonces(t *testing.T) {
 		}
 	default:
 
+	}
+}
+
+// When local transaction is send to the pool, but it cannot replace existing transaction,
+// the existing transaction gets "poked" and is getting re-broadcasted
+// this is a workaround for cases when transactions are getting stuck for strage reasons
+// even though logs show they are broadcast
+func TestTxPoke(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan Hashes, 100)
+	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+
+	cfg := DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1)
+	assert.NoError(err)
+	require.True(pool != nil)
+	ctx := context.Background()
+	var txID uint64
+	_ = coreDB.View(ctx, func(tx kv.Tx) error {
+		txID = tx.ViewID()
+		return nil
+	})
+	pendingBaseFee := uint64(200000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		DatabaseViewID:      txID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       1000000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+	addr[0] = 1
+	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	assert.NoError(err)
+
+	var idHash Hashes
+	{
+		var txSlots TxSlots
+		txSlot := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 1
+		idHash = append(idHash, txSlot.IdHash[:]...)
+		txSlots.Append(txSlot, addr[:], true)
+
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(Success, reason, reason.String())
+		}
+	}
+	var promoted Hashes
+	select {
+	case promoted = <-ch:
+		if !bytes.Equal(idHash, promoted.DedupCopy()) {
+			t.Errorf("expected promoted %x, got %x", idHash, promoted)
+		}
+	default:
+		t.Errorf("expected promotion")
+	}
+	// Send the same transaction, not accepted
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 1
+		txSlots.Append(txSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(DuplicateHash, reason, reason.String())
+		}
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(2), nonce)
+	}
+	// Even though transaction not replaced, it gets poked
+	select {
+	case promoted = <-ch:
+		if !bytes.Equal(idHash, promoted) {
+			t.Errorf("expected promoted %x, got %x", idHash, promoted)
+		}
+	default:
+		t.Errorf("expected promotion")
+	}
+	// Send different transaction, but only with tip bumped
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    3000000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 2
+		txSlots.Append(txSlot, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(NotReplaced, reason, reason.String())
+		}
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(2), nonce)
+	}
+	// Even though transaction not replaced, it gets poked
+	select {
+	case promoted = <-ch:
+		if !bytes.Equal(idHash, promoted) {
+			t.Errorf("expected promoted %x, got %x", idHash, promoted)
+		}
+	default:
+		t.Errorf("expected promotion")
 	}
 }

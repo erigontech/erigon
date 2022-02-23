@@ -856,6 +856,7 @@ func (p *TxPool) cache() kvcache.Cache {
 	defer p.lock.RUnlock()
 	return p._stateCache
 }
+
 func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	newTxs TxSlots, pendingBaseFee, blockGasLimit uint64,
 	pending *PendingPool, baseFee, queued *SubPool,
@@ -880,8 +881,20 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]DiscardReason, len(newTxs.txs))
 	for i, txn := range newTxs.txs {
-		if _, ok := byHash[string(txn.IdHash[:])]; ok {
+		if found, ok := byHash[string(txn.IdHash[:])]; ok {
 			discardReasons[i] = DuplicateHash
+			// In case if the transation is stuck, "poke" it to rebroadcast
+			// TODO refactor to return the list of promoted hashes instead of using added inside the pool
+			switch found.currentSubPool {
+			case PendingSubPool:
+				if pending.adding {
+					pending.added = append(pending.added, found.Tx.IdHash[:]...)
+				}
+			case BaseFeeSubPool:
+				if baseFee.adding {
+					baseFee.added = append(baseFee.added, found.Tx.IdHash[:]...)
+				}
+			}
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i], blockNum)
@@ -990,6 +1003,18 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 		feecapThreshold := found.Tx.feeCap * (100 + p.cfg.PriceBump) / 100
 		if mt.Tx.tip < tipThreshold || mt.Tx.feeCap < feecapThreshold {
 			// Both tip and feecap need to be larger than previously to replace the transaction
+			// In case if the transation is stuck, "poke" it to rebroadcast
+			// TODO refactor to return the list of promoted hashes instead of using added inside the pool
+			switch found.currentSubPool {
+			case PendingSubPool:
+				if p.pending.adding {
+					p.pending.added = append(p.pending.added, found.Tx.IdHash[:]...)
+				}
+			case BaseFeeSubPool:
+				if p.baseFee.adding {
+					p.baseFee.added = append(p.baseFee.added, found.Tx.IdHash[:]...)
+				}
+			}
 			return NotReplaced
 		}
 
