@@ -523,6 +523,11 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		}
 
 		// Previous snapshot found, apply any pending headers on top of it
+		if cont {
+			lastList := headersList[len(headersList)-1]
+			firstList := headersList[0]
+			log.Info("Applying headers to snapshot", "from", lastList[len(lastList)-1].Number.Uint64(), "to", firstList[0].Number.Uint64())
+		}
 		for i := 0; i < len(headersList)/2; i++ {
 			headersList[i], headersList[len(headersList)-1-i] = headersList[len(headersList)-1-i], headersList[i]
 		}
@@ -530,9 +535,6 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 			hs := headersList[j]
 			for i := 0; i < len(hs)/2; i++ {
 				hs[i], hs[len(hs)-1-i] = hs[len(hs)-1-i], hs[i]
-			}
-			if cont {
-				log.Info("Applying headers to snapshot", "from", hs[0].Number.Uint64(), "to", hs[len(hs)-1].Number.Uint64())
 			}
 			var err error
 			snap, err = snap.apply(hs)
@@ -544,7 +546,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 			if err = snap.store(c.DB); err != nil {
 				return nil, err
 			}
-			log.Info("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+			log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 		}
 		if cont {
 			snap = nil
