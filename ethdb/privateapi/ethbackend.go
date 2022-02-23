@@ -1,7 +1,6 @@
 package privateapi
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,14 +18,17 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error)
+type assemblePayloadPOSFunc func(param *core.BlockProposerParametersPOS) (*types.Block, error)
 
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
@@ -36,6 +38,8 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
 
 const MaxPendingPayloads = 128
+
+var UnknownPayload = rpc.CustomError{Code: -32001, Message: "Unknown payload"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -48,7 +52,7 @@ type EthBackendServer struct {
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
-	pendingPayloads map[uint64]types2.ExecutionPayload
+	pendingPayloads map[uint64]*pendingPayload
 	// Send new Beacon Chain payloads to staged sync
 	newPayloadCh chan<- PayloadMessage
 	// Send Beacon Chain fork choice updates to staged sync
@@ -94,13 +98,18 @@ type ForkChoiceMessage struct {
 	FinalizedBlockHash common.Hash
 }
 
+type pendingPayload struct {
+	block *types.Block
+	built bool
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
 	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
+		pendingPayloads: make(map[uint64]*pendingPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
@@ -240,7 +249,7 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 			// and thus waitingForBeaconChain is not set yet.
 
 			// TODO(yperbasis): find a more elegant solution
-			time.Sleep(time.Millisecond)
+			time.Sleep(2 * time.Millisecond)
 		}
 	}
 	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
@@ -330,19 +339,45 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	for {
-		payload, ok := s.pendingPayloads[req.PayloadId]
-		if !ok {
-			return nil, fmt.Errorf("unknown payload")
-		}
-
-		if payload.BlockNumber != 0 {
-			return &payload, nil
-		}
-
-		// Wait for payloads assembling thread to finish
-		s.syncCond.Wait()
+	payload, ok := s.pendingPayloads[req.PayloadId]
+	if !ok {
+		return nil, &UnknownPayload
 	}
+
+	// getPayload should stop the build process
+	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.7/src/engine/specification.md#payload-building
+	payload.built = true
+
+	block := payload.block
+
+	var baseFeeReply *types2.H256
+	if block.Header().BaseFee != nil {
+		var baseFee uint256.Int
+		baseFee.SetFromBig(block.Header().BaseFee)
+		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
+	}
+
+	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
+	if err != nil {
+		return nil, err
+	}
+
+	return &types2.ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
+		Timestamp:     block.Header().Time,
+		Random:        gointerfaces.ConvertHashToH256(block.Header().MixDigest),
+		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
+		GasLimit:      block.GasLimit(),
+		GasUsed:       block.GasUsed(),
+		BlockNumber:   block.NumberU64(),
+		ExtraData:     block.Extra(),
+		BaseFeePerGas: baseFeeReply,
+		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+		Transactions:  encodedTransactions,
+	}, nil
 }
 
 // EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
@@ -365,11 +400,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	s.forkChoiceCh <- ForkChoiceMessage{
+	forkChoiceMessage := ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
+	s.forkChoiceCh <- forkChoiceMessage
 
 	payloadStatus := <-s.statusCh
 	if payloadStatus.CriticalError != nil {
@@ -390,13 +426,28 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 
-	s.pendingPayloads[s.payloadId] = types2.ExecutionPayload{
-		Random:    req.PayloadAttributes.Random,
-		Timestamp: req.PayloadAttributes.Timestamp,
-		Coinbase:  req.PayloadAttributes.SuggestedFeeRecipient,
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
+	headHeader := rawdb.ReadHeader(tx, headHash, *headNumber)
+	tx.Rollback()
+
+	if headHeader.Hash() != forkChoiceMessage.HeadBlockHash {
+		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoiceMessage.HeadBlockHash)
+	}
+
+	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
+	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
+	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.Random)
+
+	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
+
 	// Unpause assemble process
 	s.syncCond.Broadcast()
+
 	// successfully assembled the payload and assigned the correct id
 	return &remote.EngineForkChoiceUpdatedReply{
 		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
@@ -425,72 +476,58 @@ func (s *EthBackendServer) StartProposer() {
 		defer s.syncCond.L.Unlock()
 
 		for {
-			// Wait until we have to process new payloads
-			s.syncCond.Wait()
+			var blockToBuild *types.Block
+			var payloadId uint64
 
-			if s.shutdown {
-				return
-			}
-
-			// Go over each payload and re-update them
-			for id := range s.pendingPayloads {
-				// If we already assembled this block, let's just skip it
-				if s.pendingPayloads[id].BlockNumber != 0 {
-					continue
-				}
-				// we do not want to make a copy of the payload in the loop because it contains a lock
-				random := gointerfaces.ConvertH256ToHash(s.pendingPayloads[id].Random)
-				coinbase := gointerfaces.ConvertH160toAddress(s.pendingPayloads[id].Coinbase)
-				timestamp := s.pendingPayloads[id].Timestamp
-				// Tell the stage headers to leave space for the write transaction for mining stages
-				s.skipCycleHack <- struct{}{}
-
-				block, err := s.assemblePayloadPOS(random, coinbase, timestamp)
-				if err != nil {
-					log.Warn("Error during block assembling", "err", err.Error())
+		FindPayloadToBuild:
+			for {
+				if s.shutdown {
 					return
 				}
-				var baseFeeReply *types2.H256
-				if block.Header().BaseFee != nil {
-					var baseFee uint256.Int
-					baseFee.SetFromBig(block.Header().BaseFee)
-					baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
-				}
-				var encodedTransactions [][]byte
-				buf := bytes.NewBuffer(nil)
 
-				for _, tx := range block.Transactions() {
-					buf.Reset()
-					// EIP-2718 txn shouldn't be additionally wrapped as RLP strings,
-					// so MarshalBinary instead of rlp.Encode
-					err := tx.MarshalBinary(buf)
-					if err != nil {
-						log.Warn("Failed to marshal transaction", "err", err.Error())
-						return
+				tx, err := s.db.BeginRo(s.ctx)
+				if err != nil {
+					log.Error("Error while opening txn in block proposer", "err", err.Error())
+					return
+				}
+				headHash := rawdb.ReadHeadBlockHash(tx)
+				tx.Rollback()
+
+				for id, payload := range s.pendingPayloads {
+					if !payload.built && payload.block.ParentHash() == headHash {
+						blockToBuild = payload.block
+						payloadId = id
+						break FindPayloadToBuild
 					}
-					encodedTransactions = append(encodedTransactions, common.CopyBytes(buf.Bytes()))
 				}
-				// Set parameters accordingly to what the beacon chain told us and from what the mining stage told us
-				s.pendingPayloads[id] = types2.ExecutionPayload{
-					ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
-					Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
-					Timestamp:     s.pendingPayloads[id].Timestamp,
-					Random:        s.pendingPayloads[id].Random,
-					StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
-					ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
-					LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
-					GasLimit:      block.GasLimit(),
-					GasUsed:       block.GasUsed(),
-					BlockNumber:   block.NumberU64(),
-					ExtraData:     block.Extra(),
-					BaseFeePerGas: baseFeeReply,
-					BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
-					Transactions:  encodedTransactions,
-				}
+
+				// Wait until we have to process new payloads
+				s.syncCond.Wait()
 			}
 
-			// Broadcast the signal that an entire loop over pending payloads has been executed
-			s.syncCond.Broadcast()
+			// Tell the stage headers to leave space for the write transaction for mining stages
+			s.skipCycleHack <- struct{}{}
+
+			param := core.BlockProposerParametersPOS{
+				ParentHash:            blockToBuild.ParentHash(),
+				Timestamp:             blockToBuild.Header().Time,
+				PrevRandao:            blockToBuild.MixDigest(),
+				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
+			}
+
+			s.syncCond.L.Unlock()
+			block, err := s.assemblePayloadPOS(&param)
+			s.syncCond.L.Lock()
+
+			if err != nil {
+				log.Warn("Error during block assembling", "err", err.Error())
+			} else {
+				payload, ok := s.pendingPayloads[payloadId]
+				if ok && !payload.built { // don't update after engine_getPayload was called
+					payload.block = block
+					payload.built = true
+				}
+			}
 		}
 	}()
 }
