@@ -48,31 +48,31 @@ type BlocksSnapshot struct {
 	From, To uint64 // [from,to)
 }
 
-type SnapshotType string
+type FType string
 
 const (
-	Headers      SnapshotType = "headers"
-	Bodies       SnapshotType = "bodies"
-	Transactions SnapshotType = "transactions"
+	Headers      FType = "headers"
+	Bodies       FType = "bodies"
+	Transactions FType = "transactions"
 )
 
 const (
-	Transactions2Block SnapshotType = "transactions-to-block"
+	Transactions2Block FType = "transactions-to-block"
 )
 
-var AllSnapshotTypes = []SnapshotType{Headers, Bodies, Transactions}
-var AllIdxTypes = []SnapshotType{Headers, Bodies, Transactions, Transactions2Block}
+var AllSnapshotTypes = []FType{Headers, Bodies, Transactions}
+var AllIdxTypes = []FType{Headers, Bodies, Transactions, Transactions2Block}
 
 var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, t SnapshotType) string {
+func FileName(from, to uint64, t FType) string {
 	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, t)
 }
-func SegmentFileName(from, to uint64, t SnapshotType) string { return FileName(from, to, t) + ".seg" }
-func DatFileName(from, to uint64, t SnapshotType) string     { return FileName(from, to, t) + ".dat" }
-func IdxFileName(from, to uint64, t SnapshotType) string     { return FileName(from, to, t) + ".idx" }
+func SegmentFileName(from, to uint64, t FType) string { return FileName(from, to, t) + ".seg" }
+func DatFileName(from, to uint64, t FType) string     { return FileName(from, to, t) + ".dat" }
+func IdxFileName(from, to uint64, t FType) string     { return FileName(from, to, t) + ".idx" }
 
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
@@ -139,7 +139,7 @@ func (s *RoSnapshots) ReopenIndices() error {
 	return s.ReopenSomeIndices(AllSnapshotTypes...)
 }
 
-func (s *RoSnapshots) ReopenSomeIndices(types ...SnapshotType) (err error) {
+func (s *RoSnapshots) ReopenSomeIndices(types ...FType) (err error) {
 	for _, bs := range s.blocks {
 		for _, snapshotType := range types {
 			switch snapshotType {
@@ -217,51 +217,24 @@ func (s *RoSnapshots) ReopenSegments() error {
 	s.closeSegements()
 	s.closeIndices()
 	s.blocks = nil
-	dir := s.dir
-	files, err := segmentsOfType(dir, Headers)
+	files, err := segmentsOfType(s.dir, Headers)
 	if err != nil {
 		return err
 	}
 	var prevTo uint64
-	for i := range files {
-		from, to, _, err := ParseFileName(files[i], ".seg")
-		if err != nil {
-			if errors.Is(ErrInvalidCompressedFileName, err) {
-				continue
-			}
-			return err
-		}
-		if to <= prevTo {
-			continue
-		}
-
-		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
-			from1, to1, _, err := ParseFileName(files[j], ".seg")
-			if err != nil {
-				if errors.Is(ErrInvalidCompressedFileName, err) {
-					continue
-				}
-				return err
-			}
-			if from1 > from {
-				break
-			}
-			to = to1
-			from = from1
-			i++
-		}
-
-		if from != prevTo { // no gaps
-			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, from)
+	for _, f := range files {
+		fmt.Printf("missed? %d, %d, %d\n", f.From, f.To, prevTo)
+		if f.From != prevTo { // no gaps
+			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, f.From)
 			//log.Debug("[open snapshots] snapshot missed before", "file", f)
 			//break
 		}
-		prevTo = to
+		prevTo = f.To
 
-		blocksSnapshot := &BlocksSnapshot{From: from, To: to}
+		blocksSnapshot := &BlocksSnapshot{From: f.From, To: f.To}
 		{
-			fileName := SegmentFileName(from, to, Bodies)
-			blocksSnapshot.Bodies, err = compress.NewDecompressor(path.Join(dir, fileName))
+			fileName := SegmentFileName(f.From, f.To, Bodies)
+			blocksSnapshot.Bodies, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					break
@@ -270,8 +243,8 @@ func (s *RoSnapshots) ReopenSegments() error {
 			}
 		}
 		{
-			fileName := SegmentFileName(from, to, Headers)
-			blocksSnapshot.Headers, err = compress.NewDecompressor(path.Join(dir, fileName))
+			fileName := SegmentFileName(f.From, f.To, Headers)
+			blocksSnapshot.Headers, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					break
@@ -280,8 +253,8 @@ func (s *RoSnapshots) ReopenSegments() error {
 			}
 		}
 		{
-			fileName := SegmentFileName(from, to, Transactions)
-			blocksSnapshot.Transactions, err = compress.NewDecompressor(path.Join(dir, fileName))
+			fileName := SegmentFileName(f.From, f.To, Transactions)
+			blocksSnapshot.Transactions, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					break
@@ -414,27 +387,15 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	return nil
 }
 
-func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
+func latestSegment(dir string, ofType FType) (uint64, error) {
 	files, err := segmentsOfType(dir, ofType)
 	if err != nil {
 		return 0, err
 	}
-	var maxBlock, prevTo uint64
+	var maxBlock uint64
 	for _, f := range files {
-		from, to, _, err := ParseFileName(f, ".seg")
-		if err != nil {
-			if errors.Is(ErrInvalidCompressedFileName, err) {
-				continue
-			}
-			return 0, err
-		}
-		if from != prevTo { // no gaps
-			log.Warn("[open snapshots] snapshot missed", "type", ofType, "from", prevTo, "to", from)
-			break
-		}
-		prevTo = to
-		if maxBlock < to {
-			maxBlock = to
+		if maxBlock < f.To {
+			maxBlock = f.To
 		}
 	}
 	if maxBlock == 0 {
@@ -442,27 +403,15 @@ func latestSegment(dir string, ofType SnapshotType) (uint64, error) {
 	}
 	return maxBlock - 1, nil
 }
-func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
+func latestIdx(dir string, ofType FType) (uint64, error) {
 	files, err := idxFilesOfType(dir, ofType)
 	if err != nil {
 		return 0, err
 	}
-	var maxBlock, prevTo uint64
+	var maxBlock uint64
 	for _, f := range files {
-		from, to, _, err := ParseFileName(f, ".idx")
-		if err != nil {
-			if errors.Is(ErrInvalidCompressedFileName, err) {
-				continue
-			}
-			return 0, err
-		}
-		if from != prevTo { // no gaps
-			log.Warn("[open snapshots] snapshot missed", "type", ofType, "from", prevTo, "to", from)
-			break
-		}
-		prevTo = to
-		if maxBlock < to {
-			maxBlock = to
+		if maxBlock < f.To {
+			maxBlock = f.To
 		}
 	}
 	if maxBlock == 0 {
@@ -471,17 +420,96 @@ func latestIdx(dir string, ofType SnapshotType) (uint64, error) {
 	return maxBlock - 1, nil
 }
 
-func IdxFiles(dir string) ([]string, error) { return filesWithExt(dir, ".idx") }
-func Segments(dir string) ([]string, error) { return filesWithExt(dir, ".seg") }
+// FMeta - parsed file metadata
+type FMeta struct {
+	From, To   uint64
+	Path, Name string
+	T          FType
+}
 
-func segmentsOfType(dir string, ofType SnapshotType) ([]string, error) {
+func IdxFiles(dir string) (res []FMeta, err error) {
+	files, err := filesWithExt(dir, ".idx")
+	if err != nil {
+		return nil, err
+	}
+	var prevTo uint64
+	for i := range files {
+		f, err := ParseFileName(files[i], ".idx")
+		if err != nil {
+			if errors.Is(ErrInvalidCompressedFileName, err) {
+				continue
+			}
+			return nil, err
+		}
+		if f.From == f.To || f.To <= prevTo {
+			continue
+		}
+
+		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
+			f2, err := ParseFileName(files[j], ".seg")
+			if err != nil {
+				if errors.Is(ErrInvalidCompressedFileName, err) {
+					continue
+				}
+				return nil, err
+			}
+			if f2.From > f.From {
+				break
+			}
+			f = f2
+			i++
+		}
+
+		res = append(res, f)
+	}
+	return res, nil
+}
+func Segments(dir string) (res []FMeta, err error) {
+	files, err := filesWithExt(dir, ".seg")
+	if err != nil {
+		return nil, err
+	}
+
+	var prevTo uint64
+	for i := range files {
+		f, err := ParseFileName(files[i], ".seg")
+		if err != nil {
+			if errors.Is(ErrInvalidCompressedFileName, err) {
+				continue
+			}
+			return nil, err
+		}
+		if f.From == f.To || f.To <= prevTo {
+			continue
+		}
+
+		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
+			f2, err := ParseFileName(files[j], ".seg")
+			if err != nil {
+				if errors.Is(ErrInvalidCompressedFileName, err) {
+					continue
+				}
+				return nil, err
+			}
+			if f2.From > f.From {
+				break
+			}
+			f = f2
+			i++
+		}
+
+		res = append(res, f)
+	}
+	return res, nil
+}
+
+func segmentsOfType(dir string, ofType FType) (res []FMeta, err error) {
 	list, err := Segments(dir)
 	if err != nil {
 		return nil, err
 	}
-	var res []string
 	for _, f := range list {
-		if !strings.Contains(f, string(ofType)) {
+		if f.T != ofType {
 			continue
 		}
 		res = append(res, f)
@@ -489,14 +517,13 @@ func segmentsOfType(dir string, ofType SnapshotType) ([]string, error) {
 	return res, nil
 }
 
-func idxFilesOfType(dir string, ofType SnapshotType) ([]string, error) {
+func idxFilesOfType(dir string, ofType FType) (res []FMeta, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
 		return nil, err
 	}
-	var res []string
 	for _, f := range files {
-		if !strings.Contains(f, string(ofType)) {
+		if f.T != ofType {
 			continue
 		}
 		res = append(res, f)
@@ -531,29 +558,30 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
-func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType SnapshotType, err error) {
-	_, fileName := filepath.Split(name)
+func ParseFileName(filePath, expectedExt string) (res FMeta, err error) {
+	_, fileName := filepath.Split(filePath)
 	ext := filepath.Ext(fileName)
 	if ext != expectedExt {
-		return 0, 0, "", fmt.Errorf("%w. Ext: %s", ErrInvalidCompressedFileName, ext)
+		return res, fmt.Errorf("%w. Ext: %s", ErrInvalidCompressedFileName, ext)
 	}
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
 	if len(parts) != 4 {
-		return 0, 0, "", fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
+		return res, fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
 	}
 	if parts[0] != "v1" {
-		return 0, 0, "", fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[0])
+		return res, fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[0])
 	}
-	from, err = strconv.ParseUint(parts[1], 10, 64)
+	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return
 	}
-	to, err = strconv.ParseUint(parts[2], 10, 64)
+	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
 		return
 	}
-	switch SnapshotType(parts[3]) {
+	var snapshotType FType
+	switch FType(parts[3]) {
 	case Headers:
 		snapshotType = Headers
 	case Bodies:
@@ -561,9 +589,9 @@ func ParseFileName(name, expectedExt string) (from, to uint64, snapshotType Snap
 	case Transactions:
 		snapshotType = Transactions
 	default:
-		return 0, 0, "", fmt.Errorf("%w, unexpected snapshot suffix: %s", ErrInvalidCompressedFileName, parts[2])
+		return res, fmt.Errorf("%w, unexpected snapshot suffix: %s", ErrInvalidCompressedFileName, parts[2])
 	}
-	return from * 1_000, to * 1_000, snapshotType, nil
+	return FMeta{From: from * 1_000, To: to * 1_000, Path: filePath, Name: fileName, T: snapshotType}, nil
 }
 
 const DEFAULT_SEGMENT_SIZE = 500_000
@@ -582,7 +610,7 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int) error {
+func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int) error {
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers); err != nil {
 		return err
@@ -597,8 +625,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, tmpDir string,
 	if err := snapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	chainID := uint256.NewInt(1)
-	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, *chainID, tmpDir, blockFrom); err != nil {
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, blockFrom); err != nil {
 		return err
 	}
 	if err := snapshots.ReopenIndices(); err != nil {
@@ -637,6 +664,12 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 		if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir); err != nil {
 			return err
 		}
+		var toPrint []string
+		for _, f := range toMergeTxs {
+			_, fName := filepath.Split(f)
+			toPrint = append(toPrint, fName)
+		}
+		log.Info("[snapshots] Merge segments", "files", toPrint)
 		if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir); err != nil {
 			return err
 		}
@@ -1315,15 +1348,14 @@ func RecompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string)
 		return err
 	}
 	for _, f := range allFiles {
-		f = filepath.Join(snapshotDir.Path, f)
-		outFile := f + ".tmp2"
-		if err := cpSegmentByWords(ctx, f, outFile, tmpDir); err != nil {
+		outFile := snapshotDir.Path + ".tmp2"
+		if err := cpSegmentByWords(ctx, f.Path, outFile, tmpDir); err != nil {
 			return err
 		}
-		if err = os.Remove(f); err != nil {
+		if err = os.Remove(f.Path); err != nil {
 			return err
 		}
-		if err = os.Rename(outFile, f); err != nil {
+		if err = os.Rename(outFile, f.Path); err != nil {
 			return err
 		}
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name SnapshotType, dir string) {
+func createTestSegmentFile(t *testing.T, from, to uint64, name FType, dir string) {
 	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 	require.NoError(t, err)
 	defer c.Close()
@@ -114,7 +114,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
-	createFile := func(from, to uint64, name SnapshotType) { createTestSegmentFile(t, from, to, name, dir) }
+	createFile := func(from, to uint64, name FType) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	err := s.ReopenSegments()
@@ -179,26 +179,26 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
-	_, _, _, err := ParseFileName("a", ".seg")
+	_, err := ParseFileName("a", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-a", ".seg")
+	_, err = ParseFileName("1-a", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-a", ".seg")
+	_, err = ParseFileName("1-2-a", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-bodies.info", ".seg")
+	_, err = ParseFileName("1-2-bodies.info", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-bodies.idx", ".seg")
+	_, err = ParseFileName("1-2-bodies.idx", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-bodies.seg", ".seg")
+	_, err = ParseFileName("1-2-bodies.seg", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("v2-1-2-bodies.seg", ".seg")
+	_, err = ParseFileName("v2-1-2-bodies.seg", ".seg")
 	require.Error(err)
-	_, _, _, err = ParseFileName("v0-1-2-bodies.seg", ".seg")
+	_, err = ParseFileName("v0-1-2-bodies.seg", ".seg")
 	require.Error(err)
 
-	from, to, tt, err := ParseFileName("v1-1-2-bodies.seg", ".seg")
+	f, err := ParseFileName("v1-1-2-bodies.seg", ".seg")
 	require.NoError(err)
-	require.Equal(tt, Bodies)
-	require.Equal(1_000, int(from))
-	require.Equal(2_000, int(to))
+	require.Equal(f.T, Bodies)
+	require.Equal(1_000, int(f.From))
+	require.Equal(2_000, int(f.To))
 }
