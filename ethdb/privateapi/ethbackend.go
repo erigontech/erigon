@@ -52,7 +52,7 @@ type EthBackendServer struct {
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
-	pendingPayloads map[uint64]*types.Block
+	pendingPayloads map[uint64]pendingPayload
 	// Send new Beacon Chain payloads to staged sync
 	newPayloadCh chan<- PayloadMessage
 	// Send Beacon Chain fork choice updates to staged sync
@@ -98,13 +98,18 @@ type ForkChoiceMessage struct {
 	FinalizedBlockHash common.Hash
 }
 
+type pendingPayload struct {
+	block *types.Block
+	built bool
+}
+
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
 	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]*types.Block), skipCycleHack: skipCycleHack,
+		pendingPayloads: make(map[uint64]pendingPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
@@ -334,10 +339,12 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	block, ok := s.pendingPayloads[req.PayloadId]
+	payload, ok := s.pendingPayloads[req.PayloadId]
 	if !ok {
 		return nil, &UnknownPayload
 	}
+
+	block := payload.block
 
 	var baseFeeReply *types2.H256
 	if block.Header().BaseFee != nil {
@@ -432,7 +439,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.Random)
 
-	s.pendingPayloads[s.payloadId] = types.NewBlock(emptyHeader, nil, nil, nil)
+	s.pendingPayloads[s.payloadId] = pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
 	// Unpause assemble process
 	s.syncCond.Broadcast()
@@ -465,7 +472,7 @@ func (s *EthBackendServer) StartProposer() {
 		defer s.syncCond.L.Unlock()
 
 		for {
-			var payloadToBuild *types.Block
+			var blockToBuild *types.Block
 			var payloadId uint64
 
 		FindPayloadToBuild:
@@ -483,9 +490,8 @@ func (s *EthBackendServer) StartProposer() {
 				tx.Rollback()
 
 				for id, payload := range s.pendingPayloads {
-					// Non-empty transactions mean we've already assembled this block
-					if len(payload.Transactions()) == 0 && payload.ParentHash() == headHash {
-						payloadToBuild = payload
+					if !payload.built && payload.block.ParentHash() == headHash {
+						blockToBuild = payload.block
 						payloadId = id
 						break FindPayloadToBuild
 					}
@@ -499,10 +505,10 @@ func (s *EthBackendServer) StartProposer() {
 			s.skipCycleHack <- struct{}{}
 
 			param := core.BlockProposerParametersPOS{
-				ParentHash:            payloadToBuild.ParentHash(),
-				Timestamp:             payloadToBuild.Header().Time,
-				PrevRandao:            payloadToBuild.MixDigest(),
-				SuggestedFeeRecipient: payloadToBuild.Header().Coinbase,
+				ParentHash:            blockToBuild.ParentHash(),
+				Timestamp:             blockToBuild.Header().Time,
+				PrevRandao:            blockToBuild.MixDigest(),
+				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
 			}
 
 			s.syncCond.L.Unlock()
@@ -512,7 +518,7 @@ func (s *EthBackendServer) StartProposer() {
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
 			} else {
-				s.pendingPayloads[payloadId] = block
+				s.pendingPayloads[payloadId] = pendingPayload{block: block, built: true}
 			}
 		}
 	}()
