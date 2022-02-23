@@ -1028,7 +1028,7 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 		if c.spanCache.Len() > 0 {
 			spanID = c.spanCache.Max().(*HeimdallSpan).ID + 1
 		}
-		for span == nil || span.EndBlock >= blockNum {
+		for span == nil || span.EndBlock < blockNum {
 			var heimdallSpan HeimdallSpan
 			fmt.Printf("span with high enough block number is not loaded, fetching span %d\n", spanID)
 			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
