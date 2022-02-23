@@ -222,16 +222,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	if err != nil {
 		return err
 	}
-	var prevTo uint64
 	for _, f := range files {
-		fmt.Printf("missed? %d, %d, %d\n", f.From, f.To, prevTo)
-		if f.From != prevTo { // no gaps
-			return fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, f.From)
-			//log.Debug("[open snapshots] snapshot missed before", "file", f)
-			//break
-		}
-		prevTo = f.To
-
 		blocksSnapshot := &BlocksSnapshot{From: f.From, To: f.To}
 		{
 			fileName := SegmentFileName(f.From, f.To, Bodies)
@@ -436,7 +427,6 @@ func noGaps(in []FileInfo) (out []FileInfo) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
-			fmt.Printf("skip: %d, %d\n", prevTo, f.To)
 			continue
 		}
 		prevTo = f.To
@@ -473,10 +463,10 @@ func parseDir(dir string) (res []FileInfo, err error) {
 		if res[i].To != res[j].To {
 			return res[i].To < res[j].To
 		}
-		if res[i].Ext != res[j].Ext {
-			return res[i].Ext < res[j].Ext
+		if res[i].T != res[j].T {
+			return res[i].T < res[j].T
 		}
-		return res[i].T < res[j].T
+		return res[i].Ext < res[j].Ext
 	})
 
 	return res, nil
@@ -542,7 +532,7 @@ func filterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 		}
 		out = append(out, f)
 	}
-	return nil
+	return out
 }
 func filesWithExt(dir, expectExt string) ([]FileInfo, error) {
 	files, err := parseDir(dir)
@@ -562,8 +552,8 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
-	if len(parts) != 4 {
-		return res, fmt.Errorf("%w. Expected format: 001500-002000-bodies-v1.seg got: %s", ErrInvalidCompressedFileName, fileName)
+	if len(parts) < 4 {
+		return res, fmt.Errorf("%w. Expected format: v1-001500-002000-bodies.seg got: %s", ErrInvalidCompressedFileName, fileName)
 	}
 	if parts[0] != "v1" {
 		return res, fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[0])
