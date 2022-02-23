@@ -65,7 +65,7 @@ var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
 var AllIdxTypes = []Type{Headers, Bodies, Transactions, Transactions2Block}
 
 var (
-	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
+	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
 
 func FileName(from, to uint64, t Type) string {
@@ -440,16 +440,16 @@ func parseDir(dir string) (res []FileInfo, err error) {
 		return nil, err
 	}
 	for _, f := range files {
+		if f.IsDir() || f.Size() == 0 || len(f.Name()) < 3 {
+			continue
+		}
+
 		meta, err := ParseFileName(dir, f)
 		if err != nil {
-			log.Warn("failed to parse snapshot file name", "file", f, "err", err)
-			if errors.Is(ErrInvalidCompressedFileName, err) {
+			if errors.Is(err, ErrInvalidFileName) {
 				continue
 			}
 			return nil, err
-		}
-		if f.Size() == 0 {
-			continue
 		}
 		res = append(res, meta)
 	}
@@ -553,10 +553,10 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
 	if len(parts) < 4 {
-		return res, fmt.Errorf("%w. Expected format: v1-001500-002000-bodies.seg got: %s", ErrInvalidCompressedFileName, fileName)
+		return res, fmt.Errorf("expected format: v1-001500-002000-bodies.seg got: %s. %w", fileName, ErrInvalidFileName)
 	}
 	if parts[0] != "v1" {
-		return res, fmt.Errorf("%w. Version: %s", ErrInvalidCompressedFileName, parts[0])
+		return res, fmt.Errorf("version: %s. %w", parts[0], ErrInvalidFileName)
 	}
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
@@ -575,7 +575,7 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 	case Transactions:
 		snapshotType = Transactions
 	default:
-		return res, fmt.Errorf("%w, unexpected snapshot suffix: %s", ErrInvalidCompressedFileName, parts[2])
+		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
 	}
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, FileInfo: f, Ext: ext}, nil
 }
