@@ -277,37 +277,15 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	return newcfg, storedBlock, nil
 }
 
-func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
-	switch {
-	case g != nil:
+func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
+	if g != nil {
 		return g.Config
-	case ghash == params.MainnetGenesisHash:
-		return params.MainnetChainConfig
-	case ghash == params.SepoliaGenesisHash:
-		return params.SepoliaChainConfig
-	case ghash == params.RopstenGenesisHash:
-		return params.RopstenChainConfig
-	case ghash == params.RinkebyGenesisHash:
-		return params.RinkebyChainConfig
-	case ghash == params.GoerliGenesisHash:
-		return params.GoerliChainConfig
-	case ghash == params.BSCGenesisHash:
-		return params.BSCChainConfig
-	case ghash == params.ChapelGenesisHash:
-		return params.ChapelChainConfig
-	case ghash == params.RialtoGenesisHash:
-		return params.RialtoChainConfig
-	case ghash == params.ErigonGenesisHash:
-		return params.ErigonChainConfig
-	case ghash == params.SokolGenesisHash:
-		return params.SokolChainConfig
-	case ghash == params.FermionGenesisHash:
-		return params.FermionChainConfig
-	case ghash == params.MumbaiGenesisHash:
-		return params.MumbaiChainConfig
-	case ghash == params.BorMainnetGenesisHash:
-		return params.BorMainnetChainConfig
-	default:
+	}
+
+	config := params.ChainConfigByGenesisHash(genesisHash)
+	if config != nil {
+		return config
+	} else {
 		return params.AllEthashProtocolChanges
 	}
 }
