@@ -202,7 +202,9 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 	}, nil
 }
 
-// Gets a transistionConfiguration and pings the execution layer and checks if the execution layer has the correct configurations
+// Receives consensus layer's transition configuration and checks if the execution layer has the correct configuration.
+// Can also be used to ping the execution layer (heartbeats).
+// See https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.7/src/engine/specification.md#engine_exchangetransitionconfigurationv1
 func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beaconConfig TransitionConfiguration) (TransitionConfiguration, error) {
 	tx, err := e.db.BeginRo(ctx)
 
