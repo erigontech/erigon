@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -82,34 +81,6 @@ func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params
 		tmpdir:                  tmpdir,
 		blockProposerParameters: blockProposerParameters,
 	}
-}
-
-func MakeEmptyHeader(parent *types.Header, chainConfig *params.ChainConfig, timestamp uint64, targetGasLimit *uint64) *types.Header {
-	num := parent.Number
-	header := &types.Header{
-		ParentHash: parent.Hash(),
-		Root:       parent.Root,
-		Number:     num.Add(num, common.Big1),
-		Difficulty: common.Big0,
-		Time:       timestamp,
-	}
-
-	parentGasLimit := parent.GasLimit
-	// Set baseFee and GasLimit if we are on an EIP-1559 chain
-	if chainConfig.IsLondon(header.Number.Uint64()) {
-		header.Eip1559 = true
-		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
-		if !chainConfig.IsLondon(parent.Number.Uint64()) {
-			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
-		}
-	}
-	if targetGasLimit != nil {
-		header.GasLimit = core.CalcGasLimit(parentGasLimit, *targetGasLimit)
-	} else {
-		header.GasLimit = parentGasLimit
-	}
-
-	return header
 }
 
 // SpawnMiningCreateBlockStage
@@ -225,7 +196,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		timestamp = cfg.blockProposerParameters.Timestamp
 	}
 
-	header := MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
+	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
