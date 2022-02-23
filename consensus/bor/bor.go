@@ -434,7 +434,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 	)
 
 	cont := true // Continue applying snapshots
-	limit := 200_000_000
+	limit := 200_000
 	for cont {
 		var headers []*types.Header
 		h := hash
