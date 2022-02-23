@@ -439,6 +439,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		var headers []*types.Header
 		h := hash
 		n := number
+		p := parents
 		cont = false
 		for snap == nil {
 			// If an in-memory snapshot was found, use that
@@ -485,13 +486,13 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 
 			// No snapshot for this header, gather the header and move backward
 			var header *types.Header
-			if len(parents) > 0 {
+			if len(p) > 0 {
 				// If we have explicit parents, pick from there (enforced)
-				header = parents[len(parents)-1]
+				header = p[len(p)-1]
 				if header.Hash() != h || header.Number.Uint64() != n {
 					return nil, consensus.ErrUnknownAncestor
 				}
-				parents = parents[:len(parents)-1]
+				p = p[:len(p)-1]
 			} else {
 				// No explicit parents (or no more left), reach out to the database
 				header = chain.GetHeader(h, n)
@@ -530,7 +531,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		}
 		c.recents.Add(snap.Hash, snap)
 		// If we've generated a new checkpoint snapshot, save to disk
-		if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+		if !cont && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
 			if err = snap.store(c.DB); err != nil {
 				return nil, err
 			}
