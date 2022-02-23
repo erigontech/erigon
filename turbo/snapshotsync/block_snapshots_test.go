@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name FType, dir string) {
+func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string) {
 	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 	require.NoError(t, err)
 	defer c.Close()
@@ -116,7 +116,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
-	createFile := func(from, to uint64, name FType) { createTestSegmentFile(t, from, to, name, dir) }
+	createFile := func(from, to uint64, name Type) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	err := s.ReopenSegments()

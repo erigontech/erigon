@@ -33,8 +33,8 @@ func (m SnapshotMode) ToString() string {
 	return mode
 }
 
-func (m SnapshotMode) ToSnapshotTypes() []snapshotsync.FType {
-	var types []snapshotsync.FType
+func (m SnapshotMode) ToSnapshotTypes() []snapshotsync.Type {
+	var types []snapshotsync.Type
 	if m.Headers {
 		types = append(types, snapshotsync.SnapshotType_headers)
 	}
@@ -50,7 +50,7 @@ func (m SnapshotMode) ToSnapshotTypes() []snapshotsync.FType {
 	return types
 }
 
-func FromSnapshotTypes(st []snapshotsync.FType) SnapshotMode {
+func FromSnapshotTypes(st []snapshotsync.Type) SnapshotMode {
 	var mode SnapshotMode
 	for i := range st {
 		switch st[i] {

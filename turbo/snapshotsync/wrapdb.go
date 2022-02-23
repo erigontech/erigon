@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	BucketConfigs = map[snapshotsync.FType]kv.TableCfg{
+	BucketConfigs = map[snapshotsync.Type]kv.TableCfg{
 		snapshotsync.SnapshotType_bodies: {
 			kv.BlockBody: kv.TableCfgItem{},
 			kv.EthTx:     kv.TableCfgItem{},
@@ -31,7 +31,7 @@ var (
 	}
 )
 
-func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[snapshotsync.FType]*snapshotsync.SnapshotsInfo) (kv.RwDB, error) {
+func WrapBySnapshotsFromDownloader(db kv.RwDB, snapshots map[snapshotsync.Type]*snapshotsync.SnapshotsInfo) (kv.RwDB, error) {
 	snKV := snapshotdb.NewSnapshotKV().DB(db)
 	for k, v := range snapshots {
 		log.Info("Wrap db by", "snapshot", k.String(), "dir", v.Dbpath)

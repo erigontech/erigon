@@ -49,31 +49,31 @@ type BlocksSnapshot struct {
 	From, To uint64 // [from,to)
 }
 
-type FType string
+type Type string
 
 const (
-	Headers      FType = "headers"
-	Bodies       FType = "bodies"
-	Transactions FType = "transactions"
+	Headers      Type = "headers"
+	Bodies       Type = "bodies"
+	Transactions Type = "transactions"
 )
 
 const (
-	Transactions2Block FType = "transactions-to-block"
+	Transactions2Block Type = "transactions-to-block"
 )
 
-var AllSnapshotTypes = []FType{Headers, Bodies, Transactions}
-var AllIdxTypes = []FType{Headers, Bodies, Transactions, Transactions2Block}
+var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
+var AllIdxTypes = []Type{Headers, Bodies, Transactions, Transactions2Block}
 
 var (
 	ErrInvalidCompressedFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, t FType) string {
+func FileName(from, to uint64, t Type) string {
 	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, t)
 }
-func SegmentFileName(from, to uint64, t FType) string { return FileName(from, to, t) + ".seg" }
-func DatFileName(from, to uint64, t FType) string     { return FileName(from, to, t) + ".dat" }
-func IdxFileName(from, to uint64, t FType) string     { return FileName(from, to, t) + ".idx" }
+func SegmentFileName(from, to uint64, t Type) string { return FileName(from, to, t) + ".seg" }
+func DatFileName(from, to uint64, t Type) string     { return FileName(from, to, t) + ".dat" }
+func IdxFileName(from, to uint64, t Type) string     { return FileName(from, to, t) + ".idx" }
 
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
@@ -140,7 +140,7 @@ func (s *RoSnapshots) ReopenIndices() error {
 	return s.ReopenSomeIndices(AllSnapshotTypes...)
 }
 
-func (s *RoSnapshots) ReopenSomeIndices(types ...FType) (err error) {
+func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 	for _, bs := range s.blocks {
 		for _, snapshotType := range types {
 			switch snapshotType {
@@ -379,7 +379,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	return nil
 }
 
-func latestSegment(dir string, ofType FType) (uint64, error) {
+func latestSegment(dir string, ofType Type) (uint64, error) {
 	files, err := segmentsOfType(dir, ofType)
 	if err != nil {
 		return 0, err
@@ -395,7 +395,7 @@ func latestSegment(dir string, ofType FType) (uint64, error) {
 	}
 	return maxBlock - 1, nil
 }
-func latestIdx(dir string, ofType FType) (uint64, error) {
+func latestIdx(dir string, ofType Type) (uint64, error) {
 	files, err := idxFilesOfType(dir, ofType)
 	if err != nil {
 		return 0, err
@@ -418,7 +418,7 @@ type FileInfo struct {
 	Version   uint8
 	From, To  uint64
 	Path, Ext string
-	T         FType
+	T         Type
 }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".idx") }
@@ -497,7 +497,7 @@ func noOverlaps(in []FileInfo) (res []FileInfo) {
 	return res
 }
 
-func segmentsOfType(dir string, ofType FType) (res []FileInfo, err error) {
+func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	list, err := Segments(dir)
 	if err != nil {
 		return nil, err
@@ -511,7 +511,7 @@ func segmentsOfType(dir string, ofType FType) (res []FileInfo, err error) {
 	return noGaps(noOverlaps(res)), nil
 }
 
-func idxFilesOfType(dir string, ofType FType) (res []FileInfo, err error) {
+func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
 		return nil, err
@@ -566,8 +566,8 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 	if err != nil {
 		return
 	}
-	var snapshotType FType
-	switch FType(parts[3]) {
+	var snapshotType Type
+	switch Type(parts[3]) {
 	case Headers:
 		snapshotType = Headers
 	case Bodies:
