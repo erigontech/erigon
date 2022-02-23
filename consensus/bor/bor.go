@@ -522,7 +522,8 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		if cont {
 			log.Info("Applying headers to snapshot", "from", headers[0].Number.Uint64(), "to", headers[len(headers)-1].Number.Uint64())
 		}
-		snap, err := snap.apply(headers)
+		var err error
+		snap, err = snap.apply(headers)
 		if err != nil {
 			return nil, err
 		}
