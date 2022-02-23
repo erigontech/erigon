@@ -24,7 +24,6 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -48,7 +47,6 @@ var (
 	GoerliGenesisHash     = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	ErigonGenesisHash     = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash      = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
-	KovanGenesisHash      = common.HexToHash("0xa3c565fc15c7478862d50ccd6561e3c06b24cc509bf388941c25ea985ce32cb9")
 	FermionGenesisHash    = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 	BSCGenesisHash        = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash     = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
@@ -63,7 +61,6 @@ var (
 
 var (
 	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
-	KovanGenesisStateRoot   = common.HexToHash("0x2480155b48a1cea17d67dbfdfaafe821c1d19cdd478c5358e8ec56dec24502b2")
 	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
 )
 
@@ -338,27 +335,6 @@ var (
 		Aura:              &AuRaConfig{},
 	}
 
-	KovanChainConfig = &ChainConfig{
-		ChainName:           networkname.KovanChainName,
-		ChainID:             big.NewInt(42),
-		Consensus:           AuRaConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(5067000),
-		ConstantinopleBlock: big.NewInt(9200000),
-		PetersburgBlock:     big.NewInt(10255201),
-		IstanbulBlock:       big.NewInt(14111141),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(24770900),
-		LondonBlock:         big.NewInt(26741100),
-		ArrowGlacierBlock:   nil,
-		Aura:                &AuRaConfig{},
-	}
-
 	FermionChainConfig = &ChainConfig{
 		ChainName:           networkname.FermionChainName,
 		ChainID:             big.NewInt(1212120),
@@ -616,9 +592,10 @@ type ChainConfig struct {
 	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
 
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
-	TerminalTotalDifficulty *big.Int        `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
-	TerminalBlockHash       *common.Hash    `json:"terminalBlockHash,omitempty"`       // The hash of the last POW block
-	TerminalBlockNumber     *hexutil.Uint64 `json:"terminalBlockNumber,omitempty"`     // The block number of the last POW block
+	TerminalTotalDifficulty *big.Int    `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
+	TerminalBlockHash       common.Hash `json:"terminalBlockHash,omitempty"`       // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
+	TerminalBlockNumber     uint64      `json:"terminalBlockNumber,omitempty"`     // Enforce particular terminal block; see TERMINAL_BLOCK_NUMBER in EIP-3675
+
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`

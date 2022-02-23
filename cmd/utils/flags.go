@@ -32,7 +32,7 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -359,11 +359,34 @@ var (
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
 	}
+	RpcAccessListFlag = cli.StringFlag{
+		Name:  "rpc.accessList",
+		Usage: "Specify granular (method-by-method) API allowlist",
+	}
 
 	RpcGasCapFlag = cli.UintFlag{
 		Name:  "rpc.gascap",
 		Usage: "Sets a cap on gas that can be used in eth_call/estimateGas",
 		Value: 50000000,
+	}
+	RpcTraceCompatFlag = cli.BoolFlag{
+		Name:  "trace.compat",
+		Usage: "Bug for bug compatibility with OE for trace_ routines",
+	}
+
+	StarknetGrpcAddressFlag = cli.StringFlag{
+		Name:  "starknet.grpc.address",
+		Usage: "Starknet GRPC address",
+		Value: "127.0.0.1:6066",
+	}
+
+	TevmFlag = cli.BoolFlag{
+		Name:  "experimental.tevm",
+		Usage: "Enables Transpiled EVM experiment",
+	}
+	TxpoolApiAddrFlag = cli.StringFlag{
+		Name:  "txpool.api.addr",
+		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
 	}
 
 	TraceMaxtracesFlag = cli.UintFlag{
@@ -646,7 +669,7 @@ var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, Me
 // setNodeKey creates a node key from set command line flags, either loading it
 // from a file or as a specified hex value. If neither flags were provided, this
 // method returns nil and an emphemeral key is to be generated.
-func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
+func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 	cfg.Name = nodeName
 	var (
 		hex  = ctx.GlobalString(NodeKeyHexFlag.Name)
@@ -658,7 +681,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 	case file != "" && hex != "":
 		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
 	case file != "":
-		common2.MustExist(path.Dir(file))
+		dir.MustExist(path.Dir(file))
 		if key, err = crypto.LoadECDSA(file); err != nil {
 			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
 		}
@@ -669,7 +692,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
 		}
 		cfg.PrivateKey = key
 	default:
-		cfg.PrivateKey = nodeKey(path.Join(dataDir, "nodekey"))
+		cfg.PrivateKey = nodeKey(path.Join(datadir, "nodekey"))
 	}
 }
 
@@ -714,8 +737,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -761,8 +782,6 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.ErigonBootnodes
 		case networkname.SokolChainName:
 			urls = params.SokolBootnodes
-		case networkname.KovanChainName:
-			urls = params.KovanBootnodes
 		case networkname.FermionChainName:
 			urls = params.FermionBootnodes
 		case networkname.MumbaiChainName:
@@ -852,7 +871,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,
 		Name:         nodeName,
-		Logger:       log.New(),
+		Log:          log.New(),
 		NodeDatabase: enodeDBPath,
 	}
 	if netRestrict != "" {
@@ -980,8 +999,8 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
-	setNodeKey(ctx, cfg, nodeName, dataDir)
+func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
+	setNodeKey(ctx, cfg, nodeName, datadir)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)
@@ -1055,8 +1074,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		filepath.Join(datadir, "goerli")
 	case networkname.SokolChainName:
 		return filepath.Join(datadir, "sokol")
-	case networkname.KovanChainName:
-		return filepath.Join(datadir, "kovan")
 	case networkname.FermionChainName:
 		return filepath.Join(datadir, "fermion")
 	case networkname.MumbaiChainName:
@@ -1387,9 +1404,15 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
 		cfg.Snapshot.Enabled = true
+	}
+	if cfg.Snapshot.Enabled {
+		snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
+		if err != nil {
+			panic(err)
+		}
+		cfg.SnapshotDir = snDir
 	}
 	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
 		cfg.Snapshot.RetireEnabled = true
@@ -1419,12 +1442,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 
 	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		torrentCfg, pieceCompletion, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			panic(err)
 		}
 		cfg.Torrent = torrentCfg
-		cfg.TorrentPieceCompletionStorage = pieceCompletion
+		cfg.TorrentDirCloser = dirCloser
 	}
 
 	nodeConfig.Http.Snapshot = cfg.Snapshot
@@ -1537,11 +1560,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			cfg.NetworkID = 77
 		}
 		cfg.Genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 42
-		}
-		cfg.Genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1212120
@@ -1641,8 +1659,6 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		genesis = core.DefaultErigonGenesisBlock()
 	case networkname.SokolChainName:
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		genesis = core.DefaultFermionGenesisBlock()
 	case networkname.MumbaiChainName:

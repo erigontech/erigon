@@ -18,6 +18,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"errors"
@@ -102,7 +103,8 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.Set(enr.UDP(realaddr.Port))
-	udp, err := ListenV5(socket, ln, cfg)
+	ctx := context.Background()
+	udp, err := ListenV5(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -726,7 +728,8 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln := enode.NewLocalNode(test.db, test.localkey)
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
-	test.udp, err = ListenV5(test.pipe, ln, Config{
+	ctx := context.Background()
+	test.udp, err = ListenV5(ctx, test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlError),
 		ValidSchemes: enode.ValidSchemesForTesting,

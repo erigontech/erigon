@@ -19,6 +19,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -57,6 +58,8 @@ type PeerInfo struct {
 	rw        p2p.MsgReadWriter
 
 	removed    chan struct{} // close this channel on remove
+	ctx        context.Context
+	ctxCancel  context.CancelFunc
 	removeOnce sync.Once
 	// each peer has own worker (goroutine) - all funcs from this queue will execute on this worker
 	// if this queue is full (means peer is slow) - old messages will be dropped
@@ -65,7 +68,9 @@ type PeerInfo struct {
 }
 
 func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
-	p := &PeerInfo{peer: peer, rw: rw, removed: make(chan struct{}), tasks: make(chan func(), 16)}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	p := &PeerInfo{peer: peer, rw: rw, removed: make(chan struct{}), tasks: make(chan func(), 16), ctx: ctx, ctxCancel: cancel}
 	go func() { // each peer has own worker, then slow
 		for f := range p.tasks {
 			f()
@@ -125,7 +130,7 @@ func (pi *PeerInfo) Remove() {
 	defer pi.lock.Unlock()
 	pi.removeOnce.Do(func() {
 		close(pi.removed)
-		close(pi.tasks)
+		pi.ctxCancel()
 	})
 }
 
@@ -134,6 +139,11 @@ func (pi *PeerInfo) Async(f func()) {
 	defer pi.lock.Unlock()
 	select {
 	case <-pi.removed: // noop if peer removed
+	case <-pi.ctx.Done():
+		if pi.tasks != nil {
+			close(pi.tasks)
+			pi.tasks = nil
+		}
 	case pi.tasks <- f:
 		if len(pi.tasks) == cap(pi.tasks) { // if channel full - loose old messages
 			for i := 0; i < cap(pi.tasks)/2; i++ {
@@ -181,8 +191,6 @@ func makeP2PServer(
 		urls = params.RinkebyBootnodes
 	case params.SokolGenesisHash:
 		urls = params.SokolBootnodes
-	case params.KovanGenesisHash:
-		urls = params.KovanBootnodes
 	case params.FermionGenesisHash:
 		urls = params.FermionBootnodes
 	case params.MumbaiGenesisHash:
@@ -601,7 +609,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 
 // Sentry creates and runs standalone sentry
 func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
-	libcommon.MustExist(datadir)
+	dir.MustExist(datadir)
 	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
@@ -853,7 +861,7 @@ func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_s
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
 	ss.lock.Lock()
@@ -880,7 +888,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 		}
 
 		// Add protocol
-		if err = srv.Start(); err != nil {
+		if err = srv.Start(ctx); err != nil {
 			srv.Stop()
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}

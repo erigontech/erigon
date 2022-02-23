@@ -13,6 +13,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -50,11 +51,12 @@ type HeadersCfg struct {
 	batchSize             datasize.ByteSize
 	noP2PDiscovery        bool
 	tmpdir                string
+	snapshotDir           *dir.Rw
 	newPayloadCh          chan privateapi.PayloadMessage
 	forkChoiceCh          chan privateapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
-	snapshots          *snapshotsync.AllSnapshots
+	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
@@ -73,10 +75,11 @@ func StageHeadersCfg(
 	newPayloadCh chan privateapi.PayloadMessage,
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
-	snapshots *snapshotsync.AllSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
+	snapshotDir *dir.Rw,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                    db,
@@ -96,6 +99,7 @@ func StageHeadersCfg(
 		snapshotDownloader:    snapshotDownloader,
 		blockReader:           blockReader,
 		snapshotHashesCfg:     snapshothashes.KnownConfig(chainConfig.ChainName),
+		snapshotDir:           snapshotDir,
 	}
 }
 
@@ -189,8 +193,14 @@ func HeadersPOS(
 	select {
 	case <-ctx.Done():
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		if !useExternalTx {
+			return tx.Commit()
+		}
 		return nil
 	case <-cfg.hd.SkipCycleHack:
+		if !useExternalTx {
+			return tx.Commit()
+		}
 		return nil
 	case forkChoiceMessage = <-cfg.forkChoiceCh:
 		forkChoiceInsteadOfNewPayload = true
@@ -1013,7 +1023,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := cfg.snapshots.BuildIndices(ctx, *chainID, cfg.tmpdir, 0); err != nil {
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, 0); err != nil {
 				return err
 			}
 		}

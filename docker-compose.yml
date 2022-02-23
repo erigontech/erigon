@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:8.3.4
+    image: grafana/grafana:8.4.0
     user: 1000:1000 # Uses erigon user from Dockerfile
     ports:
       - "3000:3000"

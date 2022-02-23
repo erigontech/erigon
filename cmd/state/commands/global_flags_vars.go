@@ -13,6 +13,7 @@ var (
 	block           uint64
 	changeSetBucket string
 	indexBucket     string
+	snapshotBlocks  bool
 )
 
 func must(err error) {
@@ -25,7 +26,7 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "specifies a block number for operation")
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 
@@ -44,4 +45,8 @@ func withCSBucket(cmd *cobra.Command) {
 
 func withIndexBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&indexBucket, "index-bucket", kv.AccountsHistory, kv.AccountsHistory+" for account and "+kv.StorageHistory+" for storage")
+}
+
+func withSnapshotBlocks(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&snapshotBlocks, "experimental.snapshot", false, "")
 }

@@ -144,7 +144,7 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	}
 	for {
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}

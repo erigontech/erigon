@@ -282,7 +282,7 @@ var cmdSetPrune = &cobra.Command{
 }
 
 func init() {
-	withDatadir(cmdPrintStages)
+	withDataDir(cmdPrintStages)
 	withChain(cmdPrintStages)
 	withHeimdall(cmdPrintStages)
 	rootCmd.AddCommand(cmdPrintStages)
@@ -291,27 +291,27 @@ func init() {
 	withReset(cmdStageSenders)
 	withBlock(cmdStageSenders)
 	withUnwind(cmdStageSenders)
-	withDatadir(cmdStageSenders)
+	withDataDir(cmdStageSenders)
 	withChain(cmdStageSenders)
 	withHeimdall(cmdStageSenders)
 
 	rootCmd.AddCommand(cmdStageSenders)
 
-	withDatadir(cmdStageHeaders)
+	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
 
 	rootCmd.AddCommand(cmdStageHeaders)
 
-	withDatadir(cmdStageBodies)
+	withDataDir(cmdStageBodies)
 	withUnwind(cmdStageBodies)
 	withChain(cmdStageBodies)
 	withHeimdall(cmdStageBodies)
 
 	rootCmd.AddCommand(cmdStageBodies)
 
-	withDatadir(cmdStageExec)
+	withDataDir(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
 	withUnwind(cmdStageExec)
@@ -323,7 +323,7 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageExec)
 
-	withDatadir(cmdStageHashState)
+	withDataDir(cmdStageHashState)
 	withReset(cmdStageHashState)
 	withBlock(cmdStageHashState)
 	withUnwind(cmdStageHashState)
@@ -334,7 +334,7 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageHashState)
 
-	withDatadir(cmdStageTrie)
+	withDataDir(cmdStageTrie)
 	withReset(cmdStageTrie)
 	withBlock(cmdStageTrie)
 	withUnwind(cmdStageTrie)
@@ -345,7 +345,7 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageTrie)
 
-	withDatadir(cmdStageHistory)
+	withDataDir(cmdStageHistory)
 	withReset(cmdStageHistory)
 	withBlock(cmdStageHistory)
 	withUnwind(cmdStageHistory)
@@ -355,7 +355,7 @@ func init() {
 
 	rootCmd.AddCommand(cmdStageHistory)
 
-	withDatadir(cmdLogIndex)
+	withDataDir(cmdLogIndex)
 	withReset(cmdLogIndex)
 	withBlock(cmdLogIndex)
 	withUnwind(cmdLogIndex)
@@ -365,7 +365,7 @@ func init() {
 
 	rootCmd.AddCommand(cmdLogIndex)
 
-	withDatadir(cmdCallTraces)
+	withDataDir(cmdCallTraces)
 	withReset(cmdCallTraces)
 	withBlock(cmdCallTraces)
 	withUnwind(cmdCallTraces)
@@ -378,28 +378,28 @@ func init() {
 	withReset(cmdStageTxLookup)
 	withBlock(cmdStageTxLookup)
 	withUnwind(cmdStageTxLookup)
-	withDatadir(cmdStageTxLookup)
+	withDataDir(cmdStageTxLookup)
 	withPruneTo(cmdStageTxLookup)
 	withChain(cmdStageTxLookup)
 	withHeimdall(cmdStageTxLookup)
 
 	rootCmd.AddCommand(cmdStageTxLookup)
 
-	withDatadir(cmdPrintMigrations)
+	withDataDir(cmdPrintMigrations)
 	rootCmd.AddCommand(cmdPrintMigrations)
 
-	withDatadir(cmdRemoveMigration)
+	withDataDir(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
 	withChain(cmdRemoveMigration)
 	withHeimdall(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
-	withDatadir(cmdRunMigrations)
+	withDataDir(cmdRunMigrations)
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 
-	withDatadir(cmdSetPrune)
+	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
 	cmdSetPrune.Flags().StringVar(&pruneFlag, "prune", "hrtc", "")
 	cmdSetPrune.Flags().Uint64Var(&pruneH, "prune.h.older", 0, "")
@@ -586,6 +586,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		vmConfig.Tracer = nil
 		vmConfig.Debug = true
 	}
+	vmConfig.TraceJumpDest = true
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -1036,9 +1037,6 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 	case networkname.SokolChainName:
 		chainConfig = params.SokolChainConfig
 		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.KovanChainName:
-		chainConfig = params.KovanChainConfig
-		genesis = core.DefaultKovanGenesisBlock()
 	case networkname.FermionChainName:
 		chainConfig = params.FermionChainConfig
 		genesis = core.DefaultFermionGenesisBlock()
@@ -1053,13 +1051,13 @@ func byChain() (*core.Genesis, *params.ChainConfig) {
 }
 
 var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *snapshotsync.AllSnapshots
+var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
-func allSnapshots(cc *params.ChainConfig) *snapshotsync.AllSnapshots {
+func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, false)
-			_allSnapshotsSingleton = snapshotsync.NewAllSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
+			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
 			}

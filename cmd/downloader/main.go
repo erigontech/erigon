@@ -15,6 +15,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
@@ -47,7 +48,7 @@ func init() {
 	flags := append(debug.Flags, utils.MetricFlags...)
 	utils.CobraFlags(rootCmd, flags)
 
-	withDatadir(rootCmd)
+	withDataDir(rootCmd)
 
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
@@ -55,7 +56,7 @@ func init() {
 	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "8mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
-	withDatadir(printTorrentHashes)
+	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
@@ -63,7 +64,7 @@ func init() {
 	rootCmd.AddCommand(printTorrentHashes)
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
@@ -102,8 +103,11 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir := filepath.Join(datadir, "snapshots")
-	common.MustExist(snapshotDir)
+	snapshotDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
+	if err != nil {
+		return err
+	}
+	defer snapshotDir.Close()
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
@@ -121,7 +125,7 @@ func Downloader(ctx context.Context) error {
 
 	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
 	if err != nil {
-		return fmt.Errorf("New: %w", err)
+		return err
 	}
 	defer pieceCompletion.Close()
 
@@ -164,7 +168,12 @@ var printTorrentHashes = &cobra.Command{
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			removeChunksStorage(snapshotDir)
+			lockedSnapshotDir, err := dir.OpenRw(snapshotDir)
+			if err != nil {
+				return err
+			}
+			defer lockedSnapshotDir.Close()
+			removeChunksStorage(lockedSnapshotDir)
 
 			files, err := downloader.AllTorrentPaths(snapshotDir)
 			if err != nil {
@@ -175,7 +184,7 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, lockedSnapshotDir); err != nil {
 				return err
 			}
 		}
@@ -213,11 +222,11 @@ var printTorrentHashes = &cobra.Command{
 	},
 }
 
-func removeChunksStorage(snapshotDir string) {
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.bolt.db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-shm"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-wal"))
+func removeChunksStorage(snapshotDir *dir.Rw) {
+	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.bolt.db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db-shm"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db-wal"))
 }
 
 func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {

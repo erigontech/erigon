@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"time"
 
@@ -129,6 +130,10 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		}
 
 		txs, err = types.DecodeTransactions(txSlots.Txs)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+
 		if err != nil {
 			return fmt.Errorf("decode rlp of pending txs: %w", err)
 		}

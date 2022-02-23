@@ -92,7 +92,7 @@ type Config = ethconfig.Config
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *ethconfig.Config
-	logger log.Logger
+	log    log.Logger
 
 	// DB interfaces
 	chainDB    kv.RwDB
@@ -197,7 +197,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
 		config:               config,
-		logger:               logger,
+		log:                  logger,
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -315,7 +315,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			return nil, err
 		}
 
-		allSnapshots := snapshotsync.NewAllSnapshots(config.Snapshot, config.SnapshotDir)
+		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -397,6 +397,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	// proof-of-stake mining
 	assembleBlockPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
+		miningStatePos.MiningConfig.Etherbase = suggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.BlockProposerParametersPOS{
@@ -497,7 +498,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,
@@ -532,27 +533,29 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
-	ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
-		ctx, chainKv, httpRpcCfg.StateCache, blockReader,
-		ethBackendRPC,
-		backend.txPool2GrpcServer,
-		miningRPC,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	var borDb kv.RoDB
-	if casted, ok := backend.engine.(*bor.Bor); ok {
-		borDb = casted.DB
-	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
-	go func() {
-		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
-			log.Error(err.Error())
-			return
+	if httpRpcCfg.Enabled {
+		ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, stateCache, ff, err := cli.EmbeddedServices(
+			ctx, chainKv, httpRpcCfg.StateCache, blockReader,
+			ethBackendRPC,
+			backend.txPool2GrpcServer,
+			miningRPC,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}()
+
+		var borDb kv.RoDB
+		if casted, ok := backend.engine.(*bor.Bor); ok {
+			borDb = casted.DB
+		}
+		apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, starkNetRpcClient, ff, stateCache, blockReader, httpRpcCfg)
+		go func() {
+			if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList); err != nil {
+				log.Error(err.Error())
+				return
+			}
+		}()
+	}
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
@@ -849,8 +852,8 @@ func (s *Ethereum) Stop() error {
 	if s.downloadProtocols != nil {
 		s.downloadProtocols.Close()
 	}
-	if s.config.TorrentPieceCompletionStorage != nil {
-		s.config.TorrentPieceCompletionStorage.Close() //nolint
+	if s.config.TorrentDirCloser != nil {
+		s.config.TorrentDirCloser.Close() //nolint
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)

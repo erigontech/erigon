@@ -143,8 +143,8 @@ type Config struct {
 	// private APIs to untrusted users is a major security risk.
 	WSExposeAll bool `toml:",omitempty"`
 
-	// Logger is a custom logger to use with the p2p.Server.
-	Logger log.Logger `toml:",omitempty"`
+	// Log is a custom logger to use with the p2p.Server.
+	Log log.Logger `toml:",omitempty"`
 
 	DatabaseVerbosity kv.DBVerbosityLvl
 
@@ -378,7 +378,7 @@ func (c *Config) warnOnce(w *bool, format string, args ...interface{}) {
 	if *w {
 		return
 	}
-	l := c.Logger
+	l := c.Log
 	if l == nil {
 		l = log.Root()
 	}

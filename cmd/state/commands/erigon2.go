@@ -10,13 +10,16 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
+	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -26,7 +29,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -42,9 +49,12 @@ var (
 	commitments         bool
 )
 
+var blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
+
 func init() {
 	withBlock(erigon2Cmd)
-	withDatadir(erigon2Cmd)
+	withDataDir(erigon2Cmd)
+	withSnapshotBlocks(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
@@ -101,7 +111,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments)
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -109,8 +119,21 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}
 
+	var blockReader interfaces.FullBlockReader
+	if snapshotBlocks {
+		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
+		snConfig.ExpectBlocks, err = eth.RestoreExpectedExternalSnapshot(historyDb, snConfig)
+		if err != nil {
+			return err
+		}
+		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
+		defer allSnapshots.Close()
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+
 	interrupt := false
-	blockNum := block
 	w := agg.MakeStateWriter(false /* beforeOn */)
 	var rootHash []byte
 	if block == 0 {
@@ -141,12 +164,15 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			}
 		}
 	}
+	blockNum := uint64(0)
 	var txNum uint64 = 1
 	trace := false
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	prevBlock := blockNum
 	prevTime := time.Now()
+	var prevHits, prevMisses uint64
+	var m runtime.MemStats
 	for !interrupt {
 		select {
 		default:
@@ -160,23 +186,40 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
 			prevBlock = blockNum
 			prevTime = currentTime
+			hits := aStats.Hits - prevHits
+			misses := aStats.Misses - prevMisses
+			prevHits = aStats.Hits
+			prevMisses = aStats.Misses
+			var hitRatio float64
+			if hits+misses > 0 {
+				hitRatio = float64(hits) / float64(hits+misses)
+			}
+			runtime.ReadMemStats(&m)
 			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
 				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
 				"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
 				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
 				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
 				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+				"hit ratio", hitRatio, "hits+misses", hits+misses,
+				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 			)
 		}
 		blockNum++
 		//fmt.Printf("block %d\n", blockNum)
 		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
-		blockHash, err := rawdb.ReadCanonicalHash(historyTx, blockNum)
+		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
 		if err != nil {
 			return err
 		}
+		if blockNum <= block {
+			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
+			// Skip that block, but increase txNum
+			txNum += uint64(txAmount) + 1
+			continue
+		}
 		var b *types.Block
-		b, _, err = rawdb.ReadBlockWithSenders(historyTx, blockHash, blockNum)
+		b, _, err = blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -189,7 +232,13 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
 		writeWrapper := &WriterWrapper{w: w, blockNum: blockNum}
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header {
+			h, err := blockReader.Header(ctx, historyTx, hash, number)
+			if err != nil {
+				panic(err)
+			}
+			return h
+		}
 		if txNum, _, err = runBlock2(trace, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
@@ -225,6 +274,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 }
 
 func runBlock2(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWrapper, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+	defer blockExecutionTimer.UpdateDuration(time.Now())
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()

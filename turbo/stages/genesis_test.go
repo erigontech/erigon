@@ -61,17 +61,6 @@ func TestDefaultGenesisBlock(t *testing.T) {
 		t.Errorf("wrong sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
 	}
 
-	block, _, err = core.DefaultKovanGenesisBlock().ToBlock()
-	if err != nil {
-		t.Errorf("error: %v", err)
-	}
-	if block.Root() != params.KovanGenesisStateRoot {
-		t.Errorf("wrong kovan genesis state root, got %v, want %v", block.Root(), params.KovanGenesisStateRoot)
-	}
-	if block.Hash() != params.KovanGenesisHash {
-		t.Errorf("wrong kovan genesis hash, got %v, want %v", block.Hash(), params.KovanGenesisHash)
-	}
-
 	block, _, err = core.DefaultFermionGenesisBlock().ToBlock()
 	if err != nil {
 		t.Errorf("error: %v", err)

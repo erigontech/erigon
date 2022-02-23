@@ -3,9 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -39,10 +37,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/status"
 )
 
 var rootCmd = &cobra.Command{
@@ -55,7 +51,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
-	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
@@ -76,7 +72,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 2, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
-	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, "tevm", false, "Enables Transpiled EVM experiment")
+	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, ethconfig.FlagSnapshot, false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
@@ -99,13 +95,13 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		cfg.SingleNodeMode = cfg.Datadir != "" || cfg.Chaindata != ""
+		cfg.SingleNodeMode = cfg.DataDir != "" || cfg.Chaindata != ""
 		if cfg.SingleNodeMode {
-			if cfg.Datadir == "" {
-				cfg.Datadir = paths.DefaultDataDir()
+			if cfg.DataDir == "" {
+				cfg.DataDir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
-				cfg.Chaindata = filepath.Join(cfg.Datadir, "chaindata")
+				cfg.Chaindata = filepath.Join(cfg.DataDir, "chaindata")
 			}
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled)
 		}
@@ -137,21 +133,14 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 			default:
 			}
 			if err := subscribeToStateChanges(ctx, client, cache); err != nil {
-				if s, ok := status.FromError(err); ok && retryLater(s.Code()) {
-					time.Sleep(time.Second)
-					continue
-				}
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
 					continue
 				}
 				log.Warn("[txpool.handleStateChanges]", "err", err)
 			}
 		}
 	}()
-}
-
-func retryLater(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.Canceled || code == codes.ResourceExhausted
 }
 
 func subscribeToStateChanges(ctx context.Context, client StateChangesClient, cache kvcache.Cache) error {
@@ -261,7 +250,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		// bor (consensus) specific db
 		var borKv kv.RoDB
-		borDbPath := filepath.Join(cfg.Datadir, "bor")
+		borDbPath := filepath.Join(cfg.DataDir, "bor")
 		{
 			// ensure db exist
 			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
@@ -306,7 +295,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewAllSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {

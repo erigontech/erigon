@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -37,11 +38,11 @@ type SendersCfg struct {
 	tmpdir            string
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
-	snapshots         *snapshotsync.AllSnapshots
+	snapshots         *snapshotsync.RoSnapshots
 	snapshotHashesCfg *snapshothashes.Config
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.AllSnapshots) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.RoSnapshots) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -378,9 +379,11 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		}
 		blockFrom := cfg.snapshots.BlocksAvailable() + 1
 		blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
-		if blockTo-blockFrom > 10_000 {
+		if blockTo-blockFrom > 1000 {
+			log.Info("[snapshots] Retire blocks", "from", blockFrom, "to", to)
+			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			// in future we will do it in background
-			if err := snapshotsync.DumpBlocks(ctx, blockFrom, blockTo, snapshotsync.DEFAULT_SEGMENT_SIZE, cfg.tmpdir, cfg.snapshots.Dir(), cfg.db, 1); err != nil {
+			if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, *chainID, cfg.tmpdir, cfg.snapshots, cfg.db, 1); err != nil {
 				return err
 			}
 			if err := cfg.snapshots.ReopenSegments(); err != nil {
@@ -389,9 +392,13 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			if err := cfg.snapshots.ReopenIndices(); err != nil {
 				return err
 			}
-			if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
-				return nil
-			}
+			// RoSnapshots must be atomic? Or we can create new instance?
+			// seed new 500K files
+
+			//if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
+			//	return nil
+			//}
+			fmt.Printf("sn runtime dump: %d-%d\n", blockFrom, blockTo)
 		}
 	}
 

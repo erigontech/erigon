@@ -10,6 +10,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -40,6 +41,15 @@ var snapshotCommand = cli.Command{
 				SnapshotFromFlag,
 				SnapshotToFlag,
 				SnapshotSegmentSizeFlag,
+			}, debug.Flags...),
+		},
+		{
+			Name:   "recompress",
+			Action: doRecompressCommand,
+			Usage:  "Recompress existing .seg files to apply new compression rules",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
+				utils.DataDirFlag,
 			}, debug.Flags...),
 		},
 		{
@@ -82,18 +92,23 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	dataDir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := filepath.Join(dataDir, "snapshots")
-	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
+	datadir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir := filepath.Join(datadir, "snapshots")
+	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 
-	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(dataDir, "chaindata")).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(datadir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir, from); err != nil {
+		rwSnapshotDir, err := dir.OpenRw(snapshotDir)
+		if err != nil {
+			return err
+		}
+		defer rwSnapshotDir.Close()
+		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -110,12 +125,12 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	if segmentSize < 1000 {
 		return fmt.Errorf("too small --segment.size %d", segmentSize)
 	}
-	dataDir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := filepath.Join(dataDir, "snapshots")
-	tmpDir := filepath.Join(dataDir, etl.TmpDirName)
-	common.MustExist(tmpDir)
+	datadir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir := filepath.Join(datadir, "snapshots")
+	tmpDir := filepath.Join(datadir, etl.TmpDirName)
+	dir.MustExist(tmpDir)
 
-	chainDB := mdbx.NewMDBX(log.New()).Path(filepath.Join(dataDir, "chaindata")).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(log.New()).Path(filepath.Join(datadir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapshotDir, tmpDir); err != nil {
@@ -123,23 +138,32 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string, from uint64) error {
-	common.MustExist(snapshotDir)
+func doRecompressCommand(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	datadir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
+	if err != nil {
+		return err
+	}
+	tmpDir := filepath.Join(datadir, etl.TmpDirName)
+	dir.MustExist(tmpDir)
+
+	if err := snapshotsync.RecompressSegments(ctx, snapshotDir, tmpDir); err != nil {
+		log.Error("Error", "err", err)
+	}
+	return nil
+}
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	allSnapshots := snapshotsync.NewAllSnapshots(cfg, snapshotDir)
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir.Path)
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	//idxFilesList, err := snapshotsync.IdxFiles(snapshotDir)
-	//if err != nil {
-	//	return err
-	//}
-	//for _, f := range idxFilesList {
-	//	_ = os.Remove(f)
-	//}
-	if err := allSnapshots.BuildIndices(ctx, *chainID, tmpDir, from); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from); err != nil {
 		return err
 	}
 	return nil
@@ -178,7 +202,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		}
 	}
 
-	common.MustExist(snapshotDir)
+	dir.MustExist(snapshotDir)
 
 	log.Info("Last body number", "last", last)
 	workers := runtime.NumCPU() - 1
@@ -186,7 +210,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		workers = 1
 	}
 	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
-		panic(err)
+		return err
 	}
 	return nil
 }
@@ -195,13 +219,13 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 func checkBlockSnapshot(chaindata string) error {
 	database := mdbx.MustOpen(chaindata)
 	defer database.Close()
-	dataDir := path.Dir(chaindata)
+	datadir := path.Dir(chaindata)
 	chainConfig := tool.ChainConfigFromDB(database)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	_ = chainID
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
-	snapshots := snapshotsync.NewAllSnapshots(cfg, filepath.Join(dataDir, "snapshots"))
+	snapshots := snapshotsync.NewRoSnapshots(cfg, filepath.Join(datadir, "snapshots"))
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {

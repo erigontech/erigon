@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
@@ -19,8 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type (
@@ -69,17 +68,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					return
 				default:
 				}
-				if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
+				if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
-					time.Sleep(3 * time.Second)
-					continue
-				}
-
 				log.Warn("rpc filters: error subscribing to events", "err", err)
-				time.Sleep(3 * time.Second)
 			}
 		}
 	}()
@@ -98,16 +91,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 						return
 					default:
 					}
-					if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-						time.Sleep(3 * time.Second)
-						continue
-					}
-					if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) || errors.Is(err, txpool2.ErrPoolDisabled) {
+					if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) || grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
 						time.Sleep(3 * time.Second)
 						continue
 					}
 					log.Warn("rpc filters: error subscribing to pending transactions", "err", err)
-					time.Sleep(3 * time.Second)
 				}
 			}
 		}()
@@ -125,16 +113,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 							return
 						default:
 						}
-						if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-							time.Sleep(3 * time.Second)
-							continue
-						}
-						if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+						if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
 							time.Sleep(3 * time.Second)
 							continue
 						}
 						log.Warn("rpc filters: error subscribing to pending blocks", "err", err)
-						time.Sleep(3 * time.Second)
 					}
 				}
 			}()
@@ -151,16 +134,11 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 							return
 						default:
 						}
-						if s, ok := status.FromError(err); ok && s.Code() == codes.Canceled {
-							time.Sleep(3 * time.Second)
-							continue
-						}
-						if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+						if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
 							time.Sleep(3 * time.Second)
 							continue
 						}
 						log.Warn("rpc filters: error subscribing to pending logs", "err", err)
-						time.Sleep(3 * time.Second)
 					}
 				}
 			}()
@@ -183,7 +161,7 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 	}
 	for {
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
@@ -209,7 +187,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 		}
 
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
@@ -253,7 +231,7 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 		}
 
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}
