@@ -522,7 +522,11 @@ func (s *EthBackendServer) StartProposer() {
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
 			} else {
-				s.pendingPayloads[payloadId] = &pendingPayload{block: block, built: true}
+				payload, ok := s.pendingPayloads[payloadId]
+				if ok && !payload.built { // don't update after engine_getPayload was called
+					payload.block = block
+					payload.built = true
+				}
 			}
 		}
 	}()
