@@ -62,12 +62,14 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	return header, nil
 }
 
-func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp uint64, fullTx bool) (map[string]interface{}, error) {
+func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	uintTimestamp := timeStamp.TurnIntoUint64()
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	currenttHeaderTime := currentHeader.Time
@@ -76,7 +78,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp uint64
 	firstHeader := rawdb.ReadHeaderByNumber(tx, 0)
 	firstHeaderTime := firstHeader.Time
 
-	if currenttHeaderTime <= timeStamp {
+	if currenttHeaderTime <= uintTimestamp {
 		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
@@ -85,7 +87,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp uint64
 		return blockResponse, nil
 	}
 
-	if firstHeaderTime >= timeStamp {
+	if firstHeaderTime >= uintTimestamp {
 		blockResponse, err := buildBlockResponse(tx, 0, fullTx)
 		if err != nil {
 			return nil, err
@@ -97,12 +99,12 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp uint64
 	blockNum := sort.Search(int(currentHeader.Number.Uint64()), func(blockNum int) bool {
 		currentHeader := rawdb.ReadHeaderByNumber(tx, uint64(blockNum))
 
-		return currentHeader.Time >= timeStamp
+		return currentHeader.Time >= uintTimestamp
 	})
 
 	resultingHeader := rawdb.ReadHeaderByNumber(tx, uint64(blockNum))
 
-	if resultingHeader.Time > timeStamp {
+	if resultingHeader.Time > uintTimestamp {
 		response, err := buildBlockResponse(tx, uint64(blockNum)-1, fullTx)
 		if err != nil {
 			return nil, err

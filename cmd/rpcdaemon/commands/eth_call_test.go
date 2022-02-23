@@ -70,7 +70,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, latestBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time), false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -111,7 +111,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, oldestBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(oldestBlock.Header().Time), false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -149,7 +149,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, latestBlock.Header().Time+999999999999, false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(latestBlock.Header().Time+999999999999), false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -194,7 +194,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, middleBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(middleBlock.Header().Time), false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
@@ -239,7 +239,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 		}
 	}
 
-	block, err := api.GetBlockByTimestamp(ctx, pickedBlock.Header().Time, false)
+	block, err := api.GetBlockByTimestamp(ctx, rpc.Timestamp(pickedBlock.Header().Time), false)
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
