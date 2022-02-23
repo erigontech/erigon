@@ -434,8 +434,9 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 	)
 
 	cont := true // Continue applying snapshots
-	limit := 200_000
+	limit := 256
 	for cont {
+		var headersList [][]*types.Header // List of lists because we will apply headers to snapshot such that we can persist snapshot after every list
 		var headers []*types.Header
 		h := hash
 		n := number
@@ -500,9 +501,12 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 					return nil, consensus.ErrUnknownAncestor
 				}
 			}
-			headers = append(headers, header)
-			if len(headers) > limit {
-				headers = headers[limit/2:]
+			if n%checkpointInterval == 0 && len(headers) > 0 {
+				headersList = append(headersList, headers)
+				headers = nil
+			}
+			if len(headersList) > limit {
+				headersList = headersList[1:]
 				cont = true
 			}
 			n--
@@ -515,28 +519,28 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 		}
 
 		// Previous snapshot found, apply any pending headers on top of it
-		for i := 0; i < len(headers)/2; i++ {
-			headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+		for i := 0; i < len(headersList)/2; i++ {
+			headersList[i], headersList[len(headersList)-1-i] = headersList[len(headersList)-1-i], headersList[i]
 		}
-
-		if cont {
-			log.Info("Applying headers to snapshot", "from", headers[0].Number.Uint64(), "to", headers[len(headers)-1].Number.Uint64())
-		}
-		var err error
-		snap, err = snap.apply(headers)
-		if err != nil {
-			return nil, err
-		}
-		if cont {
-			log.Info("Done applying headers to snapshot")
-		}
-		c.recents.Add(snap.Hash, snap)
-		// If we've generated a new checkpoint snapshot, save to disk
-		if !cont && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+		for j := 0; j < len(headersList); j++ {
+			hs := headersList[j]
+			for i := 0; i < len(hs)/2; i++ {
+				hs[i], hs[len(hs)-1-i] = hs[len(hs)-1-i], hs[i]
+			}
+			if cont {
+				log.Info("Applying headers to snapshot", "from", hs[0].Number.Uint64(), "to", hs[len(hs)-1].Number.Uint64())
+			}
+			var err error
+			snap, err = snap.apply(hs)
+			if err != nil {
+				return nil, err
+			}
+			c.recents.Add(snap.Hash, snap)
+			// We've generated a new checkpoint snapshot, save to disk
 			if err = snap.store(c.DB); err != nil {
 				return nil, err
 			}
-			log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+			log.Info("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 		}
 		if cont {
 			snap = nil
