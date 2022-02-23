@@ -137,13 +137,13 @@ func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue, syscall consensus.SystemCall) *big.Int {
+func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
 		return nil
 	}
 	if !reached {
-		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal, syscall)
+		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal)
 	}
 	return SerenityDifficulty
 }
@@ -189,9 +189,9 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	return misc.VerifyEip1559Header(chain.Config(), parent, header)
 }
 
-func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}, syscall consensus.SystemCall) error {
+func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	if !IsPoSHeader(block.Header()) {
-		return s.eth1Engine.Seal(chain, block, results, stop, syscall)
+		return s.eth1Engine.Seal(chain, block, results, stop)
 	}
 	return nil
 }

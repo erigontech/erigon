@@ -4,11 +4,8 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
@@ -86,13 +83,8 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 		)
 	}
 
-	stateReader := state.NewPlainStateReader(tx)
-	ibs := state.New(stateReader)
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
-	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return core.SysCallContract(contract, data, cfg.chainConfig, ibs, current.Header, cfg.engine)
-	}
-	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel, syscall); err != nil {
+	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
 		log.Warn("Block sealing failed", "err", err)
 	}
 

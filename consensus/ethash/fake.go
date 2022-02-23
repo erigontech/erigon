@@ -112,7 +112,7 @@ func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Hea
 }
 
 // If we're running a fake PoW, simply return a 0 nonce immediately
-func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}, syscall consensus.SystemCall) error {
+func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	header := block.Header()
 	header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 

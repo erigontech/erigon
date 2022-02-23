@@ -1015,7 +1015,7 @@ func (c *AuRa) GenesisEpochData(header *types.Header, caller consensus.SystemCal
 	return res, nil
 }
 
-func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}, syscall consensus.SystemCall) error {
+func (c *AuRa) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	return nil
 	//header := block.Header()
 	//
@@ -1212,7 +1212,7 @@ func headerStep(current *types.Header) (val uint64, err error) {
 	return val, err
 }
 
-func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue, syscall consensus.SystemCall) *big.Int {
+func (c *AuRa) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
 	var parentStep uint64
 	err := rlp.Decode(bytes.NewReader(parentSeal[0]), &parentStep)
 	if err != nil {

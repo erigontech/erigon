@@ -619,7 +619,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	// get validator set if number
 	if (number+1)%c.config.Sprint == 0 {
-		newValidators, err := c.GetCurrentValidators(number+1, syscall)
+		newValidators, err := c.GetCurrentValidators(number + 1)
 		if err != nil {
 			return errors.New("unknown validators")
 		}
@@ -791,7 +791,7 @@ func (c *Bor) Authorize(signer common.Address, signFn SignerFn) {
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}, syscall consensus.SystemCall) error {
+func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	header := block.Header()
 	// Sealing the genesis block is not supported
 	number := header.Number.Uint64()
@@ -808,7 +808,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	signer, signFn := c.signer, c.signFn
 	c.lock.RUnlock()
 
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil, syscall)
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
 		return err
 	}
@@ -879,9 +879,9 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 // 	return new(big.Int).SetUint64(snap.Difficulty(c.signer))
 // }
 
-func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ []rlp.RawValue, syscall consensus.SystemCall) *big.Int {
+func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ []rlp.RawValue) *big.Int {
 
-	snap, err := c.snapshot(chain, parentNumber, parentHash, nil, syscall)
+	snap, err := c.snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
 		return nil
 	}

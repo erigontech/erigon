@@ -121,14 +121,14 @@ type Engine interface {
 	//
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
-	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}, syscall SystemCall) error
+	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
 	SealHash(header *types.Header) common.Hash
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue, syscall SystemCall) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []rlp.RawValue
 

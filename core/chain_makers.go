@@ -201,7 +201,6 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		parent.Hash(),
 		parent.UncleHash(),
 		parent.Seal(),
-		nil,
 	)
 }
 
@@ -416,7 +415,6 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			parent.Hash(),
 			parent.UncleHash(),
 			parent.Seal(),
-			nil,
 		),
 		GasLimit: CalcGasLimit(parent.GasLimit(), parent.GasLimit()),
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
