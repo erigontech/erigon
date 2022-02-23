@@ -16,7 +16,10 @@
 
 package params
 
-import "github.com/ledgerwatch/erigon/common"
+import (
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params/networkname"
+)
 
 // MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on
 // the main Ethereum network.
@@ -177,4 +180,50 @@ func KnownDNSNetwork(genesis common.Hash, protocol string) string {
 		return ""
 	}
 	return dnsPrefix + protocol + "." + net + ".ethdisco.net"
+}
+
+func BootnodeURLsOfChain(chain string) []string {
+	switch chain {
+	case networkname.MainnetChainName:
+		return MainnetBootnodes
+	case networkname.SepoliaChainName:
+		return SepoliaBootnodes
+	case networkname.RopstenChainName:
+		return RopstenBootnodes
+	case networkname.RinkebyChainName:
+		return RinkebyBootnodes
+	case networkname.GoerliChainName:
+		return GoerliBootnodes
+	case networkname.BSCChainName:
+		return BscBootnodes
+	case networkname.ChapelChainName:
+		return ChapelBootnodes
+	case networkname.RialtoChainName:
+		return RialtoBootnodes
+	case networkname.ErigonMineName:
+		return ErigonBootnodes
+	case networkname.SokolChainName:
+		return SokolBootnodes
+	case networkname.FermionChainName:
+		return FermionBootnodes
+	case networkname.MumbaiChainName:
+		return MumbaiBootnodes
+	case networkname.BorMainnetChainName:
+		return BorMainnetBootnodes
+	default:
+		return []string{}
+	}
+}
+
+func StaticPeerURLsOfChain(chain string) []string {
+	switch chain {
+	case networkname.BSCChainName:
+		return BscStaticPeers
+	case networkname.ChapelChainName:
+		return ChapelStaticPeers
+	case networkname.RialtoChainName:
+		return RialtoStaticPeers
+	default:
+		return []string{}
+	}
 }

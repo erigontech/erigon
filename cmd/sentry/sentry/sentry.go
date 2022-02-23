@@ -178,28 +178,18 @@ func makeP2PServer(
 	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
 	var urls []string
-	switch genesisHash {
-	case params.MainnetGenesisHash:
-		urls = params.MainnetBootnodes
-	case params.SepoliaGenesisHash:
-		urls = params.SepoliaBootnodes
-	case params.RopstenGenesisHash:
-		urls = params.RopstenBootnodes
-	case params.GoerliGenesisHash:
-		urls = params.GoerliBootnodes
-	case params.RinkebyGenesisHash:
-		urls = params.RinkebyBootnodes
-	case params.SokolGenesisHash:
-		urls = params.SokolBootnodes
-	case params.FermionGenesisHash:
-		urls = params.FermionBootnodes
-	case params.MumbaiGenesisHash:
-		urls = params.MumbaiBootnodes
-	case params.BorMainnetGenesisHash:
-		urls = params.BorMainnetBootnodes
+	chainConfig := params.ChainConfigByGenesisHash(genesisHash)
+	if chainConfig != nil {
+		urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
 	}
-	p2pConfig.BootstrapNodes, _ = utils.GetUrlListNodes(urls, utils.BootnodesFlag.Name, log.Crit)
-	p2pConfig.BootstrapNodesV5 = p2pConfig.BootstrapNodes
+
+	bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
+	if err != nil {
+		return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+	}
+	p2pConfig.BootstrapNodes = bootstrapNodes
+	p2pConfig.BootstrapNodesV5 = bootstrapNodes
+
 	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
 }

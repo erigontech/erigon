@@ -1097,3 +1097,36 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsParlia:         c.Parlia != nil,
 	}
 }
+
+func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
+	switch {
+	case genesisHash == MainnetGenesisHash:
+		return MainnetChainConfig
+	case genesisHash == SepoliaGenesisHash:
+		return SepoliaChainConfig
+	case genesisHash == RopstenGenesisHash:
+		return RopstenChainConfig
+	case genesisHash == RinkebyGenesisHash:
+		return RinkebyChainConfig
+	case genesisHash == GoerliGenesisHash:
+		return GoerliChainConfig
+	case genesisHash == BSCGenesisHash:
+		return BSCChainConfig
+	case genesisHash == ChapelGenesisHash:
+		return ChapelChainConfig
+	case genesisHash == RialtoGenesisHash:
+		return RialtoChainConfig
+	case genesisHash == ErigonGenesisHash:
+		return ErigonChainConfig
+	case genesisHash == SokolGenesisHash:
+		return SokolChainConfig
+	case genesisHash == FermionGenesisHash:
+		return FermionChainConfig
+	case genesisHash == MumbaiGenesisHash:
+		return MumbaiChainConfig
+	case genesisHash == BorMainnetGenesisHash:
+		return BorMainnetChainConfig
+	default:
+		return nil
+	}
+}
