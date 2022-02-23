@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -84,7 +85,7 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 	var err error
 	operands := make([]WitnessOperator, 0)
 	for _, err = input.Read(opcode); ; _, err = input.Read(opcode) {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

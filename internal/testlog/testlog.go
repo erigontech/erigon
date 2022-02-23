@@ -44,10 +44,10 @@ func (h *handler) Log(r *log.Record) error {
 // helpers, so the file and line number in unit test output correspond to the call site
 // which emitted the log message.
 type logger struct {
-	t  *testing.T
-	l  log.Logger
-	mu *sync.Mutex
-	h  *bufHandler
+	t   *testing.T
+	log log.Logger
+	mu  *sync.Mutex
+	h   *bufHandler
 }
 
 type bufHandler struct {
@@ -63,12 +63,12 @@ func (h *bufHandler) Log(r *log.Record) error {
 // Logger returns a logger which logs to the unit test log of t.
 func Logger(t *testing.T, level log.Lvl) log.Logger {
 	l := &logger{
-		t:  t,
-		l:  log.New(),
-		mu: new(sync.Mutex),
-		h:  &bufHandler{fmt: log.TerminalFormat()},
+		t:   t,
+		log: log.New(),
+		mu:  new(sync.Mutex),
+		h:   &bufHandler{fmt: log.TerminalFormat()},
 	}
-	l.l.SetHandler(log.LvlFilterHandler(level, l.h))
+	l.log.SetHandler(log.LvlFilterHandler(level, l.h))
 	return l
 }
 
@@ -76,7 +76,7 @@ func (l *logger) Trace(msg string, ctx ...interface{}) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.l.Trace(msg, ctx...)
+	l.log.Trace(msg, ctx...)
 	l.flush()
 }
 
@@ -84,7 +84,7 @@ func (l *logger) Debug(msg string, ctx ...interface{}) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.l.Debug(msg, ctx...)
+	l.log.Debug(msg, ctx...)
 	l.flush()
 }
 
@@ -92,7 +92,7 @@ func (l *logger) Info(msg string, ctx ...interface{}) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.l.Info(msg, ctx...)
+	l.log.Info(msg, ctx...)
 	l.flush()
 }
 
@@ -100,7 +100,7 @@ func (l *logger) Warn(msg string, ctx ...interface{}) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.l.Warn(msg, ctx...)
+	l.log.Warn(msg, ctx...)
 	l.flush()
 }
 
@@ -108,7 +108,7 @@ func (l *logger) Error(msg string, ctx ...interface{}) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.l.Error(msg, ctx...)
+	l.log.Error(msg, ctx...)
 	l.flush()
 }
 
@@ -116,20 +116,20 @@ func (l *logger) Crit(msg string, ctx ...interface{}) {
 	l.t.Helper()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.l.Crit(msg, ctx...)
+	l.log.Crit(msg, ctx...)
 	l.flush()
 }
 
 func (l *logger) New(ctx ...interface{}) log.Logger {
-	return &logger{l.t, l.l.New(ctx...), l.mu, l.h}
+	return &logger{l.t, l.log.New(ctx...), l.mu, l.h}
 }
 
 func (l *logger) GetHandler() log.Handler {
-	return l.l.GetHandler()
+	return l.log.GetHandler()
 }
 
 func (l *logger) SetHandler(h log.Handler) {
-	l.l.SetHandler(h)
+	l.log.SetHandler(h)
 }
 
 // flush writes all buffered messages and clears the buffer.

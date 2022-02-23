@@ -82,8 +82,8 @@ func New(conf *Config) (*Node, error) {
 		}
 		conf.DataDir = absdatadir
 	}
-	if conf.Logger == nil {
-		conf.Logger = log.New()
+	if conf.Log == nil {
+		conf.Log = log.New()
 	}
 
 	// Ensure that the instance name doesn't cause weird conflicts with
@@ -98,7 +98,7 @@ func New(conf *Config) (*Node, error) {
 	node := &Node{
 		config:        conf,
 		inprocHandler: rpc.NewServer(50),
-		log:           conf.Logger,
+		log:           conf.Log,
 		stop:          make(chan struct{}),
 		databases:     make([]kv.Closer, 0),
 	}
@@ -289,7 +289,7 @@ func (n *Node) openDataDir() error {
 		return convertFileLockError(err)
 	}
 	if !locked {
-		return fmt.Errorf("%w: %s\n", ErrDatadirUsed, instdir)
+		return fmt.Errorf("%w: %s\n", ErrDataDirUsed, instdir)
 	}
 	n.dirLock = l
 	return nil

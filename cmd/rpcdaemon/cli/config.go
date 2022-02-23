@@ -51,7 +51,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
-	rootCmd.PersistentFlags().StringVar(&cfg.Datadir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
@@ -95,13 +95,13 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		cfg.SingleNodeMode = cfg.Datadir != "" || cfg.Chaindata != ""
+		cfg.SingleNodeMode = cfg.DataDir != "" || cfg.Chaindata != ""
 		if cfg.SingleNodeMode {
-			if cfg.Datadir == "" {
-				cfg.Datadir = paths.DefaultDataDir()
+			if cfg.DataDir == "" {
+				cfg.DataDir = paths.DefaultDataDir()
 			}
 			if cfg.Chaindata == "" {
-				cfg.Chaindata = filepath.Join(cfg.Datadir, "chaindata")
+				cfg.Chaindata = filepath.Join(cfg.DataDir, "chaindata")
 			}
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled)
 		}
@@ -250,7 +250,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		// bor (consensus) specific db
 		var borKv kv.RoDB
-		borDbPath := filepath.Join(cfg.Datadir, "bor")
+		borDbPath := filepath.Join(cfg.DataDir, "bor")
 		{
 			// ensure db exist
 			tmpDb, err := kv2.NewMDBX(logger).Path(borDbPath).Label(kv.ConsensusDB).Open()
@@ -295,7 +295,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 			}
 
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.Datadir, "snapshots"))
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {

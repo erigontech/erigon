@@ -89,7 +89,7 @@ func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
 
-func withDatadir2(cmd *cobra.Command) {
+func withDataDir2(cmd *cobra.Command) {
 	cmd.Flags().String(utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
@@ -97,7 +97,7 @@ func withDatadir2(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&enableSnapshot, ethconfig.FlagSnapshot, false, "")
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 

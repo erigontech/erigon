@@ -51,7 +51,7 @@ func must(err error) {
 	}
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
 }

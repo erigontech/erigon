@@ -68,6 +68,7 @@ type jsonWriter interface {
 }
 
 type BlockNumber int64
+type Timestamp uint64
 
 const (
 	PendingBlockNumber  = BlockNumber(-2)
@@ -239,4 +240,30 @@ func (dh *DecimalOrHex) UnmarshalJSON(data []byte) error {
 	}
 	*dh = DecimalOrHex(value)
 	return nil
+}
+
+func (ts Timestamp) TurnIntoUint64() uint64 {
+	return uint64(ts)
+}
+
+func (ts *Timestamp) UnmarshalJSON(data []byte) error {
+	input := strings.TrimSpace(string(data))
+	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
+		input = input[1 : len(input)-1]
+	}
+
+	// parse string to uint64
+	timestamp, err := strconv.ParseUint(input, 10, 64)
+	if err != nil {
+
+		// try hex number
+		if timestamp, err = hexutil.DecodeUint64(input); err != nil {
+			return err
+		}
+
+	}
+
+	*ts = Timestamp(timestamp)
+	return nil
+
 }

@@ -40,7 +40,7 @@ var configs embed.FS
 
 func init() {
 	withApiAddr(cliqueCmd)
-	withDatadir(cliqueCmd)
+	withDataDir(cliqueCmd)
 	withConfig(cliqueCmd)
 	rootCmd.AddCommand(cliqueCmd)
 }
