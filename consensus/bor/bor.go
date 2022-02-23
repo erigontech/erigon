@@ -430,99 +430,114 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
-		headers []*types.Header
-		snap    *Snapshot
+		snap *Snapshot
 	)
 
-	for snap == nil {
-		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
-			break
-		}
-
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
-				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
-				snap = s
+	cont := true // Continue applying snapshots
+	limit := 200_000_000
+	for cont {
+		var headers []*types.Header
+		h := hash
+		n := number
+		cont = false
+		for snap == nil {
+			// If an in-memory snapshot was found, use that
+			if s, ok := c.recents.Get(h); ok {
+				snap = s.(*Snapshot)
 				break
 			}
-		}
 
-		// If we're at the genesis, snapshot the initial state. Alternatively if we're
-		// at a checkpoint block without a parent (light client CHT), or we have piled
-		// up more headers than allowed to be reorged (chain reinit from a freezer),
-		// consider the checkpoint trusted and snapshot it.
-		// TODO fix this
-		if number == 0 {
-			checkpoint := chain.GetHeaderByNumber(number)
-			if checkpoint != nil {
-				// get checkpoint data
-				hash := checkpoint.Hash()
-
-				// get validators and current span
-				validators, err := c.GetCurrentValidators(number + 1)
-				if err != nil {
-					return nil, err
+			// If an on-disk checkpoint snapshot can be found, use that
+			if n%checkpointInterval == 0 {
+				if s, err := loadSnapshot(c.config, c.signatures, c.DB, h); err == nil {
+					log.Trace("Loaded snapshot from disk", "number", n, "hash", h)
+					snap = s
+					break
 				}
+			}
 
-				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators)
-				if err := snap.store(c.DB); err != nil {
-					return nil, err
+			// If we're at the genesis, snapshot the initial state. Alternatively if we're
+			// at a checkpoint block without a parent (light client CHT), or we have piled
+			// up more headers than allowed to be reorged (chain reinit from a freezer),
+			// consider the checkpoint trusted and snapshot it.
+			// TODO fix this
+			if n == 0 {
+				checkpoint := chain.GetHeaderByNumber(n)
+				if checkpoint != nil {
+					// get checkpoint data
+					h := checkpoint.Hash()
+
+					// get validators and current span
+					validators, err := c.GetCurrentValidators(n + 1)
+					if err != nil {
+						return nil, err
+					}
+
+					// new snap shot
+					snap = newSnapshot(c.config, c.signatures, n, h, validators)
+					if err := snap.store(c.DB); err != nil {
+						return nil, err
+					}
+					log.Info("Stored checkpoint snapshot to disk", "number", n, "hash", h)
+					break
 				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
-				break
 			}
+
+			// No snapshot for this header, gather the header and move backward
+			var header *types.Header
+			if len(parents) > 0 {
+				// If we have explicit parents, pick from there (enforced)
+				header = parents[len(parents)-1]
+				if header.Hash() != h || header.Number.Uint64() != n {
+					return nil, consensus.ErrUnknownAncestor
+				}
+				parents = parents[:len(parents)-1]
+			} else {
+				// No explicit parents (or no more left), reach out to the database
+				header = chain.GetHeader(h, n)
+				if header == nil {
+					return nil, consensus.ErrUnknownAncestor
+				}
+			}
+			headers = append(headers, header)
+			if len(headers) > limit {
+				headers = headers[limit/2:]
+				cont = true
+			}
+			n--
+			h = header.ParentHash
 		}
 
-		// No snapshot for this header, gather the header and move backward
-		var header *types.Header
-		if len(parents) > 0 {
-			// If we have explicit parents, pick from there (enforced)
-			header = parents[len(parents)-1]
-			if header.Hash() != hash || header.Number.Uint64() != number {
-				return nil, consensus.ErrUnknownAncestor
-			}
-			parents = parents[:len(parents)-1]
-		} else {
-			// No explicit parents (or no more left), reach out to the database
-			header = chain.GetHeader(hash, number)
-			if header == nil {
-				return nil, consensus.ErrUnknownAncestor
-			}
+		// check if snapshot is nil
+		if snap == nil {
+			return nil, fmt.Errorf("unknown error while retrieving snapshot at block number %v", n)
 		}
-		headers = append(headers, header)
-		number, hash = number-1, header.ParentHash
-	}
 
-	// check if snapshot is nil
-	if snap == nil {
-		return nil, fmt.Errorf("unknown error while retrieving snapshot at block number %v", number)
-	}
+		// Previous snapshot found, apply any pending headers on top of it
+		for i := 0; i < len(headers)/2; i++ {
+			headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
+		}
 
-	// Previous snapshot found, apply any pending headers on top of it
-	for i := 0; i < len(headers)/2; i++ {
-		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
-	}
-
-	fmt.Printf("applying %d headers to snapshot\n", len(headers))
-	snap, err := snap.apply(headers)
-	fmt.Printf("done.\n")
-	if err != nil {
-		return nil, err
-	}
-	c.recents.Add(snap.Hash, snap)
-
-	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.DB); err != nil {
+		fmt.Printf("applying %d headers to snapshot\n", len(headers))
+		snap, err := snap.apply(headers)
+		if err != nil {
 			return nil, err
 		}
-		log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		fmt.Printf("done.\n")
+		c.recents.Add(snap.Hash, snap)
+		// If we've generated a new checkpoint snapshot, save to disk
+		if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+			if err = snap.store(c.DB); err != nil {
+				return nil, err
+			}
+			log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		}
+		if cont {
+			snap = nil
+		}
 	}
-	return snap, err
+
+	return snap, nil
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any

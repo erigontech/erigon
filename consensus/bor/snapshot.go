@@ -130,7 +130,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 
 	var m runtime.MemStats
 	for i, header := range headers {
-		if i%1000 == 0 {
+		if i%100_000 == 0 {
 			runtime.ReadMemStats(&m)
 			log.Info("Applied", "headers", i, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
