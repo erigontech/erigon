@@ -2,8 +2,10 @@ package snapshotsync
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -179,24 +181,37 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
-	_, err := ParseFileName("a")
+	fs := fstest.MapFS{
+		"a":                 &fstest.MapFile{},
+		"1-a":               &fstest.MapFile{},
+		"1-2-a":             &fstest.MapFile{},
+		"1-2-bodies.info":   &fstest.MapFile{},
+		"1-2-bodies.seg":    &fstest.MapFile{},
+		"v2-1-2-bodies.seg": &fstest.MapFile{},
+		"v0-1-2-bodies.seg": &fstest.MapFile{},
+		"v1-1-2-bodies.seg": &fstest.MapFile{},
+	}
+	stat := func(name string) os.FileInfo {
+		s, err := fs.Stat(name)
+		require.NoError(err)
+		return s
+	}
+	_, err := ParseFileName("", stat("a"))
 	require.Error(err)
-	_, err = ParseFileName("1-a")
+	_, err = ParseFileName("", stat("1-a"))
 	require.Error(err)
-	_, err = ParseFileName("1-2-a")
+	_, err = ParseFileName("", stat("1-2-a"))
 	require.Error(err)
-	_, err = ParseFileName("1-2-bodies.info")
+	_, err = ParseFileName("", stat("1-2-bodies.info"))
 	require.Error(err)
-	_, err = ParseFileName("1-2-bodies.idx")
+	_, err = ParseFileName("", stat("1-2-bodies.seg"))
 	require.Error(err)
-	_, err = ParseFileName("1-2-bodies.seg")
+	_, err = ParseFileName("", stat("v2-1-2-bodies.seg"))
 	require.Error(err)
-	_, err = ParseFileName("v2-1-2-bodies.seg")
-	require.Error(err)
-	_, err = ParseFileName("v0-1-2-bodies.seg")
+	_, err = ParseFileName("", stat("v0-1-2-bodies.seg"))
 	require.Error(err)
 
-	f, err := ParseFileName("v1-1-2-bodies.seg")
+	f, err := ParseFileName("", stat("v1-1-2-bodies.seg"))
 	require.NoError(err)
 	require.Equal(f.T, Bodies)
 	require.Equal(1_000, int(f.From))

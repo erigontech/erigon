@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"os"
 	"path"
@@ -420,51 +421,79 @@ func latestIdx(dir string, ofType FType) (uint64, error) {
 	return maxBlock - 1, nil
 }
 
-// FMeta - parsed file metadata
-type FMeta struct {
-	From, To   uint64
-	Path, Name string
-	T          FType
+// FileInfo - parsed file metadata
+type FileInfo struct {
+	fs.FileInfo
+	Version   uint8
+	From, To  uint64
+	Path, Ext string
+	T         FType
 }
 
-func IdxFiles(dir string) (res []FMeta, err error) {
-	files, err := filesWithExt(dir, ".idx")
-	if err != nil {
-		return nil, err
-	}
-	return parseAndSkipOverlaps(files)
-}
-func Segments(dir string) (res []FMeta, err error) {
-	files, err := filesWithExt(dir, ".seg")
-	if err != nil {
-		return nil, err
-	}
-	return parseAndSkipOverlaps(files)
-}
-
-// parseAndSkipOverlaps - does parse list of files to []FMeta, also it does skip file ranges overlaps
-// to get only largest ranges and avoid overlap
-func parseAndSkipOverlaps(files []string) (res []FMeta, err error) {
+func IdxFiles(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".idx") }
+func Segments(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".seg") }
+func noGaps(in []FileInfo) (out []FileInfo) {
 	var prevTo uint64
-	for i := range files {
-		f, err := ParseFileName(files[i])
+	for _, f := range in {
+		if f.To <= prevTo {
+			fmt.Printf("skip: %d, %d\n", prevTo, f.To)
+			continue
+		}
+		prevTo = f.To
+		out = append(out, f)
+	}
+	return out
+}
+func parseDir(dir string) (res []FileInfo, err error) {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		meta, err := ParseFileName(dir, f)
 		if err != nil {
+			log.Warn("failed to parse snapshot file name", "file", f, "err", err)
 			if errors.Is(ErrInvalidCompressedFileName, err) {
 				continue
 			}
 			return nil, err
 		}
-		if f.From == f.To || f.To <= prevTo {
+		if f.Size() == 0 {
+			continue
+		}
+		res = append(res, meta)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		if res[i].Version != res[j].Version {
+			return res[i].Version < res[j].Version
+		}
+		if res[i].From != res[j].From {
+			return res[i].From < res[j].From
+		}
+		if res[i].To != res[j].To {
+			return res[i].To < res[j].To
+		}
+		if res[i].Ext != res[j].Ext {
+			return res[i].Ext < res[j].Ext
+		}
+		return res[i].T < res[j].T
+	})
+
+	return res, nil
+}
+
+// noOverlaps - keep largest ranges and avoid overlap
+func noOverlaps(in []FileInfo) (res []FileInfo) {
+	for i := range in {
+		f := in[i]
+		if f.From == f.To {
 			continue
 		}
 
-		for j := i + 1; j < len(files); j++ { // if there is file with larger range - use it instead
-			f2, err := ParseFileName(files[j])
-			if err != nil {
-				if errors.Is(ErrInvalidCompressedFileName, err) {
-					continue
-				}
-				return nil, err
+		for j := i + 1; j < len(in); j++ { // if there is file with larger range - use it instead
+			f2 := in[j]
+			if f.From == f.To {
+				continue
 			}
 			if f2.From > f.From {
 				break
@@ -475,10 +504,10 @@ func parseAndSkipOverlaps(files []string) (res []FMeta, err error) {
 
 		res = append(res, f)
 	}
-	return res, nil
+	return res
 }
 
-func segmentsOfType(dir string, ofType FType) (res []FMeta, err error) {
+func segmentsOfType(dir string, ofType FType) (res []FileInfo, err error) {
 	list, err := Segments(dir)
 	if err != nil {
 		return nil, err
@@ -489,10 +518,10 @@ func segmentsOfType(dir string, ofType FType) (res []FMeta, err error) {
 		}
 		res = append(res, f)
 	}
-	return res, nil
+	return noGaps(noOverlaps(res)), nil
 }
 
-func idxFilesOfType(dir string, ofType FType) (res []FMeta, err error) {
+func idxFilesOfType(dir string, ofType FType) (res []FileInfo, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
 		return nil, err
@@ -503,29 +532,24 @@ func idxFilesOfType(dir string, ofType FType) (res []FMeta, err error) {
 		}
 		res = append(res, f)
 	}
-	return res, nil
+	return noGaps(noOverlaps(res)), nil
 }
 
-func filesWithExt(dir, ext string) ([]string, error) {
-	files, err := ioutil.ReadDir(dir)
+func filterExt(in []FileInfo, expectExt string) (out []FileInfo) {
+	for _, f := range in {
+		if f.Ext != expectExt { // filter out only compressed files
+			continue
+		}
+		out = append(out, f)
+	}
+	return nil
+}
+func filesWithExt(dir, expectExt string) ([]FileInfo, error) {
+	files, err := parseDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	var res []string
-	for _, f := range files {
-		if !IsCorrectFileName(f.Name()) {
-			continue
-		}
-		if f.Size() == 0 {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ext { // filter out only compressed files
-			continue
-		}
-		res = append(res, f.Name())
-	}
-	sort.Strings(res)
-	return res, nil
+	return filterExt(files, expectExt), nil
 }
 
 func IsCorrectFileName(name string) bool {
@@ -533,8 +557,8 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
-func ParseFileName(filePath string) (res FMeta, err error) {
-	_, fileName := filepath.Split(filePath)
+func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
+	fileName := f.Name()
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
@@ -563,7 +587,7 @@ func ParseFileName(filePath string) (res FMeta, err error) {
 	default:
 		return res, fmt.Errorf("%w, unexpected snapshot suffix: %s", ErrInvalidCompressedFileName, parts[2])
 	}
-	return FMeta{From: from * 1_000, To: to * 1_000, Path: filePath, Name: fileName, T: snapshotType}, nil
+	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, FileInfo: f, Ext: ext}, nil
 }
 
 const DEFAULT_SEGMENT_SIZE = 500_000
@@ -1345,6 +1369,7 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 	buf := make([]byte, 4096)
 	d, err := compress.NewDecompressor(srcF)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	defer d.Close()
