@@ -97,11 +97,11 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
-		return fmt.Errorf(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", executionAt)
+		return fmt.Errorf("empty block %d", executionAt)
 	}
 
 	if cfg.blockProposerParameters != nil && cfg.blockProposerParameters.ParentHash != parent.Hash() {
-		return fmt.Errorf(fmt.Sprintf("[%s] Wrong head block", logPrefix), "headBlock", parent.Hash(), "requested", cfg.blockProposerParameters.ParentHash)
+		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockProposerParameters.ParentHash)
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
