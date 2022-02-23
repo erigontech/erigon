@@ -142,7 +142,11 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false))
 	if err != nil {
-		t.Errorf("calling GetStorageAt: %v", err)
+		if fmt.Sprintf("%v", err) != fmt.Sprintf("hash %s is not currently canonical", orphanedBlock.Hash().String()[2:]) {
+			t.Errorf("wrong error: %v", err)
+		}
+	} else {
+		t.Error("error expected")
 	}
 
 	assert.Equal(common.HexToHash("0x0").String(), result)

@@ -53,13 +53,13 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	defer func(start time.Time) { log.Trace("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
-	stateBlockNumber, hash, err := rpchelper.GetBlockNumber(stateBlockNumberOrHash, tx, api.filters)
+	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(stateBlockNumberOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
 	var stateReader state.StateReader
-	if num, ok := stateBlockNumberOrHash.Number(); ok && num == rpc.LatestBlockNumber {
+	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
 		if err != nil {
 			return nil, err
