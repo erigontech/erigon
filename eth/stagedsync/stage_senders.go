@@ -380,7 +380,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		blockFrom := cfg.snapshots.BlocksAvailable() + 1
 		blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
 		if blockTo-blockFrom > 1000 {
-			log.Info("[snapshots] Retire blocks", "from", blockFrom, "to", to)
+			log.Info("[snapshots] Retire blocks", "from", blockFrom, "to", blockTo)
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			wg := sync.WaitGroup{}
 			wg.Add(1)

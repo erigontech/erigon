@@ -704,8 +704,8 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, t
 	if blocksPerFile == 0 {
 		return nil
 	}
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, i+blocksPerFile, blocksPerFile) {
-		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, i+blocksPerFile, blocksPerFile), tmpDir, snapshotDir, chainDB, workers); err != nil {
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
+		if err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapshotDir, chainDB, workers); err != nil {
 			return err
 		}
 	}
