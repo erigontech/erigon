@@ -46,7 +46,7 @@ type ForkChoiceState struct {
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
-	PrevRandao            common.Hash    `json:"prevRandao"                gencodec:"required"`
+	PrevRandao            common.Hash    `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
 }
 
