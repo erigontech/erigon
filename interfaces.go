@@ -121,6 +121,7 @@ type CallMsg struct {
 	GasPrice *uint256.Int    // wei <-> gas exchange ratio
 	Value    *uint256.Int    // amount of wei sent along with the call
 	Data     []byte          // input data, usually an ABI-encoded contract method invocation
+	IsFake   bool
 
 	FeeCap     *uint256.Int     // EIP-1559 fee cap per gas.
 	Tip        *uint256.Int     // EIP-1559 tip per gas.
