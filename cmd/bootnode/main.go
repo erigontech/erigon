@@ -111,7 +111,7 @@ func main() {
 
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	if natm != nil {
-		if !realaddr.IP.IsLoopback() {
+		if !realaddr.IP.IsLoopback() && natm.SupportsMapping() {
 			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 		}
 		if ext, err := natm.ExternalIP(); err == nil {
