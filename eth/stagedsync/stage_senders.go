@@ -386,7 +386,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			wg.Add(1)
 			go func() { // move to own goroutine, because in this goroutine already living RwTx
 				// in future we will do it in background
-				if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, *chainID, cfg.tmpdir, cfg.snapshots, cfg.db, 1); err != nil {
+				if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, *chainID, cfg.tmpdir, cfg.snapshots, cfg.db, 1, log.LvlDebug); err != nil {
 					panic(err)
 					//return err
 				}
