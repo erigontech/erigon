@@ -54,7 +54,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, false), db, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
@@ -91,7 +91,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, false), db, nil)
 
 	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
@@ -132,7 +132,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, false), db, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 
@@ -170,7 +170,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, false), db, nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader := rawdb.ReadHeaderByNumber(tx, 0)
@@ -215,7 +215,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, false), db, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
 	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
