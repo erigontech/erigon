@@ -74,7 +74,7 @@ func TestMerge(t *testing.T) {
 	defer s.Close()
 
 	require.NoError(s.ReopenSegments())
-	err := findAndMergeBlockSegments(context.Background(), s, dir)
+	_, err := findAndMergeBlockSegments(context.Background(), s, dir, 1)
 	require.NoError(err)
 	require.NoError(s.ReopenSegments())
 
@@ -85,7 +85,7 @@ func TestMerge(t *testing.T) {
 	a := d.Count()
 	require.Equal(10, a)
 
-	err = findAndMergeBlockSegments(context.Background(), s, dir)
+	_, err = findAndMergeBlockSegments(context.Background(), s, dir, 1)
 	require.NoError(err)
 	require.NoError(s.ReopenSegments())
 
