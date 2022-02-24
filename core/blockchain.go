@@ -351,6 +351,20 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
+	if chainConfig.Bor != nil {
+		ret, _, err := evm.Call(
+			vm.AccountRef(msg.From()),
+			*msg.To(),
+			msg.Data(),
+			msg.Gas(),
+			msg.Value(),
+			false,
+		)
+		if err != nil {
+			return nil, nil
+		}
+		return ret, nil
+	}
 	res, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
