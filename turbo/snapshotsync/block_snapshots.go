@@ -649,13 +649,13 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 	}
 
 	if err := mergeByAppendSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir, workers); err != nil {
-		return from, err
+		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
 	if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir, workers); err != nil {
-		return from, err
+		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
 	if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir, workers); err != nil {
-		return from, err
+		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
 	if err := snapshots.ReopenSegments(); err != nil {
 		return from, fmt.Errorf("ReopenSegments: %w", err)
