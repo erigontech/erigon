@@ -583,6 +583,7 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, FileInfo: f, Ext: ext}, nil
 }
 
+const MERGE_THRESHOLD = 2 // don't trigger merge if have too small amount of partial segments
 const DEFAULT_SEGMENT_SIZE = 500_000
 const MIN_SEGMENT_SIZE = 1_000
 
@@ -643,7 +644,7 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
 	}
 
-	doMerge := len(toMergeBodies) >= 2 || to-from != DEFAULT_SEGMENT_SIZE
+	doMerge := len(toMergeBodies) >= MERGE_THRESHOLD || to-from == DEFAULT_SEGMENT_SIZE
 	if !doMerge {
 		return from, nil
 	}
