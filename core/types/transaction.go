@@ -454,10 +454,10 @@ type Message struct {
 	tip        uint256.Int
 	data       []byte
 	accessList AccessList
-	isFake     bool
+	checkNonce bool
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, isFake bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -466,7 +466,7 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 		gasLimit:   gasLimit,
 		data:       data,
 		accessList: accessList,
-		isFake:     isFake,
+		checkNonce: checkNonce,
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)
@@ -490,4 +490,4 @@ func (m Message) Gas() uint64            { return m.gasLimit }
 func (m Message) Nonce() uint64          { return m.nonce }
 func (m Message) Data() []byte           { return m.data }
 func (m Message) AccessList() AccessList { return m.accessList }
-func (m Message) IsFake() bool           { return m.isFake }
+func (m Message) CheckNonce() bool       { return m.checkNonce }

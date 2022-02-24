@@ -849,7 +849,6 @@ func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
 func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                 { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
-func (m callMsg) IsFake() bool                 { return m.CallMsg.IsFake }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.

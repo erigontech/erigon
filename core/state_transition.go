@@ -84,7 +84,7 @@ type Message interface {
 	Value() *uint256.Int
 
 	Nonce() uint64
-	IsFake() bool
+	CheckNonce() bool
 	Data() []byte
 	AccessList() types.AccessList
 }
@@ -277,8 +277,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
-	//  Only check transactions that are not fake.
-	if !st.msg.IsFake() {
+	// Make sure this transaction's nonce is correct.
+	if st.msg.CheckNonce() {
 		stNonce := st.state.GetNonce(st.msg.From())
 		if msgNonce := st.msg.Nonce(); stNonce < msgNonce {
 			return fmt.Errorf("%w: address %v, tx: %d state: %d", ErrNonceTooHigh,
@@ -290,15 +290,15 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				st.msg.From().Hex(), stNonce)
 		}
+	}
 
-		// Make sure the sender is an EOA (EIP-3607)
-		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
-			// common.Hash{} means that the sender is not in the state.
-			// Historically there were transactions with 0 gas price and non-existing sender,
-			// so we have to allow that.
-			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-				st.msg.From().Hex(), codeHash)
-		}
+	// Make sure the sender is an EOA (EIP-3607)
+	if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
+		// common.Hash{} means that the sender is not in the state.
+		// Historically there were transactions with 0 gas price and non-existing sender,
+		// so we have to allow that.
+		return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+			st.msg.From().Hex(), codeHash)
 	}
 
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
