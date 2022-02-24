@@ -25,7 +25,7 @@ type ExecutionPayload struct {
 	StateRoot     common.Hash     `json:"stateRoot"     gencodec:"required"`
 	ReceiptsRoot  common.Hash     `json:"receiptsRoot"  gencodec:"required"`
 	LogsBloom     hexutil.Bytes   `json:"logsBloom"     gencodec:"required"`
-	Random        common.Hash     `json:"random"        gencodec:"required"`
+	PrevRandao    common.Hash     `json:"prevRandao"    gencodec:"required"`
 	BlockNumber   hexutil.Uint64  `json:"blockNumber"   gencodec:"required"`
 	GasLimit      hexutil.Uint64  `json:"gasLimit"      gencodec:"required"`
 	GasUsed       hexutil.Uint64  `json:"gasUsed"       gencodec:"required"`
@@ -46,7 +46,7 @@ type ForkChoiceState struct {
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64 `json:"timestamp"             gencodec:"required"`
-	Random                common.Hash    `json:"random"                gencodec:"required"`
+	PrevRandao            common.Hash    `json:"prevRandao"                gencodec:"required"`
 	SuggestedFeeRecipient common.Address `json:"suggestedFeeRecipient" gencodec:"required"`
 }
 
@@ -94,7 +94,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 	if payloadAttributes != nil {
 		prepareParameters = &remote.EnginePayloadAttributes{
 			Timestamp:             uint64(payloadAttributes.Timestamp),
-			Random:                gointerfaces.ConvertHashToH256(payloadAttributes.Random),
+			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 		}
 	}
@@ -147,7 +147,7 @@ func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload
 		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(([]byte)(payload.LogsBloom)),
-		Random:        gointerfaces.ConvertHashToH256(payload.Random),
+		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
 		BlockNumber:   uint64(payload.BlockNumber),
 		GasLimit:      uint64(payload.GasLimit),
 		GasUsed:       uint64(payload.GasUsed),
@@ -190,7 +190,7 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
 		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
 		LogsBloom:     bloom[:],
-		Random:        gointerfaces.ConvertH256ToHash(payload.Random),
+		PrevRandao:    gointerfaces.ConvertH256ToHash(payload.PrevRandao),
 		BlockNumber:   hexutil.Uint64(payload.BlockNumber),
 		GasLimit:      hexutil.Uint64(payload.GasLimit),
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
