@@ -124,6 +124,11 @@ type (
 		key      common.Hash
 		prevalue uint256.Int
 	}
+	fakeStorageChange struct {
+		account  *common.Address
+		key      common.Hash
+		prevalue uint256.Int
+	}
 	codeChange struct {
 		account  *common.Address
 		prevcode []byte
@@ -217,6 +222,14 @@ func (ch storageChange) revert(s *IntraBlockState) {
 }
 
 func (ch storageChange) dirtied() *common.Address {
+	return ch.account
+}
+
+func (ch fakeStorageChange) revert(s *IntraBlockState) {
+	s.getStateObject(*ch.account).fakeStorage[ch.key] = ch.prevalue
+}
+
+func (ch fakeStorageChange) dirtied() *common.Address {
 	return ch.account
 }
 
