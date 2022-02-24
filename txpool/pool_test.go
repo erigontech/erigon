@@ -586,4 +586,49 @@ func TestTxPoke(t *testing.T) {
 	default:
 		t.Errorf("expected promotion")
 	}
+
+	// Send the same transaction, but as remote
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    300000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 1
+		txSlots.Append(txSlot, addr[:], true)
+		pool.AddRemoteTxs(ctx, txSlots)
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(2), nonce)
+	}
+	// Remote transactions do not cause pokes
+	select {
+	case <-ch:
+		t.Errorf("remote transactions should not cause re-broadcast")
+	default:
+	}
+	// Send different transaction, but only with tip bumped, as a remote
+	{
+		txSlots := TxSlots{}
+		txSlot := &TxSlot{
+			tip:    3000000,
+			feeCap: 300000,
+			gas:    100000,
+			nonce:  2,
+		}
+		txSlot.IdHash[0] = 2
+		txSlots.Append(txSlot, addr[:], true)
+		pool.AddRemoteTxs(ctx, txSlots)
+		nonce, ok := pool.NonceFromAddress(addr)
+		assert.True(ok)
+		assert.Equal(uint64(2), nonce)
+	}
+	// Remote transactions do not cause pokes
+	select {
+	case <-ch:
+		t.Errorf("remote transactions should not cause re-broadcast")
+	default:
+	}
 }

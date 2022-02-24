@@ -885,14 +885,16 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 			discardReasons[i] = DuplicateHash
 			// In case if the transation is stuck, "poke" it to rebroadcast
 			// TODO refactor to return the list of promoted hashes instead of using added inside the pool
-			switch found.currentSubPool {
-			case PendingSubPool:
-				if pending.adding {
-					pending.added = append(pending.added, found.Tx.IdHash[:]...)
-				}
-			case BaseFeeSubPool:
-				if baseFee.adding {
-					baseFee.added = append(baseFee.added, found.Tx.IdHash[:]...)
+			if newTxs.isLocal[i] {
+				switch found.currentSubPool {
+				case PendingSubPool:
+					if pending.adding {
+						pending.added = append(pending.added, found.Tx.IdHash[:]...)
+					}
+				case BaseFeeSubPool:
+					if baseFee.adding {
+						baseFee.added = append(baseFee.added, found.Tx.IdHash[:]...)
+					}
 				}
 			}
 			continue
@@ -1005,14 +1007,16 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 			// Both tip and feecap need to be larger than previously to replace the transaction
 			// In case if the transation is stuck, "poke" it to rebroadcast
 			// TODO refactor to return the list of promoted hashes instead of using added inside the pool
-			switch found.currentSubPool {
-			case PendingSubPool:
-				if p.pending.adding {
-					p.pending.added = append(p.pending.added, found.Tx.IdHash[:]...)
-				}
-			case BaseFeeSubPool:
-				if p.baseFee.adding {
-					p.baseFee.added = append(p.baseFee.added, found.Tx.IdHash[:]...)
+			if mt.subPool&IsLocal != 0 {
+				switch found.currentSubPool {
+				case PendingSubPool:
+					if p.pending.adding {
+						p.pending.added = append(p.pending.added, found.Tx.IdHash[:]...)
+					}
+				case BaseFeeSubPool:
+					if p.baseFee.adding {
+						p.baseFee.added = append(p.baseFee.added, found.Tx.IdHash[:]...)
+					}
 				}
 			}
 			return NotReplaced
