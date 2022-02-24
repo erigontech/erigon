@@ -231,6 +231,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | debug_getModifiedAccountsByNumber          | Yes     |                                            |
 | debug_getModifiedAccountsByHash            | Yes     |                                            |
 | debug_storageRangeAt                       | Yes     |                                            |
+| debug_traceBlockByHash                     | Yes     | Streaming (can handle huge results)        |
+| debug_traceBlockByNumber                   | Yes     | Streaming (can handle huge results)        |
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)        |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)        |
 |                                            |         |                                            |

@@ -152,6 +152,16 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
+	var benchTraceBlockByHashCmd = &cobra.Command{
+		Use:   "benchTraceBlockByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+		},
+	}
+	with(benchTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchTraceTransactionCmd = &cobra.Command{
 		Use:   "benchTraceTransaction",
 		Short: "",
