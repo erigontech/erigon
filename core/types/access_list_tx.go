@@ -532,7 +532,7 @@ func (tx AccessListTx) AsMessage(s Signer, _ *big.Int) (Message, error) {
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: tx.AccessList,
-		isFake:     false,
+		checkNonce: true,
 	}
 
 	var err error
