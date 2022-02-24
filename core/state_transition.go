@@ -290,15 +290,15 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				st.msg.From().Hex(), stNonce)
 		}
-	}
 
-	// Make sure the sender is an EOA (EIP-3607)
-	if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
-		// common.Hash{} means that the sender is not in the state.
-		// Historically there were transactions with 0 gas price and non-existing sender,
-		// so we have to allow that.
-		return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-			st.msg.From().Hex(), codeHash)
+		// Make sure the sender is an EOA (EIP-3607)
+		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
+			// common.Hash{} means that the sender is not in the state.
+			// Historically there were transactions with 0 gas price and non-existing sender,
+			// so we have to allow that.
+			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+				st.msg.From().Hex(), codeHash)
+		}
 	}
 
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
