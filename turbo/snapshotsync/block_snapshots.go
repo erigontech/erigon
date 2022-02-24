@@ -626,7 +626,7 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 	var from, to, stopAt uint64
 	// merge segments
 	for _, sn := range snapshots.blocks {
-		if sn.To-sn.From >= DEFAULT_SEGMENT_SIZE {
+		if sn.To-sn.From >= DEFAULT_SEGMENT_SIZE { // is complete .seg
 			continue
 		}
 		if from == 0 {
