@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -24,7 +25,17 @@ import (
 
 const callTimeout = 5 * time.Minute
 
-func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, block *types.Block, overrides *map[common.Address]ethapi.Account, gasCap uint64, chainConfig *params.ChainConfig, stateCache kvcache.Cache, contractHasTEVM func(hash common.Hash) (bool, error)) (*core.ExecutionResult, error) {
+func DoCall(
+	ctx context.Context,
+	args ethapi.CallArgs,
+	tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash,
+	block *types.Block, overrides *map[common.Address]ethapi.Account,
+	gasCap uint64,
+	chainConfig *params.ChainConfig,
+	filters *filters.Filters,
+	stateCache kvcache.Cache,
+	contractHasTEVM func(hash common.Hash) (bool, error),
+) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
 		if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
@@ -32,8 +43,7 @@ func DoCall(ctx context.Context, args ethapi.CallArgs, tx kv.Tx, blockNrOrHash r
 			return state, block.Header(), nil
 		}
 	*/
-	blockNumber := block.NumberU64()
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, blockNumber, stateCache)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, filters, stateCache)
 	if err != nil {
 		return nil, err
 	}
