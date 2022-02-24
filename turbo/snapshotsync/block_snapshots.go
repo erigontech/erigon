@@ -643,7 +643,8 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
 	}
 
-	if len(toMergeBodies) <= 1 {
+	doMerge := len(toMergeBodies) >= 2 || to-from != DEFAULT_SEGMENT_SIZE
+	if !doMerge {
 		return from, nil
 	}
 
