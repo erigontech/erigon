@@ -1,6 +1,4 @@
 #include "utils.h"
-#include <stdio.h>
-#include <stdlib.h>
 
 int lcp_kasai(const unsigned char *T, int *SA, int *LCP, int *FTR, int *INV, int sa_size, int n)
 {
