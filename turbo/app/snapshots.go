@@ -148,11 +148,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
-	workers := runtime.NumCPU() - 1
-	if workers < 1 {
-		workers = 1
-	}
-	fmt.Printf("Retire from %d to %d\n", from, to)
 
 	if err := snapshotsync.RetireBlocks(ctx, from, to, *chainID, tmpDir, snapshots, chainDB, 1); err != nil {
 		panic(err)
