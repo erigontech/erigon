@@ -440,7 +440,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: tx.AccessList,
-		checkNonce: true,
+		isFake:     false,
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)

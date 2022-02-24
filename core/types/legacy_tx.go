@@ -452,7 +452,7 @@ func (tx LegacyTx) AsMessage(s Signer, _ *big.Int) (Message, error) {
 		amount:     *tx.Value,
 		data:       tx.Data,
 		accessList: nil,
-		checkNonce: true,
+		isFake:     false,
 	}
 
 	var err error
