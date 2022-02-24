@@ -34,6 +34,7 @@ import (
 
 	"github.com/flanglet/kanzi-go/transform"
 	"github.com/ledgerwatch/erigon-lib/common"
+	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 )
@@ -67,11 +68,12 @@ type Compressor struct {
 }
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int) (*Compressor, error) {
+	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
 	ext := filepath.Ext(fileName)
 	// UncompressedFile - it's intermediate .idt file, outputFile it's final .seg (or .dat) file.
-	// tmpOutFilePath - it's ".seg.tmp" ("dat.tmp") file which will be renamed to .seg file if everything succeed.
+	// tmpOutFilePath - it's ".seg.tmp" (".idt.tmp") file which will be renamed to .seg file if everything succeed.
 	// It allow atomically create .seg file (downloader will not see partially ready/ non-ready .seg files).
 	// I didn't create ".seg.tmp" file in tmpDir, because I think tmpDir and snapsthoDir may be mounted to different drives
 	uncompressedPath := filepath.Join(tmpDir, fileName[:len(fileName)-len(ext)]) + ".idt"
