@@ -284,7 +284,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		GasUsed:     req.GasUsed,
 		GasLimit:    req.GasLimit,
 		Time:        req.Timestamp,
-		MixDigest:   gointerfaces.ConvertH256ToHash(req.Random),
+		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
 		UncleHash:   types.EmptyUncleHash,
 		Difficulty:  serenity.SerenityDifficulty,
 		Nonce:       serenity.SerenityNonce,
@@ -366,7 +366,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
 		Timestamp:     block.Header().Time,
-		Random:        gointerfaces.ConvertHashToH256(block.Header().MixDigest),
+		PrevRandao:    gointerfaces.ConvertHashToH256(block.Header().MixDigest),
 		StateRoot:     gointerfaces.ConvertHashToH256(block.Root()),
 		ReceiptRoot:   gointerfaces.ConvertHashToH256(block.ReceiptHash()),
 		LogsBloom:     gointerfaces.ConvertBytesToH2048(block.Bloom().Bytes()),
@@ -441,7 +441,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
-	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.Random)
+	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
 
 	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
