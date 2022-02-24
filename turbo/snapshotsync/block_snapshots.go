@@ -608,7 +608,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.ReopenSegments(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	mergedFrom, err := findAndMergeBlockSegments(ctx, snapshots, tmpDir, workers, lvl)
+	mergedFrom, err := findAndMergeBlockSegments(ctx, snapshots, tmpDir, workers)
 	if err != nil {
 		return fmt.Errorf("findAndMergeBlockSegments: %w", err)
 	}
@@ -622,7 +622,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	return nil
 }
 
-func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string, workers int, lvl log.Lvl) (uint64, error) {
+func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string, workers int) (uint64, error) {
 	var toMergeBodies, toMergeHeaders, toMergeTxs []string
 	var from, to, stopAt uint64
 	// merge segments
