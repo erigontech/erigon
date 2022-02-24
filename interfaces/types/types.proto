@@ -60,7 +60,7 @@ message ExecutionPayload {
   types.H256 stateRoot = 3;
   types.H256 receiptRoot = 4;
   types.H2048 logsBloom = 5;
-  types.H256 random = 6;
+  types.H256 prevRandao = 6;
   uint64 blockNumber = 7;
   uint64 gasLimit = 8;
   uint64 gasUsed = 9;

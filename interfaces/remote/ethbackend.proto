@@ -91,7 +91,7 @@ message EnginePayloadStatus {
 
 message EnginePayloadAttributes {
   uint64 timestamp = 1;
-  types.H256 random = 2;
+  types.H256 prevRandao = 2;
   types.H160 suggestedFeeRecipient = 3;
 }
 
