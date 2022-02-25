@@ -319,7 +319,7 @@ func (s *RoSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, foun
 }
 
 func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, lvl log.Lvl) error {
-	logEvery := time.NewTicker(30 * time.Second)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	for _, sn := range s.blocks {
@@ -608,7 +608,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.ReopenSegments(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	mergedFrom, err := findAndMergeBlockSegments(ctx, snapshots, tmpDir, workers)
+	mergedFrom, err := findAndMergeBlockSegments(ctx, snapshots, tmpDir, workers, lvl)
 	if err != nil {
 		return fmt.Errorf("findAndMergeBlockSegments: %w", err)
 	}
@@ -622,7 +622,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	return nil
 }
 
-func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string, workers int) (uint64, error) {
+func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string, workers int, lvl log.Lvl) (uint64, error) {
 	var toMergeBodies, toMergeHeaders, toMergeTxs []string
 	var from, to, stopAt uint64
 	// merge segments
@@ -649,13 +649,13 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 		return from, nil
 	}
 
-	if err := mergeByAppendSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir, workers); err != nil {
+	if err := mergeByAppendSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir, workers, lvl); err != nil {
 		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
-	if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir, workers); err != nil {
+	if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir, workers, lvl); err != nil {
 		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
-	if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir, workers); err != nil {
+	if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir, workers, lvl); err != nil {
 		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
 	if err := snapshots.ReopenSegments(); err != nil {
@@ -683,14 +683,14 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 	return from, nil
 }
 
-func mergeByAppendSegments(ctx context.Context, toMerge []string, targetFile, tmpDir string, workers int) error {
+func mergeByAppendSegments(ctx context.Context, toMerge []string, targetFile, tmpDir string, workers int, lvl log.Lvl) error {
 	fileNames := make([]string, len(toMerge))
 	for i, f := range toMerge {
 		_, fName := filepath.Split(f)
 		fileNames[i] = fName
 	}
 	_, fName := filepath.Split(targetFile)
-	log.Debug("[snapshots] mergeing", "files", fileNames, "to", fName)
+	log.Log(lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
 	f, err := compress.NewCompressor(ctx, "merge", targetFile, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
 		return err
