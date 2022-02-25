@@ -1273,7 +1273,9 @@ func (*Merger) FindCandidates(snapshots *RoSnapshots) (toMergeHeaders, toMergeBo
 		toMergeHeaders = append(toMergeHeaders, sn.Headers.FilePath())
 		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
 	}
-	mergeRecommended = len(toMergeBodies) >= MERGE_THRESHOLD || to-from == DEFAULT_SEGMENT_SIZE
+	enoughSmallSegments := len(toMergeHeaders) >= MERGE_THRESHOLD
+	canFormNewCompleteSegment := to-from == DEFAULT_SEGMENT_SIZE && len(toMergeHeaders) > 1
+	mergeRecommended = enoughSmallSegments || canFormNewCompleteSegment
 	return
 }
 
