@@ -630,6 +630,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err != nil {
 		return fmt.Errorf("findAndMergeBlockSegments: %w", err)
 	}
+	log.Log(lvl, "[snapshots] Merge done. Indexing new segments")
 	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, mergedFrom, lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
 	}
@@ -644,7 +645,7 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 	merger := NewMerger(tmpDir, workers, lvl)
 	toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(snapshots)
 	if recommendedMerge {
-		if err := merger.Merge(ctx, toMergeHeaders, toMergeBodies, toMergeTxs, from, to, snapshots.Dir()); err != nil {
+		if err := merger.Merge(ctx, toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 			return 0, err
 		}
 		if err := snapshots.ReopenSegments(); err != nil {
@@ -653,7 +654,7 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 		if err := snapshots.ReopenIndices(); err != nil {
 			return from, fmt.Errorf("ReopenSegments: %w", err)
 		}
-		if err := merger.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, snapshots.Dir()); err != nil {
+		if err := merger.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 			return 0, err
 		}
 	}
@@ -1284,14 +1285,14 @@ func (*Merger) FindCandidates(snapshots *RoSnapshots) (toMergeHeaders, toMergeBo
 	return
 }
 
-func (m *Merger) Merge(ctx context.Context, toMergeHeaders, toMergeBodies, toMergeTxs []string, from, to uint64, snapshotDir string) error {
-	if err := m.merge(ctx, toMergeBodies, filepath.Join(snapshotDir, SegmentFileName(from, to, Bodies))); err != nil {
+func (m *Merger) Merge(ctx context.Context, toMergeHeaders, toMergeBodies, toMergeTxs []string, from, to uint64, snapshotDir *dir.Rw) error {
+	if err := m.merge(ctx, toMergeBodies, filepath.Join(snapshotDir.Path, SegmentFileName(from, to, Bodies))); err != nil {
 		return fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
-	if err := m.merge(ctx, toMergeHeaders, filepath.Join(snapshotDir, SegmentFileName(from, to, Headers))); err != nil {
+	if err := m.merge(ctx, toMergeHeaders, filepath.Join(snapshotDir.Path, SegmentFileName(from, to, Headers))); err != nil {
 		return fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
-	if err := m.merge(ctx, toMergeTxs, filepath.Join(snapshotDir, SegmentFileName(from, to, Transactions))); err != nil {
+	if err := m.merge(ctx, toMergeTxs, filepath.Join(snapshotDir.Path, SegmentFileName(from, to, Transactions))); err != nil {
 		return fmt.Errorf("mergeByAppendSegments: %w", err)
 	}
 	return nil
@@ -1337,7 +1338,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 	return nil
 }
 
-func (m *Merger) RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs []string, snapshotsDir string) error {
+func (m *Merger) RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs []string, snapshotsDir *dir.Rw) error {
 	for _, f := range toMergeBodies {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
@@ -1357,7 +1358,7 @@ func (m *Merger) RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs []stri
 		_ = os.Remove(withoutExt + ".idx")
 		_ = os.Remove(withoutExt + "-to-block.idx")
 	}
-	tmpFiles, err := TmpFiles(snapshotsDir)
+	tmpFiles, err := TmpFiles(snapshotsDir.Path)
 	if err != nil {
 		return err
 	}
