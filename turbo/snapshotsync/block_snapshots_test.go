@@ -73,11 +73,16 @@ func TestMerge(t *testing.T) {
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
+	require.NoError(s.ReopenSegments())
 
-	require.NoError(s.ReopenSegments())
-	_, err := findAndMergeBlockSegments(context.Background(), s, dir, 1, log.LvlInfo)
-	require.NoError(err)
-	require.NoError(s.ReopenSegments())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo)
+		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
+		require.True(recommendedMerge)
+		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		require.NoError(err)
+		require.NoError(s.ReopenSegments())
+	}
 
 	expectedFileName := SegmentFileName(500_000, 1_000_000, Transactions)
 	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
@@ -86,9 +91,14 @@ func TestMerge(t *testing.T) {
 	a := d.Count()
 	require.Equal(10, a)
 
-	_, err = findAndMergeBlockSegments(context.Background(), s, dir, 1, log.LvlInfo)
-	require.NoError(err)
-	require.NoError(s.ReopenSegments())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo)
+		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
+		require.True(recommendedMerge)
+		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		require.NoError(err)
+		require.NoError(s.ReopenSegments())
+	}
 
 	expectedFileName = SegmentFileName(1_000_000, 1_250_000, Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))

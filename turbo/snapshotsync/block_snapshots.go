@@ -626,12 +626,24 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.ReopenSegments(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	mergedFrom, err := findAndMergeBlockSegments(ctx, snapshots, tmpDir, workers, lvl)
-	if err != nil {
-		return fmt.Errorf("findAndMergeBlockSegments: %w", err)
+	merger := NewMerger(tmpDir, workers, lvl)
+	toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(snapshots)
+	if !recommendedMerge {
+		return nil
+	}
+
+	if err := merger.Merge(ctx, toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir.Rw{Path: snapshots.Dir()}); err != nil {
+		return err
+	}
+	snapshots.Close()
+	if err := merger.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, &dir.Rw{Path: snapshots.Dir()}); err != nil {
+		return err
+	}
+	if err := snapshots.ReopenSegments(); err != nil {
+		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 	log.Log(lvl, "[snapshots] Merge done. Indexing new segments")
-	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, mergedFrom, lvl); err != nil {
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, from, lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
 	}
 	if err := snapshots.ReopenIndices(); err != nil {
@@ -639,24 +651,6 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 
 	return nil
-}
-
-func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string, workers int, lvl log.Lvl) (uint64, error) {
-	merger := NewMerger(tmpDir, workers, lvl)
-	toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(snapshots)
-	if recommendedMerge {
-		if err := merger.Merge(ctx, toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir.Rw{Path: snapshots.Dir()}); err != nil {
-			return 0, err
-		}
-		snapshots.Close()
-		if err := merger.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, &dir.Rw{Path: snapshots.Dir()}); err != nil {
-			return 0, err
-		}
-		if err := snapshots.ReopenSegments(); err != nil {
-			return from, fmt.Errorf("ReopenSegments: %w", err)
-		}
-	}
-	return from, nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
