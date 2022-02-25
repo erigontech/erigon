@@ -9,7 +9,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -30,7 +29,7 @@ func DoCall(
 	ctx context.Context,
 	args ethapi.CallArgs,
 	tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash,
-	block *types.Block, overrides *commands.StateOverrides,
+	block *types.Block, overrides *ethapi.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
 	filters *filters.Filters,
@@ -54,7 +53,7 @@ func DoCall(
 
 	// Override the fields of specified contracts before execution.
 	if overrides != nil {
-		if err := overrides.override(state); err != nil{
+		if err := overrides.Override(state); err != nil{
 			return nil, err
 		}
 
