@@ -53,7 +53,7 @@ func DoCall(
 
 	// Override the fields of specified contracts before execution.
 	if overrides != nil {
-		if err := overrides.Override(state); err != nil{
+		if err := overrides.Override(state); err != nil {
 			return nil, err
 		}
 
