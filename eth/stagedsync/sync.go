@@ -319,17 +319,17 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
-	t := time.Since(start)
-	if t > 60*time.Second {
+	took := time.Since(start)
+	if took > 60*time.Second {
 		logPrefix := s.LogPrefix()
-		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", t)
+		log.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
-	s.timings = append(s.timings, Timing{stage: stage.ID, took: t})
+	s.timings = append(s.timings, Timing{stage: stage.ID, took: took})
 	return nil
 }
 
 func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
-	t := time.Now()
+	start := time.Now()
 	log.Trace("Unwind...", "stage", stage.ID)
 	stageState, err := s.StageState(stage.ID, tx, db)
 	if err != nil {
@@ -352,17 +352,17 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
-	took := time.Since(t)
+	took := time.Since(start)
 	if took > 60*time.Second {
 		logPrefix := s.LogPrefix()
 		log.Info(fmt.Sprintf("[%s] Unwind done", logPrefix), "in", took)
 	}
-	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: time.Since(t)})
+	s.timings = append(s.timings, Timing{isUnwind: true, stage: stage.ID, took: took})
 	return nil
 }
 
 func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
-	t := time.Now()
+	start := time.Now()
 	log.Trace("Prune...", "stage", stage.ID)
 
 	stageState, err := s.StageState(stage.ID, tx, db)
@@ -383,12 +383,12 @@ func (s *Sync) pruneStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx)
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
 
-	took := time.Since(t)
+	took := time.Since(start)
 	if took > 60*time.Second {
 		logPrefix := s.LogPrefix()
-		log.Info(fmt.Sprintf("[%s] Prune done", logPrefix), "in", t)
+		log.Info(fmt.Sprintf("[%s] Prune done", logPrefix), "in", took)
 	}
-	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: time.Since(t)})
+	s.timings = append(s.timings, Timing{isPrune: true, stage: stage.ID, took: took})
 	return nil
 }
 
