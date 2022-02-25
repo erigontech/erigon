@@ -642,7 +642,7 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.ReopenSegments(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	log.Log(lvl, "[snapshots] Merge done. Indexing new segments")
+	log.Log(lvl, "[snapshots] Merge done. Indexing new segments", "from", from)
 	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, from, lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
 	}
