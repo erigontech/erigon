@@ -64,10 +64,10 @@ func TestMerge(t *testing.T) {
 		}
 	}
 
-	N := uint64(15)
+	N := uint64(7)
 	createFile(0, 500_000)
-	for i := uint64(500_000); i < 500_000+N*50_000; i += 50_000 {
-		createFile(i, i+50_000)
+	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
+		createFile(i, i+100_000)
 	}
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
@@ -83,18 +83,18 @@ func TestMerge(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
-	require.Equal(10, a)
+	require.Equal(5, a)
 
 	_, err = findAndMergeBlockSegments(context.Background(), s, dir, 1)
 	require.NoError(err)
 	require.NoError(s.ReopenSegments())
 
-	expectedFileName = SegmentFileName(1_000_000, 1_250_000, Transactions)
+	expectedFileName = SegmentFileName(1_000_000, 1_200_000, Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
-	require.Equal(5, a)
+	require.Equal(2, a)
 }
 
 func TestRecompress(t *testing.T) {
