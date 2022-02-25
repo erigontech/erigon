@@ -648,14 +648,12 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 		if err := merger.Merge(ctx, toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 			return 0, err
 		}
-		if err := snapshots.ReopenSegments(); err != nil {
-			return from, fmt.Errorf("ReopenSegments: %w", err)
-		}
-		if err := snapshots.ReopenIndices(); err != nil {
-			return from, fmt.Errorf("ReopenSegments: %w", err)
-		}
+		snapshots.Close()
 		if err := merger.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 			return 0, err
+		}
+		if err := snapshots.ReopenSegments(); err != nil {
+			return from, fmt.Errorf("ReopenSegments: %w", err)
 		}
 	}
 	return from, nil
