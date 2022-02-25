@@ -718,7 +718,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
 		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
-		Alloc: readPrealloc("allocs/dev.json"),
+		Alloc:      readPrealloc("allocs/dev.json"),
 	}
 }
 
