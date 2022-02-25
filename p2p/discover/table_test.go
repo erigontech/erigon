@@ -20,7 +20,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/rand"
-
 	"net"
 	"reflect"
 	"testing"
@@ -95,7 +94,7 @@ func testPingReplace(t *testing.T, newNodeIsResponding, lastInBucketIsResponding
 func TestBucket_bumpNoDuplicates(t *testing.T) {
 	t.Parallel()
 	cfg := &quick.Config{
-		MaxCount: 1000,
+		MaxCount: 200,
 		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
 		Values: func(args []reflect.Value, rand *rand.Rand) {
 			// generate a random list of nodes. this will be the content of the bucket.
@@ -414,7 +413,7 @@ func genIP(rand *rand.Rand) net.IP {
 
 func quickcfg() *quick.Config {
 	return &quick.Config{
-		MaxCount: 5000,
+		MaxCount: 1000,
 		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
 	}
 }
