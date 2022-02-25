@@ -106,8 +106,6 @@ type BaseAPI struct {
 	TevmEnabled  bool // experiment
 }
 
-type StateOverrides map[common.Address]ethapi.Account
-
 func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
