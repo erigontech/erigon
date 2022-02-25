@@ -663,12 +663,22 @@ func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpD
 	}
 	for _, f := range toMergeBodies {
 		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
 	}
 	for _, f := range toMergeHeaders {
 		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
 	}
 	for _, f := range toMergeTxs {
 		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + "-to-block.idx")
 	}
 	return from, nil
 }
