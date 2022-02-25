@@ -423,6 +423,23 @@ type FileInfo struct {
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".seg") }
+func TmpFiles(dir string) (res []string, err error) {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		if f.IsDir() || len(f.Name()) < 3 {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ".tmp" {
+			continue
+		}
+		res = append(res, filepath.Join(dir, f.Name()))
+	}
+	return res, nil
+}
+
 func noGaps(in []FileInfo) (out []FileInfo, err error) {
 	var prevTo uint64
 	for _, f := range in {
@@ -624,104 +641,23 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 }
 
 func findAndMergeBlockSegments(ctx context.Context, snapshots *RoSnapshots, tmpDir string, workers int, lvl log.Lvl) (uint64, error) {
-	var toMergeBodies, toMergeHeaders, toMergeTxs []string
-	var from, to, stopAt uint64
-	// merge segments
-	for _, sn := range snapshots.blocks {
-		if sn.To-sn.From >= DEFAULT_SEGMENT_SIZE { // is complete .seg
-			continue
+	merger := NewMerger(tmpDir, workers, lvl)
+	toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(snapshots)
+	if recommendedMerge {
+		if err := merger.Merge(ctx, toMergeHeaders, toMergeBodies, toMergeTxs, from, to, snapshots.Dir()); err != nil {
+			return 0, err
 		}
-		if from == 0 {
-			from = sn.From
-			stopAt = chooseSegmentEnd(from, from+DEFAULT_SEGMENT_SIZE, DEFAULT_SEGMENT_SIZE)
+		if err := snapshots.ReopenSegments(); err != nil {
+			return from, fmt.Errorf("ReopenSegments: %w", err)
 		}
-
-		if sn.To > stopAt {
-			break
+		if err := snapshots.ReopenIndices(); err != nil {
+			return from, fmt.Errorf("ReopenSegments: %w", err)
 		}
-		to = sn.To
-		toMergeBodies = append(toMergeBodies, sn.Bodies.FilePath())
-		toMergeHeaders = append(toMergeHeaders, sn.Headers.FilePath())
-		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
-	}
-
-	doMerge := len(toMergeBodies) >= MERGE_THRESHOLD || to-from == DEFAULT_SEGMENT_SIZE
-	if !doMerge {
-		return from, nil
-	}
-
-	if err := mergeByAppendSegments(ctx, toMergeBodies, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Bodies)), tmpDir, workers, lvl); err != nil {
-		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
-	}
-	if err := mergeByAppendSegments(ctx, toMergeHeaders, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Headers)), tmpDir, workers, lvl); err != nil {
-		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
-	}
-	if err := mergeByAppendSegments(ctx, toMergeTxs, filepath.Join(snapshots.Dir(), SegmentFileName(from, to, Transactions)), tmpDir, workers, lvl); err != nil {
-		return from, fmt.Errorf("mergeByAppendSegments: %w", err)
-	}
-	if err := snapshots.ReopenSegments(); err != nil {
-		return from, fmt.Errorf("ReopenSegments: %w", err)
-	}
-	for _, f := range toMergeBodies {
-		_ = os.Remove(f)
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-	}
-	for _, f := range toMergeHeaders {
-		_ = os.Remove(f)
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-	}
-	for _, f := range toMergeTxs {
-		_ = os.Remove(f)
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + "-to-block.idx")
+		if err := merger.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, snapshots.Dir()); err != nil {
+			return 0, err
+		}
 	}
 	return from, nil
-}
-
-func mergeByAppendSegments(ctx context.Context, toMerge []string, targetFile, tmpDir string, workers int, lvl log.Lvl) error {
-	fileNames := make([]string, len(toMerge))
-	for i, f := range toMerge {
-		_, fName := filepath.Split(f)
-		fileNames[i] = fName
-	}
-	_, fName := filepath.Split(targetFile)
-	log.Log(lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
-	f, err := compress.NewCompressor(ctx, "merge", targetFile, tmpDir, compress.MinPatternScore, workers)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	var word = make([]byte, 0, 4096)
-	for _, cFile := range toMerge {
-		d, err := compress.NewDecompressor(cFile)
-		if err != nil {
-			return err
-		}
-		defer d.Close()
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			for g.HasNext() {
-				word, _ = g.Next(word[:0])
-				if err := f.AddWord(word); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		d.Close()
-	}
-	if err = f.Compress(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
@@ -1311,6 +1247,122 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+type Merger struct {
+	lvl     log.Lvl
+	workers int
+	tmpDir  string
+}
+
+func NewMerger(tmpDir string, workers int, lvl log.Lvl) *Merger {
+	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl}
+}
+func (*Merger) FindCandidates(snapshots *RoSnapshots) (toMergeHeaders, toMergeBodies, toMergeTxs []string, from, to uint64, mergeRecommended bool) {
+	var stopAt uint64
+	// merge segments
+	for _, sn := range snapshots.blocks {
+		if sn.To-sn.From >= DEFAULT_SEGMENT_SIZE { // is complete .seg
+			continue
+		}
+		if from == 0 {
+			from = sn.From
+			stopAt = chooseSegmentEnd(from, from+DEFAULT_SEGMENT_SIZE, DEFAULT_SEGMENT_SIZE)
+		}
+
+		if sn.To > stopAt {
+			break
+		}
+		to = sn.To
+		toMergeBodies = append(toMergeBodies, sn.Bodies.FilePath())
+		toMergeHeaders = append(toMergeHeaders, sn.Headers.FilePath())
+		toMergeTxs = append(toMergeTxs, sn.Transactions.FilePath())
+	}
+	mergeRecommended = len(toMergeBodies) >= MERGE_THRESHOLD || to-from == DEFAULT_SEGMENT_SIZE
+	return
+}
+
+func (m *Merger) Merge(ctx context.Context, toMergeHeaders, toMergeBodies, toMergeTxs []string, from, to uint64, snapshotDir string) error {
+	if err := m.merge(ctx, toMergeBodies, filepath.Join(snapshotDir, SegmentFileName(from, to, Bodies))); err != nil {
+		return fmt.Errorf("mergeByAppendSegments: %w", err)
+	}
+	if err := m.merge(ctx, toMergeHeaders, filepath.Join(snapshotDir, SegmentFileName(from, to, Headers))); err != nil {
+		return fmt.Errorf("mergeByAppendSegments: %w", err)
+	}
+	if err := m.merge(ctx, toMergeTxs, filepath.Join(snapshotDir, SegmentFileName(from, to, Transactions))); err != nil {
+		return fmt.Errorf("mergeByAppendSegments: %w", err)
+	}
+	return nil
+}
+
+func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string) error {
+	fileNames := make([]string, len(toMerge))
+	for i, f := range toMerge {
+		_, fName := filepath.Split(f)
+		fileNames[i] = fName
+	}
+	_, fName := filepath.Split(targetFile)
+	log.Log(m.lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
+	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var word = make([]byte, 0, 4096)
+	for _, cFile := range toMerge {
+		d, err := compress.NewDecompressor(cFile)
+		if err != nil {
+			return err
+		}
+		defer d.Close()
+		if err := d.WithReadAhead(func() error {
+			g := d.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				if err := f.AddWord(word); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		d.Close()
+	}
+	if err = f.Compress(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *Merger) RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs []string, snapshotsDir string) error {
+	for _, f := range toMergeBodies {
+		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+	}
+	for _, f := range toMergeHeaders {
+		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+	}
+	for _, f := range toMergeTxs {
+		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+		_ = os.Remove(withoutExt + "-to-block.idx")
+	}
+	tmpFiles, err := TmpFiles(snapshotsDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range tmpFiles {
+		_ = os.Remove(f)
 	}
 	return nil
 }

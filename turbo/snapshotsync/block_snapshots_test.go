@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -74,7 +75,7 @@ func TestMerge(t *testing.T) {
 	defer s.Close()
 
 	require.NoError(s.ReopenSegments())
-	_, err := findAndMergeBlockSegments(context.Background(), s, dir, 1)
+	_, err := findAndMergeBlockSegments(context.Background(), s, dir, 1, log.LvlInfo)
 	require.NoError(err)
 	require.NoError(s.ReopenSegments())
 
@@ -85,7 +86,7 @@ func TestMerge(t *testing.T) {
 	a := d.Count()
 	require.Equal(10, a)
 
-	_, err = findAndMergeBlockSegments(context.Background(), s, dir, 1)
+	_, err = findAndMergeBlockSegments(context.Background(), s, dir, 1, log.LvlInfo)
 	require.NoError(err)
 	require.NoError(s.ReopenSegments())
 
