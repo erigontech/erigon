@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -64,37 +65,47 @@ func TestMerge(t *testing.T) {
 		}
 	}
 
-	N := uint64(15)
+	N := uint64(7)
 	createFile(0, 500_000)
-	for i := uint64(500_000); i < 500_000+N*50_000; i += 50_000 {
-		createFile(i, i+50_000)
+	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
+		createFile(i, i+100_000)
 	}
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
+	require.NoError(s.ReopenSegments())
 
-	require.NoError(s.ReopenSegments())
-	err := findAndMergeBlockSegments(context.Background(), s, dir)
-	require.NoError(err)
-	require.NoError(s.ReopenSegments())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo)
+		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
+		require.True(recommendedMerge)
+		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		require.NoError(err)
+		require.NoError(s.ReopenSegments())
+	}
 
 	expectedFileName := SegmentFileName(500_000, 1_000_000, Transactions)
 	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
-	require.Equal(10, a)
+	require.Equal(5, a)
 
-	err = findAndMergeBlockSegments(context.Background(), s, dir)
-	require.NoError(err)
-	require.NoError(s.ReopenSegments())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo)
+		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
+		require.True(recommendedMerge)
+		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		require.NoError(err)
+		require.NoError(s.ReopenSegments())
+	}
 
-	expectedFileName = SegmentFileName(1_000_000, 1_250_000, Transactions)
+	expectedFileName = SegmentFileName(1_000_000, 1_200_000, Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
-	require.Equal(5, a)
+	require.Equal(2, a)
 }
 
 func TestRecompress(t *testing.T) {

@@ -581,7 +581,7 @@ func (srv *Server) setupDiscovery(ctx context.Context) error {
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	srv.log.Trace("UDP listener up", "addr", realaddr)
 	if srv.NAT != nil {
-		if !realaddr.IP.IsLoopback() {
+		if !realaddr.IP.IsLoopback() && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
 				defer debug.LogPanic()
@@ -693,7 +693,7 @@ func (srv *Server) setupListening() error {
 	// Update the local node record and map the TCP listening port if NAT is configured.
 	if tcp, ok := listener.Addr().(*net.TCPAddr); ok {
 		srv.localnode.Set(enr.TCP(tcp.Port))
-		if !tcp.IP.IsLoopback() && srv.NAT != nil {
+		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
 				defer debug.LogPanic()

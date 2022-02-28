@@ -277,37 +277,15 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	return newcfg, storedBlock, nil
 }
 
-func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
-	switch {
-	case g != nil:
+func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
+	if g != nil {
 		return g.Config
-	case ghash == params.MainnetGenesisHash:
-		return params.MainnetChainConfig
-	case ghash == params.SepoliaGenesisHash:
-		return params.SepoliaChainConfig
-	case ghash == params.RopstenGenesisHash:
-		return params.RopstenChainConfig
-	case ghash == params.RinkebyGenesisHash:
-		return params.RinkebyChainConfig
-	case ghash == params.GoerliGenesisHash:
-		return params.GoerliChainConfig
-	case ghash == params.BSCGenesisHash:
-		return params.BSCChainConfig
-	case ghash == params.ChapelGenesisHash:
-		return params.ChapelChainConfig
-	case ghash == params.RialtoGenesisHash:
-		return params.RialtoChainConfig
-	case ghash == params.ErigonGenesisHash:
-		return params.ErigonChainConfig
-	case ghash == params.SokolGenesisHash:
-		return params.SokolChainConfig
-	case ghash == params.FermionGenesisHash:
-		return params.FermionChainConfig
-	case ghash == params.MumbaiGenesisHash:
-		return params.MumbaiChainConfig
-	case ghash == params.BorMainnetGenesisHash:
-		return params.BorMainnetChainConfig
-	default:
+	}
+
+	config := params.ChainConfigByGenesisHash(genesisHash)
+	if config != nil {
+		return config
+	} else {
 		return params.AllEthashProtocolChanges
 	}
 }
@@ -740,18 +718,7 @@ func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 		ExtraData:  append(append(make([]byte, 32), faucet[:]...), make([]byte, crypto.SignatureLength)...),
 		GasLimit:   11500000,
 		Difficulty: big.NewInt(1),
-		Alloc: map[common.Address]GenesisAccount{
-			common.BytesToAddress([]byte{1}): {Balance: big.NewInt(1)}, // ECRecover
-			common.BytesToAddress([]byte{2}): {Balance: big.NewInt(1)}, // SHA256
-			common.BytesToAddress([]byte{3}): {Balance: big.NewInt(1)}, // RIPEMD
-			common.BytesToAddress([]byte{4}): {Balance: big.NewInt(1)}, // Identity
-			common.BytesToAddress([]byte{5}): {Balance: big.NewInt(1)}, // ModExp
-			common.BytesToAddress([]byte{6}): {Balance: big.NewInt(1)}, // ECAdd
-			common.BytesToAddress([]byte{7}): {Balance: big.NewInt(1)}, // ECScalarMul
-			common.BytesToAddress([]byte{8}): {Balance: big.NewInt(1)}, // ECPairing
-			common.BytesToAddress([]byte{9}): {Balance: big.NewInt(1)}, // BLAKE2b
-			faucet:                           {Balance: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(9))},
-		},
+		Alloc:      readPrealloc("allocs/dev.json"),
 	}
 }
 

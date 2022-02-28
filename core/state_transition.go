@@ -292,32 +292,28 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v, nonce: %d", ErrNonceMax,
 				st.msg.From().Hex(), stNonce)
 		}
+
+		fmt.Println("Got here 1")
+		// Make sure the sender is an EOA (EIP-3607)
+		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
+			// common.Hash{} means that the sender is not in the state.
+			// Historically there were transactions with 0 gas price and non-existing sender,
+			// so we have to allow that.
+			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
+				st.msg.From().Hex(), codeHash)
+		}
 	}
 
-	fmt.Println("Got here 1")
-
-	// Make sure the sender is an EOA (EIP-3607)
-	if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
-		// common.Hash{} means that the sender is not in the state.
-		// Historically there were transactions with 0 gas price and non-existing sender,
-		// so we have to allow that.
-		return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
-			st.msg.From().Hex(), codeHash)
-	}
-
-	fmt.Println("Got here 2")
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		fmt.Printf("st.gasFeeCap: %v, st.tip: %v\n", st.tip, st.gasFeeCap)
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
 			if l := st.gasFeeCap.BitLen(); l > 256 {
-				fmt.Println("About to break gas fee cap")
 				return fmt.Errorf("%w: address %v, gasFeeCap bit length: %d", ErrFeeCapVeryHigh,
 					st.msg.From().Hex(), l)
 			}
 			if l := st.tip.BitLen(); l > 256 {
-				fmt.Println("About to break tip")
 				return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
 					st.msg.From().Hex(), l)
 			}
@@ -437,10 +433,15 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 	if st.isParlia {
 		st.state.AddBalance(consensus.SystemAddress, amount)
-	} else if london && st.isBor {
-		burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
-		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
-		st.state.AddBalance(burntContractAddress, burnAmount)
+	} else {
+		st.state.AddBalance(st.evm.Context().Coinbase, amount)
+	}
+	if st.isBor {
+		if london {
+			burntContractAddress := common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context().BlockNumber))
+			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
+			st.state.AddBalance(burntContractAddress, burnAmount)
+		}
 		// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 		// add transfer log
 		output1 := input1.Clone()
@@ -457,8 +458,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			output1.Sub(output1, amount),
 			output2.Add(output2, amount),
 		)
-	} else {
-		st.state.AddBalance(st.evm.Context().Coinbase, amount)
 	}
 
 	return &ExecutionResult{

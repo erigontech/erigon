@@ -395,16 +395,12 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	// proof-of-stake mining
-	assembleBlockPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
+	assembleBlockPOS := func(param *core.BlockProposerParametersPOS) (*types.Block, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
-		miningStatePos.MiningConfig.Etherbase = suggestedFeeRecipient
+		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.BlockProposerParametersPOS{
-					Random:                random,
-					SuggestedFeeRecipient: suggestedFeeRecipient,
-					Timestamp:             timestamp,
-				}, tmpdir),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),

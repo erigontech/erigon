@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -46,6 +47,7 @@ func (gc *GenesisContractsClient) CommitState(
 	header *types.Header,
 	chCtx chainContext,
 	c *Bor,
+	syscall consensus.SystemCall,
 ) error {
 	eventRecord := event.BuildEventRecord()
 	recordBytes, err := rlp.EncodeToBytes(eventRecord)
@@ -60,7 +62,7 @@ func (gc *GenesisContractsClient) CommitState(
 		return err
 	}
 	log.Trace("→ committing new state", "eventRecord", event.String())
-	_, err = c.sysCall(common.HexToAddress(gc.StateReceiverContract), data)
+	_, err = syscall(common.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return err
 	}
@@ -71,6 +73,7 @@ func (gc *GenesisContractsClient) LastStateId(header *types.Header,
 	state *state.IntraBlockState,
 	chain chainContext,
 	c *Bor,
+	syscall consensus.SystemCall,
 ) (*big.Int, error) {
 	method := "lastStateId"
 	data, err := gc.stateReceiverABI.Pack(method)
@@ -79,7 +82,7 @@ func (gc *GenesisContractsClient) LastStateId(header *types.Header,
 		return nil, err
 	}
 
-	result, err := c.sysCall(common.HexToAddress(gc.StateReceiverContract), data)
+	result, err := syscall(common.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return nil, err
 	}

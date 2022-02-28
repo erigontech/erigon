@@ -63,6 +63,17 @@ var snapshotCommand = cli.Command{
 				SnapshotRebuildFlag,
 			}, debug.Flags...),
 		},
+		{
+			Name:   "retire",
+			Action: doRetireCommand,
+			Usage:  "Build snapshots for some recent blocks",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
+				utils.DataDirFlag,
+				SnapshotFromFlag,
+				SnapshotToFlag,
+			}, debug.Flags...),
+		},
 	},
 }
 
@@ -115,6 +126,36 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
+func doRetireCommand(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
+	datadir := cliCtx.String(utils.DataDirFlag.Name)
+	snapshotDir := filepath.Join(datadir, "snapshots")
+	tmpDir := filepath.Join(datadir, etl.TmpDirName)
+	from := cliCtx.Uint64(SnapshotFromFlag.Name)
+	to := cliCtx.Uint64(SnapshotToFlag.Name)
+
+	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(datadir, "chaindata")).Readonly().MustOpen()
+	defer chainDB.Close()
+
+	cfg := ethconfig.NewSnapshotCfg(true, true)
+	rwSnapshotDir, err := dir.OpenRw(snapshotDir)
+	if err != nil {
+		return err
+	}
+	defer rwSnapshotDir.Close()
+	chainConfig := tool.ChainConfigFromDB(chainDB)
+	chainID, _ := uint256.FromBig(chainConfig.ChainID)
+	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
+
+	if err := snapshotsync.RetireBlocks(ctx, from, to, *chainID, tmpDir, snapshots, chainDB, 1, log.LvlInfo); err != nil {
+		panic(err)
+		//return err
+	}
+	return nil
+}
+
 func doSnapshotCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
@@ -163,7 +204,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	if err := allSnapshots.ReopenSegments(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil
@@ -209,7 +250,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	if workers < 1 {
 		workers = 1
 	}
-	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers); err != nil {
+	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil

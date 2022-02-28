@@ -2,14 +2,18 @@ package cli
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -26,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -45,6 +50,9 @@ var rootCmd = &cobra.Command{
 	Use:   "rpcdaemon",
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
+
+const JwtTokenExpiry = 5 * time.Second
+const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
@@ -80,6 +88,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
+	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, "jwt-secret", "", "Token to ensure safe connection between CL and EL")
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -372,6 +381,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
+	var engineListenerAuth *http.Server
 	var enginesrv *rpc.Server
 	var engineHttpEndpoint string
 
@@ -418,7 +428,10 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		wsHandler = srv.WebsocketHandler([]string{"*"}, cfg.WebsocketCompression)
 	}
 
-	apiHandler := createHandler(cfg, defaultAPIList, httpHandler, wsHandler)
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, false)
+	if err != nil {
+		return err
+	}
 
 	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, apiHandler)
 	if err != nil {
@@ -428,7 +441,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
 	if len(engineAPI) > 0 {
-		engineListener, enginesrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI, engineFlag)
+		engineListener, engineListenerAuth, enginesrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI, engineFlag)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api for engine: %w", err)
 		}
@@ -471,6 +484,11 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
 		}
 
+		if engineListenerAuth != nil {
+			_ = engineListenerAuth.Shutdown(shutdownCtx)
+			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
+		}
+
 		if cfg.GRPCServerEnabled {
 			if cfg.GRPCHealthCheckEnabled {
 				healthServer.Shutdown()
@@ -491,7 +509,37 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler) http.Handler {
+func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, isAuth bool) (http.Handler, error) {
+	var jwtVerificationKey []byte
+	var err error
+
+	if isAuth {
+		// If no file is specified we generate a key in jwt.hex
+		if cfg.JWTSecretPath == "" {
+			jwtVerificationKey := make([]byte, 32)
+			rand.Read(jwtVerificationKey)
+			jwtVerificationKey = []byte(common.Bytes2Hex(jwtVerificationKey))
+			f, err := os.Create(JwtDefaultFile)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+
+			_, err = f.Write(jwtVerificationKey)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			jwtVerificationKey, err = ioutil.ReadFile(cfg.JWTSecretPath)
+			if err != nil {
+				return nil, err
+			}
+			if len(jwtVerificationKey) != 64 {
+				return nil, fmt.Errorf("error: invalid size of verification key in %s", cfg.JWTSecretPath)
+			}
+		}
+	}
+
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
@@ -501,37 +549,79 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 			wsHandler.ServeHTTP(w, r)
 			return
 		}
+
+		if isAuth {
+			// Check if JWT signature is correct
+			tokenStr, ok := r.Header["Authorization"]
+			if !ok {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			claims := jwt.StandardClaims{}
+			tkn, err := jwt.ParseWithClaims(strings.Replace(tokenStr[0], "Bearer ", "", 1), &claims, func(token *jwt.Token) (interface{}, error) {
+				return jwtVerificationKey, nil
+			})
+			if err != nil || !tkn.Valid {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			// Validate time of iat
+			now := time.Now().Unix()
+			if claims.IssuedAt > now+JwtTokenExpiry.Nanoseconds() && claims.IssuedAt < now-JwtTokenExpiry.Nanoseconds() {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+		}
+
 		httpHandler.ServeHTTP(w, r)
 	})
 
-	return handler
+	return handler, nil
 }
 
-func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, engineFlag []string) (*http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, engineFlag []string) (*http.Server, *http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
+	engineHttpEndpointAuth := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort+1)
 
 	enginesrv := rpc.NewServer(cfg.RpcBatchConcurrency)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", err
 	}
 	enginesrv.SetAllowList(allowListForRPC)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, engineFlag, enginesrv, false); err != nil {
-		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
 	engineHttpHandler := node.NewHTTPHandlerStack(enginesrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-	engineApiHandler := createHandler(cfg, engineApi, engineHttpHandler, nil)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, nil, false)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
+
+	engineApiHandlerAuth, err := createHandler(cfg, engineApi, engineHttpHandler, nil, true)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
 
 	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
+		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
+
+	engineListenerAuth, _, err := node.StartHTTPEndpoint(engineHttpEndpointAuth, rpc.DefaultHTTPTimeouts, engineApiHandlerAuth)
+	if err != nil {
+		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
+	}
+
 	engineInfo := []interface{}{"url", engineHttpEndpoint}
 	log.Info("HTTP endpoint opened for engine", engineInfo...)
+	engineInfoAuth := []interface{}{"url", engineHttpEndpointAuth}
+	log.Info("HTTP endpoint opened for auth engine", engineInfoAuth...)
 
-	return engineListener, enginesrv, engineHttpEndpoint, nil
+	return engineListener, engineListenerAuth, enginesrv, engineHttpEndpoint, nil
 
 }
