@@ -29,7 +29,7 @@ var (
 	sendValue   uint64
 	nonce       uint64
 	searchBlock bool
-	txType string
+	txType      string
 )
 
 const (
