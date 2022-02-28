@@ -277,6 +277,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
+	fmt.Println("Running preCheck")
+	fmt.Printf("st value: %+v, st pointer: %p\n", st, st)
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce := st.state.GetNonce(st.msg.From())
@@ -292,6 +294,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 	}
 
+	fmt.Println("Got here 1")
+
 	// Make sure the sender is an EOA (EIP-3607)
 	if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
 		// common.Hash{} means that the sender is not in the state.
@@ -301,15 +305,19 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			st.msg.From().Hex(), codeHash)
 	}
 
+	fmt.Println("Got here 2")
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
+		fmt.Printf("st.gasFeeCap: %v, st.tip: %v\n", st.tip, st.gasFeeCap)
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
 			if l := st.gasFeeCap.BitLen(); l > 256 {
+				fmt.Println("About to break gas fee cap")
 				return fmt.Errorf("%w: address %v, gasFeeCap bit length: %d", ErrFeeCapVeryHigh,
 					st.msg.From().Hex(), l)
 			}
 			if l := st.tip.BitLen(); l > 256 {
+				fmt.Println("About to break tip")
 				return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
 					st.msg.From().Hex(), l)
 			}

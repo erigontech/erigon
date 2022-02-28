@@ -29,6 +29,7 @@ var (
 	sendValue   uint64
 	nonce       uint64
 	searchBlock bool
+	txType string
 )
 
 const (
@@ -36,8 +37,10 @@ const (
 )
 
 func init() {
+	sendTxCmd.Flags().StringVar(&txType, "tx-type", "", "type of transaction, specify 'contract' or 'regular'")
+	sendTxCmd.MarkFlagRequired("tx-type")
+
 	sendTxCmd.Flags().StringVar(&sendAddr, "addr", "", "String address to send to")
-	sendTxCmd.MarkFlagRequired("addr")
 	sendTxCmd.Flags().Uint64Var(&sendValue, "value", 0, "Uint64 Value to send")
 	sendTxCmd.Flags().Uint64Var(&nonce, "nonce", 0, "Uint64 nonce")
 	sendTxCmd.Flags().BoolVar(&searchBlock, "search-block", false, "Boolean look for tx in mined blocks")
@@ -49,7 +52,11 @@ var sendTxCmd = &cobra.Command{
 	Use:   "send-tx",
 	Short: "Sends a transaction",
 	Args: func(cmd *cobra.Command, args []string) error {
-		if sendValue == 0 {
+		fmt.Println("tx type is: ", txType)
+		if txType != "regular" && txType != "contract" {
+			return fmt.Errorf("tx type to create must either be 'contract' or 'regular'")
+		}
+		if sendValue == 0 && txType == "regular" {
 			return fmt.Errorf("value must be > 0")
 		}
 		return nil
@@ -58,18 +65,28 @@ var sendTxCmd = &cobra.Command{
 		if clearDev {
 			defer clearDevDB()
 		}
-		toAddress := common.HexToAddress(sendAddr)
-		signer := types.LatestSigner(params.AllCliqueProtocolChanges)
-		signedTx, _ := types.SignTx(types.NewTransaction(nonce, toAddress, uint256.NewInt(sendValue),
-			params.TxGas, uint256.NewInt(gasPrice), nil), *signer, devnetSignPrivateKey)
-		hash, err := requests.SendTx(reqId, &signedTx)
-		if err != nil {
-			fmt.Printf("Error trying to send transaction: %v\n", err)
+
+		if txType == "regular" {
+			if sendAddr == "" {
+				panic("string address to send to must be present")
+			}
+
+			toAddress := common.HexToAddress(sendAddr)
+			signer := types.LatestSigner(params.AllCliqueProtocolChanges)
+			signedTx, _ := types.SignTx(types.NewTransaction(nonce, toAddress, uint256.NewInt(sendValue),
+				params.TxGas, uint256.NewInt(gasPrice), nil), *signer, devnetSignPrivateKey)
+			hash, err := requests.SendTx(reqId, &signedTx)
+			if err != nil {
+				fmt.Printf("Error trying to send transaction: %v\n", err)
+			}
+
+			if searchBlock {
+				searchBlockForTx(*hash)
+			}
+		} else {
+			emitContractEvent()
 		}
 
-		if searchBlock {
-			searchBlockForTx(*hash)
-		}
 	},
 }
 
@@ -148,25 +165,24 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 		}
 	}
 
-	// TODO: Adding the below code to keep the 'testLogEvents' function in use
-	useFunction := false
-	if useFunction {
-		testLogEvents()
-	}
-
 	return false, nil
 }
 
-func testLogEvents() {
+func emitContractEvent() {
+	fmt.Println("Process started...")
 	gspec := core.DeveloperGenesisBlock(uint64(0), common.HexToAddress("67b1d87101671b127f5f8714789C7192f7ad340e"))
+	fmt.Printf("Gspec is: %+v\n", gspec)
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, params.TxGas)
 	transactOpts := bind.NewKeyedTransactor(devnetSignPrivateKey)
+	fmt.Printf("backend is: %+v\n", contractBackend)
 	_, _, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
 	if err != nil {
+		fmt.Printf("error 1: %+v\n", err)
 		panic(err)
 	}
 	_, err = subscriptionContract.Fallback(transactOpts, []byte{})
 	if err != nil {
+		fmt.Printf("error 2: %+v\n", err)
 		panic(err)
 	}
 }

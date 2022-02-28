@@ -552,6 +552,9 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	fmt.Println()
+	fmt.Printf("call from estimate gas is: %+v\n", call)
+
 	// Determine the lowest and highest possible gas limits to binary search in between
 	var (
 		lo  = params.TxGas - 1
@@ -643,6 +646,9 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
+	fmt.Println()
+	fmt.Printf("call is: %+v\n", call)
+
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = u256.Num1
@@ -665,6 +671,8 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
 	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
+
+	fmt.Printf("Message: %+v\n", msg)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
 }
