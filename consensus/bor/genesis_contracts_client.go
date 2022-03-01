@@ -58,7 +58,7 @@ func (gc *GenesisContractsClient) CommitState(
 	t := event.Time.Unix()
 	data, err := gc.stateReceiverABI.Pack(method, big.NewInt(0).SetInt64(t), recordBytes)
 	if err != nil {
-		log.Error("Unable to pack tx for commitState", "error", err)
+		log.Error("Unable to pack tx for commitState", "err", err)
 		return err
 	}
 	log.Trace("→ committing new state", "eventRecord", event.String())
@@ -78,7 +78,7 @@ func (gc *GenesisContractsClient) LastStateId(header *types.Header,
 	method := "lastStateId"
 	data, err := gc.stateReceiverABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for LastStateId", "error", err)
+		log.Error("Unable to pack tx for LastStateId", "err", err)
 		return nil, err
 	}
 

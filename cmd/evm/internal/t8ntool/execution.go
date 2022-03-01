@@ -169,7 +169,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	for i, txn := range txs {
 		msg, err := txn.AsMessage(*signer, pre.Env.BaseFee)
 		if err != nil {
-			log.Warn("rejected txn", "index", i, "hash", txn.Hash(), "error", err)
+			log.Warn("rejected txn", "index", i, "hash", txn.Hash(), "err", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
@@ -188,7 +188,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		msgResult, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			ibs.RevertToSnapshot(snapshot)
-			log.Info("rejected txn", "index", i, "hash", txn.Hash(), "from", msg.From(), "error", err)
+			log.Info("rejected txn", "index", i, "hash", txn.Hash(), "from", msg.From(), "err", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}

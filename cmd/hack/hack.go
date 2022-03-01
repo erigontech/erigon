@@ -2521,11 +2521,11 @@ func main() {
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
+			log.Error("could not create CPU profile", "err", err)
 			return
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
+			log.Error("could not start CPU profile", "err", err)
 			return
 		}
 		defer pprof.StopCPUProfile()

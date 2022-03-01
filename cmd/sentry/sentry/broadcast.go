@@ -37,7 +37,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 	}
 	data, err := rlp.EncodeToBytes(&typedRequest)
 	if err != nil {
-		log.Error("propagateNewBlockHashes", "error", err)
+		log.Error("propagateNewBlockHashes", "err", err)
 		return
 	}
 	var req66 *proto_sentry.OutboundMessageData
@@ -57,7 +57,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 
 				_, err = sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
-					log.Error("propagateNewBlockHashes", "error", err)
+					log.Error("propagateNewBlockHashes", "err", err)
 				}
 			}
 		default:
@@ -74,7 +74,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 		TD:    td,
 	})
 	if err != nil {
-		log.Error("broadcastNewBlock", "error", err)
+		log.Error("broadcastNewBlock", "err", err)
 	}
 	var req66 *proto_sentry.SendMessageToRandomPeersRequest
 	for _, sentry := range cs.sentries {
@@ -96,10 +96,10 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 			}
 			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-					log.Debug("broadcastNewBlock", "error", err)
+					log.Debug("broadcastNewBlock", "err", err)
 					continue
 				}
-				log.Error("broadcastNewBlock", "error", err)
+				log.Error("broadcastNewBlock", "err", err)
 			}
 		}
 	}
@@ -128,7 +128,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("BroadcastLocalPooledTxs", "error", err)
+			log.Error("BroadcastLocalPooledTxs", "err", err)
 		}
 		var req66 *proto_sentry.OutboundMessageData
 		for _, sentry := range cs.sentries {
@@ -147,10 +147,10 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
 				if err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-						log.Debug("BroadcastLocalPooledTxs", "error", err)
+						log.Debug("BroadcastLocalPooledTxs", "err", err)
 						continue
 					}
-					log.Error("BroadcastLocalPooledTxs", "error", err)
+					log.Error("BroadcastLocalPooledTxs", "err", err)
 				}
 				avgPeersPerSent66 += len(peers.GetPeers())
 			}
@@ -182,7 +182,7 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("BroadcastRemotePooledTxs", "error", err)
+			log.Error("BroadcastRemotePooledTxs", "err", err)
 		}
 		var req66 *proto_sentry.SendMessageToRandomPeersRequest
 		for _, sentry := range cs.sentries {
@@ -204,10 +204,10 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 				}
 				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-						log.Debug("BroadcastRemotePooledTxs", "error", err)
+						log.Debug("BroadcastRemotePooledTxs", "err", err)
 						continue
 					}
-					log.Error("BroadcastRemotePooledTxs", "error", err)
+					log.Error("BroadcastRemotePooledTxs", "err", err)
 				}
 			}
 		}
@@ -233,7 +233,7 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 
 		data, err := rlp.EncodeToBytes(eth.NewPooledTransactionHashesPacket(pending))
 		if err != nil {
-			log.Error("PropagatePooledTxsToPeersList", "error", err)
+			log.Error("PropagatePooledTxsToPeersList", "err", err)
 		}
 		for _, sentry := range cs.sentries {
 			if !sentry.Ready() {
@@ -253,10 +253,10 @@ func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, 
 					}
 					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
 						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-							log.Debug("PropagatePooledTxsToPeersList", "error", err)
+							log.Debug("PropagatePooledTxsToPeersList", "err", err)
 							continue
 						}
-						log.Error("PropagatePooledTxsToPeersList", "error", err)
+						log.Error("PropagatePooledTxsToPeersList", "err", err)
 					}
 				}
 			}

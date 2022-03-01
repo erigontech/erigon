@@ -32,7 +32,7 @@ func (cs *ControlServerImpl) UpdateHead(ctx context.Context, height uint64, hash
 		}
 
 		if _, err := sentry.SetStatus(ctx, statusMsg, &grpc.EmptyCallOption{}); err != nil {
-			log.Error("Update status message for the sentry", "error", err)
+			log.Error("Update status message for the sentry", "err", err)
 		}
 	}
 }

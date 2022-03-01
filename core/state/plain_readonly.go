@@ -86,7 +86,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	}
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
-		log.Error("Error decoding account", "error", err)
+		log.Error("Error decoding account", "err", err)
 		return err
 	}
 	binary.BigEndian.PutUint64(k[common.AddressLength:], acc.Incarnation)
