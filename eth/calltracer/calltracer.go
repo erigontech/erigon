@@ -45,7 +45,7 @@ func (ct *CallTracer) CaptureStart(evm *vm.EVM, depth int, from common.Address, 
 			}
 
 			if err != nil {
-				log.Warn("while CaptureStart", "error", err)
+				log.Warn("while CaptureStart", "err", err)
 			}
 		}
 	}

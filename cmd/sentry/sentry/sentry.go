@@ -950,7 +950,7 @@ func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
 	return ss.messageStreams[msgID] != nil && len(ss.messageStreams[msgID]) > 0
-	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
+	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "err", err)
 }
 
 func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch chan *proto_sentry.InboundMessage) func() {
@@ -996,7 +996,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 			return nil
 		case in := <-ch:
 			if err := server.Send(in); err != nil {
-				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
+				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "err", err)
 				return err
 			}
 		}
@@ -1012,13 +1012,13 @@ func (ss *SentryServerImpl) Close() {
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
-		log.Warn("Sending new peer notice to core P2P failed", "error", err)
+		log.Warn("Sending new peer notice to core P2P failed", "err", err)
 	}
 }
 
 func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
-		log.Warn("Sending gone peer notice to core P2P failed", "error", err)
+		log.Warn("Sending gone peer notice to core P2P failed", "err", err)
 	}
 }
 

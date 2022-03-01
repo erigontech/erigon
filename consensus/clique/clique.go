@@ -224,12 +224,12 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.ConsensusSnapshotConfig
 	snapNum, err := lastSnapshot(cliqueDB)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
-			log.Error("on Clique init while getting latest snapshot", "error", err)
+			log.Error("on Clique init while getting latest snapshot", "err", err)
 		}
 	} else {
 		snaps, err := c.snapshots(snapNum, warmupCacheSnapshots)
 		if err != nil {
-			log.Error("on Clique init", "error", err)
+			log.Error("on Clique init", "err", err)
 		}
 
 		for _, sn := range snaps {

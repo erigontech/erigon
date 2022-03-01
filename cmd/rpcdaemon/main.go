@@ -18,7 +18,7 @@ func main() {
 		logger := log.New()
 		db, borDb, backend, txPool, mining, starknet, stateCache, blockReader, ff, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
-			log.Error("Could not connect to DB", "error", err)
+			log.Error("Could not connect to DB", "err", err)
 			return nil
 		}
 		defer db.Close()

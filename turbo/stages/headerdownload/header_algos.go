@@ -716,7 +716,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 							log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
 							break // prevent removal of the link from the hd.linkQueue
 						} else {
-							log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "error", err)
+							log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 							skip = true
 						}
 					}

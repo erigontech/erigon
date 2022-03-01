@@ -360,7 +360,7 @@ func handleNewPayload(
 		}
 
 		if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
 			return nil
 		}
 
@@ -389,7 +389,7 @@ func verifyAndSaveNewPoSHeader(
 	headerHash := header.Hash()
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -519,7 +519,7 @@ func downloadMissingPoSHeaders(
 			return err
 		}
 		if err := cfg.hd.VerifyHeader(&h); err != nil {
-			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
+			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			return err
 		}
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())

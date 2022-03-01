@@ -265,10 +265,10 @@ func Exit() {
 func RaiseFdLimit() {
 	limit, err := fdlimit.Maximum()
 	if err != nil {
-		log.Error("Failed to retrieve file descriptor allowance", "error", err)
+		log.Error("Failed to retrieve file descriptor allowance", "err", err)
 		return
 	}
 	if _, err = fdlimit.Raise(uint64(limit)); err != nil {
-		log.Error("Failed to raise file descriptor allowance", "error", err)
+		log.Error("Failed to raise file descriptor allowance", "err", err)
 	}
 }
