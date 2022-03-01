@@ -29,7 +29,7 @@ func DoCall(
 	ctx context.Context,
 	args ethapi.CallArgs,
 	tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash,
-	block *types.Block, overrides *map[common.Address]ethapi.Account,
+	block *types.Block, overrides *ethapi.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
 	filters *filters.Filters,
@@ -53,38 +53,10 @@ func DoCall(
 
 	// Override the fields of specified contracts before execution.
 	if overrides != nil {
-		for addr, account := range *overrides {
-			// Override account nonce.
-			if account.Nonce != nil {
-				state.SetNonce(addr, uint64(*account.Nonce))
-			}
-			// Override account(contract) code.
-			if account.Code != nil {
-				state.SetCode(addr, *account.Code)
-			}
-			// Override account balance.
-			if account.Balance != nil {
-				balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-				if overflow {
-					return nil, fmt.Errorf("account.Balance higher than 2^256-1")
-				}
-				state.SetBalance(addr, balance)
-			}
-			if account.State != nil && account.StateDiff != nil {
-				return nil, fmt.Errorf("account %s has both 'state' and 'stateDiff'", addr.Hex())
-			}
-			// Replace entire state if caller requires.
-			if account.State != nil {
-				state.SetStorage(addr, *account.State)
-			}
-			// Apply state diff into specified accounts.
-			if account.StateDiff != nil {
-				for key, value := range *account.StateDiff {
-					key := key
-					state.SetState(addr, &key, value)
-				}
-			}
+		if err := overrides.Override(state); err != nil {
+			return nil, err
 		}
+
 	}
 
 	// Setup context so it may be cancelled the call has completed
