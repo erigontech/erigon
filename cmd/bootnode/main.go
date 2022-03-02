@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"net"
 	"os"
 
@@ -110,7 +111,7 @@ func main() {
 
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	if natm != nil {
-		if !realaddr.IP.IsLoopback() {
+		if !realaddr.IP.IsLoopback() && natm.SupportsMapping() {
 			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 		}
 		if ext, err := natm.ExternalIP(); err == nil {
@@ -129,12 +130,16 @@ func main() {
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
 	}
+
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
 	if *runv5 {
-		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

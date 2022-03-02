@@ -17,7 +17,7 @@ GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build -trimpath -tags=debug -ldflags "-X 
 GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
 GO_MINOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
 
-all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry txpool
+default: all
 
 go-version:
 	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
@@ -40,63 +40,34 @@ docker-compose:
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
+%.cmd: git-submodules
+	@# Note: $* is replaced by the command name
+	@echo "Building $*"
+	@$(GOBUILD) -o $(GOBIN)/$* ./cmd/$*
+	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+
 geth: erigon
 
-erigon: go-version git-submodules
-	@echo "Building Erigon"
-	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
-	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
-	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
+erigon: go-version erigon.cmd
+	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
-hack: git-submodules
-	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
-	@echo "Run \"$(GOBIN)/hack\" to launch hack."
+COMMANDS += cons
+COMMANDS += devnettest
+COMMANDS += downloader
+COMMANDS += evm
+COMMANDS += hack
+COMMANDS += integration
+COMMANDS += pics
+COMMANDS += rpcdaemon
+COMMANDS += rpctest
+COMMANDS += sentry
+COMMANDS += state
+COMMANDS += txpool
 
-rpctest: git-submodules
-	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
-	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
+# build each command using %.cmd rule
+$(COMMANDS): %: %.cmd
 
-state: git-submodules
-	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
-	@echo "Run \"$(GOBIN)/state\" to launch state."
-
-
-pics: git-submodules
-	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
-	@echo "Run \"$(GOBIN)/pics\" to launch pics."
-
-rpcdaemon: git-submodules
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon
-	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
-
-txpool: git-submodules
-	$(GOBUILD) -o $(GOBIN)/txpool ./cmd/txpool
-	@echo "Run \"$(GOBIN)/txpool\" to launch txpool."
-
-integration: git-submodules
-	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
-	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
-
-sentry: git-submodules
-	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
-	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
-	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
-
-cons: git-submodules
-	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
-	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
-
-evm: git-submodules
-	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
-	@echo "Run \"$(GOBIN)/evm\" to run EVM"
-
-downloader: git-submodules
-	$(GOBUILD) -o $(GOBIN)/downloader ./cmd/downloader
-	@echo "Run \"$(GOBIN)/downloader\" to download and seed snapshots."
-
-devnettest: git-submodules
-	$(GOBUILD) -o $(GOBIN)/devnettest ./cmd/devnettest
-	@echo "Run \"$(GOBIN)/devnettest\" to launch devnettest."
+all: erigon $(COMMANDS)
 
 db-tools:
 	@echo "Building db-tools"
@@ -161,5 +132,6 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
-	# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule update --init --recursive --force || true
+	@echo "Updating git submodules"
+	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule update --quiet --init --recursive --force || true

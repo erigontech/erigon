@@ -17,7 +17,6 @@
 package node
 
 import (
-	"crypto/ecdsa"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +30,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -39,7 +37,6 @@ import (
 )
 
 const (
-	datadirPrivateKey   = "nodekey"            // Path within the datadir to the node's private key
 	datadirStaticNodes  = "static-nodes.json"  // Path within the datadir to the static node list
 	datadirTrustedNodes = "trusted-nodes.json" // Path within the datadir to the trusted node list
 	datadirNodeDatabase = "nodes"              // Path within the datadir to store the node infos
@@ -143,8 +140,8 @@ type Config struct {
 	// private APIs to untrusted users is a major security risk.
 	WSExposeAll bool `toml:",omitempty"`
 
-	// Logger is a custom logger to use with the p2p.Server.
-	Logger log.Logger `toml:",omitempty"`
+	// Log is a custom logger to use with the p2p.Server.
+	Log log.Logger `toml:",omitempty"`
 
 	DatabaseVerbosity kv.DBVerbosityLvl
 
@@ -285,44 +282,6 @@ func (c *Config) ResolvePath(path string) string {
 	return filepath.Join(c.DataDir, path)
 }
 
-// NodeKey retrieves the currently configured private key of the node, checking
-// first any manually set key, falling back to the one found in the configured
-// data folder. If no key can be found, a new one is generated.
-func (c *Config) NodeKey() (*ecdsa.PrivateKey, error) {
-	// Use any specifically configured key.
-	if c.P2P.PrivateKey != nil {
-		return c.P2P.PrivateKey, nil
-	}
-	// Generate ephemeral key if no datadir is being used.
-	if c.DataDir == "" {
-		key, err := crypto.GenerateKey()
-		if err != nil {
-			return key, fmt.Errorf("failed to generate ephemeral node key: %w", err)
-		}
-		return key, nil
-	}
-
-	keyfile := c.ResolvePath(datadirPrivateKey)
-	if key, err := crypto.LoadECDSA(keyfile); err == nil {
-		return key, nil
-	}
-	// No persistent key found, generate and store a new one.
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
-	}
-	instanceDir := c.DataDir
-	if err := os.MkdirAll(instanceDir, 0700); err != nil {
-		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
-		return key, nil
-	}
-	keyfile = filepath.Join(instanceDir, datadirPrivateKey)
-	if err := crypto.SaveECDSA(keyfile, key); err != nil {
-		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
-	}
-	return key, nil
-}
-
 // StaticNodes returns a list of node enode URLs configured as static nodes.
 func (c *Config) StaticNodes() ([]*enode.Node, error) {
 	dbPath := c.ResolvePath(datadirStaticNodes)
@@ -378,7 +337,7 @@ func (c *Config) warnOnce(w *bool, format string, args ...interface{}) {
 	if *w {
 		return
 	}
-	l := c.Logger
+	l := c.Log
 	if l == nil {
 		l = log.Root()
 	}

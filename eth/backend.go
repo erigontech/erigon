@@ -92,7 +92,7 @@ type Config = ethconfig.Config
 // Ethereum implements the Ethereum full node service.
 type Ethereum struct {
 	config *ethconfig.Config
-	logger log.Logger
+	log    log.Logger
 
 	// DB interfaces
 	chainDB    kv.RwDB
@@ -197,7 +197,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
 		config:               config,
-		logger:               logger,
+		log:                  logger,
 		chainDB:              chainKv,
 		networkID:            config.NetworkID,
 		etherbase:            config.Miner.Etherbase,
@@ -395,16 +395,12 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
 	// proof-of-stake mining
-	assembleBlockPOS := func(random common.Hash, suggestedFeeRecipient common.Address, timestamp uint64) (*types.Block, error) {
+	assembleBlockPOS := func(param *core.BlockProposerParametersPOS) (*types.Block, error) {
 		miningStatePos := stagedsync.NewMiningState(&config.Miner)
-		miningStatePos.MiningConfig.Etherbase = suggestedFeeRecipient
+		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, &stagedsync.BlockProposerParametersPOS{
-					Random:                random,
-					SuggestedFeeRecipient: suggestedFeeRecipient,
-					Timestamp:             timestamp,
-				}, tmpdir),
+				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
 				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
 				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
@@ -498,7 +494,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.logger, backend.chainDB,
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,

@@ -53,7 +53,7 @@ var blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 
 func init() {
 	withBlock(erigon2Cmd)
-	withDatadir(erigon2Cmd)
+	withDataDir(erigon2Cmd)
 	withSnapshotBlocks(erigon2Cmd)
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")

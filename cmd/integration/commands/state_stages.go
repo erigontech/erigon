@@ -117,7 +117,7 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
-	withDatadir2(stateStags)
+	withDataDir2(stateStags)
 	withReferenceChaindata(stateStags)
 	withUnwind(stateStags)
 	withUnwindEvery(stateStags)
@@ -129,7 +129,7 @@ func init() {
 
 	rootCmd.AddCommand(stateStags)
 
-	withDatadir(loopIhCmd)
+	withDataDir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
@@ -137,7 +137,7 @@ func init() {
 
 	rootCmd.AddCommand(loopIhCmd)
 
-	withDatadir(loopExecCmd)
+	withDataDir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)

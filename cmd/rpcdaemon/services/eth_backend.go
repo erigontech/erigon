@@ -61,7 +61,7 @@ func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
 
-		back.log.Error("getting Version", "error", err)
+		back.log.Error("getting Version", "err", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(back.version, versionReply) {
@@ -144,7 +144,7 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	}
 	for {
 		event, err := subscription.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			log.Info("rpcdaemon: the subscription channel was closed")
 			break
 		}

@@ -3,7 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/contracts"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core"
 	"strings"
 	"time"
 
@@ -144,5 +148,25 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 		}
 	}
 
+	// TODO: Adding the below code to keep the 'testLogEvents' function in use
+	useFunction := false
+	if useFunction {
+		testLogEvents()
+	}
+
 	return false, nil
+}
+
+func testLogEvents() {
+	gspec := core.DeveloperGenesisBlock(uint64(0), common.HexToAddress("67b1d87101671b127f5f8714789C7192f7ad340e"))
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, params.TxGas)
+	transactOpts := bind.NewKeyedTransactor(devnetSignPrivateKey)
+	_, _, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
+	if err != nil {
+		panic(err)
+	}
+	_, err = subscriptionContract.Fallback(transactOpts, []byte{})
+	if err != nil {
+		panic(err)
+	}
 }

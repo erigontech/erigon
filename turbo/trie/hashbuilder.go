@@ -251,7 +251,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
-
 	}
 	return nil
 }
@@ -321,11 +320,11 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("accountLeafHashWithKey [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
 	if popped > 0 {
 		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*hashStackStride]
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
 	}
+	//fmt.Printf("accountLeafHashWithKey [%x]=>[%x]\nHash [%x]\n", key, val, hb.hashBuf[:])
 	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	hb.nodeStack = append(hb.nodeStack, nil)
 	if hb.trace {

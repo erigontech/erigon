@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -379,19 +380,35 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		blockFrom := cfg.snapshots.BlocksAvailable() + 1
 		blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
 		if blockTo-blockFrom > 1000 {
-			// in future we will do it in background
-			if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, cfg.tmpdir, cfg.snapshots, cfg.db, 1); err != nil {
-				return err
-			}
-			if err := cfg.snapshots.ReopenSegments(); err != nil {
-				return err
-			}
-			if err := cfg.snapshots.ReopenIndices(); err != nil {
-				return err
-			}
-			//if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
-			//	return nil
-			//}
+			log.Info("[snapshots] Retire blocks", "from", blockFrom, "to", blockTo)
+			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+			wg := sync.WaitGroup{}
+			wg.Add(1)
+			go func() { // move to own goroutine, because in this goroutine already living RwTx
+				// in future we will do it in background
+				if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, *chainID, cfg.tmpdir, cfg.snapshots, cfg.db, 1, log.LvlDebug); err != nil {
+					panic(err)
+					//return err
+				}
+				if err := cfg.snapshots.ReopenSegments(); err != nil {
+					panic(err)
+					//return err
+				}
+				if err := cfg.snapshots.ReopenIndices(); err != nil {
+					panic(err)
+
+					//return err
+				}
+				// RoSnapshots must be atomic? Or we can create new instance?
+				// seed new 500K files
+
+				//if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
+				//	return nil
+				//}
+
+				defer wg.Done()
+			}()
+			wg.Wait()
 			fmt.Printf("sn runtime dump: %d-%d\n", blockFrom, blockTo)
 		}
 	}

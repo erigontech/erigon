@@ -193,8 +193,14 @@ func HeadersPOS(
 	select {
 	case <-ctx.Done():
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		if !useExternalTx {
+			return tx.Commit()
+		}
 		return nil
 	case <-cfg.hd.SkipCycleHack:
+		if !useExternalTx {
+			return tx.Commit()
+		}
 		return nil
 	case forkChoiceMessage = <-cfg.forkChoiceCh:
 		forkChoiceInsteadOfNewPayload = true
@@ -354,7 +360,7 @@ func handleNewPayload(
 		}
 
 		if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
 			return nil
 		}
 
@@ -383,7 +389,7 @@ func verifyAndSaveNewPoSHeader(
 	headerHash := header.Hash()
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -513,7 +519,7 @@ func downloadMissingPoSHeaders(
 			return err
 		}
 		if err := cfg.hd.VerifyHeader(&h); err != nil {
-			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
+			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			return err
 		}
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
@@ -1017,7 +1023,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if headers < expect || bodies < expect || txs < expect {
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, 0); err != nil {
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, 0, log.LvlInfo); err != nil {
 				return err
 			}
 		}

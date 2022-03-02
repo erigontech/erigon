@@ -182,7 +182,7 @@ Loop:
 			blockHeight := header.Number.Uint64()
 			_, err := cfg.bd.VerifyUncles(header, rawBody.Uncles, cr)
 			if err != nil {
-				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "error", err)
+				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
 				u.UnwindTo(blockHeight-1, header.Hash())
 				break Loop
 			}

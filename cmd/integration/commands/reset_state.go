@@ -36,7 +36,7 @@ var cmdResetState = &cobra.Command{
 }
 
 func init() {
-	withDatadir(cmdResetState)
+	withDataDir(cmdResetState)
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)

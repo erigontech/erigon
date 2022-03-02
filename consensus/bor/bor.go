@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -223,9 +224,8 @@ type Bor struct {
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
-	fakeDiff bool // Skip difficulty verifications
-
-	sysCall consensus.SystemCall
+	fakeDiff  bool // Skip difficulty verifications
+	spanCache *btree.BTree
 }
 
 // New creates a Matic Bor consensus engine.
@@ -261,6 +261,7 @@ func New(
 		GenesisContractsClient: genesisContractsClient,
 		HeimdallClient:         heimdallClient,
 		WithoutHeimdall:        withoutHeimdall,
+		spanCache:              btree.New(32),
 	}
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
@@ -429,97 +430,130 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
-		headers []*types.Header
-		snap    *Snapshot
+		snap *Snapshot
 	)
 
-	for snap == nil {
-		// If an in-memory snapshot was found, use that
-		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
-			break
-		}
-
-		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
-			if s, err := loadSnapshot(c.config, c.signatures, c.DB, hash); err == nil {
-				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
-				snap = s
+	cont := true // Continue applying snapshots
+	limit := 256
+	for cont {
+		var headersList [][]*types.Header // List of lists because we will apply headers to snapshot such that we can persist snapshot after every list
+		var headers []*types.Header
+		h := hash
+		n := number
+		p := parents
+		cont = false
+		for snap == nil {
+			// If an in-memory snapshot was found, use that
+			if s, ok := c.recents.Get(h); ok {
+				snap = s.(*Snapshot)
 				break
 			}
-		}
 
-		// If we're at the genesis, snapshot the initial state. Alternatively if we're
-		// at a checkpoint block without a parent (light client CHT), or we have piled
-		// up more headers than allowed to be reorged (chain reinit from a freezer),
-		// consider the checkpoint trusted and snapshot it.
-		// TODO fix this
-		if number == 0 {
-			checkpoint := chain.GetHeaderByNumber(number)
-			if checkpoint != nil {
-				// get checkpoint data
-				hash := checkpoint.Hash()
-
-				// get validators and current span
-				validators, err := c.GetCurrentValidators(number + 1)
-				if err != nil {
-					return nil, err
+			// If an on-disk checkpoint snapshot can be found, use that
+			if n%checkpointInterval == 0 {
+				if s, err := loadSnapshot(c.config, c.signatures, c.DB, h); err == nil {
+					log.Trace("Loaded snapshot from disk", "number", n, "hash", h)
+					snap = s
+					break
 				}
+			}
 
-				// new snap shot
-				snap = newSnapshot(c.config, c.signatures, number, hash, validators)
-				if err := snap.store(c.DB); err != nil {
-					return nil, err
+			// If we're at the genesis, snapshot the initial state. Alternatively if we're
+			// at a checkpoint block without a parent (light client CHT), or we have piled
+			// up more headers than allowed to be reorged (chain reinit from a freezer),
+			// consider the checkpoint trusted and snapshot it.
+			// TODO fix this
+			if n == 0 {
+				checkpoint := chain.GetHeaderByNumber(n)
+				if checkpoint != nil {
+					// get checkpoint data
+					h := checkpoint.Hash()
+
+					// get validators and current span
+					validators, err := c.GetCurrentValidators(n + 1)
+					if err != nil {
+						return nil, err
+					}
+
+					// new snap shot
+					snap = newSnapshot(c.config, c.signatures, n, h, validators)
+					if err := snap.store(c.DB); err != nil {
+						return nil, err
+					}
+					log.Info("Stored checkpoint snapshot to disk", "number", n, "hash", h)
+					break
 				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
-				break
 			}
+
+			// No snapshot for this header, gather the header and move backward
+			var header *types.Header
+			if len(p) > 0 {
+				// If we have explicit parents, pick from there (enforced)
+				header = p[len(p)-1]
+				if header.Hash() != h || header.Number.Uint64() != n {
+					return nil, consensus.ErrUnknownAncestor
+				}
+				p = p[:len(p)-1]
+			} else {
+				// No explicit parents (or no more left), reach out to the database
+				header = chain.GetHeader(h, n)
+				if header == nil {
+					return nil, consensus.ErrUnknownAncestor
+				}
+			}
+			if n%checkpointInterval == 0 && len(headers) > 0 {
+				headersList = append(headersList, headers)
+				if len(headersList) > limit {
+					headersList = headersList[1:]
+					cont = true
+				}
+				headers = nil
+			}
+			headers = append(headers, header)
+			n--
+			h = header.ParentHash
 		}
 
-		// No snapshot for this header, gather the header and move backward
-		var header *types.Header
-		if len(parents) > 0 {
-			// If we have explicit parents, pick from there (enforced)
-			header = parents[len(parents)-1]
-			if header.Hash() != hash || header.Number.Uint64() != number {
-				return nil, consensus.ErrUnknownAncestor
-			}
-			parents = parents[:len(parents)-1]
-		} else {
-			// No explicit parents (or no more left), reach out to the database
-			header = chain.GetHeader(hash, number)
-			if header == nil {
-				return nil, consensus.ErrUnknownAncestor
-			}
+		// check if snapshot is nil
+		if snap == nil {
+			return nil, fmt.Errorf("unknown error while retrieving snapshot at block number %v", n)
 		}
-		headers = append(headers, header)
-		number, hash = number-1, header.ParentHash
-	}
-
-	// check if snapshot is nil
-	if snap == nil {
-		return nil, fmt.Errorf("Unknown error while retrieving snapshot at block number %v", number)
-	}
-
-	// Previous snapshot found, apply any pending headers on top of it
-	for i := 0; i < len(headers)/2; i++ {
-		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
-	}
-
-	snap, err := snap.apply(headers)
-	if err != nil {
-		return nil, err
-	}
-	c.recents.Add(snap.Hash, snap)
-
-	// If we've generated a new checkpoint snapshot, save to disk
-	if snap.Number%checkpointInterval == 0 && len(headers) > 0 {
-		if err = snap.store(c.DB); err != nil {
-			return nil, err
+		if len(headers) > 0 {
+			headersList = append(headersList, headers)
 		}
-		log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+
+		// Previous snapshot found, apply any pending headers on top of it
+		if cont {
+			lastList := headersList[len(headersList)-1]
+			firstList := headersList[0]
+			log.Info("Applying headers to snapshot", "from", lastList[len(lastList)-1].Number.Uint64(), "to", firstList[0].Number.Uint64())
+		}
+		for i := 0; i < len(headersList)/2; i++ {
+			headersList[i], headersList[len(headersList)-1-i] = headersList[len(headersList)-1-i], headersList[i]
+		}
+		for j := 0; j < len(headersList); j++ {
+			hs := headersList[j]
+			for i := 0; i < len(hs)/2; i++ {
+				hs[i], hs[len(hs)-1-i] = hs[len(hs)-1-i], hs[i]
+			}
+			var err error
+			snap, err = snap.apply(hs)
+			if err != nil {
+				return nil, err
+			}
+			c.recents.Add(snap.Hash, snap)
+			// We've generated a new checkpoint snapshot, save to disk
+			if err = snap.store(c.DB); err != nil {
+				return nil, err
+			}
+			log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		}
+		if cont {
+			snap = nil
+		}
 	}
-	return snap, err
+
+	return snap, nil
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
@@ -549,14 +583,14 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	if number == 0 {
 		return errUnknownBlock
 	}
-	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
-	if err != nil {
-		return err
-	}
 
 	// Resolve the authorization key and check against signers
 	signer, err := ecrecover(header, c.signatures, c.config)
+	if err != nil {
+		return err
+	}
+	// Retrieve the snapshot needed to verify this header and cache it
+	snap, err := c.snapshot(chain, number-1, header.ParentHash, parents)
 	if err != nil {
 		return err
 	}
@@ -661,31 +695,28 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
 func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) (types.Transactions, types.Receipts, error) {
-
-	// Update sysCall
-
 	var err error
 	headerNumber := header.Number.Uint64()
 	if headerNumber%c.config.Sprint == 0 {
 		cx := chainContext{Chain: chain, Bor: c}
 		// check and commit span
-		if err := c.checkAndCommitSpan(state, header, cx); err != nil {
-			log.Error("Error while committing span", "error", err)
+		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
+			log.Error("Error while committing span", "err", err)
 			return nil, types.Receipts{}, err
 		}
 
 		if !c.WithoutHeimdall {
 			// commit states
-			_, err = c.CommitStates(state, header, cx)
+			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "error", err)
+				log.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "error", err)
+		log.Error("Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
 
@@ -738,24 +769,24 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 		cx := chainContext{Chain: chain, Bor: c}
 
 		// check and commit span
-		err := c.checkAndCommitSpan(state, header, cx)
+		err := c.checkAndCommitSpan(state, header, cx, syscall)
 		if err != nil {
-			log.Error("Error while committing span", "error", err)
+			log.Error("Error while committing span", "err", err)
 			return nil, nil, types.Receipts{}, err
 		}
 
 		if !c.WithoutHeimdall {
 			// commit states
-			_, err = c.CommitStates(state, header, cx)
+			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "error", err)
+				log.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "error", err)
+		log.Error("Error changing contract code", "err", err)
 		return nil, nil, types.Receipts{}, err
 	}
 
@@ -913,17 +944,17 @@ func (c *Bor) Close() error {
 }
 
 // GetCurrentSpan get current span from contract
-func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain chainContext) (*Span, error) {
+func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain chainContext, syscall consensus.SystemCall) (*Span, error) {
 
 	// method
 	method := "getCurrentSpan"
 	data, err := c.validatorSetABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for getCurrentSpan", "error", err)
+		log.Error("Unable to pack tx for getCurrentSpan", "err", err)
 		return nil, err
 	}
 
-	result, err := c.sysCall(common.HexToAddress(c.config.ValidatorContract), data)
+	result, err := syscall(common.HexToAddress(c.config.ValidatorContract), data)
 	if err != nil {
 		return nil, err
 	}
@@ -949,56 +980,27 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 }
 
 // GetCurrentValidators get current validators
-func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) { // method
-	method := "getBorValidators"
-
-	data, err := c.validatorSetABI.Pack(method, big.NewInt(0).SetUint64(blockNumber))
+func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
+	span, err := c.getSpanForBlock(blockNumber)
 	if err != nil {
-		log.Error("Unable to pack tx for getValidator", "error", err)
 		return nil, err
 	}
-
-	result, err := c.sysCall(common.HexToAddress(c.config.ValidatorContract), data)
-	if err != nil {
-		panic(err)
-	}
-
-	var (
-		ret0 = new([]common.Address)
-		ret1 = new([]*big.Int)
-	)
-	out := &[]interface{}{
-		ret0,
-		ret1,
-	}
-
-	if err := c.validatorSetABI.UnpackIntoInterface(out, method, result); err != nil {
-		return nil, err
-	}
-
-	valz := make([]*Validator, len(*ret0))
-	for i, a := range *ret0 {
-		valz[i] = &Validator{
-			Address:     a,
-			VotingPower: (*ret1)[i].Int64(),
-		}
-	}
-
-	return valz, nil
+	return span.ValidatorSet.Validators, nil
 }
 
 func (c *Bor) checkAndCommitSpan(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) error {
 	headerNumber := header.Number.Uint64()
-	span, err := c.GetCurrentSpan(header, state, chain)
+	span, err := c.GetCurrentSpan(header, state, chain, syscall)
 	if err != nil {
 		return err
 	}
 	if c.needToCommitSpan(span, headerNumber) {
-		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain)
+		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain, syscall)
 		return err
 	}
 	return nil
@@ -1023,16 +1025,64 @@ func (c *Bor) needToCommitSpan(span *Span, headerNumber uint64) bool {
 	return false
 }
 
+func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
+	log.Info("Getting span", "for block", blockNum)
+	var span *HeimdallSpan
+	c.spanCache.AscendGreaterOrEqual(&HeimdallSpan{Span: Span{EndBlock: blockNum}}, func(item btree.Item) bool {
+		span = item.(*HeimdallSpan)
+		return false
+	})
+	if span == nil {
+		// Span with high enough block number is not loaded
+		var spanID uint64
+		if c.spanCache.Len() > 0 {
+			spanID = c.spanCache.Max().(*HeimdallSpan).ID + 1
+		}
+		for span == nil || span.EndBlock < blockNum {
+			var heimdallSpan HeimdallSpan
+			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
+			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(response.Result, &heimdallSpan); err != nil {
+				return nil, err
+			}
+			span = &heimdallSpan
+			c.spanCache.ReplaceOrInsert(span)
+			spanID++
+		}
+	} else {
+		for span.StartBlock > blockNum {
+			// Span wit low enough block number is not loaded
+			var spanID uint64 = span.ID - 1
+			var heimdallSpan HeimdallSpan
+			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
+			response, err := c.HeimdallClient.FetchWithRetry(fmt.Sprintf("bor/span/%d", spanID), "")
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(response.Result, &heimdallSpan); err != nil {
+				return nil, err
+			}
+			span = &heimdallSpan
+			c.spanCache.ReplaceOrInsert(span)
+		}
+	}
+	return span, nil
+}
+
 func (c *Bor) fetchAndCommitSpan(
 	newSpanID uint64,
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) error {
 	var heimdallSpan HeimdallSpan
 
 	if c.WithoutHeimdall {
-		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain)
+		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain, syscall)
 		if err != nil {
 			return err
 		}
@@ -1051,9 +1101,9 @@ func (c *Bor) fetchAndCommitSpan(
 	// check if chain id matches with heimdall span
 	if heimdallSpan.ChainID != c.chainConfig.ChainID.String() {
 		return fmt.Errorf(
-			"Chain id proposed span, %s, and bor chain id, %s, doesn't match",
+			"chain id proposed span, %s, and bor chain id, %s, doesn't match",
 			heimdallSpan.ChainID,
-			c.chainConfig.ChainID,
+			c.chainConfig.ChainID.String(),
 		)
 	}
 
@@ -1079,7 +1129,7 @@ func (c *Bor) fetchAndCommitSpan(
 
 	// method
 	method := "commitSpan"
-	log.Info("✅ Committing new span",
+	log.Debug("✅ Committing new span",
 		"id", heimdallSpan.ID,
 		"startBlock", heimdallSpan.StartBlock,
 		"endBlock", heimdallSpan.EndBlock,
@@ -1096,11 +1146,11 @@ func (c *Bor) fetchAndCommitSpan(
 		producerBytes,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for commitSpan", "error", err)
+		log.Error("Unable to pack tx for commitSpan", "err", err)
 		return err
 	}
 
-	_, err = c.sysCall(common.HexToAddress(c.config.ValidatorContract), data)
+	_, err = syscall(common.HexToAddress(c.config.ValidatorContract), data)
 	// apply message
 	return err
 }
@@ -1110,10 +1160,11 @@ func (c *Bor) CommitStates(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) ([]*types.StateSyncData, error) {
 	stateSyncs := make([]*types.StateSyncData, 0)
 	number := header.Number.Uint64()
-	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, c)
+	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, c, syscall)
 	if err != nil {
 		return nil, err
 	}
@@ -1153,7 +1204,7 @@ func (c *Bor) CommitStates(
 		}
 		stateSyncs = append(stateSyncs, &stateData)
 
-		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c); err != nil {
+		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c, syscall); err != nil {
 			return nil, err
 		}
 		lastStateID++
@@ -1182,9 +1233,10 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	state *state.IntraBlockState,
 	header *types.Header,
 	chain chainContext,
+	syscall consensus.SystemCall,
 ) (*HeimdallSpan, error) {
 	headerNumber := header.Number.Uint64()
-	span, err := c.GetCurrentSpan(header, state, chain)
+	span, err := c.GetCurrentSpan(header, state, chain, syscall)
 	if err != nil {
 		return nil, err
 	}

@@ -140,12 +140,12 @@ func ruleAllowsOrigin(allowedOrigin string, browserOrigin string) bool {
 	)
 	allowedScheme, allowedHostname, allowedPort, err = parseOriginURL(allowedOrigin)
 	if err != nil {
-		log.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "error", err)
+		log.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "err", err)
 		return false
 	}
 	browserScheme, browserHostname, browserPort, err = parseOriginURL(browserOrigin)
 	if err != nil {
-		log.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "error", err)
+		log.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "err", err)
 		return false
 	}
 	if allowedScheme != "" && allowedScheme != browserScheme {

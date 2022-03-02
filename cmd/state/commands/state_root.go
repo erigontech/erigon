@@ -27,7 +27,7 @@ import (
 
 func init() {
 	withBlock(stateRootCmd)
-	withDatadir(stateRootCmd)
+	withDataDir(stateRootCmd)
 	rootCmd.AddCommand(stateRootCmd)
 }
 

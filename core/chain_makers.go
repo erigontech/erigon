@@ -396,6 +396,33 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	return &ChainPack{Length: n, Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
+func MakeEmptyHeader(parent *types.Header, chainConfig *params.ChainConfig, timestamp uint64, targetGasLimit *uint64) *types.Header {
+	header := &types.Header{
+		Root:       parent.Root,
+		ParentHash: parent.Hash(),
+		Number:     new(big.Int).Add(parent.Number, common.Big1),
+		Difficulty: common.Big0,
+		Time:       timestamp,
+	}
+
+	parentGasLimit := parent.GasLimit
+	// Set baseFee and GasLimit if we are on an EIP-1559 chain
+	if chainConfig.IsLondon(header.Number.Uint64()) {
+		header.Eip1559 = true
+		header.BaseFee = misc.CalcBaseFee(chainConfig, parent)
+		if !chainConfig.IsLondon(parent.Number.Uint64()) {
+			parentGasLimit = parent.GasLimit * params.ElasticityMultiplier
+		}
+	}
+	if targetGasLimit != nil {
+		header.GasLimit = CalcGasLimit(parentGasLimit, *targetGasLimit)
+	} else {
+		header.GasLimit = parentGasLimit
+	}
+
+	return header
+}
+
 func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, engine consensus.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
@@ -404,32 +431,17 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 		time = parent.Time() + 10 // block time is fixed at 10 seconds
 	}
 
-	header := &types.Header{
-		Root:       common.Hash{},
-		ParentHash: parent.Hash(),
-		Coinbase:   parent.Coinbase(),
-		Difficulty: engine.CalcDifficulty(chain, time,
-			time-10,
-			parent.Difficulty(),
-			parent.NumberU64(),
-			parent.Hash(),
-			parent.UncleHash(),
-			parent.Seal(),
-		),
-		GasLimit: CalcGasLimit(parent.GasLimit(), parent.GasLimit()),
-		Number:   new(big.Int).Add(parent.Number(), common.Big1),
-		Time:     time,
-	}
+	header := MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	header.Coinbase = parent.Coinbase()
+	header.Difficulty = engine.CalcDifficulty(chain, time,
+		time-10,
+		parent.Difficulty(),
+		parent.NumberU64(),
+		parent.Hash(),
+		parent.UncleHash(),
+		parent.Seal(),
+	)
 	header.Seal = engine.GenerateSeal(chain, header, parent.Header(), nil)
-
-	if chain.Config().IsLondon(header.Number.Uint64()) {
-		header.BaseFee = misc.CalcBaseFee(chain.Config(), parent.Header())
-		header.Eip1559 = true
-		if !chain.Config().IsLondon(parent.NumberU64()) {
-			parentGasLimit := parent.GasLimit() * params.ElasticityMultiplier
-			header.GasLimit = CalcGasLimit(parentGasLimit, parentGasLimit)
-		}
-	}
 	header.WithSeal = chain.Config().IsHeaderWithSeal()
 
 	return header

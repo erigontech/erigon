@@ -178,28 +178,18 @@ func makeP2PServer(
 	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
 	var urls []string
-	switch genesisHash {
-	case params.MainnetGenesisHash:
-		urls = params.MainnetBootnodes
-	case params.SepoliaGenesisHash:
-		urls = params.SepoliaBootnodes
-	case params.RopstenGenesisHash:
-		urls = params.RopstenBootnodes
-	case params.GoerliGenesisHash:
-		urls = params.GoerliBootnodes
-	case params.RinkebyGenesisHash:
-		urls = params.RinkebyBootnodes
-	case params.SokolGenesisHash:
-		urls = params.SokolBootnodes
-	case params.FermionGenesisHash:
-		urls = params.FermionBootnodes
-	case params.MumbaiGenesisHash:
-		urls = params.MumbaiBootnodes
-	case params.BorMainnetGenesisHash:
-		urls = params.BorMainnetBootnodes
+	chainConfig := params.ChainConfigByGenesisHash(genesisHash)
+	if chainConfig != nil {
+		urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
 	}
-	p2pConfig.BootstrapNodes, _ = utils.GetUrlListNodes(urls, utils.BootnodesFlag.Name, log.Crit)
-	p2pConfig.BootstrapNodesV5 = p2pConfig.BootstrapNodes
+
+	bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
+	if err != nil {
+		return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+	}
+	p2pConfig.BootstrapNodes = bootstrapNodes
+	p2pConfig.BootstrapNodesV5 = bootstrapNodes
+
 	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
 }
@@ -861,7 +851,7 @@ func (ss *SentryServerImpl) HandShake(context.Context, *emptypb.Empty) (*proto_s
 	return reply, nil
 }
 
-func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
 	genesisHash := gointerfaces.ConvertH256ToHash(statusData.ForkData.Genesis)
 
 	ss.lock.Lock()
@@ -888,7 +878,7 @@ func (ss *SentryServerImpl) SetStatus(_ context.Context, statusData *proto_sentr
 		}
 
 		// Add protocol
-		if err = srv.Start(); err != nil {
+		if err = srv.Start(ctx); err != nil {
 			srv.Stop()
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}
@@ -960,7 +950,7 @@ func (ss *SentryServerImpl) hasSubscribers(msgID proto_sentry.MessageId) bool {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
 	return ss.messageStreams[msgID] != nil && len(ss.messageStreams[msgID]) > 0
-	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "error", err)
+	//	log.Error("Sending msg to core P2P failed", "msg", proto_sentry.MessageId_name[int32(streamMsg.msgId)], "err", err)
 }
 
 func (ss *SentryServerImpl) addMessagesStream(ids []proto_sentry.MessageId, ch chan *proto_sentry.InboundMessage) func() {
@@ -1006,7 +996,7 @@ func (ss *SentryServerImpl) Messages(req *proto_sentry.MessagesRequest, server p
 			return nil
 		case in := <-ch:
 			if err := server.Send(in); err != nil {
-				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "error", err)
+				log.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "err", err)
 				return err
 			}
 		}
@@ -1022,13 +1012,13 @@ func (ss *SentryServerImpl) Close() {
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
-		log.Warn("Sending new peer notice to core P2P failed", "error", err)
+		log.Warn("Sending new peer notice to core P2P failed", "err", err)
 	}
 }
 
 func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
-		log.Warn("Sending gone peer notice to core P2P failed", "error", err)
+		log.Warn("Sending gone peer notice to core P2P failed", "err", err)
 	}
 }
 

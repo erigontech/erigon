@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -666,34 +664,19 @@ var (
 
 var MetricFlags = []cli.Flag{MetricsEnabledFlag, MetricsEnabledExpensiveFlag, MetricsHTTPFlag, MetricsPortFlag}
 
-// setNodeKey creates a node key from set command line flags, either loading it
-// from a file or as a specified hex value. If neither flags were provided, this
-// method returns nil and an emphemeral key is to be generated.
-func setNodeKey(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
-	cfg.Name = nodeName
-	var (
-		hex  = ctx.GlobalString(NodeKeyHexFlag.Name)
-		file = ctx.GlobalString(NodeKeyFileFlag.Name)
-		key  *ecdsa.PrivateKey
-		err  error
-	)
-	switch {
-	case file != "" && hex != "":
-		Fatalf("Options %q and %q are mutually exclusive", NodeKeyFileFlag.Name, NodeKeyHexFlag.Name)
-	case file != "":
-		dir.MustExist(path.Dir(file))
-		if key, err = crypto.LoadECDSA(file); err != nil {
-			Fatalf("Option %q: %v", NodeKeyFileFlag.Name, err)
-		}
-		cfg.PrivateKey = key
-	case hex != "":
-		if key, err = crypto.HexToECDSA(hex); err != nil {
-			Fatalf("Option %q: %v", NodeKeyHexFlag.Name, err)
-		}
-		cfg.PrivateKey = key
-	default:
-		cfg.PrivateKey = nodeKey(path.Join(dataDir, "nodekey"))
+// setNodeKey loads a node key from command line flags if provided,
+// otherwise it tries to load it from datadir,
+// otherwise it generates a new key in datadir.
+func setNodeKey(ctx *cli.Context, cfg *p2p.Config, datadir string) {
+	file := ctx.GlobalString(NodeKeyFileFlag.Name)
+	hex := ctx.GlobalString(NodeKeyHexFlag.Name)
+
+	config := p2p.NodeKeyConfig{}
+	key, err := config.LoadOrParseOrGenerateAndSave(file, hex, datadir)
+	if err != nil {
+		Fatalf("%v", err)
 	}
+	cfg.PrivateKey = key
 }
 
 // setNodeUserIdent creates the user identifier from CLI flags.
@@ -708,94 +691,45 @@ func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
 	}
 }
 
-// setBootstrapNodes creates a list of bootstrap nodes from the command line
-// flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	var urls []string
-	if ctx.GlobalIsSet(BootnodesFlag.Name) {
-		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
-	} else {
-		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case networkname.MainnetChainName:
-			urls = params.MainnetBootnodes
-		case networkname.SepoliaChainName:
-			urls = params.SepoliaBootnodes
-		case networkname.RopstenChainName:
-			urls = params.RopstenBootnodes
-		case networkname.RinkebyChainName:
-			urls = params.RinkebyBootnodes
-		case networkname.GoerliChainName:
-			urls = params.GoerliBootnodes
-		case networkname.BSCChainName:
-			urls = params.BscBootnodes
-		case networkname.ChapelChainName:
-			urls = params.ChapelBootnodes
-		case networkname.RialtoChainName:
-			urls = params.RialtoBootnodes
-		case networkname.ErigonMineName:
-			urls = params.ErigonBootnodes
-		case networkname.SokolChainName:
-			urls = params.SokolBootnodes
-		case networkname.FermionChainName:
-			urls = params.FermionBootnodes
-		case networkname.MumbaiChainName:
-			urls = params.MumbaiBootnodes
-		case networkname.BorMainnetChainName:
-			urls = params.BorMainnetBootnodes
-		default:
-			if cfg.BootstrapNodes != nil {
-				return // already set, don't apply defaults.
-			}
-		}
+	// If already set, don't apply defaults.
+	if cfg.BootstrapNodes != nil {
+		return
 	}
 
-	cfg.BootstrapNodes, _ = GetUrlListNodes(urls, BootnodesFlag.Name, log.Crit)
+	nodes, err := GetBootnodesFromFlags(ctx.GlobalString(BootnodesFlag.Name), ctx.GlobalString(ChainFlag.Name))
+	if err != nil {
+		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
+	}
+
+	cfg.BootstrapNodes = nodes
 }
 
-// setBootstrapNodesV5 creates a list of bootstrap nodes from the command line
-// flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
-	var urls []string
-	if ctx.GlobalIsSet(BootnodesFlag.Name) {
-		urls = SplitAndTrim(ctx.GlobalString(BootnodesFlag.Name))
-	} else {
-		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case networkname.MainnetChainName:
-			urls = params.MainnetBootnodes
-		case networkname.SepoliaChainName:
-			urls = params.SepoliaBootnodes
-		case networkname.RopstenChainName:
-			urls = params.RopstenBootnodes
-		case networkname.RinkebyChainName:
-			urls = params.RinkebyBootnodes
-		case networkname.GoerliChainName:
-			urls = params.GoerliBootnodes
-		case networkname.BSCChainName:
-			urls = params.BscBootnodes
-		case networkname.ChapelChainName:
-			urls = params.ChapelBootnodes
-		case networkname.RialtoChainName:
-			urls = params.RialtoBootnodes
-		case networkname.ErigonMineName:
-			urls = params.ErigonBootnodes
-		case networkname.SokolChainName:
-			urls = params.SokolBootnodes
-		case networkname.FermionChainName:
-			urls = params.FermionBootnodes
-		case networkname.MumbaiChainName:
-			urls = params.MumbaiBootnodes
-		case networkname.BorMainnetChainName:
-			urls = params.BorMainnetBootnodes
-		default:
-			if cfg.BootstrapNodesV5 != nil {
-				return // already set, don't apply defaults.
-			}
-		}
+	// If already set, don't apply defaults.
+	if cfg.BootstrapNodesV5 != nil {
+		return
 	}
 
-	cfg.BootstrapNodesV5, _ = GetUrlListNodes(urls, BootnodesFlag.Name, log.Error)
+	nodes, err := GetBootnodesFromFlags(ctx.GlobalString(BootnodesFlag.Name), ctx.GlobalString(ChainFlag.Name))
+	if err != nil {
+		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
+	}
+
+	cfg.BootstrapNodesV5 = nodes
+}
+
+// GetBootnodesFromFlags makes a list of bootnodes from command line flags.
+// If urlsStr is given, it is used and parsed as a comma-separated list of enode:// urls,
+// otherwise a list of preconfigured bootnodes of the specified chain is returned.
+func GetBootnodesFromFlags(urlsStr, chain string) ([]*enode.Node, error) {
+	var urls []string
+	if urlsStr != "" {
+		urls = SplitAndTrim(urlsStr)
+	} else {
+		urls = params.BootnodeURLsOfChain(chain)
+	}
+	return ParseNodesFromURLs(urls)
 }
 
 func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
@@ -804,52 +738,44 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 		urls = SplitAndTrim(ctx.GlobalString(StaticPeersFlag.Name))
 	} else {
 		chain := ctx.GlobalString(ChainFlag.Name)
-		switch chain {
-		case networkname.BSCChainName:
-			urls = params.BscStaticPeers
-		case networkname.ChapelChainName:
-			urls = params.ChapelStaticPeers
-		case networkname.RialtoChainName:
-			urls = params.RialtoStaticPeers
-		}
+		urls = params.StaticPeerURLsOfChain(chain)
 	}
-	cfg.StaticNodes, _ = GetUrlListNodes(urls, StaticPeersFlag.Name, log.Error)
+
+	nodes, err := ParseNodesFromURLs(urls)
+	if err != nil {
+		Fatalf("Option %s: %v", StaticPeersFlag.Name, err)
+	}
+
+	cfg.StaticNodes = nodes
 }
 
 func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
-	cfg.TrustedNodes, _ = appendCfgUrlListNodes(cfg.TrustedNodes, ctx, TrustedPeersFlag.Name, log.Error)
+	if !ctx.GlobalIsSet(TrustedPeersFlag.Name) {
+		return
+	}
+
+	urls := SplitAndTrim(ctx.GlobalString(TrustedPeersFlag.Name))
+	trustedNodes, err := ParseNodesFromURLs(urls)
+	if err != nil {
+		Fatalf("Option %s: %v", TrustedPeersFlag.Name, err)
+	}
+
+	cfg.TrustedNodes = append(cfg.TrustedNodes, trustedNodes...)
 }
 
-func appendCfgUrlListNodes(nodes []*enode.Node, ctx *cli.Context, flagName string, logFn func(msg string, ctx ...interface{})) ([]*enode.Node, error) {
-	if ctx.GlobalIsSet(flagName) {
-		urls := SplitAndTrim(ctx.GlobalString(flagName))
-		return appendUrlListNodes(nodes, urls, flagName, logFn)
+func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
+	nodes := make([]*enode.Node, 0, len(urls))
+	for _, url := range urls {
+		if url == "" {
+			continue
+		}
+		n, err := enode.Parse(enode.ValidSchemes, url)
+		if err != nil {
+			return nil, fmt.Errorf("invalid node URL %s: %w", url, err)
+		}
+		nodes = append(nodes, n)
 	}
 	return nodes, nil
-}
-
-func GetUrlListNodes(urls []string, nodeType string, logFn func(msg string, ctx ...interface{})) (_ []*enode.Node, retErr error) {
-	return appendUrlListNodes(nil, urls, nodeType, logFn)
-}
-
-func appendUrlListNodes(nodes []*enode.Node, urls []string, nodeType string, logFn func(msg string, ctx ...interface{})) (_ []*enode.Node, retErr error) {
-	if nodes == nil {
-		nodes = make([]*enode.Node, 0, len(urls))
-	}
-	for _, url := range urls {
-		if url != "" {
-			node, err := enode.Parse(enode.ValidSchemes, url)
-			if err != nil {
-				retErr = err
-				if logFn != nil {
-					logFn(fmt.Sprintf("%s URL invalid", nodeType), "url", url, "err", err)
-				}
-			} else {
-				nodes = append(nodes, node)
-			}
-		}
-	}
-	return nodes, retErr
 }
 
 // NewP2PConfig
@@ -862,7 +788,11 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}
-	serverKey := nodeKey(filepath.Join(datadir, "nodekey"))
+
+	serverKey, err := nodeKey(datadir)
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &p2p.Config{
 		ListenAddr:   fmt.Sprintf(":%d", port),
@@ -871,7 +801,7 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 		NoDiscovery:  nodiscover,
 		PrivateKey:   serverKey,
 		Name:         nodeName,
-		Logger:       log.New(),
+		Log:          log.New(),
 		NodeDatabase: enodeDBPath,
 	}
 	if netRestrict != "" {
@@ -879,16 +809,16 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 		cfg.NetRestrict.Add(netRestrict)
 	}
 	if staticPeers != nil {
-		staticNodes, err := GetUrlListNodes(staticPeers, StaticPeersFlag.Name, log.Error)
+		staticNodes, err := ParseNodesFromURLs(staticPeers)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bad option %s: %w", StaticPeersFlag.Name, err)
 		}
 		cfg.StaticNodes = staticNodes
 	}
 	if trustedPeers != nil {
-		trustedNodes, err := GetUrlListNodes(trustedPeers, TrustedPeersFlag.Name, log.Error)
+		trustedNodes, err := ParseNodesFromURLs(trustedPeers)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("bad option %s: %w", TrustedPeersFlag.Name, err)
 		}
 		cfg.TrustedNodes = trustedNodes
 	}
@@ -900,22 +830,12 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	return cfg, nil
 }
 
-func nodeKey(keyfile string) *ecdsa.PrivateKey {
-	if err := os.MkdirAll(path.Dir(keyfile), 0755); err != nil {
-		panic(err)
-	}
-	if key, err := crypto.LoadECDSA(keyfile); err == nil {
-		return key
-	}
-	// No persistent key found, generate and store a new one.
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		log.Crit(fmt.Sprintf("Failed to generate node key: %v", err))
-	}
-	if err := crypto.SaveECDSA(keyfile, key); err != nil {
-		log.Error(fmt.Sprintf("Failed to persist node key: %v", err))
-	}
-	return key
+// nodeKey loads a node key from datadir if it exists,
+// otherwise it generates a new key in datadir.
+func nodeKey(datadir string) (*ecdsa.PrivateKey, error) {
+	config := p2p.NodeKeyConfig{}
+	keyfile := config.DefaultPath(datadir)
+	return config.LoadOrGenerateAndSave(keyfile)
 }
 
 // setListenAddress creates a TCP listening address string from set command
@@ -999,8 +919,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
-func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, dataDir string) {
-	setNodeKey(ctx, cfg, nodeName, dataDir)
+func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
+	cfg.Name = nodeName
+	setNodeKey(ctx, cfg, datadir)
 	setNAT(ctx, cfg)
 	setListenAddress(ctx, cfg)
 	setBootstrapNodes(ctx, cfg)

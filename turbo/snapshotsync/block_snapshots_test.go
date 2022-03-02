@@ -2,8 +2,10 @@ package snapshotsync
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
@@ -12,11 +14,12 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name SnapshotType, dir string) {
+func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string) {
 	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
 	require.NoError(t, err)
 	defer c.Close()
@@ -62,37 +65,47 @@ func TestMerge(t *testing.T) {
 		}
 	}
 
-	N := uint64(15)
+	N := uint64(7)
 	createFile(0, 500_000)
-	for i := uint64(500_000); i < 500_000+N*50_000; i += 50_000 {
-		createFile(i, i+50_000)
+	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
+		createFile(i, i+100_000)
 	}
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
+	require.NoError(s.ReopenSegments())
 
-	require.NoError(s.ReopenSegments())
-	err := findAndMergeBlockSegments(context.Background(), s, dir)
-	require.NoError(err)
-	require.NoError(s.ReopenSegments())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo)
+		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
+		require.True(recommendedMerge)
+		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		require.NoError(err)
+		require.NoError(s.ReopenSegments())
+	}
 
 	expectedFileName := SegmentFileName(500_000, 1_000_000, Transactions)
 	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
-	require.Equal(10, a)
+	require.Equal(5, a)
 
-	err = findAndMergeBlockSegments(context.Background(), s, dir)
-	require.NoError(err)
-	require.NoError(s.ReopenSegments())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo)
+		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
+		require.True(recommendedMerge)
+		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		require.NoError(err)
+		require.NoError(s.ReopenSegments())
+	}
 
-	expectedFileName = SegmentFileName(1_000_000, 1_250_000, Transactions)
+	expectedFileName = SegmentFileName(1_000_000, 1_200_000, Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
-	require.Equal(5, a)
+	require.Equal(2, a)
 }
 
 func TestRecompress(t *testing.T) {
@@ -114,7 +127,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.Snapshot{Enabled: true}
-	createFile := func(from, to uint64, name SnapshotType) { createTestSegmentFile(t, from, to, name, dir) }
+	createFile := func(from, to uint64, name Type) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
 	err := s.ReopenSegments()
@@ -179,26 +192,39 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 func TestParseCompressedFileName(t *testing.T) {
 	require := require.New(t)
-	_, _, _, err := ParseFileName("a", ".seg")
+	fs := fstest.MapFS{
+		"a":                 &fstest.MapFile{},
+		"1-a":               &fstest.MapFile{},
+		"1-2-a":             &fstest.MapFile{},
+		"1-2-bodies.info":   &fstest.MapFile{},
+		"1-2-bodies.seg":    &fstest.MapFile{},
+		"v2-1-2-bodies.seg": &fstest.MapFile{},
+		"v0-1-2-bodies.seg": &fstest.MapFile{},
+		"v1-1-2-bodies.seg": &fstest.MapFile{},
+	}
+	stat := func(name string) os.FileInfo {
+		s, err := fs.Stat(name)
+		require.NoError(err)
+		return s
+	}
+	_, err := ParseFileName("", stat("a"))
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-a", ".seg")
+	_, err = ParseFileName("", stat("1-a"))
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-a", ".seg")
+	_, err = ParseFileName("", stat("1-2-a"))
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-bodies.info", ".seg")
+	_, err = ParseFileName("", stat("1-2-bodies.info"))
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-bodies.idx", ".seg")
+	_, err = ParseFileName("", stat("1-2-bodies.seg"))
 	require.Error(err)
-	_, _, _, err = ParseFileName("1-2-bodies.seg", ".seg")
+	_, err = ParseFileName("", stat("v2-1-2-bodies.seg"))
 	require.Error(err)
-	_, _, _, err = ParseFileName("v2-1-2-bodies.seg", ".seg")
-	require.Error(err)
-	_, _, _, err = ParseFileName("v0-1-2-bodies.seg", ".seg")
+	_, err = ParseFileName("", stat("v0-1-2-bodies.seg"))
 	require.Error(err)
 
-	from, to, tt, err := ParseFileName("v1-1-2-bodies.seg", ".seg")
+	f, err := ParseFileName("", stat("v1-1-2-bodies.seg"))
 	require.NoError(err)
-	require.Equal(tt, Bodies)
-	require.Equal(1_000, int(from))
-	require.Equal(2_000, int(to))
+	require.Equal(f.T, Bodies)
+	require.Equal(1_000, int(f.From))
+	require.Equal(2_000, int(f.To))
 }

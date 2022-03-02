@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -46,6 +47,7 @@ func (gc *GenesisContractsClient) CommitState(
 	header *types.Header,
 	chCtx chainContext,
 	c *Bor,
+	syscall consensus.SystemCall,
 ) error {
 	eventRecord := event.BuildEventRecord()
 	recordBytes, err := rlp.EncodeToBytes(eventRecord)
@@ -56,11 +58,11 @@ func (gc *GenesisContractsClient) CommitState(
 	t := event.Time.Unix()
 	data, err := gc.stateReceiverABI.Pack(method, big.NewInt(0).SetInt64(t), recordBytes)
 	if err != nil {
-		log.Error("Unable to pack tx for commitState", "error", err)
+		log.Error("Unable to pack tx for commitState", "err", err)
 		return err
 	}
 	log.Trace("→ committing new state", "eventRecord", event.String())
-	_, err = c.sysCall(common.HexToAddress(gc.StateReceiverContract), data)
+	_, err = syscall(common.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return err
 	}
@@ -71,15 +73,16 @@ func (gc *GenesisContractsClient) LastStateId(header *types.Header,
 	state *state.IntraBlockState,
 	chain chainContext,
 	c *Bor,
+	syscall consensus.SystemCall,
 ) (*big.Int, error) {
 	method := "lastStateId"
 	data, err := gc.stateReceiverABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for LastStateId", "error", err)
+		log.Error("Unable to pack tx for LastStateId", "err", err)
 		return nil, err
 	}
 
-	result, err := c.sysCall(common.HexToAddress(gc.StateReceiverContract), data)
+	result, err := syscall(common.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return nil, err
 	}

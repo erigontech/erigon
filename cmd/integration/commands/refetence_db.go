@@ -101,19 +101,19 @@ var cmdFToMdbx = &cobra.Command{
 }
 
 func init() {
-	withDatadir(cmdCompareBucket)
+	withDataDir(cmdCompareBucket)
 	withReferenceChaindata(cmdCompareBucket)
 	withBucket(cmdCompareBucket)
 
 	rootCmd.AddCommand(cmdCompareBucket)
 
-	withDatadir(cmdCompareStates)
+	withDataDir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
 
-	withDatadir(cmdMdbxToMdbx)
+	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
 	withBucket(cmdMdbxToMdbx)
 

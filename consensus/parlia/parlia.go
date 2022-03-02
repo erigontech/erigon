@@ -985,7 +985,7 @@ func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBloc
 	method := "getValidators"
 	data, err := p.validatorSetABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for getValidators", "error", err)
+		log.Error("Unable to pack tx for getValidators", "err", err)
 		return nil, err
 	}
 	// call
@@ -1060,7 +1060,7 @@ func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, 
 		spoiledVal,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for slash", "error", err)
+		log.Error("Unable to pack tx for slash", "err", err)
 		return nil, nil, nil, err
 	}
 	// apply message
@@ -1087,7 +1087,7 @@ func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header
 	// get packed data
 	data, err := p.validatorSetABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for init validator set", "error", err)
+		log.Error("Unable to pack tx for init validator set", "err", err)
 		return nil, nil, nil, err
 	}
 	for _, c := range contracts {
@@ -1124,7 +1124,7 @@ func (p *Parlia) distributeToValidator(amount *uint256.Int, validator common.Add
 		validator,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for deposit", "error", err)
+		log.Error("Unable to pack tx for deposit", "err", err)
 		return nil, nil, nil, err
 	}
 	// apply message

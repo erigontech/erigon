@@ -26,7 +26,7 @@ type Flags struct {
 	Gas        uint64
 	Nonce      uint64
 	PrivateKey string
-	Datadir    string
+	DataDir    string
 	Chaindata  string
 	Output     string
 }
@@ -99,16 +99,16 @@ func config() (*cobra.Command, *Flags) {
 	generateRawTxCmd.PersistentFlags().StringVar(&flags.PrivateKey, "private_key", "", "Private key")
 	generateRawTxCmd.MarkPersistentFlagRequired("private_key")
 
-	generateRawTxCmd.PersistentFlags().StringVar(&flags.Datadir, "datadir", "", "path to Erigon working directory")
+	generateRawTxCmd.PersistentFlags().StringVar(&flags.DataDir, "datadir", "", "path to Erigon working directory")
 
 	generateRawTxCmd.PersistentFlags().StringVarP(&flags.Output, "output", "o", "", "Path to file where sign transaction will be saved. Print to stdout if empty.")
 
 	generateRawTxCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		if flags.Datadir == "" {
-			flags.Datadir = paths.DefaultDataDir()
+		if flags.DataDir == "" {
+			flags.DataDir = paths.DefaultDataDir()
 		}
 		if flags.Chaindata == "" {
-			flags.Chaindata = filepath.Join(flags.Datadir, "chaindata")
+			flags.Chaindata = filepath.Join(flags.DataDir, "chaindata")
 		}
 		return nil
 	}

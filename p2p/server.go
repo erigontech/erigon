@@ -19,6 +19,7 @@ package p2p
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"errors"
@@ -155,8 +156,8 @@ type Config struct {
 	// whenever a message is sent to or received from a peer
 	EnableMsgEvents bool
 
-	// Logger is a custom logger to use with the p2p.Server.
-	Logger log.Logger `toml:",omitempty"`
+	// Log is a custom logger to use with the p2p.Server.
+	Log log.Logger `toml:",omitempty"`
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
@@ -452,14 +453,14 @@ func (srv *Server) Running() bool {
 
 // Start starts running the server.
 // Servers can not be re-used after stopping.
-func (srv *Server) Start() error {
+func (srv *Server) Start(ctx context.Context) error {
 	srv.lock.Lock()
 	defer srv.lock.Unlock()
 	if srv.running {
 		return errors.New("server already running")
 	}
 
-	srv.log = srv.Config.Logger
+	srv.log = srv.Config.Log
 	if srv.log == nil {
 		srv.log = log.Root()
 	}
@@ -497,7 +498,7 @@ func (srv *Server) Start() error {
 			return err
 		}
 	}
-	if err := srv.setupDiscovery(); err != nil {
+	if err := srv.setupDiscovery(ctx); err != nil {
 		return err
 	}
 	srv.setupDialScheduler()
@@ -552,7 +553,7 @@ func (srv *Server) setupLocalNode() error {
 	return nil
 }
 
-func (srv *Server) setupDiscovery() error {
+func (srv *Server) setupDiscovery(ctx context.Context) error {
 	srv.discmix = enode.NewFairMix(discmixTimeout)
 
 	// Add protocol-specific discovery sources.
@@ -580,7 +581,7 @@ func (srv *Server) setupDiscovery() error {
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	srv.log.Trace("UDP listener up", "addr", realaddr)
 	if srv.NAT != nil {
-		if !realaddr.IP.IsLoopback() {
+		if !realaddr.IP.IsLoopback() && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
 				defer debug.LogPanic()
@@ -606,7 +607,7 @@ func (srv *Server) setupDiscovery() error {
 			Unhandled:   unhandled,
 			Log:         srv.log,
 		}
-		ntab, err := discover.ListenV4(conn, srv.localnode, cfg)
+		ntab, err := discover.ListenV4(ctx, conn, srv.localnode, cfg)
 		if err != nil {
 			return err
 		}
@@ -624,9 +625,9 @@ func (srv *Server) setupDiscovery() error {
 		}
 		var err error
 		if sconn != nil {
-			srv.DiscV5, err = discover.ListenV5(sconn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, sconn, srv.localnode, cfg)
 		} else {
-			srv.DiscV5, err = discover.ListenV5(conn, srv.localnode, cfg)
+			srv.DiscV5, err = discover.ListenV5(ctx, conn, srv.localnode, cfg)
 		}
 		if err != nil {
 			return err
@@ -640,7 +641,7 @@ func (srv *Server) setupDialScheduler() {
 		self:           srv.localnode.ID(),
 		maxDialPeers:   srv.maxDialedConns(),
 		maxActiveDials: srv.MaxPendingPeers,
-		log:            srv.Logger,
+		log:            srv.Log,
 		netRestrict:    srv.NetRestrict,
 		dialer:         srv.Dialer,
 		clock:          srv.clock,
@@ -692,7 +693,7 @@ func (srv *Server) setupListening() error {
 	// Update the local node record and map the TCP listening port if NAT is configured.
 	if tcp, ok := listener.Addr().(*net.TCPAddr); ok {
 		srv.localnode.Set(enr.TCP(tcp.Port))
-		if !tcp.IP.IsLoopback() && srv.NAT != nil {
+		if !tcp.IP.IsLoopback() && (srv.NAT != nil) && srv.NAT.SupportsMapping() {
 			srv.loopWG.Add(1)
 			go func() {
 				defer debug.LogPanic()
