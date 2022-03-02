@@ -33,7 +33,8 @@ type assemblePayloadPOSFunc func(random common.Hash, suggestedFeeRecipient commo
 // 2.1.0 - add NetPeerCount function
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
-var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 0, Patch: 0}
+// 3.1.0 - add Subscribe to logs
+var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 1, Patch: 0}
 
 const MaxPendingPayloads = 128
 
@@ -62,6 +63,7 @@ type EthBackendServer struct {
 	proposing             bool
 	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
 	shutdown              bool
+	logsFilter            *LogsFilterAggregator
 }
 
 type EthBackend interface {
@@ -98,11 +100,14 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
 	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
+	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]types2.ExecutionPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
+		logsFilter: NewLogsFilterAggregator(),
 	}
+	s.events.AddLogsSubscription(s.logsFilter.distributeLogs)
+	return s
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {

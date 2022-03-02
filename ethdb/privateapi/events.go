@@ -3,6 +3,7 @@ package privateapi
 import (
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -12,6 +13,7 @@ type HeaderSubscription func(headerRLP []byte) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
+type LogsSubscription func([]remote.SubscribeLogsReply) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
@@ -20,6 +22,7 @@ type Events struct {
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
+	logsSubscriptions         map[int]LogsSubscription
 	lock                      sync.RWMutex
 }
 
@@ -29,6 +32,7 @@ func NewEvents() *Events {
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
+		logsSubscriptions:         map[int]LogsSubscription{},
 	}
 }
 
@@ -57,6 +61,12 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
 }
 
+func (e *Events) AddLogsSubscription(s LogsSubscription) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.logsSubscriptions[len(e.logsSubscriptions)] = s
+}
+
 func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -81,6 +91,16 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 	for i, sub := range e.pendingLogsSubscriptions {
 		if err := sub(logs); err != nil {
 			delete(e.pendingLogsSubscriptions, i)
+		}
+	}
+}
+
+func (e *Events) OnLogs(logs []remote.SubscribeLogsReply) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for i, sub := range e.logsSubscriptions {
+		if err := sub(logs); err != nil {
+			delete(e.logsSubscriptions, i)
 		}
 	}
 }
