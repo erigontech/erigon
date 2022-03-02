@@ -21,7 +21,7 @@ RUN chown -R erigon:erigon /home/erigon
 
 USER erigon
 
-EXPOSE 8545 8550 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060
+EXPOSE 8545 8550 8551 8546 30303 30303/udp 30304 30304/udp 8080 9090 6060
 
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 ARG BUILD_DATE

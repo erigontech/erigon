@@ -382,7 +382,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
 	var engineListenerAuth *http.Server
-	var enginesrv *rpc.Server
+	var engineSrv *rpc.Server
 	var engineHttpEndpoint string
 
 	// register apis and create handler stack
@@ -407,14 +407,19 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		}
 	}
 
-	var apiFlags []string
-	var engineFlag []string
+	if len(engineAPI) != 0 {
+		// eth API should also be exposed on the same port as engine API
+		for _, api := range rpcAPI {
+			if api.Namespace == "eth" {
+				engineAPI = append(engineAPI, api)
+			}
+		}
+	}
 
+	var apiFlags []string
 	for _, flag := range cfg.API {
 		if flag != "engine" {
 			apiFlags = append(apiFlags, flag)
-		} else {
-			engineFlag = append(engineFlag, flag)
 		}
 	}
 
@@ -441,7 +446,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
 	if len(engineAPI) > 0 {
-		engineListener, engineListenerAuth, enginesrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI, engineFlag)
+		engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api for engine: %w", err)
 		}
@@ -471,8 +476,8 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 
 	defer func() {
 		srv.Stop()
-		if enginesrv != nil {
-			enginesrv.Stop()
+		if engineSrv != nil {
+			engineSrv.Stop()
 		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -580,23 +585,23 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 	return handler, nil
 }
 
-func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, engineFlag []string) (*http.Server, *http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
 	engineHttpEndpointAuth := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort+1)
 
-	enginesrv := rpc.NewServer(cfg.RpcBatchConcurrency)
+	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
-	enginesrv.SetAllowList(allowListForRPC)
+	engineSrv.SetAllowList(allowListForRPC)
 
-	if err := node.RegisterApisFromWhitelist(engineApi, engineFlag, enginesrv, false); err != nil {
+	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true); err != nil {
 		return nil, nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	engineHttpHandler := node.NewHTTPHandlerStack(enginesrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
+	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
 	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, nil, false)
 	if err != nil {
 		return nil, nil, nil, "", err
@@ -622,6 +627,5 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, engineFlag [
 	engineInfoAuth := []interface{}{"url", engineHttpEndpointAuth}
 	log.Info("HTTP endpoint opened for auth engine", engineInfoAuth...)
 
-	return engineListener, engineListenerAuth, enginesrv, engineHttpEndpoint, nil
-
+	return engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, nil
 }

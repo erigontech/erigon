@@ -322,14 +322,14 @@ internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 
 #### `rpcdaemon` ports
 
-|  Port |  Protocol |      Purpose      |  Expose |
-|:-----:|:---------:|:-----------------:|:-------:|
-|  8545 |    TCP    | HTTP & WebSockets | Private |
-|:-----:|:---------:|:-----------------:|:-------:|
-|  8550 |    TCP    |       HTTP        | Private |
+|  Port |  Protocol |      Purpose       |  Expose |
+|:-----:|:---------:|:------------------:|:-------:|
+|  8545 |    TCP    | HTTP & WebSockets  | Private |
+|  8550 |    TCP    |       HTTP         | Private |
+|  8551 |    TCP    | HTTP with JWS auth | Private |
 
 Typically 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically 8550 is exposed only internally for the engineApi JSON-RPC queries
+Typically 8550 (unauthenticated) and 8551 (authenticated) are exposed only internally for the Engine API JSON-RPC queries.
 
 #### `sentry` ports
 
