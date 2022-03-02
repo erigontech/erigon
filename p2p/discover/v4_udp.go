@@ -21,7 +21,6 @@ import (
 	"container/list"
 	"context"
 	"crypto/ecdsa"
-	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -266,7 +265,7 @@ func (t *UDPv4) LookupPubkey(key *ecdsa.PublicKey) []*enode.Node {
 		// case and run the bootstrapping logic.
 		<-t.tab.refresh()
 	}
-	return t.newLookup(t.closeCtx, encodePubkey(key)).run()
+	return t.newLookup(t.closeCtx, key).run()
 }
 
 // RandomNodes is an iterator yielding nodes from a random walk of the DHT.
@@ -281,20 +280,23 @@ func (t *UDPv4) lookupRandom() []*enode.Node {
 
 // lookupSelf implements transport.
 func (t *UDPv4) lookupSelf() []*enode.Node {
-	return t.newLookup(t.closeCtx, encodePubkey(&t.priv.PublicKey)).run()
+	return t.newLookup(t.closeCtx, &t.priv.PublicKey).run()
 }
 
 func (t *UDPv4) newRandomLookup(ctx context.Context) *lookup {
-	var target encPubkey
-	crand.Read(target[:])
-	return t.newLookup(ctx, target)
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.log.Warn("Failed to generate a random node key for newRandomLookup", "err", err)
+		key = t.priv
+	}
+	return t.newLookup(ctx, &key.PublicKey)
 }
 
-func (t *UDPv4) newLookup(ctx context.Context, targetKey encPubkey) *lookup {
-	target := enode.ID(crypto.Keccak256Hash(targetKey[:]))
-	ekey := v4wire.Pubkey(targetKey)
+func (t *UDPv4) newLookup(ctx context.Context, targetKey *ecdsa.PublicKey) *lookup {
+	targetKeyEnc := v4wire.EncodePubkey(targetKey)
+	target := enode.PubkeyEncoded(targetKeyEnc).ID()
 	it := newLookup(ctx, t.tab, target, func(n *node) ([]*node, error) {
-		return t.findnode(n.ID(), n.addr(), ekey)
+		return t.findnode(n.ID(), n.addr(), targetKeyEnc)
 	})
 	return it
 }
@@ -565,7 +567,7 @@ func (t *UDPv4) handlePacket(from *net.UDPAddr, buf []byte) error {
 		return err
 	}
 	packet := t.wrapPacket(rawpacket)
-	fromID := fromKey.ID()
+	fromID := enode.PubkeyEncoded(fromKey).ID()
 	if packet.preverify != nil {
 		err = packet.preverify(packet, from, fromID, fromKey)
 	}
@@ -741,7 +743,7 @@ func (t *UDPv4) handleFindnode(h *packetHandlerV4, from *net.UDPAddr, fromID eno
 	req := h.Packet.(*v4wire.Findnode)
 
 	// Determine closest nodes.
-	target := enode.ID(crypto.Keccak256Hash(req.Target[:]))
+	target := enode.PubkeyEncoded(req.Target).ID()
 	closest := t.tab.findnodeByID(target, bucketSize, true).entries
 
 	// Send neighbors in chunks with at most maxNeighbors per packet
