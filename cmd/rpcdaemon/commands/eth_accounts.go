@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -19,6 +20,7 @@ import (
 )
 
 var ch = make(chan struct{}, kv.ReadersLimit)
+var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
@@ -26,10 +28,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	defer func() { <-ch }()
 	t := time.Now()
 	tx, err1 := api.db.BeginRo(ctx)
-	took := time.Since(t)
-	if took > time.Millisecond {
-		fmt.Printf("kv_mdbx.go:363: %s\n", took)
-	}
+	beginMetric.UpdateDuration(t)
 	if err1 != nil {
 		log.Error("err", "err", err1)
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
