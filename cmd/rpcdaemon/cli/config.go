@@ -382,14 +382,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			nt, _ := runtime.ThreadCreateProfile(nil)
-			ng, _ := runtime.GoroutineProfile(nil)
-			fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
-		}
-	}()
 	var engineListener *http.Server
 	var engineListenerAuth *http.Server
 	var engineSrv *rpc.Server
