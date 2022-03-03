@@ -1454,7 +1454,7 @@ func threads(chaindata string) error {
 	}))
 	go func() {
 		for {
-			time.Sleep(5 * time.Second)
+			time.Sleep(1 * time.Second)
 			n, _ := runtime.ThreadCreateProfile(nil)
 			fmt.Printf("threads: %d\n", int64(n))
 		}
