@@ -10,7 +10,6 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -30,11 +29,24 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	tx, err1 := api.db.BeginRo(ctx)
 	beginMetric.UpdateDuration(t)
 	if err1 != nil {
-		log.Error("err", "err", err1)
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
-	tx.Rollback()
-	return (*hexutil.Big)(big.NewInt(12345678890)), nil
+	defer tx.Rollback()
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
+	if err != nil {
+		return nil, err
+	}
+
+	acc, err := reader.ReadAccountData(address)
+	if err != nil {
+		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
+	}
+	if acc == nil {
+		// Special case - non-existent account is assumed to have zero balance
+		return (*hexutil.Big)(big.NewInt(0)), nil
+	}
+
+	return (*hexutil.Big)(acc.Balance.ToBig()), nil
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
