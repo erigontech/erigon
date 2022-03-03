@@ -294,11 +294,11 @@ func handleForkChoice(
 
 	if !repliedWithSyncStatus {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-			// Short range re-org
+			log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 			// TODO(yperbasis): what if some bodies are missing and we have to download them?
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
-			// Long range re-org
+			log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 	}
