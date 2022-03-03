@@ -42,7 +42,7 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-Recommend 2Tb storage space on a single partition: 1.8Tb state, 200GB temp files (can symlink or mount
+Recommend 3.84Tb storage space on a single partition: 3.4Tb state, 400GB temp files (can symlink or mount
 folder `<datadir>/etl-tmp` to another disk).
 
 RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
