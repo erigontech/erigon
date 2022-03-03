@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -1437,108 +1436,6 @@ func compress1(fileName, segmentFileName string) error {
 }
 func decompress(name string) error {
 	return parallelcompress.Decompress("hack", name+".seg", name+".decompressed.dat")
-}
-func threads(chaindata string, n int) error {
-	db := mdbx.NewMDBX(log.New()).Path(chaindata).RoTxsLimit(n).MustOpen()
-	defer db.Close()
-	ctx := context.Background()
-	var fst, lst uint64
-	tool.Check(db.View(ctx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.AccountChangeSet)
-		tool.Check(err)
-		k, _, _ := c.First()
-		fst = binary.BigEndian.Uint64(k)
-		k, _, _ = c.Last()
-		lst = binary.BigEndian.Uint64(k)
-		return nil
-	}))
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			nt, _ := runtime.ThreadCreateProfile(nil)
-			ng, _ := runtime.GoroutineProfile(nil)
-			fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
-		}
-	}()
-	fmt.Printf("from: %d, to: %d\n", fst, lst)
-	defer func(t time.Time) { fmt.Printf("hack.go:1464: %s\n", time.Since(t)) }(time.Now())
-	defer func() {
-		nt, _ := runtime.ThreadCreateProfile(nil)
-		ng, _ := runtime.GoroutineProfile(nil)
-		fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
-	}()
-	wg := sync.WaitGroup{}
-	for i := fst; i < lst; i++ {
-		wg.Add(1)
-		go func(i uint64) {
-			defer wg.Done()
-			tool.Check(db.View(ctx, func(tx kv.Tx) error {
-				ib := dbutils.EncodeBlockNumber(i)
-				c, err := tx.Cursor(kv.AccountChangeSet)
-				tool.Check(err)
-				_, _, _ = c.Seek(ib)
-				c2, err := tx.Cursor(kv.StorageChangeSet)
-				tool.Check(err)
-				_, _, _ = c2.Seek(ib)
-				c3, err := tx.Cursor(kv.Log)
-				tool.Check(err)
-				_, _, _ = c3.Seek(ib)
-				c4, err := tx.Cursor(kv.Receipts)
-				tool.Check(err)
-				_, _, _ = c4.Seek(ib)
-				c5, err := tx.Cursor(kv.BlockBody)
-				tool.Check(err)
-				_, _, _ = c5.Seek(ib)
-				c6, err := tx.Cursor(kv.AccountsHistory)
-				tool.Check(err)
-				_, _, _ = c6.Seek(ib)
-				c7, err := tx.Cursor(kv.StorageHistory)
-				tool.Check(err)
-				_, _, _ = c7.Seek(ib)
-				return nil
-			}))
-			if i%10_000 == 0 {
-				fmt.Printf("done: %dK\n", i/1000)
-			}
-		}(i)
-	}
-	wg.Wait()
-	fmt.Printf("done\n")
-	return nil
-}
-
-func threads2(chaindata string, n int) error {
-	db := mdbx.NewMDBX(log.New()).Path(chaindata).RoTxsLimit(n).MustOpen()
-	defer db.Close()
-	ctx := context.Background()
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			nt, _ := runtime.ThreadCreateProfile(nil)
-			ng, _ := runtime.GoroutineProfile(nil)
-			fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
-		}
-	}()
-	defer func(t time.Time) { fmt.Printf("hack.go:1464: %s\n", time.Since(t)) }(time.Now())
-	defer func() {
-		nt, _ := runtime.ThreadCreateProfile(nil)
-		ng, _ := runtime.GoroutineProfile(nil)
-		fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
-	}()
-	wg := sync.WaitGroup{}
-	for i := 0; i < 32_000; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			tool.Check(db.View(ctx, func(tx kv.Tx) error { return nil }))
-			if i%10_000 == 0 {
-				fmt.Printf("done: %dK\n", i/1000)
-			}
-		}(i)
-	}
-	wg.Wait()
-	fmt.Printf("done\n")
-	return nil
 }
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
