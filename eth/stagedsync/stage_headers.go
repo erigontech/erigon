@@ -244,6 +244,15 @@ func handleForkChoice(
 	headerHash := forkChoiceMessage.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+	if currentHeadHash == headerHash { // no-op
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: currentHeadHash,
+		}
+		return nil
+	}
+
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
