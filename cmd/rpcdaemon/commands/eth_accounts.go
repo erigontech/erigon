@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -21,6 +22,9 @@ import (
 
 var ch = make(chan struct{}, kv.ReadersLimit)
 var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
+func init() {
+	debug.SetMaxThreads(len(ch) + 1)
+}
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
