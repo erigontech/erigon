@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
@@ -533,7 +534,7 @@ func DefaultGenesisBlock() *Genesis {
 	}
 }
 
-//DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
+// DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
 func DefaultSepoliaGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.SepoliaChainConfig,
@@ -735,4 +736,37 @@ func readPrealloc(filename string) GenesisAlloc {
 		panic(fmt.Sprintf("Could not parse genesis preallocation for %s: %v", filename, err))
 	}
 	return ga
+}
+
+func DefaultGenesisBlockByChainName(chain string) *Genesis {
+	switch chain {
+	case networkname.MainnetChainName:
+		return DefaultGenesisBlock()
+	case networkname.SepoliaChainName:
+		return DefaultSepoliaGenesisBlock()
+	case networkname.RopstenChainName:
+		return DefaultRopstenGenesisBlock()
+	case networkname.RinkebyChainName:
+		return DefaultRinkebyGenesisBlock()
+	case networkname.GoerliChainName:
+		return DefaultGoerliGenesisBlock()
+	case networkname.ErigonMineName:
+		return DefaultErigonGenesisBlock()
+	case networkname.SokolChainName:
+		return DefaultSokolGenesisBlock()
+	case networkname.FermionChainName:
+		return DefaultFermionGenesisBlock()
+	case networkname.BSCChainName:
+		return DefaultBSCGenesisBlock()
+	case networkname.ChapelChainName:
+		return DefaultChapelGenesisBlock()
+	case networkname.RialtoChainName:
+		return DefaultRialtoGenesisBlock()
+	case networkname.MumbaiChainName:
+		return DefaultMumbaiGenesisBlock()
+	case networkname.BorMainnetChainName:
+		return DefaultBorMainnetGenesisBlock()
+	default:
+		return nil
+	}
 }
