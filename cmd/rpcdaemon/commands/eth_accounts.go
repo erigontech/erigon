@@ -23,7 +23,7 @@ import (
 var ch = make(chan struct{}, kv.ReadersLimit)
 var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
 func init() {
-	debug.SetMaxThreads(len(ch) + 1)
+	debug.SetMaxThreads(len(ch) + 40)
 }
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
