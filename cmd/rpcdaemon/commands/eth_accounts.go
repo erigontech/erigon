@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var ch = make(chan struct{}, 1024)
+var ch = make(chan struct{}, 512)
 var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
 func init() {
 	debug.SetMaxThreads(cap(ch) + 40)
