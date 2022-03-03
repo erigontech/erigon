@@ -42,7 +42,7 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-For a full archive node we recommend 4TB storage space on a single partition: 1.8TB state (as of March 2022),
+For a full archive node we recommend >=3TB storage space on a single partition: 1.8TB state (as of March 2022),
 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk).
 
 RAM: >=16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
