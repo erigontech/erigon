@@ -1530,18 +1530,7 @@ func threads2(chaindata string) error {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			tool.Check(db.View(ctx, func(tx kv.Tx) error {
-				tool.Check(tx.ForEach(kv.AccountChangeSet, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.StorageChangeSet, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.Log, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.Receipts, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.BlockBody, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.EthTx, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.AccountsHistory, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.StorageHistory, nil, func(k, v []byte) error { return nil }))
-				tool.Check(tx.ForEach(kv.TxLookup, nil, func(k, v []byte) error { return nil }))
-				return nil
-			}))
+			tool.Check(db.View(ctx, func(tx kv.Tx) error { return nil }))
 			if i%10_000 == 0 {
 				fmt.Printf("done: %dK\n", i/1000)
 			}

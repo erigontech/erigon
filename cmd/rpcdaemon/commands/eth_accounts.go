@@ -23,7 +23,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 		log.Error("err", "err", err1)
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
-	defer tx.Rollback()
+	tx.Rollback()
 	return (*hexutil.Big)(big.NewInt(12345678890)), nil
 }
 
