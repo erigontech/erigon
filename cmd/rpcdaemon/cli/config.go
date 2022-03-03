@@ -79,6 +79,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 2, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
+	rootCmd.PersistentFlags().IntVar(&cfg.DBReadConcurrency, "db.read.concurrency", runtime.NumCPU(), "Does limit amount of parallel db reads")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
@@ -247,7 +248,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.SingleNodeMode {
 		var rwKv kv.RwDB
 		log.Trace("Creating chain db", "path", cfg.Chaindata)
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimit(runtime.NumCPU()).Path(cfg.Chaindata).Readonly().Open()
+		rwKv, err = kv2.NewMDBX(logger).RoTxsLimit(cfg.DBReadConcurrency).Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
