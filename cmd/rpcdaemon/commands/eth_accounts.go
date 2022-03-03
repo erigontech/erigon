@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"runtime/debug"
+	"runtime"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -19,11 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var ch = make(chan struct{}, 128)
+var ch = make(chan struct{}, runtime.NumCPU())
 var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
-func init() {
-	debug.SetMaxThreads(cap(ch) + 40)
-}
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
