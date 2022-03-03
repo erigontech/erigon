@@ -42,12 +42,12 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-Recommend 2Tb storage space on a single partition: 1.6Tb state, 200GB temp files (can symlink or mount
-folder `<datadir>/etl-tmp` to another disk).
+For a full archive node we recommend 4TB storage space on a single partition: 1.8TB state (as of March 2022),
+200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk).
 
-RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
+RAM: >=16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
 
-<code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
+<code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
 
 Usage
 =====
@@ -69,7 +69,7 @@ There is an optional stage that can be enabled through flags:
 
 ### Testnets
 
-If you would like to give Erigon a try, but do not have spare 2Tb on your drive, a good option is to start syncing one
+If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
 of the public testnets, Görli. It syncs much quicker, and does not take so much disk space:
 
 ```sh
