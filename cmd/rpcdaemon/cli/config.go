@@ -392,8 +392,8 @@ func grpcConnect(creds credentials.TransportCredentials, dialAddress string) (*g
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
 	dialOpts = []grpc.DialOption{
-		//grpc.WithWriteBufferSize(128 * 1024),
-		//grpc.WithReadBufferSize(128 * 1024),
+		grpc.WithWriteBufferSize(32 * 1024),
+		grpc.WithReadBufferSize(32 * 1024),
 
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(200 * datasize.MB))),
