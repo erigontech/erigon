@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -1437,6 +1438,46 @@ func compress1(fileName, segmentFileName string) error {
 func decompress(name string) error {
 	return parallelcompress.Decompress("hack", name+".seg", name+".decompressed.dat")
 }
+func threads(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	ctx := context.Background()
+	var fst, lst uint64
+	tool.Check(db.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.AccountChangeSet)
+		tool.Check(err)
+		k, _, _ := c.First()
+		fst = binary.BigEndian.Uint64(k)
+		k, _, _ = c.Last()
+		lst = binary.BigEndian.Uint64(k)
+		return nil
+	}))
+	wg := sync.WaitGroup{}
+	for i := fst; i < lst; i++ {
+		wg.Add(1)
+		go func(i uint64) {
+			defer wg.Wait()
+			tool.Check(db.View(ctx, func(tx kv.Tx) error {
+				c, err := tx.Cursor(kv.AccountChangeSet)
+				tool.Check(err)
+				_, _, _ = c.Seek(dbutils.EncodeBlockNumber(i))
+				c2, err := tx.Cursor(kv.StorageChangeSet)
+				tool.Check(err)
+				_, _, _ = c2.Seek(dbutils.EncodeBlockNumber(i))
+				return nil
+			}))
+		}(i)
+	}
+	go func() {
+		for {
+			time.Sleep(10 * time.Second)
+			n, _ := runtime.ThreadCreateProfile(nil)
+			fmt.Printf("threads: %d\n", int64(n))
+		}
+	}()
+	wg.Wait()
+	return nil
+}
 
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := mdbx.MustOpen(chaindata)
@@ -2680,6 +2721,8 @@ func main() {
 		err = compress1(*name, *name)
 	case "decompress":
 		err = decompress(*name)
+	case "threads":
+		err = threads(*name)
 	case "genstate":
 		err = genstate()
 	case "mainnetGenesis":
