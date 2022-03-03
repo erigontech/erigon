@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -17,6 +18,12 @@ import (
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	tx, err1 := api.db.BeginRo(ctx)
+	if err1 != nil {
+		log.Error("err", "err", err1)
+		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
+	}
+	defer tx.Rollback()
 	return (*hexutil.Big)(big.NewInt(12345678890)), nil
 }
 
