@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -22,7 +23,12 @@ var ch = make(chan struct{}, 1000)
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	ch <- struct{}{}
 	defer func() { <-ch }()
+	t := time.Now()
 	tx, err1 := api.db.BeginRo(ctx)
+	took := time.Since(t)
+	if took > time.Millisecond {
+		fmt.Printf("kv_mdbx.go:363: %s\n", took)
+	}
 	if err1 != nil {
 		log.Error("err", "err", err1)
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
