@@ -3,7 +3,6 @@ package privateapi
 import (
 	"fmt"
 	"net"
-	"runtime"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
@@ -35,9 +34,9 @@ func NewServer(rateLimit uint32, creds credentials.TransportCredentials) *grpc.S
 	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
 	//}
 
-	cpus := uint32(runtime.GOMAXPROCS(-1))
+	//cpus := uint32(runtime.GOMAXPROCS(-1))
 	opts := []grpc.ServerOption{
-		grpc.NumStreamWorkers(cpus),          // reduce amount of goroutines
+		//grpc.NumStreamWorkers(cpus),          // reduce amount of goroutines
 		grpc.MaxConcurrentStreams(rateLimit), // to force clients reduce concurrency level
 		// Don't drop the connection, settings accordign to this comment on GitHub
 		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
