@@ -27,11 +27,13 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	defer func() { <-ch }()
 	t := time.Now()
 	tx, err1 := api.db.BeginRo(ctx)
-	beginMetric.UpdateDuration(t)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
+	beginMetric.UpdateDuration(t)
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
 	if err != nil {
 		return nil, err
