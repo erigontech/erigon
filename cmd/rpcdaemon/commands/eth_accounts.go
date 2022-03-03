@@ -32,8 +32,8 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	defer tx.Rollback()
 	beginMetric.UpdateDuration(t)
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	//runtime.LockOSThread()
+	//defer runtime.UnlockOSThread()
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
 	if err != nil {
 		return nil, err
