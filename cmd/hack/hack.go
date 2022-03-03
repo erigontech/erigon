@@ -1462,6 +1462,11 @@ func threads(chaindata string) error {
 	}()
 	fmt.Printf("from: %d, to: %d\n", fst, lst)
 	defer func(t time.Time) { fmt.Printf("hack.go:1464: %s\n", time.Since(t)) }(time.Now())
+	defer func() {
+		nt, _ := runtime.ThreadCreateProfile(nil)
+		ng, _ := runtime.GoroutineProfile(nil)
+		fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
+	}()
 	wg := sync.WaitGroup{}
 	for i := fst; i < lst; i++ {
 		wg.Add(1)
