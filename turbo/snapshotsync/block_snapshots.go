@@ -702,13 +702,50 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
+	var sender [20]byte
+	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
+		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
+			return valueBuf, err
+		}
+		if len(senders) > 0 {
+			sender = senders[j]
+		}
+
+		valueBuf = valueBuf[:0]
+		valueBuf = append(valueBuf, slot.IdHash[:1]...)
+		valueBuf = append(valueBuf, sender[:]...)
+		valueBuf = append(valueBuf, v...)
+		return valueBuf, nil
+	}
 	valueBuf := make([]byte, 16*4096)
+	addSystemTx := func(tx kv.Tx, txId uint64) error {
+		binary.BigEndian.PutUint64(numBuf, txId)
+		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
+		if err != nil {
+			return err
+		}
+		if tv == nil {
+			if err := f.AddWord(nil); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		parseCtx.WithSender(false)
+		valueBuf, err = parse(tv, valueBuf, nil, 0)
+		if err != nil {
+			return err
+		}
+		if err := f.AddWord(valueBuf); err != nil {
+			return err
+		}
+		return nil
+	}
 
 	firstIDSaved := false
 
 	from := dbutils.EncodeBlockNumber(blockFrom)
 	var lastBody types.BodyForStorage
-	var sender [20]byte
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -730,31 +767,27 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, err
 		}
 
-		binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-
 		if !firstIDSaved {
 			firstIDSaved = true
-			firstTxID = body.BaseTxId
+			firstTxID = body.BaseTxId + 1
 		}
 		j := 0
-		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
+
+		if err := addSystemTx(tx, body.BaseTxId); err != nil {
+			return false, err
+		}
+		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if prevTxID != 0 && id != prevTxID+1 {
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
 			parseCtx.WithSender(len(senders) == 0)
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
+			valueBuf, err = parse(tv, valueBuf, senders, j)
+			if err != nil {
 				return err
 			}
-			if len(senders) > 0 {
-				sender = senders[j]
-			}
-
-			valueBuf = valueBuf[:0]
-			valueBuf = append(valueBuf, slot.IdHash[:1]...)
-			valueBuf = append(valueBuf, sender[:]...)
-			valueBuf = append(valueBuf, tv...)
 			if err := f.AddWord(valueBuf); err != nil {
 				return err
 			}
@@ -776,6 +809,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}); err != nil {
 			return false, err
 		}
+
+		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+			return false, err
+		}
+
 		return true, nil
 	}); err != nil {
 		return 0, err

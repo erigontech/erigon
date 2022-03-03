@@ -429,7 +429,7 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 
 	body := new(types.Body)
 	body.Uncles = b.Uncles
-	return body, b.BaseTxId, b.TxAmount, nil
+	return body, b.BaseTxId + 1, b.TxAmount - 2, nil // empty txs in the beginning and end of block
 }
 
 func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeight uint64, sn *BlocksSnapshot, buf []byte) (*types.Body, []common.Address, uint64, uint32, error) {
