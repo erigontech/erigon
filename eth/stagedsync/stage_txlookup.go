@@ -160,7 +160,7 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 			return fmt.Errorf("rlp decode err: %w", err)
 		}
 
-		txs, err := rawdb.CanonicalTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.CanonicalTransactions(tx, body.BaseTxId+1, body.TxAmount-2)
 		if err != nil {
 			return err
 		}
@@ -232,7 +232,7 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 			return fmt.Errorf("rlp decode: %w", err)
 		}
 
-		txs, err := rawdb.CanonicalTransactions(tx, body.BaseTxId, body.TxAmount)
+		txs, err := rawdb.CanonicalTransactions(tx, body.BaseTxId+1, body.TxAmount-2)
 		if err != nil {
 			return err
 		}
