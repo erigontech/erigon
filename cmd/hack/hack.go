@@ -1438,8 +1438,8 @@ func compress1(fileName, segmentFileName string) error {
 func decompress(name string) error {
 	return parallelcompress.Decompress("hack", name+".seg", name+".decompressed.dat")
 }
-func threads(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
+func threads(chaindata string, n int) error {
+	db := mdbx.NewMDBX(log.New()).Path(chaindata).RoTxsLimit(n).MustOpen()
 	defer db.Close()
 	ctx := context.Background()
 	var fst, lst uint64
@@ -1507,8 +1507,8 @@ func threads(chaindata string) error {
 	return nil
 }
 
-func threads2(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
+func threads2(chaindata string, n int) error {
+	db := mdbx.NewMDBX(log.New()).Path(chaindata).RoTxsLimit(n).MustOpen()
 	defer db.Close()
 	ctx := context.Background()
 	go func() {
@@ -2784,9 +2784,9 @@ func main() {
 	case "decompress":
 		err = decompress(*name)
 	case "threads":
-		err = threads(*chaindata)
+		err = threads(*chaindata, int(*block))
 	case "threads2":
-		err = threads2(*chaindata)
+		err = threads2(*chaindata, int(*block))
 	case "genstate":
 		err = genstate()
 	case "mainnetGenesis":
