@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -43,8 +44,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
 )
 
 var rootCmd = &cobra.Command{
@@ -318,7 +322,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("open tls cert: %w", err)
 	}
-	conn, err := grpcutil.Connect(creds, cfg.PrivateApiAddr)
+	conn, err := grpcConnect(creds, cfg.PrivateApiAddr)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
@@ -379,6 +383,38 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	ff = filters.New(ctx, eth, txPool, mining)
 
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
+}
+
+func grpcConnect(creds credentials.TransportCredentials, dialAddress string) (*grpc.ClientConn, error) {
+	var dialOpts []grpc.DialOption
+
+	backoffCfg := backoff.DefaultConfig
+	backoffCfg.BaseDelay = 500 * time.Millisecond
+	backoffCfg.MaxDelay = 10 * time.Second
+	dialOpts = []grpc.DialOption{
+		grpc.WithWriteBufferSize(128 * 1024),
+		grpc.WithReadBufferSize(128 * 1024),
+
+		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(200 * datasize.MB))),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+	}
+	if creds == nil {
+		dialOpts = append(dialOpts, grpc.WithInsecure())
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+	}
+
+	//if opts.inMemConn != nil {
+	//	dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) {
+	//		return opts.inMemConn.Dial()
+	//	}))
+	//}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return grpc.DialContext(ctx, dialAddress, dialOpts...)
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
