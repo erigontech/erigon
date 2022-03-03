@@ -1454,9 +1454,10 @@ func threads(chaindata string) error {
 	}))
 	go func() {
 		for {
-			time.Sleep(1 * time.Second)
-			n, _ := runtime.ThreadCreateProfile(nil)
-			fmt.Printf("threads: %d\n", int64(n))
+			time.Sleep(5 * time.Second)
+			nt, _ := runtime.ThreadCreateProfile(nil)
+			ng, _ := runtime.GoroutineProfile(nil)
+			fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
 		}
 	}()
 	fmt.Printf("from: %d, to: %d\n", fst, lst)
@@ -1490,7 +1491,7 @@ func threads(chaindata string) error {
 				_, _, _ = c7.Seek(ib)
 				return nil
 			}))
-			if i%1000 == 0 {
+			if i%10_000 == 0 {
 				fmt.Printf("done: %dK\n", i/1000)
 			}
 		}(i)
