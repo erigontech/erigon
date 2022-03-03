@@ -2722,7 +2722,7 @@ func main() {
 	case "decompress":
 		err = decompress(*name)
 	case "threads":
-		err = threads(*name)
+		err = threads(*chaindata)
 	case "genstate":
 		err = genstate()
 	case "mainnetGenesis":
