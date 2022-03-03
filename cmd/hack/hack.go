@@ -1526,7 +1526,7 @@ func threads2(chaindata string) error {
 		fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
 	}()
 	wg := sync.WaitGroup{}
-	for i := 0; i < 100_000; i++ {
+	for i := 0; i < 32_000; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
