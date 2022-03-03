@@ -21,7 +21,11 @@ var tx kv.Tx
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	if tx == nil {
-		tx, _ = api.db.BeginRo(ctx)
+		var err error
+		tx, err = api.db.BeginRo(ctx)
+		if err != nil {
+			panic(err)
+		}
 	}
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
 	if err != nil {
