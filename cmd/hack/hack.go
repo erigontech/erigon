@@ -1459,6 +1459,7 @@ func threads(chaindata string) error {
 			fmt.Printf("threads: %d\n", int64(n))
 		}
 	}()
+	fmt.Printf("from: %d, to: %d\n", fst, lst)
 	wg := sync.WaitGroup{}
 	for i := fst; i < lst; i++ {
 		wg.Add(1)
@@ -1492,6 +1493,7 @@ func threads(chaindata string) error {
 		}(i)
 	}
 	wg.Wait()
+	fmt.Printf("done\n")
 	return nil
 }
 
