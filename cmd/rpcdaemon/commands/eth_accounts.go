@@ -9,7 +9,6 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -20,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var ch = make(chan struct{}, kv.ReadersLimit)
+var ch = make(chan struct{}, 1024)
 var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
 func init() {
 	debug.SetMaxThreads(cap(ch) + 40)
