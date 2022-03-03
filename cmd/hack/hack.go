@@ -1465,7 +1465,7 @@ func threads(chaindata string) error {
 	for i := fst; i < lst; i++ {
 		wg.Add(1)
 		go func(i uint64) {
-			defer wg.Wait()
+			defer wg.Done()
 			tool.Check(db.View(ctx, func(tx kv.Tx) error {
 				ib := dbutils.EncodeBlockNumber(i)
 				c, err := tx.Cursor(kv.AccountChangeSet)
