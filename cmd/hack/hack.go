@@ -1452,6 +1452,13 @@ func threads(chaindata string) error {
 		lst = binary.BigEndian.Uint64(k)
 		return nil
 	}))
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			n, _ := runtime.ThreadCreateProfile(nil)
+			fmt.Printf("threads: %d\n", int64(n))
+		}
+	}()
 	wg := sync.WaitGroup{}
 	for i := fst; i < lst; i++ {
 		wg.Add(1)
@@ -1484,13 +1491,6 @@ func threads(chaindata string) error {
 			}))
 		}(i)
 	}
-	go func() {
-		for {
-			time.Sleep(5 * time.Second)
-			n, _ := runtime.ThreadCreateProfile(nil)
-			fmt.Printf("threads: %d\n", int64(n))
-		}
-	}()
 	wg.Wait()
 	return nil
 }
