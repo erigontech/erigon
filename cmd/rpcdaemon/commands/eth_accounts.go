@@ -16,8 +16,12 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
+var ch = make(chan struct{}, 1000)
+
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	ch <- struct{}{}
+	defer func() { <-ch }()
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		log.Error("err", "err", err1)
