@@ -43,6 +43,7 @@ import (
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
@@ -192,7 +193,8 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	kvRPC := remotedbserver.NewKvServer(ctx, chainKv)
+
+	kvRPC := remotedbserver.NewKvServer(ctx, mdbx.NewMDBX(logger).RoTxsLimit(kv.ReadersLimit).Readonly().Path(filepath.Join(stack.Config().DataDir, "chaindata")).Label(kv.ChainDB).MustOpen())
 	backend := &Ethereum{
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
