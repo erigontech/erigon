@@ -1490,6 +1490,9 @@ func threads(chaindata string) error {
 				_, _, _ = c7.Seek(ib)
 				return nil
 			}))
+			if i%1000 == 0 {
+				fmt.Printf("done: %dK\n", i/1000)
+			}
 		}(i)
 	}
 	wg.Wait()
