@@ -1461,6 +1461,7 @@ func threads(chaindata string) error {
 		}
 	}()
 	fmt.Printf("from: %d, to: %d\n", fst, lst)
+	defer func(t time.Time) { fmt.Printf("hack.go:1463: %s\n", time.Since(t)) }(time.Now())
 	wg := sync.WaitGroup{}
 	for i := fst; i < lst; i++ {
 		wg.Add(1)
