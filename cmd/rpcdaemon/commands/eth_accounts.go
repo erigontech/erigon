@@ -17,11 +17,6 @@ import (
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	tx, err1 := api.db.BeginRo(ctx)
-	if err1 != nil {
-		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
-	}
-	defer tx.Rollback()
 	return (*hexutil.Big)(big.NewInt(12345678890)), nil
 }
 
