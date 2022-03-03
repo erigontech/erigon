@@ -522,7 +522,7 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity).MapSize(6 * datasize.TB)
+		opts := mdbx.NewMDBX(logger).RoTxsLimit(2048).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity).MapSize(6 * datasize.TB)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
