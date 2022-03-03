@@ -311,13 +311,13 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Insert an easy and a difficult chain afterwards
 	easyChain, err := core.GenerateChain(m.ChainConfig, current(m.DB), m.Engine, m.DB, len(first), func(i int, b *core.BlockGen) {
 		b.OffsetTime(first[i])
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
 	diffChain, err := core.GenerateChain(m.ChainConfig, current(m.DB), m.Engine, m.DB, len(second), func(i int, b *core.BlockGen) {
 		b.OffsetTime(second[i])
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestChainTxReorgs(t *testing.T) {
 
 			gen.OffsetTime(9) // Lower the block difficulty to simulate a weaker chain
 		}
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestChainTxReorgs(t *testing.T) {
 			futureAdd, _ = types.SignTx(types.NewTransaction(gen.TxNonce(addr3), addr3, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, key3)
 			gen.AddTx(futureAdd) // This transaction will be added after a full reorg
 		}
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
@@ -647,7 +647,7 @@ func TestEIP155Transition(t *testing.T) {
 			}
 			block.AddTx(tx)
 		}
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if chainErr != nil {
 		t.Fatalf("generate blocks: %v", chainErr)
 	}
@@ -730,7 +730,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 			}
 			block.AddTx(tx)
 		}
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		return fmt.Errorf("generate blocks: %w", err)
 	}
@@ -903,7 +903,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 			t.Fatal(err)
 		}
 		block.AddTx(txn)
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1046,7 +1046,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 			} else {
 				b.SetCoinbase(common.Address{1})
 			}
-		}, false /* intemediateHashes */)
+		}, false /* intermediateHashes */)
 		if err != nil {
 			t.Fatalf("generate fork %d: %v", i, err)
 		}
@@ -1087,7 +1087,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 
 	shared, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 64, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate shared chain: %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		} else {
 			b.SetCoinbase(common.Address{2})
 		}
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate original chain: %v", err)
 	}
@@ -1108,7 +1108,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 			b.SetCoinbase(common.Address{3})
 			b.OffsetTime(-2)
 		}
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate competitor chain: %v", err)
 	}
@@ -1447,7 +1447,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		tx, _ = types.SignTx(types.NewTransaction(1, aa,
 			u256.Num1, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1624,7 +1624,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		}
 		expectations = append(expectations, exp)
 		current = exp
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
@@ -1763,7 +1763,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			u256.Num0, 100000, u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		b.AddTx(tx)
 		nonce++
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}

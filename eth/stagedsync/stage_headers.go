@@ -130,7 +130,7 @@ func SpawnStageHeaders(
 	}
 
 	pendingHeaderHash, pendingHeaderHeight := cfg.hd.GetPendingHeader()
-	if pendingHeaderHeight != 0 { // some work left to do after unwind
+	if pendingHeaderHash != (common.Hash{}) { // some work left to do after unwind
 		log.Info(fmt.Sprintf("[%s] Pending header after unwind", s.LogPrefix()), "height", pendingHeaderHeight, "hash", pendingHeaderHash)
 
 		logEvery := time.NewTicker(logInterval)
@@ -244,6 +244,15 @@ func handleForkChoice(
 	headerHash := forkChoiceMessage.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+	if currentHeadHash == headerHash { // no-op
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: currentHeadHash,
+		}
+		return nil
+	}
+
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -271,14 +280,16 @@ func handleForkChoice(
 	headerNumber := header.Number.Uint64()
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
-	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
-
-	forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
-	if err != nil {
-		if !repliedWithSyncStatus {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+	forkingPoint := uint64(0)
+	if headerNumber > 0 {
+		parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
+		if err != nil {
+			if !repliedWithSyncStatus {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			}
+			return err
 		}
-		return err
 	}
 
 	if !repliedWithSyncStatus {

@@ -25,7 +25,7 @@ func TestTxPoolContent(t *testing.T) {
 	m, require := stages.MockWithTxPool(t), require.New(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
-	}, false /* intemediateHashes */)
+	}, false /* intermediateHashes */)
 	require.NoError(err)
 	err = m.InsertChain(chain)
 	require.NoError(err)
