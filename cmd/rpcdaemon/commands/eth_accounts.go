@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
-	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"google.golang.org/grpc"
@@ -19,21 +17,16 @@ import (
 )
 
 var ch = make(chan struct{}, runtime.NumCPU())
-var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
 func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	ch <- struct{}{}
 	defer func() { <-ch }()
-	t := time.Now()
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	beginMetric.UpdateDuration(t)
-	//runtime.LockOSThread()
-	//defer runtime.UnlockOSThread()
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
 	if err != nil {
 		return nil, err
