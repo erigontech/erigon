@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var ch = make(chan struct{}, runtime.NumCPU()*4)
+var ch = make(chan struct{}, runtime.NumCPU())
 var beginMetric = metrics.GetOrCreateSummary(`db_begin_ro`) //nolint
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
