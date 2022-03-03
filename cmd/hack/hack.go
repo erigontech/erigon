@@ -2680,10 +2680,6 @@ func main() {
 		err = compress1(*name, *name)
 	case "decompress":
 		err = decompress(*name)
-	case "threads":
-		err = threads(*chaindata, int(*block))
-	case "threads2":
-		err = threads2(*chaindata, int(*block))
 	case "genstate":
 		err = genstate()
 	case "mainnetGenesis":
