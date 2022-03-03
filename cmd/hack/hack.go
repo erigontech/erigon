@@ -1507,6 +1507,51 @@ func threads(chaindata string) error {
 	return nil
 }
 
+func threads2(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+	ctx := context.Background()
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			nt, _ := runtime.ThreadCreateProfile(nil)
+			ng, _ := runtime.GoroutineProfile(nil)
+			fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
+		}
+	}()
+	defer func(t time.Time) { fmt.Printf("hack.go:1464: %s\n", time.Since(t)) }(time.Now())
+	defer func() {
+		nt, _ := runtime.ThreadCreateProfile(nil)
+		ng, _ := runtime.GoroutineProfile(nil)
+		fmt.Printf("threads: %d, goroutines: %d\n", nt, ng)
+	}()
+	wg := sync.WaitGroup{}
+	for i := 0; i < 100_000; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tool.Check(db.View(ctx, func(tx kv.Tx) error {
+				tool.Check(tx.ForEach(kv.AccountChangeSet, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.StorageChangeSet, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.Log, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.Receipts, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.BlockBody, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.EthTx, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.AccountsHistory, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.StorageHistory, nil, func(k, v []byte) error { return nil }))
+				tool.Check(tx.ForEach(kv.TxLookup, nil, func(k, v []byte) error { return nil }))
+				return nil
+			}))
+			if i%10_000 == 0 {
+				fmt.Printf("done: %dK\n", i/1000)
+			}
+		}(i)
+	}
+	wg.Wait()
+	fmt.Printf("done\n")
+	return nil
+}
+
 func changeSetStats(chaindata string, block1, block2 uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
@@ -2751,6 +2796,8 @@ func main() {
 		err = decompress(*name)
 	case "threads":
 		err = threads(*chaindata)
+	case "threads2":
+		err = threads2(*chaindata)
 	case "genstate":
 		err = genstate()
 	case "mainnetGenesis":
