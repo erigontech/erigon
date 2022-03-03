@@ -247,7 +247,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.SingleNodeMode {
 		var rwKv kv.RwDB
 		log.Trace("Creating chain db", "path", cfg.Chaindata)
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimit(runtime.NumCPU()).Path(cfg.Chaindata).Readonly().Open()
+		rwKv, err = kv2.NewMDBX(logger).RoTxsLimit(runtime.NumCPU() / 2).Path(cfg.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
