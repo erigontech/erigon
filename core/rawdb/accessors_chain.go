@@ -548,7 +548,7 @@ func WriteRawBody(db kv.StatelessRwTx, hash common.Hash, number uint64, body *ty
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = WriteRawTransactions(db, body.Transactions, baseTxId); err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
 	return nil
