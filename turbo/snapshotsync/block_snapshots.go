@@ -954,6 +954,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	return nil
 }
 
+var EmptyTxHash = common.Hash{}
+
 func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum, expectedCount uint64, segmentFilePath, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
 	dir, _ := filepath.Split(segmentFilePath)
 
@@ -1048,6 +1050,9 @@ RETRY:
 			}
 			j++
 			if it.empty {
+				if err := txnHashIdx.AddKey(EmptyTxHash[:], it.offset); err != nil {
+					errCh <- it.err
+				}
 				continue
 			}
 			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
@@ -1097,6 +1102,9 @@ RETRY:
 				}
 
 				if it.empty {
+					if err := txnHashIdx.AddKey(EmptyTxHash[:], blockNum); err != nil {
+						errCh <- it.err
+					}
 					continue
 				}
 
