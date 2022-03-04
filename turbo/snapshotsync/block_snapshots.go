@@ -1050,9 +1050,6 @@ RETRY:
 			}
 			j++
 			if it.empty {
-				if err := txnHashIdx.AddKey(EmptyTxHash[:], it.offset); err != nil {
-					errCh <- it.err
-				}
 				continue
 			}
 			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
@@ -1102,9 +1099,6 @@ RETRY:
 				}
 
 				if it.empty {
-					if err := txnHashIdx.AddKey(EmptyTxHash[:], blockNum); err != nil {
-						errCh <- it.err
-					}
 					continue
 				}
 
