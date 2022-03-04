@@ -777,12 +777,14 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
 			return false, err
 		}
-		prevTxID++
+		if prevTxID > 0 {
+			prevTxID++
+		}
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
-			fmt.Printf("b: %d,%d\n", blockNum, id)
-			if prevTxID != 1 && id != prevTxID+1 {
+			fmt.Printf("b: %d,%d,%d\n", blockNum, id, prevTxID)
+			if prevTxID != 0 && id != prevTxID+1 {
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
@@ -817,8 +819,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, err
 		}
 		prevTxID++
-		fmt.Printf("a: %d,%d\n", blockNum, prevTxID)
-
 		return true, nil
 	}); err != nil {
 		return 0, err
