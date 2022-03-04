@@ -1078,6 +1078,7 @@ RETRY:
 			}
 			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
 				errCh <- it.err
+				return
 			}
 
 			select {
