@@ -1333,7 +1333,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		if err := m.merge(ctx, toMergeTxs, filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Transactions))); err != nil {
 			return fmt.Errorf("mergeByAppendSegments: %w", err)
 		}
-		fmt.Printf("remove: %s\n", toMergeHeaders)
 		snapshots.Close()
 		if err := m.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 			return err
