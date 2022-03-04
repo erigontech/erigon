@@ -77,9 +77,9 @@ func TestMerge(t *testing.T) {
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo)
-		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
-		require.True(recommendedMerge)
-		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		ranges := merger.FindMergeRanges(s)
+		require.True(len(ranges) > 0)
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
 		require.NoError(err)
 		require.NoError(s.ReopenSegments())
 	}
@@ -93,14 +93,13 @@ func TestMerge(t *testing.T) {
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo)
-		toMergeHeaders, toMergeBodies, toMergeTxs, from, to, recommendedMerge := merger.FindCandidates(s)
-		require.True(recommendedMerge)
-		err := merger.Merge(context.Background(), toMergeHeaders, toMergeBodies, toMergeTxs, from, to, &dir2.Rw{Path: s.Dir()})
+		ranges := merger.FindMergeRanges(s)
+		require.True(len(ranges) == 0)
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
 		require.NoError(err)
-		require.NoError(s.ReopenSegments())
 	}
 
-	expectedFileName = SegmentFileName(1_000_000, 1_200_000, Transactions)
+	expectedFileName = SegmentFileName(1_100_000, 1_200_000, Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
