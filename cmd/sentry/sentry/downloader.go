@@ -117,7 +117,7 @@ func RecvUploadMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Debug("[RecvUploadMessage]: Handling incoming message", "error", err)
+			log.Debug("[RecvUploadMessage]: Handling incoming message", "err", err)
 
 		}
 		if wg != nil {
@@ -204,7 +204,7 @@ func RecvUploadHeadersMessage(ctx context.Context,
 			return
 		}
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "error", err)
+			log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "err", err)
 		}
 		if wg != nil {
 			wg.Done()
@@ -301,7 +301,7 @@ func RecvMessage(
 
 		if err = handleInboundMessage(ctx, req, sentry); err != nil {
 			if rlp.IsInvalidRLPError(err) {
-				log.Debug("[RecvMessage] Kick peer for invalid RLP", "error", err)
+				log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
 				outreq := proto_sentry.PenalizePeerRequest{
 					PeerId:  req.PeerId,
 					Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
@@ -310,7 +310,7 @@ func RecvMessage(
 					log.Error("Could not send penalty", "err", err1)
 				}
 			} else {
-				log.Warn("[RecvMessage] Handling incoming message", "error", err)
+				log.Warn("[RecvMessage] Handling incoming message", "err", err)
 			}
 		}
 

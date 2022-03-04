@@ -61,7 +61,7 @@ func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
 
-		back.log.Error("getting Version", "error", err)
+		back.log.Error("getting Version", "err", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(back.version, versionReply) {

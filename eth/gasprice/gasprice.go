@@ -214,12 +214,12 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	ignoreUnder, overflow := uint256.FromBig(ingoreUnderBig)
 	if overflow {
 		err := errors.New("overflow in getBlockPrices, gasprice.go: ignoreUnder too large")
-		log.Error("gasprice.go: getBlockPrices", "error", err)
+		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
 	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if block == nil {
-		log.Error("gasprice.go: getBlockPrices", "error", err)
+		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
 	blockTxs := block.Transactions()
@@ -232,7 +232,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		baseFee, overflow = uint256.FromBig(block.BaseFee())
 		if overflow {
 			err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
-			log.Error("gasprice.go: getBlockPrices", "error", err)
+			log.Error("gasprice.go: getBlockPrices", "err", err)
 			return err
 		}
 	}

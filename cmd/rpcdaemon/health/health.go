@@ -44,7 +44,7 @@ func ProcessHealthcheckIfNeeded(
 	defer r.Body.Close()
 
 	if errParse != nil {
-		log.Root().Warn("unable to process healthcheck request", "error", errParse)
+		log.Root().Warn("unable to process healthcheck request", "err", errParse)
 	} else {
 		// 1. net_peerCount
 		if body.MinPeerCount != nil {
@@ -59,7 +59,7 @@ func ProcessHealthcheckIfNeeded(
 
 	err := reportHealth(errParse, errMinPeerCount, errCheckBlock, w)
 	if err != nil {
-		log.Root().Warn("unable to process healthcheck request", "error", err)
+		log.Root().Warn("unable to process healthcheck request", "err", err)
 	}
 
 	return true

@@ -29,7 +29,7 @@ func NewMiningService(client txpool.MiningClient) *MiningService {
 func (s *MiningService) EnsureVersionCompatibility() bool {
 	versionReply, err := s.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		s.log.Error("getting Version", "error", err)
+		s.log.Error("getting Version", "err", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(s.version, versionReply) {

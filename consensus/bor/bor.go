@@ -701,7 +701,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 		cx := chainContext{Chain: chain, Bor: c}
 		// check and commit span
 		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {
-			log.Error("Error while committing span", "error", err)
+			log.Error("Error while committing span", "err", err)
 			return nil, types.Receipts{}, err
 		}
 
@@ -709,14 +709,14 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "error", err)
+				log.Error("Error while committing states", "err", err)
 				return nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err = c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "error", err)
+		log.Error("Error changing contract code", "err", err)
 		return nil, types.Receipts{}, err
 	}
 
@@ -771,7 +771,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 		// check and commit span
 		err := c.checkAndCommitSpan(state, header, cx, syscall)
 		if err != nil {
-			log.Error("Error while committing span", "error", err)
+			log.Error("Error while committing span", "err", err)
 			return nil, nil, types.Receipts{}, err
 		}
 
@@ -779,14 +779,14 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
-				log.Error("Error while committing states", "error", err)
+				log.Error("Error while committing states", "err", err)
 				return nil, nil, types.Receipts{}, err
 			}
 		}
 	}
 
 	if err := c.changeContractCodeIfNeeded(headerNumber, state); err != nil {
-		log.Error("Error changing contract code", "error", err)
+		log.Error("Error changing contract code", "err", err)
 		return nil, nil, types.Receipts{}, err
 	}
 
@@ -950,7 +950,7 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 	method := "getCurrentSpan"
 	data, err := c.validatorSetABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for getCurrentSpan", "error", err)
+		log.Error("Unable to pack tx for getCurrentSpan", "err", err)
 		return nil, err
 	}
 
@@ -1146,7 +1146,7 @@ func (c *Bor) fetchAndCommitSpan(
 		producerBytes,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for commitSpan", "error", err)
+		log.Error("Unable to pack tx for commitSpan", "err", err)
 		return err
 	}
 

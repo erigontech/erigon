@@ -82,9 +82,9 @@ func StageLoop(
 				return
 			}
 
-			log.Error("Staged Sync", "error", err)
+			log.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downloader", "error", recoveryErr)
+				log.Error("Failed to recover header downloader", "err", recoveryErr)
 			}
 			continue
 		}

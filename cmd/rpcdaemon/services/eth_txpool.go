@@ -37,7 +37,7 @@ Start:
 			time.Sleep(3 * time.Second)
 			goto Start
 		}
-		s.log.Error("ensure version", "error", err)
+		s.log.Error("ensure version", "err", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(s.version, versionReply) {

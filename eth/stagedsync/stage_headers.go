@@ -130,7 +130,7 @@ func SpawnStageHeaders(
 	}
 
 	pendingHeaderHash, pendingHeaderHeight := cfg.hd.GetPendingHeader()
-	if pendingHeaderHeight != 0 { // some work left to do after unwind
+	if pendingHeaderHash != (common.Hash{}) { // some work left to do after unwind
 		log.Info(fmt.Sprintf("[%s] Pending header after unwind", s.LogPrefix()), "height", pendingHeaderHeight, "hash", pendingHeaderHash)
 
 		logEvery := time.NewTicker(logInterval)
@@ -244,6 +244,15 @@ func handleForkChoice(
 	headerHash := forkChoiceMessage.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+	if currentHeadHash == headerHash { // no-op
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: currentHeadHash,
+		}
+		return nil
+	}
+
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -271,23 +280,25 @@ func handleForkChoice(
 	headerNumber := header.Number.Uint64()
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
-	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
-
-	forkingPoint, err := headerInserter.ForkingPoint(tx, header, parent)
-	if err != nil {
-		if !repliedWithSyncStatus {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+	forkingPoint := uint64(0)
+	if headerNumber > 0 {
+		parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
+		if err != nil {
+			if !repliedWithSyncStatus {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			}
+			return err
 		}
-		return err
 	}
 
 	if !repliedWithSyncStatus {
 		if headerNumber-forkingPoint <= ShortPoSReorgThresholdBlocks {
-			// Short range re-org
+			log.Info(fmt.Sprintf("[%s] Short range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 			// TODO(yperbasis): what if some bodies are missing and we have to download them?
 			cfg.hd.SetPendingPayloadStatus(headerHash)
 		} else {
-			// Long range re-org
+			log.Info(fmt.Sprintf("[%s] Long range re-org", s.LogPrefix()), "headerNumber", headerNumber, "forkingPoint", forkingPoint)
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 	}
@@ -360,7 +371,7 @@ func handleNewPayload(
 		}
 
 		if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+			log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
 			return nil
 		}
 
@@ -389,7 +400,7 @@ func verifyAndSaveNewPoSHeader(
 	headerHash := header.Hash()
 
 	if verificationErr := cfg.hd.VerifyHeader(header); verificationErr != nil {
-		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "error", verificationErr)
+		log.Warn("Verification failed for header", "hash", headerHash, "height", headerNumber, "err", verificationErr)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
 			LatestValidHash: header.ParentHash,
@@ -519,7 +530,7 @@ func downloadMissingPoSHeaders(
 			return err
 		}
 		if err := cfg.hd.VerifyHeader(&h); err != nil {
-			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "error", err)
+			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			return err
 		}
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())

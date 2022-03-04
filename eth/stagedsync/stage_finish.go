@@ -135,7 +135,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
 		return libcommon.Stopped(ctx.Done())
 	}); err != nil {
-		log.Error("RPC Daemon notification failed", "error", err)
+		log.Error("RPC Daemon notification failed", "err", err)
 		return err
 	}
 	notifier.OnNewHeader(headersRlp)

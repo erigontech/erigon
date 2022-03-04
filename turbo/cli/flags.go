@@ -208,7 +208,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalString(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.GlobalString(BadBlockFlag.Name))
 		if err != nil {
-			log.Warn("Error decoding block hash", "hash", ctx.GlobalString(BadBlockFlag.Name), "error", err)
+			log.Warn("Error decoding block hash", "hash", ctx.GlobalString(BadBlockFlag.Name), "err", err)
 		} else {
 			cfg.BadBlockHash = common.BytesToHash(bytes)
 		}

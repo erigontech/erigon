@@ -433,7 +433,7 @@ func TestClique(t *testing.T) {
 					copy(nonce[:], clique.NonceAuthVote)
 					gen.SetNonce(nonce)
 				}
-			}, false /* intemediateHashes */)
+			}, false /* intermediateHashes */)
 			if err != nil {
 				t.Fatalf("generate blocks: %v", err)
 			}

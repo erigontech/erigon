@@ -200,6 +200,12 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	}
 	ibs := state.New(stateReader)
 
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.Override(ibs); err != nil {
+			return err
+		}
+	}
+
 	var baseFee *uint256.Int
 	if header != nil && header.BaseFee != nil {
 		var overflow bool
