@@ -548,6 +548,9 @@ func WriteRawBody(db kv.StatelessRwTx, hash common.Hash, number uint64, body *ty
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
+	if number == 46147 {
+		fmt.Printf("writing: %d, %d\n", baseTxId+1, body.Transactions)
+	}
 	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
 	}
@@ -569,11 +572,43 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
+	if number == 46147 {
+		fmt.Printf("writing: %d, %d\n", baseTxId+1, body.Transactions)
+	}
 	err = WriteTransactions(db, body.Transactions, baseTxId+1)
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
 
+	if number == 46147 {
+		numBuf := make([]byte, 8+32)
+		var prevTxID uint64
+		if err := db.ForEach(kv.HeaderCanonical, nil, func(k, v []byte) error {
+			prevTxID++
+			copy(numBuf, k)
+			copy(numBuf[8:], v)
+			b, err := ReadBodyForStorageByKey(db, numBuf)
+			if err != nil {
+				return err
+			}
+			binary.BigEndian.PutUint64(numBuf, b.BaseTxId+1)
+			if err := db.ForAmount(kv.EthTx, numBuf[:8], b.TxAmount-2, func(tk, tv []byte) error {
+				id := binary.BigEndian.Uint64(tk)
+				fmt.Printf("b: %d,%d\n", binary.BigEndian.Uint64(k), id)
+				if prevTxID != 1 && id != prevTxID+1 {
+					panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", binary.BigEndian.Uint64(k), prevTxID, id))
+				}
+				prevTxID = id
+				return nil
+			}); err != nil {
+				return err
+			}
+			prevTxID++
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
 	return nil
 }
 
