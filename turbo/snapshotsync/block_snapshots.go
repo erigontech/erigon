@@ -770,7 +770,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 		if !firstIDSaved {
 			firstIDSaved = true
-			firstTxID = body.BaseTxId + 1
+			firstTxID = body.BaseTxId
 		}
 		j := 0
 
