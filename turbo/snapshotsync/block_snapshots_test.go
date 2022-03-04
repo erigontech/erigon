@@ -104,7 +104,7 @@ func TestMerge(t *testing.T) {
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
-	require.Equal(2, a)
+	require.Equal(1, a)
 }
 
 func TestRecompress(t *testing.T) {
