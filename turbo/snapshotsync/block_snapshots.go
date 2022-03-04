@@ -1046,6 +1046,7 @@ RETRY:
 				errCh <- it.err
 				return
 			}
+			j++
 			if it.empty {
 				continue
 			}
@@ -1059,7 +1060,6 @@ RETRY:
 				return
 			default:
 			}
-			j++
 		}
 
 		if j != expectedCount {
