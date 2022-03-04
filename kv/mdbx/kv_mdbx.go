@@ -472,6 +472,10 @@ func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byt
 	return nil
 }
 func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	if amount == 0 {
+		return nil
+	}
+
 	c, err := tx.Cursor(bucket)
 	if err != nil {
 		return err
