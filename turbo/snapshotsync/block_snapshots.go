@@ -1046,6 +1046,9 @@ RETRY:
 				errCh <- it.err
 				return
 			}
+			if it.empty {
+				continue
+			}
 			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
 				errCh <- it.err
 			}
@@ -1091,6 +1094,10 @@ RETRY:
 						return err
 					}
 					blockNum++
+				}
+
+				if it.empty {
+					continue
 				}
 
 				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
