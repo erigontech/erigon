@@ -968,15 +968,9 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 
 	buf := make([]byte, 1024)
 
-	var nonEmptyCount int
-	for it := range forEachAsync(ctx, d) {
-		if it.err != nil {
-			return it.err
-		}
-		if len(it.word) == 0 {
-			continue
-		}
-		nonEmptyCount++
+	nonEmptyCount, err := notEmptyWordsAmount(ctx, d)
+	if err != nil {
+		return err
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1270,6 +1264,26 @@ func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompress
 		}
 	}()
 	return ch
+}
+func notEmptyWordsAmount(ctx context.Context, d *compress.Decompressor) (int, error) {
+	var notEmptyCount int
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		var wc uint64
+		word := make([]byte, 0, 4096)
+		for g.HasNext() {
+			word, _ = g.Next(word[:0])
+			if len(word) == 0 {
+				continue
+			}
+			notEmptyCount++
+			wc++
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	return notEmptyCount, nil
 }
 
 // Idx - iterate over segment and building .idx file
