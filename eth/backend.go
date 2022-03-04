@@ -194,7 +194,9 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
-	kvRPC := remotedbserver.NewKvServer(ctx, mdbx.NewMDBX(logger).RoTxsLimit(kv.ReadersLimit).Readonly().Path(filepath.Join(stack.Config().DataDir, "chaindata")).Label(kv.ChainDB).MustOpen())
+	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
+	limiter := make(chan struct{}, kv.ReadersLimit)
+	kvRPC := remotedbserver.NewKvServer(ctx, mdbx.NewMDBX(logger).RoTxsLimiter(limiter).Readonly().Path(filepath.Join(stack.Config().DataDir, "chaindata")).Label(kv.ChainDB).MustOpen())
 	backend := &Ethereum{
 		sentryCtx:            ctx,
 		sentryCancel:         ctxCancel,
