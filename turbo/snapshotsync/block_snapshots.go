@@ -776,6 +776,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
 			return false, err
 		}
+		prevTxID++
 		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
 		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
@@ -813,6 +814,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
 			return false, err
 		}
+		prevTxID++
 
 		return true, nil
 	}); err != nil {
