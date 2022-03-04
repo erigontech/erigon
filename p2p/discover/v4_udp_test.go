@@ -264,7 +264,8 @@ func TestUDPv4_findnode(t *testing.T) {
 	// put a few nodes into the table. their exact
 	// distribution shouldn't matter much, although we need to
 	// take care not to overflow any bucket.
-	nodes := &nodesByDistance{target: testTarget.ID()}
+	testTargetID := enode.PubkeyEncoded(testTarget).ID()
+	nodes := &nodesByDistance{target: testTargetID}
 	live := make(map[enode.ID]bool)
 	numCandidates := 2 * bucketSize
 	for i := 0; i < numCandidates; i++ {
@@ -282,11 +283,11 @@ func TestUDPv4_findnode(t *testing.T) {
 
 	// ensure there's a bond with the test node,
 	// findnode won't be accepted otherwise.
-	remoteID := v4wire.EncodePubkey(&test.remotekey.PublicKey).ID()
+	remoteID := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 	test.table.db.UpdateLastPongReceived(remoteID, test.remoteaddr.IP, time.Now())
 
 	// check that closest neighbors are returned.
-	expected := test.table.findnodeByID(testTarget.ID(), bucketSize, true)
+	expected := test.table.findnodeByID(testTargetID, bucketSize, true)
 	test.packetIn(nil, &v4wire.Findnode{Target: testTarget, Expiration: futureExp})
 	waitNeighbors := func(want []*node) {
 		test.waitPacketOut(func(p *v4wire.Neighbors, to *net.UDPAddr, hash []byte) {
@@ -294,11 +295,12 @@ func TestUDPv4_findnode(t *testing.T) {
 				t.Errorf("wrong number of results: got %d, want %d", len(p.Nodes), bucketSize)
 			}
 			for i, n := range p.Nodes {
-				if n.ID.ID() != want[i].ID() {
+				nodeID := enode.PubkeyEncoded(n.ID).ID()
+				if nodeID != want[i].ID() {
 					t.Errorf("result mismatch at %d:\n  got:  %v\n  want: %v", i, n, expected.entries[i])
 				}
-				if !live[n.ID.ID()] {
-					t.Errorf("result includes dead node %v", n.ID.ID())
+				if !live[nodeID] {
+					t.Errorf("result includes dead node %v", nodeID)
 				}
 			}
 		})
@@ -322,7 +324,7 @@ func TestUDPv4_findnodeMultiReply(t *testing.T) {
 	// queue a pending findnode request
 	resultc, errc := make(chan []*node), make(chan error)
 	go func() {
-		rid := encodePubkey(&test.remotekey.PublicKey).id()
+		rid := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 		ns, err := test.udp.findnode(rid, test.remoteaddr, testTarget)
 		if err != nil && len(ns) == 0 {
 			errc <- err
@@ -446,7 +448,7 @@ func TestUDPv4_successfulPing(t *testing.T) {
 	// pong packet.
 	select {
 	case n := <-added:
-		rid := encodePubkey(&test.remotekey.PublicKey).id()
+		rid := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 		if n.ID() != rid {
 			t.Errorf("node has wrong ID: got %v, want %v", n.ID(), rid)
 		}
