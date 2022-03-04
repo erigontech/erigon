@@ -223,7 +223,7 @@ type ChainPack struct {
 	Headers  []*types.Header
 	Blocks   []*types.Block
 	Receipts []types.Receipts
-	TopBlock *types.Block // Convinience field to access the last block
+	TopBlock *types.Block // Convenience field to access the last block
 }
 
 // OneBlock returns a ChainPack which contains just one

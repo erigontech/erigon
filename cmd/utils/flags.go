@@ -1424,90 +1424,29 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 	// Override any default configs for hard coded networks.
 	chain := ctx.GlobalString(ChainFlag.Name)
+
 	switch chain {
+	default:
+		genesis := core.DefaultGenesisBlockByChainName(chain)
+		genesisHash := params.GenesisHashByChainName(chain)
+		if (genesis == nil) || (genesisHash == nil) {
+			Fatalf("ChainDB name is not recognized: %s", chain)
+			return
+		}
+		cfg.Genesis = genesis
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkID = params.NetworkIDByChainName(chain)
+		}
+		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
-	case networkname.MainnetChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 1
-		}
-		cfg.Genesis = core.DefaultGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
-	case networkname.SepoliaChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 11155111
-		}
-		cfg.Genesis = core.DefaultSepoliaGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.SepoliaGenesisHash)
-	case networkname.RopstenChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 3
-		}
-		cfg.Genesis = core.DefaultRopstenGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.RopstenGenesisHash)
-	case networkname.RinkebyChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 4
-		}
-		cfg.Genesis = core.DefaultRinkebyGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.RinkebyGenesisHash)
-	case networkname.GoerliChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 5
-		}
-		cfg.Genesis = core.DefaultGoerliGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
-	case networkname.BSCChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 56
-		}
-		cfg.Genesis = core.DefaultBSCGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.BSCGenesisHash)
-	case networkname.ChapelChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 97
-		}
-		cfg.Genesis = core.DefaultChapelGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.ChapelGenesisHash)
-	case networkname.RialtoChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 97
-		}
-		cfg.Genesis = core.DefaultRialtoGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.RialtoGenesisHash)
-	case networkname.ErigonMineName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = new(big.Int).SetBytes([]byte("erigon-mine")).Uint64() // erigon-mine
-		}
-		cfg.Genesis = core.DefaultErigonGenesisBlock()
-	case networkname.SokolChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 77
-		}
-		cfg.Genesis = core.DefaultSokolGenesisBlock()
-	case networkname.FermionChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 1212120
-		}
-		cfg.Genesis = core.DefaultFermionGenesisBlock()
-	case networkname.MumbaiChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 80001
-		}
-		cfg.Genesis = core.DefaultMumbaiGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.MumbaiGenesisHash)
-	case networkname.BorMainnetChainName:
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = 137
-		}
-		cfg.Genesis = core.DefaultBorMainnetGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, params.BorMainnetGenesisHash)
 	case networkname.DevChainName:
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
 			cfg.NetworkID = 1337
 		}
+
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
 		if developer == (common.Address{}) {
@@ -1521,8 +1460,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
-	default:
-		Fatalf("ChainDB name is not recognized: %s", chain)
 	}
 }
 
@@ -1562,40 +1499,6 @@ func MakeChainDatabase(logger log.Logger, cfg *node.Config) kv.RwDB {
 		Fatalf("Could not open database: %v", err)
 	}
 	return chainDb
-}
-
-func MakeGenesis(ctx *cli.Context) *core.Genesis {
-	var genesis *core.Genesis
-	chain := ctx.GlobalString(ChainFlag.Name)
-	switch chain {
-	case networkname.SepoliaChainName:
-		genesis = core.DefaultSepoliaGenesisBlock()
-	case networkname.RopstenChainName:
-		genesis = core.DefaultRopstenGenesisBlock()
-	case networkname.RinkebyChainName:
-		genesis = core.DefaultRinkebyGenesisBlock()
-	case networkname.GoerliChainName:
-		genesis = core.DefaultGoerliGenesisBlock()
-	case networkname.BSCChainName:
-		genesis = core.DefaultBSCGenesisBlock()
-	case networkname.ChapelChainName:
-		genesis = core.DefaultChapelGenesisBlock()
-	case networkname.RialtoChainName:
-		genesis = core.DefaultRialtoGenesisBlock()
-	case networkname.ErigonMineName:
-		genesis = core.DefaultErigonGenesisBlock()
-	case networkname.SokolChainName:
-		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.FermionChainName:
-		genesis = core.DefaultFermionGenesisBlock()
-	case networkname.MumbaiChainName:
-		genesis = core.DefaultMumbaiGenesisBlock()
-	case networkname.BorMainnetChainName:
-		genesis = core.DefaultBorMainnetGenesisBlock()
-	case networkname.DevChainName:
-		Fatalf("Developer chains are ephemeral")
-	}
-	return genesis
 }
 
 // MakeConsolePreloads retrieves the absolute paths for the console JavaScript
