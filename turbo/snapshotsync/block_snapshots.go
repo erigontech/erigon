@@ -1149,7 +1149,9 @@ RETRY:
 			errCh <- err
 			return
 		}
+		fmt.Printf("build4: %d\n", firstBlockNum)
 		errCh <- txnHash2BlockNumIdx.Build()
+		fmt.Printf("build5: %d\n", firstBlockNum)
 	}()
 
 	wg.Wait()
