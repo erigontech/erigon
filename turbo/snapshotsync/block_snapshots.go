@@ -59,6 +59,7 @@ const (
 
 const (
 	Transactions2Block Type = "transactions-to-block"
+	TransactionsId     Type = "transactions-id"
 )
 
 var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
@@ -967,9 +968,20 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 
 	buf := make([]byte, 1024)
 
+	var nonEmptyCount int
+	for it := range forEachAsync(ctx, d) {
+		if it.err != nil {
+			return it.err
+		}
+		if len(it.word) == 0 {
+			continue
+		}
+		nonEmptyCount++
+	}
+
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
+		KeyCount:   nonEmptyCount,
+		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
@@ -979,9 +991,21 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 	if err != nil {
 		return err
 	}
+	txnIdIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   d.Count(),
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, TransactionsId)),
+		BaseDataID: firstTxID,
+	})
+	if err != nil {
+		return err
+	}
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
-		Enums:      true,
+		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
@@ -1037,6 +1061,7 @@ RETRY:
 	wg := sync.WaitGroup{}
 	errCh := make(chan error, 2)
 	defer close(errCh)
+	num := make([]byte, 8)
 
 	wg.Add(1)
 	go func() {
@@ -1049,6 +1074,11 @@ RETRY:
 				return
 			}
 			j++
+			binary.BigEndian.PutUint64(num, firstTxID+it.i)
+			if err := txnIdIdx.AddKey(num, it.offset); err != nil {
+				errCh <- it.err
+				return
+			}
 			if it.empty {
 				continue
 			}
@@ -1069,6 +1099,7 @@ RETRY:
 		}
 
 		errCh <- txnHashIdx.Build()
+		errCh <- txnIdIdx.Build()
 	}()
 	wg.Add(1)
 	go func() {
