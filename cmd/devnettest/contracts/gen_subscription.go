@@ -4,6 +4,7 @@
 package contracts
 
 import (
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -36,11 +37,13 @@ var SubscriptionBin = "0x6080604052348015600f57600080fd5b50607180601d6000396000f
 func DeploySubscription(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Subscription, error) {
 	parsed, err := abi.JSON(strings.NewReader(SubscriptionABI))
 	if err != nil {
+		fmt.Printf("error: DeploySubscription 1: %+v\n", err)
 		return common.Address{}, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SubscriptionBin), backend)
 	if err != nil {
+		fmt.Printf("error: DeploySubscription 2: %+v\n", err)
 		return common.Address{}, nil, nil, err
 	}
 	return address, tx, &Subscription{SubscriptionCaller: SubscriptionCaller{contract: contract}, SubscriptionTransactor: SubscriptionTransactor{contract: contract}, SubscriptionFilterer: SubscriptionFilterer{contract: contract}}, nil

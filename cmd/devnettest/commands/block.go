@@ -56,8 +56,15 @@ var sendTxCmd = &cobra.Command{
 		if txType != "regular" && txType != "contract" {
 			return fmt.Errorf("tx type to create must either be 'contract' or 'regular'")
 		}
-		if sendValue == 0 && txType == "regular" {
-			return fmt.Errorf("value must be > 0")
+		if txType == "regular" {
+			fmt.Println(sendAddr)
+			fmt.Println(sendValue)
+			if sendValue == 0 {
+				return fmt.Errorf("value must be > 0")
+			}
+			if sendAddr == "" {
+				return fmt.Errorf("string address to send to must be present")
+			}
 		}
 		return nil
 	},
@@ -67,10 +74,6 @@ var sendTxCmd = &cobra.Command{
 		}
 
 		if txType == "regular" {
-			if sendAddr == "" {
-				panic("string address to send to must be present")
-			}
-
 			toAddress := common.HexToAddress(sendAddr)
 			signer := types.LatestSigner(params.AllCliqueProtocolChanges)
 			signedTx, _ := types.SignTx(types.NewTransaction(nonce, toAddress, uint256.NewInt(sendValue),
@@ -169,11 +172,15 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 }
 
 func emitContractEvent() {
+	const txGas uint64 = 6000000000
 	fmt.Println("Process started...")
+	fmt.Println()
 	gspec := core.DeveloperGenesisBlock(uint64(0), common.HexToAddress("67b1d87101671b127f5f8714789C7192f7ad340e"))
 	fmt.Printf("Gspec is: %+v\n", gspec)
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, params.TxGas)
+	fmt.Println()
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, txGas)
 	transactOpts := bind.NewKeyedTransactor(devnetSignPrivateKey)
+	transactOpts.GasLimit = txGas
 	fmt.Printf("backend is: %+v\n", contractBackend)
 	_, _, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
 	if err != nil {

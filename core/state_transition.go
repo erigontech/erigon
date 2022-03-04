@@ -197,7 +197,7 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTransition {
 	isParlia := evm.ChainConfig().Parlia != nil
 	isBor := evm.ChainConfig().Bor != nil
-	return &StateTransition{
+	st := &StateTransition{
 		gp:        gp,
 		evm:       evm,
 		msg:       msg,
@@ -214,6 +214,8 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		isParlia: isParlia,
 		isBor:    isBor,
 	}
+	fmt.Printf("st in NST is: %+v\n", st.gas)
+	return st
 }
 
 // ApplyMessage computes the new state by applying the given message
@@ -227,6 +229,12 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Pariry behaviour
 func ApplyMessage(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	fmt.Println()
+	fmt.Println("Printing properties of msg...")
+	fmt.Printf("Fee cap: %+v, %T\n", msg.FeeCap(), msg.FeeCap())
+	fmt.Printf("Tip: %+v, %T\n", msg.Tip(), msg.Tip())
+	fmt.Printf("Gas: %+v, %T\n", msg.Gas(), msg.Gas())
+	fmt.Println()
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
@@ -269,7 +277,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return err
 		}
 	}
+	fmt.Printf("st.gas before buying is: %+v\n", st.gas)
 	st.gas += st.msg.Gas()
+	fmt.Printf("st.gas after buying is: %+v\n", st.gas)
 
 	st.initialGas = st.msg.Gas()
 	return nil
@@ -344,6 +354,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	fmt.Printf("st.gas in TDb is: %+v\n", st.gas)
 	var input1 *uint256.Int
 	var input2 *uint256.Int
 	if st.isBor {
@@ -384,6 +395,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, err
 	}
 	if st.gas < gas {
+		fmt.Printf("st.gas in failed func is: %+v\n", st.gas)
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
 	}
 	st.gas -= gas

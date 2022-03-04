@@ -549,6 +549,8 @@ func (b *SimulatedBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error
 // EstimateGas executes the requested code against the currently pending block/state and
 // returns the used amount of gas.
 func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (uint64, error) {
+	fmt.Println()
+	fmt.Println("Function invoked!!!")
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -596,6 +598,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 		snapshot := b.pendingState.Snapshot()
 		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
+		fmt.Printf("err %+v\n", err)
 		b.pendingState.RevertToSnapshot(snapshot)
 
 		if err != nil {
@@ -637,6 +640,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
+			fmt.Println("sim.go")
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
@@ -652,6 +656,12 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = u256.Num1
+	}
+	if call.FeeCap == nil {
+		call.FeeCap = uint256.NewInt(880000000)
+	}
+	if call.Tip == nil {
+		call.Tip = uint256.NewInt(880000000)
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
@@ -674,7 +684,12 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 	fmt.Printf("Message: %+v\n", msg)
 
-	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
+	fmt.Println()
+	st := core.NewStateTransition(vmEnv, msg, gasPool)
+	fmt.Println("about to start transDb")
+	fmt.Printf("st is: %+v\n", st)
+	fmt.Println()
+	return st.TransitionDb(true /* refunds */, false /* gasBailout */)
 }
 
 // SendTransaction updates the pending block to include the given transaction.
@@ -687,10 +702,12 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
+		fmt.Printf("error: SendTransaction 1: %+v\n", senderErr)
 		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.GetNonce() != nonce {
+		fmt.Printf("error: SendTransaction 2: %+v\n", nil)
 		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.GetNonce(), nonce)
 	}
 
@@ -702,6 +719,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
 		&b.pendingHeader.GasUsed, vm.Config{}, b.contractHasTEVM); err != nil {
+		fmt.Printf("error: SendTransaction 3: %+v\n", err)
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
@@ -712,6 +730,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		block.AddTxWithChain(b.getHeader, b.m.Engine, tx)
 	}, false /* intermediateHashes */)
 	if err != nil {
+		fmt.Printf("error: SendTransaction 4: %+v\n", err)
 		return err
 	}
 	//fmt.Printf("==== End producing block %d\n", b.pendingBlock.NumberU64())
