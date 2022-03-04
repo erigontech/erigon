@@ -777,6 +777,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
 			return false, err
 		}
+		count++
 		if prevTxID > 0 {
 			prevTxID++
 		}
@@ -818,6 +819,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, err
 		}
 		prevTxID++
+		count++
 		return true, nil
 	}); err != nil {
 		return 0, err
