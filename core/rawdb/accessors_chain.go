@@ -608,6 +608,7 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 		}); err != nil {
 			panic(err)
 		}
+		fmt.Printf("assert finish\n")
 	}
 	return nil
 }
