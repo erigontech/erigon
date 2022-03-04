@@ -1068,7 +1068,7 @@ RETRY:
 				return
 			}
 			j++
-			binary.BigEndian.PutUint64(num, firstTxID+it.i)
+			binary.BigEndian.PutUint64(num, it.i)
 			if err := txnIdIdx.AddKey(num, it.offset); err != nil {
 				errCh <- it.err
 				return
