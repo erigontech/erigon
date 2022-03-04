@@ -1266,6 +1266,9 @@ func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompress
 	return ch
 }
 func notEmptyWordsAmount(ctx context.Context, d *compress.Decompressor) (int, error) {
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
 	var notEmptyCount int
 	if err := d.WithReadAhead(func() error {
 		g := d.MakeGetter()
@@ -1273,11 +1276,19 @@ func notEmptyWordsAmount(ctx context.Context, d *compress.Decompressor) (int, er
 		word := make([]byte, 0, 4096)
 		for g.HasNext() {
 			word, _ = g.Next(word[:0])
+			wc++
 			if len(word) == 0 {
 				continue
 			}
 			notEmptyCount++
-			wc++
+
+			select {
+			default:
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[snapshots] Counting non-empty words", "file", d.FilePath(), "progress", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(d.Count())))
+			}
 		}
 		return nil
 	}); err != nil {
