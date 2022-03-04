@@ -998,6 +998,7 @@ RETRY:
 	type txHashWithOffet struct {
 		txnHash   [32]byte
 		i, offset uint64
+		empty     bool
 		err       error
 	}
 	txsCh := make(chan txHashWithOffet, 1024)
@@ -1015,6 +1016,12 @@ RETRY:
 				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
+			if len(it.word) == 0 {
+				txsCh <- txHashWithOffet{empty: true, i: it.i, offset: it.offset}
+				txsCh2 <- txHashWithOffet{empty: true, i: it.i, offset: it.offset}
+				continue
+			}
+
 			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
 				txsCh <- txHashWithOffet{err: it.err}
 				txsCh2 <- txHashWithOffet{err: it.err}
