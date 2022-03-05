@@ -56,6 +56,7 @@ var txsBeginEnd2 = Migration{
 			}
 			if progress != nil {
 				latestBlock = binary.BigEndian.Uint64(progress)
+				log.Info("[migration] Continue migration", "from_block", latestBlock)
 			} else {
 				latestBlock = bodiesProgress + 1 // include block 0
 			}
@@ -87,14 +88,13 @@ var txsBeginEnd2 = Migration{
 			blockNum := uint64(i)
 
 			select {
-			default:
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Info("[migration] Replacement preprocessing",
+				log.Info("[migration] Adding empty txs to begin/end of blocks",
 					"processed", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)),
-					//"input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()),
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			default:
 			}
 
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
@@ -168,7 +168,7 @@ var txsBeginEnd2 = Migration{
 			if err := BeforeCommit(tx, numBuf, false); err != nil {
 				return err
 			}
-			if blockNum%10 == 0 {
+			if blockNum%100 == 0 {
 				if err := tx.Commit(); err != nil {
 					return err
 				}
