@@ -85,7 +85,7 @@ var txsBeginEnd2 = Migration{
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Debug("[migration] Replacement preprocessing",
+				log.Info("[migration] Replacement preprocessing",
 					"processed", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)),
 					//"input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()),
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
