@@ -108,6 +108,10 @@ func TestTxsBeginEnd2(t *testing.T) {
 		require.NoError(err)
 		require.Zero(cnt)
 
+		v, err := tx.ReadSequence(kv.NonCanonicalTxs)
+		require.NoError(err)
+		require.Zero(v)
+
 		return nil
 	})
 	require.NoError(err)
