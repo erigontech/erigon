@@ -991,7 +991,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		return err
 	}
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
+		KeyCount:   nonEmptyCount,
 		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
