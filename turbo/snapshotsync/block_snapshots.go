@@ -1046,7 +1046,7 @@ RETRY:
 	}()
 
 	wg := sync.WaitGroup{}
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	defer close(errCh)
 	num := make([]byte, 8)
 
