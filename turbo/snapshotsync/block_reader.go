@@ -3,6 +3,7 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -349,7 +350,9 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	txs := make([]types.Transaction, b.TxAmount)
 	senders = make([]common.Address, b.TxAmount)
 	if b.TxAmount > 0 {
-		txnOffset := sn.TxnHashIdx.Lookup2(b.BaseTxId - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
+		r := recsplit.NewIndexReader(sn.TxnIdsIdx)
+		binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-sn.TxnIdsIdx.BaseDataID())
+		txnOffset := r.Lookup(buf[:8])
 		gg = sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)

@@ -44,6 +44,7 @@ type BlocksSnapshot struct {
 	BodyNumberIdx       *recsplit.Index        // block_num_u64     -> bodies_segment_offset
 	HeaderHashIdx       *recsplit.Index        // header_hash       -> headers_segment_offset
 	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
+	TxnIdsIdx           *recsplit.Index        // transaction_id    -> transactions_segment_offset
 	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
 
 	From, To uint64 // [from,to)
