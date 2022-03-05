@@ -56,7 +56,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, downloadRate, uploadRate data
 	if lg.Debug == verbosity {
 		torrentConfig.Debug = true
 	}
-	torrentConfig.Logger = NewAdapterLogger().FilterLevel(verbosity)
+	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 
 	c, err := storage.NewBoltPieceCompletion(snapshotsDir.Path)
 	if err != nil {
