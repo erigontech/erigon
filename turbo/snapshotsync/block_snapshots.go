@@ -1005,6 +1005,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 
 RETRY:
 	txnHashIdx.NoLogs(true)
+	txnIdIdx.NoLogs(true)
 	txnHash2BlockNumIdx.NoLogs(true)
 
 	ch := forEachAsync(ctx, d)
