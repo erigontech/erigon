@@ -75,6 +75,12 @@ var txsBeginEnd2 = Migration{
 			}
 		}
 
+		tx, err := db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+
 		numBuf := make([]byte, 8)
 		numHashBuf := make([]byte, 8+32)
 		for i := int(latestBlock); i >= 0; i-- {
@@ -91,80 +97,90 @@ var txsBeginEnd2 = Migration{
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
 
-			if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-				if err != nil {
-					return err
-				}
-				binary.BigEndian.PutUint64(numHashBuf[:8], blockNum)
-				copy(numHashBuf[8:], canonicalHash[:])
-				b, err := rawdb.ReadBodyForStorageByKey(tx, numHashBuf)
-				if err != nil {
-					panic(err)
-					return err
-				}
-				if b == nil {
+			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			if err != nil {
+				return err
+			}
+			binary.BigEndian.PutUint64(numHashBuf[:8], blockNum)
+			copy(numHashBuf[8:], canonicalHash[:])
+			b, err := rawdb.ReadBodyForStorageByKey(tx, numHashBuf)
+			if err != nil {
+				panic(err)
+				return err
+			}
+			if b == nil {
+				return nil
+			}
+
+			txs, err := rawdb.CanonicalTransactions(tx, b.BaseTxId, b.TxAmount)
+			if err != nil {
+				return err
+			}
+
+			b.BaseTxId += (latestBlock - blockNum) * 2
+			b.TxAmount += 2
+			if err := rawdb.WriteBodyForStorage(tx, canonicalHash, blockNum, b); err != nil {
+				return fmt.Errorf("failed to write body: %w", err)
+			}
+			if err := writeTransactionsNewDeprecated(tx, txs, uint64(len(txs))+2); err != nil {
+				return fmt.Errorf("failed to write body txs: %w", err)
+			}
+
+			//TODO: drop nonCanonical bodies, headers, txs
+			if err = tx.ForPrefix(kv.BlockBody, numHashBuf[:8], func(k, v []byte) error {
+				if bytes.Equal(k, numHashBuf) { // don't delete canonical blocks
 					return nil
 				}
-
-				txs, err := rawdb.CanonicalTransactions(tx, b.BaseTxId, b.TxAmount)
-				if err != nil {
+				bodyForStorage := new(types.BodyForStorage)
+				if err := rlp.DecodeBytes(v, bodyForStorage); err != nil {
 					return err
 				}
 
-				b.BaseTxId += (latestBlock - blockNum) * 2
-				b.TxAmount += 2
-				if err := rawdb.WriteBodyForStorage(tx, canonicalHash, blockNum, b); err != nil {
-					return fmt.Errorf("failed to write body: %w", err)
-				}
-				if err := writeTransactionsNewDeprecated(tx, txs, uint64(len(txs))+2); err != nil {
-					return fmt.Errorf("failed to write body txs: %w", err)
+				for i := bodyForStorage.BaseTxId; i < bodyForStorage.BaseTxId+uint64(bodyForStorage.TxAmount); i++ {
+					binary.BigEndian.PutUint64(numBuf, i)
+					if err = tx.Delete(kv.NonCanonicalTxs, numBuf, nil); err != nil {
+						return err
+					}
 				}
 
-				//TODO: drop nonCanonical bodies, headers, txs
-				if err = tx.ForPrefix(kv.BlockBody, numHashBuf[:8], func(k, v []byte) error {
-					if bytes.Equal(k, numHashBuf) { // don't delete canonical blocks
-						return nil
-					}
-					bodyForStorage := new(types.BodyForStorage)
-					if err := rlp.DecodeBytes(v, bodyForStorage); err != nil {
-						return err
-					}
-
-					for i := bodyForStorage.BaseTxId; i < bodyForStorage.BaseTxId+uint64(bodyForStorage.TxAmount); i++ {
-						binary.BigEndian.PutUint64(numBuf, i)
-						if err = tx.Delete(kv.NonCanonicalTxs, numBuf, nil); err != nil {
-							return err
-						}
-					}
-
-					fmt.Printf("del: %x\n", k)
-					if err = tx.Delete(kv.BlockBody, k, nil); err != nil {
-						return err
-					}
-					if err = tx.Delete(kv.Headers, k, nil); err != nil {
-						return err
-					}
-					if err = tx.Delete(kv.HeaderTD, k, nil); err != nil {
-						return err
-					}
-					if err = tx.Delete(kv.HeaderNumber, k[8:], nil); err != nil {
-						return err
-					}
-					if err = tx.Delete(kv.HeaderNumber, k[8:], nil); err != nil {
-						return err
-					}
-
-					return nil
-				}); err != nil {
+				if err = tx.Delete(kv.BlockBody, k, nil); err != nil {
+					return err
+				}
+				if err = tx.Delete(kv.Headers, k, nil); err != nil {
+					return err
+				}
+				if err = tx.Delete(kv.HeaderTD, k, nil); err != nil {
+					return err
+				}
+				if err = tx.Delete(kv.HeaderNumber, k[8:], nil); err != nil {
+					return err
+				}
+				if err = tx.Delete(kv.HeaderNumber, k[8:], nil); err != nil {
 					return err
 				}
 
-				binary.BigEndian.PutUint64(numBuf, blockNum)
-				return BeforeCommit(tx, numBuf, false)
+				return nil
 			}); err != nil {
 				return err
 			}
+
+			binary.BigEndian.PutUint64(numBuf, blockNum)
+			if err := BeforeCommit(tx, numBuf, false); err != nil {
+				return err
+			}
+			if blockNum%10 == 0 {
+				if err := tx.Commit(); err != nil {
+					return err
+				}
+				tx, err = db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			return err
 		}
 
 		return db.Update(context.Background(), func(tx kv.RwTx) error {
