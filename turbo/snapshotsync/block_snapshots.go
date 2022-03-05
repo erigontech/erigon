@@ -247,6 +247,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 		}
 		{
 			fileName := SegmentFileName(f.From, f.To, Transactions)
+			fmt.Printf("alex: %s\n", path.Join(s.dir, fileName))
 			blocksSnapshot.Transactions, err = compress.NewDecompressor(path.Join(s.dir, fileName))
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
