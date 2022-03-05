@@ -92,7 +92,7 @@ var txsBeginEnd2 = Migration{
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
 				log.Info("[migration] Adding empty txs to begin/end of blocks",
-					"processed", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)),
+					"processed", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)), "block_num", blockNum,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			default:
 			}
