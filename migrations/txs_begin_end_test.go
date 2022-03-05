@@ -62,6 +62,8 @@ func TestTxsBeginEnd2(t *testing.T) {
 			return err
 		}
 		for i := uint64(7); i < 10; i++ {
+			err = rawdb.DeleteCanonicalHash(tx, i)
+			require.NoError(err)
 			hash := common.Hash{0xa, byte(i)}
 			err = WriteRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
@@ -90,7 +92,7 @@ func TestTxsBeginEnd2(t *testing.T) {
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		for i := uint64(7); i < 10; i++ {
-			hash := common.Hash{0xa, byte(i)}
+			hash := common.Hash{byte(i)}
 			k := make([]byte, 8+32)
 			binary.BigEndian.PutUint64(k, 7)
 			copy(k[8:], hash[:])

@@ -653,7 +653,7 @@ func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, 
 		}
 
 		if err := tx.ForAmount(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			id := newBaseId + (bodyForStorage.BaseTxId - binary.BigEndian.Uint64(k))
+			id := newBaseId + (binary.BigEndian.Uint64(k) - bodyForStorage.BaseTxId)
 			if err := tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(id), v); err != nil {
 				return err
 			}
@@ -710,7 +710,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 			return err
 		}
 		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			id := newBaseId + (bodyForStorage.BaseTxId - binary.BigEndian.Uint64(k))
+			id := newBaseId + (binary.BigEndian.Uint64(k) - bodyForStorage.BaseTxId)
 			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
 				return err
 			}
