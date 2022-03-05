@@ -1012,7 +1012,7 @@ RETRY:
 	type txHashWithOffet struct {
 		txnHash   [32]byte
 		i, offset uint64
-		empty     bool
+		empty     bool // block may have empty txn in the beginning or end of block. such txs have no hash, but have ID
 		err       error
 	}
 	txsCh := make(chan txHashWithOffet, 1024)
