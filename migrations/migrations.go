@@ -45,7 +45,7 @@ type Migration struct {
 
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
-	ErrMigrationCommitNotCalled = fmt.Errorf("migration commit function was not called")
+	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
@@ -215,6 +215,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 
 		if !callbackCalled {
+			panic(1)
 			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
 		}
 		log.Info("Applied migration", "name", v.Name)

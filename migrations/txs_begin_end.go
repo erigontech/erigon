@@ -109,7 +109,7 @@ var txsBeginEnd2 = Migration{
 				return err
 			}
 			if b == nil {
-				return nil
+				continue
 			}
 
 			txs, err := rawdb.CanonicalTransactions(tx, b.BaseTxId, b.TxAmount)
