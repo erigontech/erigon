@@ -185,13 +185,13 @@ var txsBeginEnd2 = Migration{
 
 		return db.Update(context.Background(), func(tx kv.RwTx) error {
 			// reset non-canonical sequence to 0
-			//v, err := tx.ReadSequence(kv.NonCanonicalTxs)
-			//if err != nil {
-			//	return err
-			//}
-			//if _, err := tx.IncrementSequence(kv.NonCanonicalTxs, -v); err != nil {
-			//	return err
-			//}
+			v, err := tx.ReadSequence(kv.NonCanonicalTxs)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.IncrementSequence(kv.NonCanonicalTxs, -v); err != nil {
+				return err
+			}
 
 			// This migration is no-op, but it forces the migration mechanism to apply it and thus write the DB schema version info
 			return BeforeCommit(tx, nil, true)
