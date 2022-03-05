@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"runtime"
+	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
@@ -41,6 +45,9 @@ var txsBeginEnd = Migration{
 var txsBeginEnd2 = Migration{
 	Name: "txs_begin_end",
 	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+		logEvery := time.NewTicker(10 * time.Second)
+		defer logEvery.Stop()
+
 		var latestBlock uint64
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			bodiesProgress, err := stages.GetStageProgress(tx, stages.Bodies)
@@ -72,6 +79,18 @@ var txsBeginEnd2 = Migration{
 		numHashBuf := make([]byte, 8+32)
 		for i := int(latestBlock); i >= 0; i-- {
 			blockNum := uint64(i)
+
+			select {
+			default:
+			case <-logEvery.C:
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				log.Debug("[migration] Replacement preprocessing",
+					"processed", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)),
+					//"input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()),
+					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+			}
+
 			if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 				canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 				if err != nil {
