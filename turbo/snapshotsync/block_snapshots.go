@@ -961,13 +961,8 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 
 	buf := make([]byte, 1024)
 
-	nonEmptyCount, err := notEmptyWordsAmount(ctx, d)
-	if err != nil {
-		return err
-	}
-
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   nonEmptyCount,
+		KeyCount:   d.Count() - d.EmptyWordsCount(),
 		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
@@ -991,7 +986,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		return err
 	}
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   nonEmptyCount,
+		KeyCount:   d.Count() - d.EmptyWordsCount(),
 		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
