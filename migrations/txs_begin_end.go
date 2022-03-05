@@ -168,7 +168,7 @@ var txsBeginEnd2 = Migration{
 			if err := BeforeCommit(tx, numBuf, false); err != nil {
 				return err
 			}
-			if blockNum%1000 == 0 {
+			if blockNum%10_000 == 0 {
 				if err := tx.Commit(); err != nil {
 					return err
 				}
