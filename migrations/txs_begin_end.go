@@ -93,7 +93,7 @@ var txsBeginEnd2 = Migration{
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Info("[migration] Adding system-txs to begin/end of blocks",
+				log.Info("[migration] Adding system-txs",
 					"progress", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)), "block_num", blockNum,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			default:
@@ -106,10 +106,7 @@ var txsBeginEnd2 = Migration{
 
 			var oldBlock *types.Body
 			if ASSERT {
-				oldBlock, err = rawdb.ReadBodyWithTransactions(tx, canonicalHash, blockNum)
-				if err != nil {
-					return err
-				}
+				oldBlock = readCanonicalBodyWithTransactionsDeprecated(tx, canonicalHash, blockNum)
 			}
 
 			binary.BigEndian.PutUint64(numHashBuf[:8], blockNum)
@@ -127,20 +124,26 @@ var txsBeginEnd2 = Migration{
 				return err
 			}
 
-			b.BaseTxId += blockNum * 2
+			b.BaseTxId += (blockNum) * 2
 			b.TxAmount += 2
 			if err := rawdb.WriteBodyForStorage(tx, canonicalHash, blockNum, b); err != nil {
 				return fmt.Errorf("failed to write body: %w", err)
 			}
-			if err := writeTransactionsNewDeprecated(tx, txs, b.BaseTxId); err != nil {
+			binary.BigEndian.PutUint64(numBuf, b.BaseTxId) // del first tx in block
+			if err = tx.Delete(kv.EthTx, numHashBuf, nil); err != nil {
+				return err
+			}
+			if err := writeTransactionsNewDeprecated(tx, txs, b.BaseTxId+1); err != nil {
 				return fmt.Errorf("failed to write body txs: %w", err)
+			}
+			binary.BigEndian.PutUint64(numBuf, b.BaseTxId+uint64(b.TxAmount)-1) // del last tx in block
+			if err = tx.Delete(kv.EthTx, numHashBuf, nil); err != nil {
+				return err
 			}
 
 			if ASSERT {
-				newBlock, err := rawdb.ReadBodyWithTransactions(tx, canonicalHash, blockNum)
-				if err != nil {
-					return err
-				}
+				newBlock, baseTxId, txAmount := rawdb.ReadBody(tx, canonicalHash, blockNum)
+				newBlock.Transactions, err = rawdb.CanonicalTransactions(tx, baseTxId, txAmount)
 				for i, oldTx := range oldBlock.Transactions {
 					newTx := newBlock.Transactions[i]
 					if oldTx.GetNonce() != newTx.GetNonce() {
@@ -245,17 +248,37 @@ func writeTransactionsNewDeprecated(db kv.RwTx, txs []types.Transaction, baseTxI
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
 
 		buf.Reset()
 		if err := rlp.Encode(buf, tx); err != nil {
 			return fmt.Errorf("broken tx rlp: %w", err)
 		}
-
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Put(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
 			return err
 		}
+		txId++
 	}
 	return nil
+}
+
+func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+	data := rawdb.ReadStorageBodyRLP(db, hash, number)
+	if len(data) == 0 {
+		return nil
+	}
+	bodyForStorage := new(types.BodyForStorage)
+	err := rlp.DecodeBytes(data, bodyForStorage)
+	if err != nil {
+		log.Error("Invalid block body RLP", "hash", hash, "err", err)
+		return nil
+	}
+	body := new(types.Body)
+	body.Uncles = bodyForStorage.Uncles
+	body.Transactions, err = rawdb.CanonicalTransactions(db, bodyForStorage.BaseTxId, bodyForStorage.TxAmount)
+	if err != nil {
+		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
+		return nil
+	}
+	return body
 }
