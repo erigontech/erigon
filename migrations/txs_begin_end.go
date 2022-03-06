@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const ASSERT = true
+const ASSERT = false
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
 
