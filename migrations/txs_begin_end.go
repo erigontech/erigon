@@ -149,7 +149,6 @@ var txsBeginEnd2 = Migration{
 				}
 			}
 
-			//TODO: drop nonCanonical bodies, headers, txs
 			if err = tx.ForPrefix(kv.BlockBody, numHashBuf[:8], func(k, v []byte) error {
 				if bytes.Equal(k, numHashBuf) { // don't delete canonical blocks
 					return nil
