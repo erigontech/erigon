@@ -119,7 +119,7 @@ type Anchor struct {
 // As anchors are moved around in the binary heap, they internally track their
 // position in the heap (using `idx` field). This feature allows updating
 // the heap (using `Fix` function) in situations when anchor is accessed not
-// through the priority queue, but through the map `anchor` in the
+// throught the priority queue, but through the map `anchor` in the
 // HeaderDownloader type.
 type AnchorQueue []*Anchor
 
