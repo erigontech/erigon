@@ -54,6 +54,7 @@ type MdbxOpts struct {
 	log           log.Logger
 	augumentLimit uint64
 	pageSize      uint64
+	roTxsLimiter  chan struct{}
 }
 
 func testKVPath() string {
@@ -75,6 +76,11 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	opts.label = label
+	return opts
+}
+
+func (opts MdbxOpts) RoTxsLimiter(l chan struct{}) MdbxOpts {
+	opts.roTxsLimiter = l
 	return opts
 }
 
@@ -221,14 +227,20 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
 	}
 
-	db := &MdbxKV{
-		opts:    opts,
-		env:     env,
-		log:     opts.log,
-		wg:      &sync.WaitGroup{},
-		buckets: kv.TableCfg{},
-		txSize:  dirtyPagesLimit * opts.pageSize,
+	if opts.roTxsLimiter == nil {
+
+		opts.roTxsLimiter = make(chan struct{}, runtime.NumCPU())
 	}
+	db := &MdbxKV{
+		opts:         opts,
+		env:          env,
+		log:          opts.log,
+		wg:           &sync.WaitGroup{},
+		buckets:      kv.TableCfg{},
+		txSize:       dirtyPagesLimit * opts.pageSize,
+		roTxsLimiter: opts.roTxsLimiter,
+	}
+
 	customBuckets := opts.bucketsCfg(kv.ChaindataTablesCfg)
 	for name, cfg := range customBuckets { // copy map to avoid changing global variable
 		db.buckets[name] = cfg
@@ -285,12 +297,13 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 }
 
 type MdbxKV struct {
-	env     *mdbx.Env
-	log     log.Logger
-	wg      *sync.WaitGroup
-	buckets kv.TableCfg
-	opts    MdbxOpts
-	txSize  uint64
+	env          *mdbx.Env
+	log          log.Logger
+	wg           *sync.WaitGroup
+	buckets      kv.TableCfg
+	opts         MdbxOpts
+	txSize       uint64
+	roTxsLimiter chan struct{} // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
 }
 
 // openDBIs - first trying to open existing DBI's in RO transaction
@@ -352,7 +365,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	default:
+	case db.roTxsLimiter <- struct{}{}:
 	}
 	if db.env == nil {
 		return nil, fmt.Errorf("db closed")
@@ -475,7 +488,6 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 	if amount == 0 {
 		return nil
 	}
-
 	c, err := tx.Cursor(bucket)
 	if err != nil {
 		return err
@@ -733,7 +745,12 @@ func (tx *MdbxTx) Commit() error {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		if !tx.readOnly {
+		if tx.readOnly {
+			select {
+			case <-tx.db.roTxsLimiter:
+			default:
+			}
+		} else {
 			runtime.UnlockOSThread()
 		}
 	}()
@@ -789,7 +806,12 @@ func (tx *MdbxTx) Rollback() {
 	defer func() {
 		tx.tx = nil
 		tx.db.wg.Done()
-		if !tx.readOnly {
+		if tx.readOnly {
+			select {
+			case <-tx.db.roTxsLimiter:
+			default:
+			}
+		} else {
 			runtime.UnlockOSThread()
 		}
 	}()
