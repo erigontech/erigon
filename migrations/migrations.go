@@ -215,7 +215,6 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 
 		if !callbackCalled {
-			panic(1)
 			return fmt.Errorf("%w: %s", ErrMigrationCommitNotCalled, v.Name)
 		}
 		log.Info("Applied migration", "name", v.Name)
