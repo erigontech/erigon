@@ -214,7 +214,6 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		isParlia: isParlia,
 		isBor:    isBor,
 	}
-	fmt.Printf("st in NST is: %+v\n", st.gas)
 	return st
 }
 
@@ -229,12 +228,6 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 // `gasBailout` is true when it is not required to fail transaction if the balance is not enough to pay gas.
 // for trace_call to replicate OE/Pariry behaviour
 func ApplyMessage(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
-	fmt.Println()
-	fmt.Println("Printing properties of msg...")
-	fmt.Printf("Fee cap: %+v, %T\n", msg.FeeCap(), msg.FeeCap())
-	fmt.Printf("Tip: %+v, %T\n", msg.Tip(), msg.Tip())
-	fmt.Printf("Gas: %+v, %T\n", msg.Gas(), msg.Gas())
-	fmt.Println()
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
 }
 
@@ -277,9 +270,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return err
 		}
 	}
-	fmt.Printf("st.gas before buying is: %+v\n", st.gas)
 	st.gas += st.msg.Gas()
-	fmt.Printf("st.gas after buying is: %+v\n", st.gas)
 
 	st.initialGas = st.msg.Gas()
 	return nil
@@ -287,8 +278,6 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
-	fmt.Println("Running preCheck")
-	fmt.Printf("st value: %+v, st pointer: %p\n", st, st)
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		stNonce := st.state.GetNonce(st.msg.From())
@@ -303,7 +292,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 				st.msg.From().Hex(), stNonce)
 		}
 
-		fmt.Println("Got here 1")
 		// Make sure the sender is an EOA (EIP-3607)
 		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
 			// common.Hash{} means that the sender is not in the state.
@@ -316,7 +304,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
-		fmt.Printf("st.gasFeeCap: %v, st.tip: %v\n", st.tip, st.gasFeeCap)
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
 			if l := st.gasFeeCap.BitLen(); l > 256 {
@@ -354,7 +341,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*ExecutionResult, error) {
-	fmt.Printf("st.gas in TDb is: %+v\n", st.gas)
 	var input1 *uint256.Int
 	var input2 *uint256.Int
 	if st.isBor {
@@ -395,7 +381,6 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, err
 	}
 	if st.gas < gas {
-		fmt.Printf("st.gas in failed func is: %+v\n", st.gas)
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
 	}
 	st.gas -= gas

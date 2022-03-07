@@ -105,12 +105,10 @@ func DeployContract(opts *TransactOpts, abi abi.ABI, bytecode []byte, backend Co
 
 	input, err := c.abi.Pack("", params...)
 	if err != nil {
-		fmt.Printf("error: DeployContract 1: %+v\n", err)
 		return common.Address{}, nil, nil, err
 	}
 	tx, err := c.transact(opts, nil, append(bytecode, input...))
 	if err != nil {
-		fmt.Printf("error: DeployContract 2: %+v\n", err)
 		return common.Address{}, nil, nil, err
 	}
 	c.address = crypto.CreateAddress(opts.From, tx.GetNonce())
@@ -216,7 +214,6 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if opts.Value != nil {
 		overflow := value.SetFromBig(opts.Value)
 		if overflow {
-			fmt.Printf("error: (c *BoundContract) transact 1: %+v\n", err)
 			return nil, fmt.Errorf("opts.Value higher than 2^256-1")
 		}
 	}
@@ -224,7 +221,6 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if opts.Nonce == nil {
 		nonce, err = c.transactor.PendingNonceAt(ensureContext(opts.Context), opts.From)
 		if err != nil {
-			fmt.Printf("error: (c *BoundContract) transact 2: %+v\n", err)
 			return nil, fmt.Errorf("failed to retrieve account nonce: %w", err)
 		}
 	} else {
@@ -235,13 +231,11 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if gasPriceBig == nil {
 		gasPriceBig, err = c.transactor.SuggestGasPrice(ensureContext(opts.Context))
 		if err != nil {
-			fmt.Printf("error: (c *BoundContract) transact 3: %+v\n", err)
 			return nil, fmt.Errorf("failed to suggest gas price: %v", err)
 		}
 	}
 	gasPrice, overflow := uint256.FromBig(gasPriceBig)
 	if overflow {
-		fmt.Printf("error: (c *BoundContract) transact 4: %+v\n", err)
 		return nil, fmt.Errorf("gasPriceBig higher than 2^256-1")
 	}
 	gasLimit := opts.GasLimit
@@ -249,20 +243,15 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 		// Gas estimation cannot succeed without code for method invocations
 		if contract != nil {
 			if code, codeErr := c.transactor.PendingCodeAt(ensureContext(opts.Context), c.address); codeErr != nil {
-				fmt.Printf("error: (c *BoundContract) transact 5: %+v\n", codeErr)
 				return nil, codeErr
 			} else if len(code) == 0 {
-				fmt.Printf("error: (c *BoundContract) transact 6: %+v\n", ErrNoCode)
 				return nil, ErrNoCode
 			}
 		}
 		// If the contract surely has code (or code is not needed), estimate the transaction
 		msg := ethereum.CallMsg{From: opts.From, To: contract, GasPrice: gasPrice, Value: value, Data: input}
-		fmt.Println()
-		fmt.Printf("Message is formed here: %+v\n", msg)
 		gasLimit, err = c.transactor.EstimateGas(ensureContext(opts.Context), msg)
 		if err != nil {
-			fmt.Printf("error: (c *BoundContract) transact 7: %+v\n", err)
 			return nil, fmt.Errorf("failed to estimate gas needed: %w", err)
 		}
 	}
@@ -274,16 +263,13 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 		rawTx = types.NewTransaction(nonce, c.address, value, gasLimit, gasPrice, input)
 	}
 	if opts.Signer == nil {
-		fmt.Printf("error: (c *BoundContract) transact 8: %+v\n", err)
 		return nil, errors.New("no signer to authorize the transaction with")
 	}
 	signedTx, err := opts.Signer(opts.From, rawTx)
 	if err != nil {
-		fmt.Printf("error: (c *BoundContract) transact 9: %+v\n", err)
 		return nil, err
 	}
 	if err := c.transactor.SendTransaction(ensureContext(opts.Context), signedTx); err != nil {
-		fmt.Printf("error: (c *BoundContract) transact 10: %+v\n", err)
 		return nil, err
 	}
 	return signedTx, nil

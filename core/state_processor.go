@@ -86,11 +86,7 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // indicating the block was invalid.
 func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
-	fmt.Println()
-	fmt.Printf("tx: %+v\n", tx)
-	fmt.Println()
 	if err != nil {
-		fmt.Printf("error: applyTransaction 1: %+v\n", err)
 		return nil, nil, err
 	}
 
@@ -104,12 +100,10 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		fmt.Printf("error: applyTransaction 2: %+v\n", err)
 		return nil, nil, err
 	}
 	// Update the state with pending changes
 	if err = statedb.FinalizeTx(evm.ChainRules(), stateWriter); err != nil {
-		fmt.Printf("error: applyTransaction 3: %+v\n", err)
 		return nil, nil, err
 	}
 
@@ -140,7 +134,6 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 	}
 
 	if err != nil {
-		fmt.Printf("error: applyTransaction 4: %+v\n", err)
 	}
 	return receipt, result.ReturnData, err
 }
