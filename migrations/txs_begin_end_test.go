@@ -39,7 +39,7 @@ func TestTxsBeginEnd(t *testing.T) {
 	err = migrator.Apply(db, tmpDir)
 	require.ErrorIs(ErrTxsBeginEndNoMigration, err)
 }
-func TestTxsBeginEnd2(t *testing.T) {
+func TestTxsBeginEnd(t *testing.T) {
 	require, tmpDir, db := require.New(t), t.TempDir(), memdb.NewTestDB(t)
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
@@ -78,7 +78,7 @@ func TestTxsBeginEnd2(t *testing.T) {
 	require.NoError(err)
 
 	migrator := NewMigrator(kv.ChainDB)
-	migrator.Migrations = []Migration{txsBeginEnd2}
+	migrator.Migrations = []Migration{txsBeginEnd}
 	err = migrator.Apply(db, tmpDir)
 	require.NoError(err)
 
