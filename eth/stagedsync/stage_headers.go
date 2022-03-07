@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -52,8 +53,8 @@ type HeadersCfg struct {
 	noP2PDiscovery        bool
 	tmpdir                string
 	snapshotDir           *dir.Rw
-	newPayloadCh          chan privateapi.PayloadMessage
-	forkChoiceCh          chan privateapi.ForkChoiceMessage
+	newPayloadCh          chan engineapi.PayloadMessage
+	forkChoiceCh          chan engineapi.ForkChoiceMessage
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.RoSnapshots
@@ -72,8 +73,8 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	newPayloadCh chan privateapi.PayloadMessage,
-	forkChoiceCh chan privateapi.ForkChoiceMessage,
+	newPayloadCh chan engineapi.PayloadMessage,
+	forkChoiceCh chan engineapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -185,8 +186,8 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
-	var payloadMessage privateapi.PayloadMessage
-	var forkChoiceMessage privateapi.ForkChoiceMessage
+	var payloadMessage engineapi.PayloadMessage
+	var forkChoiceMessage engineapi.ForkChoiceMessage
 
 	// Decide what kind of action we need to take place
 	forkChoiceInsteadOfNewPayload := false
@@ -233,7 +234,7 @@ func HeadersPOS(
 }
 
 func handleForkChoice(
-	forkChoiceMessage *privateapi.ForkChoiceMessage,
+	forkChoiceMessage *engineapi.ForkChoiceMessage,
 	s *StageState,
 	u Unwinder,
 	ctx context.Context,
@@ -311,7 +312,7 @@ func handleForkChoice(
 }
 
 func handleNewPayload(
-	payloadMessage *privateapi.PayloadMessage,
+	payloadMessage *engineapi.PayloadMessage,
 	s *StageState,
 	ctx context.Context,
 	tx kv.RwTx,
@@ -440,6 +441,7 @@ func verifyAndSaveNewPoSHeader(
 		}
 	} else {
 		// Side chain or something weird
+		// TODO(yperbasis): Handle weird cases on the canonical chain
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
 		// No canonization, HeadHeaderHash & StageProgress are not updated
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -54,9 +55,9 @@ type EthBackendServer struct {
 	payloadId       uint64
 	pendingPayloads map[uint64]*pendingPayload
 	// Send new Beacon Chain payloads to staged sync
-	newPayloadCh chan<- PayloadMessage
+	newPayloadCh chan<- engineapi.PayloadMessage
 	// Send Beacon Chain fork choice updates to staged sync
-	forkChoiceCh chan<- ForkChoiceMessage
+	forkChoiceCh chan<- engineapi.ForkChoiceMessage
 	// Replies to newPayload & forkchoice requests
 	statusCh <-chan PayloadStatus
 	// Determines whether stageloop is processing a block or not
@@ -85,26 +86,13 @@ type PayloadStatus struct {
 	CriticalError   error
 }
 
-// The message we are going to send to the stage sync in NewPayload
-type PayloadMessage struct {
-	Header *types.Header
-	Body   *types.RawBody
-}
-
-// The message we are going to send to the stage sync in ForkchoiceUpdated
-type ForkChoiceMessage struct {
-	HeadBlockHash      common.Hash
-	SafeBlockHash      common.Hash
-	FinalizedBlockHash common.Hash
-}
-
 type pendingPayload struct {
 	block *types.Block
 	built bool
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
+	config *params.ChainConfig, newPayloadCh chan<- engineapi.PayloadMessage, forkChoiceCh chan<- engineapi.ForkChoiceMessage, statusCh <-chan PayloadStatus,
 	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
@@ -309,7 +297,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	// Send the block over
-	s.newPayloadCh <- PayloadMessage{
+	s.newPayloadCh <- engineapi.PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
 			Transactions: req.Transactions,
@@ -402,7 +390,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	forkChoiceMessage := ForkChoiceMessage{
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),

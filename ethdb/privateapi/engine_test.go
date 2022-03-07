@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/stretchr/testify/require"
 )
 
@@ -89,8 +90,8 @@ func TestMockDownloadRequest(t *testing.T) {
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	newPayloadCh := make(chan PayloadMessage)
-	forkChoiceCh := make(chan ForkChoiceMessage)
+	newPayloadCh := make(chan engineapi.PayloadMessage)
+	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
@@ -150,8 +151,8 @@ func TestMockValidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	newPayloadCh := make(chan PayloadMessage)
-	forkChoiceCh := make(chan ForkChoiceMessage)
+	newPayloadCh := make(chan engineapi.PayloadMessage)
+	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
@@ -187,8 +188,8 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	newPayloadCh := make(chan PayloadMessage)
-	forkChoiceCh := make(chan ForkChoiceMessage)
+	newPayloadCh := make(chan engineapi.PayloadMessage)
+	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
 	statusCh := make(chan PayloadStatus)
 
 	waitingForHeaders := uint32(1)
@@ -224,8 +225,8 @@ func TestNoTTD(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	newPayloadCh := make(chan PayloadMessage)
-	forkChoiceCh := make(chan ForkChoiceMessage)
+	newPayloadCh := make(chan engineapi.PayloadMessage)
+	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 

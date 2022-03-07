@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -86,8 +87,8 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	// Beacon Chain
-	NewPayloadCh          chan privateapi.PayloadMessage
-	ForkChoiceCh          chan privateapi.ForkChoiceMessage
+	NewPayloadCh          chan engineapi.PayloadMessage
+	ForkChoiceCh          chan engineapi.ForkChoiceMessage
 	waitingForBeaconChain uint32
 }
 
@@ -287,8 +288,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	isBor := mock.ChainConfig.Bor != nil
 
-	mock.NewPayloadCh = make(chan privateapi.PayloadMessage)
-	mock.ForkChoiceCh = make(chan privateapi.ForkChoiceMessage)
+	mock.NewPayloadCh = make(chan engineapi.PayloadMessage)
+	mock.ForkChoiceCh = make(chan engineapi.ForkChoiceMessage)
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,

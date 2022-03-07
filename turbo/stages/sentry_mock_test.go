@@ -11,9 +11,9 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -511,7 +511,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	m := stages.MockWithZeroTTD(t)
 
 	// Trivial forkChoice: everything points to genesis
-	forkChoiceMessage := privateapi.ForkChoiceMessage{
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      m.Genesis.Hash(),
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
