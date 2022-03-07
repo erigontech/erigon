@@ -362,11 +362,11 @@ func WriteRawTransactions(db kv.StatelessWriteTx, txs [][]byte, baseTxId uint64)
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
-		txId++
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
 			return err
 		}
+		txId++
 	}
 	return nil
 }
@@ -652,12 +652,18 @@ func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, 
 			return err
 		}
 
-		if err := tx.ForAmount(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			id := newBaseId + (binary.BigEndian.Uint64(k) - bodyForStorage.BaseTxId)
+		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
+		i := uint64(0)
+		if err := tx.ForAmount(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+			id := newBaseId + 1 + i
 			if err := tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(id), v); err != nil {
 				return err
 			}
-			return tx.Delete(kv.NonCanonicalTxs, k, nil)
+			if err := tx.Delete(kv.NonCanonicalTxs, k, nil); err != nil {
+				return err
+			}
+			i++
+			return nil
 		}); err != nil {
 			return err
 		}
@@ -709,12 +715,18 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 		if err != nil {
 			return err
 		}
-		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			id := newBaseId + (binary.BigEndian.Uint64(k) - bodyForStorage.BaseTxId)
+		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
+		i := uint64(0)
+		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+			id := newBaseId + 1 + i
 			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
 				return err
 			}
-			return tx.Delete(kv.EthTx, k, nil)
+			if err := tx.Delete(kv.EthTx, k, nil); err != nil {
+				return err
+			}
+			i++
+			return nil
 		}); err != nil {
 			return err
 		}
