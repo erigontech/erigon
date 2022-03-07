@@ -294,7 +294,6 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 	i := uint32(0)
 
 	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
-		fmt.Printf("alex: %d, amount=%d\n", binary.BigEndian.Uint64(k), amount)
 		var decodeErr error
 		reader.Reset(v)
 		stream.Reset(reader, 0)
