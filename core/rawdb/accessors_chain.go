@@ -293,6 +293,8 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
+	fmt.Printf("oh: %d,%d\n", baseTxId, amount)
+	panic(1)
 	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
 		fmt.Printf("alex: %d\n", binary.BigEndian.Uint64(k))
 		var decodeErr error
