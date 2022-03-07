@@ -513,7 +513,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
 	if bodyForStorage.TxAmount < 2 {
-		panic(1)
+		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
 	}
 	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
