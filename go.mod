@@ -8,9 +8,9 @@ require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.9.0
 	github.com/VictoriaMetrics/metrics v1.18.1
-	github.com/anacrolix/go-libutp v1.1.0
-	github.com/anacrolix/log v0.10.0
-	github.com/anacrolix/torrent v1.40.1
+	github.com/anacrolix/go-libutp v1.2.0
+	github.com/anacrolix/log v0.10.1-0.20220123034749-3920702c17f8
+	github.com/anacrolix/torrent v1.41.0
 	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/c2h5oh/datasize v0.0.0-20200825124411-48ed595a09d2
 	github.com/consensys/gnark-crypto v0.4.0
@@ -40,7 +40,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220301153833-165f190c83c2
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220304021315-56d528b1f012
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
@@ -48,7 +48,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.6
 	github.com/quasilyte/go-ruleguard/dsl v0.3.17
 	github.com/rs/cors v1.8.2
-	github.com/shirou/gopsutil/v3 v3.22.1
+	github.com/shirou/gopsutil/v3 v3.22.2
 	github.com/spf13/cobra v1.2.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.1-0.20210427113832-6241f9ab9942
@@ -64,11 +64,10 @@ require (
 	github.com/wcharczuk/go-chart/v2 v2.1.0
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.9.0
-	golang.org/x/crypto v0.0.0-20211117183948-ae814b36b871
+	golang.org/x/crypto v0.0.0-20220131195533-30dcbda58838
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20220204135822-1c1b9b1eba6a
-	golang.org/x/text v0.3.7 // indirect
-	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
+	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65
 	google.golang.org/genproto v0.0.0-20210917145530-b395a37504d4 // indirect
 	google.golang.org/grpc v1.42.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0

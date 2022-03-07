@@ -43,7 +43,7 @@ dbg:
 %.cmd: git-submodules
 	@# Note: $* is replaced by the command name
 	@echo "Building $*"
-	@$(GOBUILD) -o $(GOBIN)/$* ./cmd/$*
+	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
 geth: erigon

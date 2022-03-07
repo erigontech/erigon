@@ -17,15 +17,9 @@
 package discover
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"errors"
-	"math/big"
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
@@ -35,33 +29,6 @@ type node struct {
 	enode.Node
 	addedAt        time.Time // time when the node was added to the table
 	livenessChecks uint      // how often liveness was checked
-}
-
-type encPubkey [64]byte
-
-func encodePubkey(key *ecdsa.PublicKey) encPubkey {
-	var e encPubkey
-	math.ReadBits(key.X, e[:len(e)/2])
-	math.ReadBits(key.Y, e[len(e)/2:])
-	return e
-}
-
-func decodePubkey(curve elliptic.Curve, e []byte) (*ecdsa.PublicKey, error) {
-	if len(e) != len(encPubkey{}) {
-		return nil, errors.New("wrong size public key data")
-	}
-	p := &ecdsa.PublicKey{Curve: curve, X: new(big.Int), Y: new(big.Int)}
-	half := len(e) / 2
-	p.X.SetBytes(e[:half])
-	p.Y.SetBytes(e[half:])
-	if !p.Curve.IsOnCurve(p.X, p.Y) {
-		return nil, errors.New("invalid curve point")
-	}
-	return p, nil
-}
-
-func (e encPubkey) id() enode.ID {
-	return enode.ID(crypto.Keccak256Hash(e[:]))
 }
 
 func wrapNode(n *enode.Node) *node {

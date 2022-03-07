@@ -239,7 +239,7 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
 			// This might happen, for example, in the following scenario:
 			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
@@ -249,7 +249,7 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 			// and thus waitingForBeaconChain is not set yet.
 
 			// TODO(yperbasis): find a more elegant solution
-			time.Sleep(2 * time.Millisecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 	}
 	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
@@ -304,6 +304,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
 		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
 		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
+		log.Info("[NewPayload] stage loop is busy")
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -395,6 +396,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
 
 	if s.stageLoopIsBusy() {
+		log.Info("[ForkChoiceUpdated] stage loop is busy")
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil

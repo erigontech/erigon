@@ -58,10 +58,13 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 			baseFee = block.BaseFee()
 		}
 
-		if txn != nil {
-			return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
+		// if no transaction was found then we return nil
+		if txn == nil {
+			return nil, nil
+
 		}
-		return nil, nil
+
+		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
 	}
 
 	curHeader := rawdb.ReadCurrentHeader(tx)
@@ -81,7 +84,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, hash common.Hash) 
 			return nil, err
 		}
 
-		// if no transactiion was found in the txpool then we return nil and an error warning that we didn't find the transaction by the hash
+		// if no transaction was found in the txpool then we return nil and an error warning that we didn't find the transaction by the hash
 		if txn == nil {
 			return nil, nil
 		}
