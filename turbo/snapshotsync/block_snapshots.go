@@ -1262,37 +1262,6 @@ func forEachAsync(ctx context.Context, d *compress.Decompressor) chan decompress
 	}()
 	return ch
 }
-func notEmptyWordsAmount(ctx context.Context, d *compress.Decompressor) (int, error) {
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
-	var notEmptyCount int
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		var wc uint64
-		word := make([]byte, 0, 4096)
-		for g.HasNext() {
-			word, _ = g.Next(word[:0])
-			wc++
-			if len(word) == 0 {
-				continue
-			}
-			notEmptyCount++
-
-			select {
-			default:
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("[snapshots] Counting non-empty words", "file", d.FilePath(), "progress", fmt.Sprintf("%.2f%%", 100*float64(wc)/float64(d.Count())))
-			}
-		}
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-	return notEmptyCount, nil
-}
 
 // Idx - iterate over segment and building .idx file
 func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpDir string, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error) error {
