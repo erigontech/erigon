@@ -19,28 +19,6 @@ import (
 
 func TestTxsBeginEnd(t *testing.T) {
 	require, tmpDir, db := require.New(t), t.TempDir(), memdb.NewTestDB(t)
-
-	migrator := NewMigrator(kv.ChainDB)
-	migrator.Migrations = []Migration{txsBeginEnd}
-	err := migrator.Apply(db, tmpDir)
-	require.NoError(err)
-
-	err = db.Update(context.Background(), func(tx kv.RwTx) error {
-		if err := tx.ClearBucket(kv.Migrations); err != nil {
-			return err
-		}
-		if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {
-			return err
-		}
-		return nil
-	})
-	require.NoError(err)
-
-	err = migrator.Apply(db, tmpDir)
-	require.ErrorIs(ErrTxsBeginEndNoMigration, err)
-}
-func TestTxsBeginEnd(t *testing.T) {
-	require, tmpDir, db := require.New(t), t.TempDir(), memdb.NewTestDB(t)
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, CommonTx: types.CommonTx{ChainID: u256.N1, Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
 	err := txn.MarshalBinary(buf)
