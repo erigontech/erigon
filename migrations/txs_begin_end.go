@@ -25,28 +25,6 @@ var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was
 var txsBeginEnd = Migration{
 	Name: "txs_begin_end",
 	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
-		var latestBlock uint64
-		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			latestBlock, err = stages.GetStageProgress(tx, stages.Bodies)
-			if err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		if latestBlock > 0 {
-			return ErrTxsBeginEndNoMigration
-		}
-		return db.Update(context.Background(), func(tx kv.RwTx) error {
-			return BeforeCommit(tx, nil, true)
-		})
-	},
-}
-
-var txsBeginEnd2 = Migration{
-	Name: "txs_begin_end",
-	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 
