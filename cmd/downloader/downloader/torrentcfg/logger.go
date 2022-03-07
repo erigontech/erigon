@@ -1,7 +1,6 @@
 package torrentcfg
 
 import (
-	stdlog "log"
 	"strings"
 
 	utp "github.com/anacrolix/go-libutp"
@@ -10,14 +9,8 @@ import (
 )
 
 func init() {
-	lg.Default = NewAdapterLogger()
-	utp.Logger = stdlog.New(NullWriter(1), "", stdlog.LstdFlags)
-}
-
-func NewAdapterLogger() lg.Logger {
-	return lg.Logger{
-		LoggerImpl: lg.LoggerImpl(adapterLogger{}),
-	}
+	lg.Default.Handlers = []lg.Handler{adapterHandler{}}
+	utp.Logger.Handlers = []lg.Handler{noopHandler{}}
 }
 
 var String2LogLevel = map[string]lg.Level{
@@ -27,19 +20,21 @@ var String2LogLevel = map[string]lg.Level{
 	lg.Error.LogString():   lg.Error,
 }
 
-type adapterLogger struct{}
+type noopHandler struct{}
 
-func (b adapterLogger) Log(msg lg.Msg) {
-	lvl, ok := msg.GetLevel()
-	if !ok {
-		lvl = lg.Debug
-	}
+func (b noopHandler) Handle(r lg.Record) {
+}
+
+type adapterHandler struct{}
+
+func (b adapterHandler) Handle(r lg.Record) {
+	lvl := r.Level
 
 	switch lvl {
 	case lg.Debug:
-		log.Debug(msg.String())
+		log.Debug(r.String())
 	case lg.Info:
-		str := msg.String()
+		str := r.String()
 		if strings.Contains(str, "EOF") ||
 			strings.Contains(str, "spurious timer") ||
 			strings.Contains(str, "banning ip <nil>") { // suppress useless errors
@@ -48,21 +43,21 @@ func (b adapterLogger) Log(msg lg.Msg) {
 
 		log.Info(str)
 	case lg.Warning:
-		str := msg.String()
+		str := r.String()
 		if strings.Contains(str, "could not find offer for id") { // suppress useless errors
 			break
 		}
 
 		log.Warn(str)
 	case lg.Error:
-		str := msg.String()
+		str := r.String()
 		if strings.Contains(str, "EOF") { // suppress useless errors
 			break
 		}
 
 		log.Error(str)
 	case lg.Critical:
-		str := msg.String()
+		str := r.String()
 		if strings.Contains(str, "EOF") { // suppress useless errors
 			break
 		}
@@ -72,12 +67,6 @@ func (b adapterLogger) Log(msg lg.Msg) {
 
 		log.Error(str)
 	default:
-		log.Warn("unknown log type", "msg", msg.String())
+		log.Warn("unknown logtype", "msg", r.String())
 	}
 }
-
-// NullWriter implements the io.Write interface but doesn't do anything.
-type NullWriter int
-
-// Write implements the io.Write interface but is a noop.
-func (NullWriter) Write([]byte) (int, error) { return 0, nil }
