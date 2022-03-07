@@ -1084,11 +1084,8 @@ RETRY:
 			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 		}
 
-		fmt.Printf("build1: %d\n", firstBlockNum)
 		errCh <- txnHashIdx.Build()
-		fmt.Printf("build2: %d\n", firstBlockNum)
 		errCh <- txnIdIdx.Build()
-		fmt.Printf("build3: %d\n", firstBlockNum)
 	}()
 	wg.Add(1)
 	go func() {
@@ -1141,9 +1138,7 @@ RETRY:
 			errCh <- err
 			return
 		}
-		fmt.Printf("build4: %d\n", firstBlockNum)
 		errCh <- txnHash2BlockNumIdx.Build()
-		fmt.Printf("build5: %d\n", firstBlockNum)
 	}()
 
 	wg.Wait()
