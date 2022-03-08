@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -196,11 +197,11 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t))
+	stack, err := New(testNodeConfig(t))
+	require.NoError(t, err)
 	defer stack.Close()
 
 	var db kv.RwDB
-	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
 			db, err = OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
