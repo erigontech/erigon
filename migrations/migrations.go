@@ -116,20 +116,10 @@ func (m *Migrator) PendingMigrations(tx kv.Tx) ([]Migration, error) {
 	return pending, nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
-	if len(m.Migrations) == 0 {
-		return nil
-	}
-
-	var applied map[string][]byte
-	var existingVersion []byte
+func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
-		applied, err = AppliedMigrations(tx, false)
-		if err != nil {
-			return fmt.Errorf("reading applied migrations: %w", err)
-		}
-		existingVersion, err = tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
+		existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
 		if err != nil {
 			return fmt.Errorf("reading DB schema version: %w", err)
 		}
@@ -154,6 +144,19 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 		return nil
 	}); err != nil {
+		return fmt.Errorf("migrator.VerifyVersion: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
+	if len(m.Migrations) == 0 {
+		return nil
+	}
+
+	var applied map[string][]byte
+	if err := m.VerifyVersion(db); err != nil {
 		return err
 	}
 
