@@ -1149,6 +1149,7 @@ RETRY:
 			if errors.Is(err, recsplit.ErrCollision) {
 				log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 				txnHashIdx.ResetNextSalt()
+				txnIdIdx.ResetNextSalt()
 				txnHash2BlockNumIdx.ResetNextSalt()
 				goto RETRY
 			}
