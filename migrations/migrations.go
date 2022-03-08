@@ -144,7 +144,7 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("migrator.Apply: %w", err)
+		return fmt.Errorf("migrator.VerifyVersion: %w", err)
 	}
 
 	return nil
