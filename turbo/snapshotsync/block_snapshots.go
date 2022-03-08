@@ -1084,8 +1084,16 @@ RETRY:
 			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 		}
 
-		errCh <- txnHashIdx.Build()
-		errCh <- txnIdIdx.Build()
+		if err := txnHashIdx.Build(); err != nil {
+			errCh <- fmt.Errorf("txnHashIdx: %w", err)
+		} else {
+			errCh <- nil
+		}
+		if err := txnIdIdx.Build(); err != nil {
+			errCh <- fmt.Errorf("txnIdIdx: %w", err)
+		} else {
+			errCh <- nil
+		}
 	}()
 	wg.Add(1)
 	go func() {
@@ -1138,7 +1146,11 @@ RETRY:
 			errCh <- err
 			return
 		}
-		errCh <- txnHash2BlockNumIdx.Build()
+		if err := txnHash2BlockNumIdx.Build(); err != nil {
+			errCh <- fmt.Errorf("txnHash2BlockNumIdx: %w", err)
+		} else {
+			errCh <- nil
+		}
 	}()
 
 	wg.Wait()
