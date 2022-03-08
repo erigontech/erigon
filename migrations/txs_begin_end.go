@@ -199,19 +199,20 @@ var txsBeginEnd = Migration{
 				if err != nil {
 					return err
 				}
-				bodyForStorage := new(types.BodyForStorage)
-				if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
-					return err
-				}
-				if err != nil {
-					return err
-				}
-				currentSeq, err := tx.ReadSequence(kv.EthTx)
-				if err != nil {
-					return err
+				var newSeqValue uint64
+				if len(data) > 0 {
+					bodyForStorage := new(types.BodyForStorage)
+					if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+						return fmt.Errorf("rlp.DecodeBytes(bodyForStorage): %w", err)
+					}
+					currentSeq, err := tx.ReadSequence(kv.EthTx)
+					if err != nil {
+						return err
+					}
+					newSeqValue = bodyForStorage.BaseTxId + uint64(bodyForStorage.TxAmount) - currentSeq
 				}
 
-				if _, err := tx.IncrementSequence(kv.EthTx, bodyForStorage.BaseTxId+uint64(bodyForStorage.TxAmount)-currentSeq); err != nil {
+				if _, err := tx.IncrementSequence(kv.EthTx, newSeqValue); err != nil {
 					return err
 				}
 			}

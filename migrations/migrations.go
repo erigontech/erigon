@@ -155,7 +155,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 
 	// migration names must be unique, protection against people's mistake
@@ -182,7 +182,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 			progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
 			return err
 		}); err != nil {
-			return err
+			return fmt.Errorf("migrator.Apply: %w", err)
 		}
 
 		if err := v.Up(db, filepath.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
@@ -212,7 +212,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 
 			return nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
 		}
 
 		if !callbackCalled {
@@ -231,7 +231,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, kv.DBSchemaVersion.Patch))
 	return nil
