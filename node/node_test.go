@@ -172,7 +172,7 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(testNodeConfig(t))
 	defer stack.Close()
 
-	db, err := OpenDatabase(stack.Config(), log.New(), kv.ChainDB)
+	db, err := OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
