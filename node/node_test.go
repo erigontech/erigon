@@ -203,7 +203,7 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(stack.Config(), log.New(), kv.ChainDB)
+			db, err = OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
