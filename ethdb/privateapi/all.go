@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-
 	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
