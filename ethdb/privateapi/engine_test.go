@@ -90,12 +90,11 @@ func TestMockDownloadRequest(t *testing.T) {
 	require := require.New(t)
 
 	makeTestDb(ctx, db)
-	newPayloadCh := make(chan engineapi.PayloadMessage)
-	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
+	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -106,7 +105,7 @@ func TestMockDownloadRequest(t *testing.T) {
 		done <- true
 	}()
 
-	<-newPayloadCh
+	beaconRequestList.WaitForRequest()
 	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
 	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
@@ -151,12 +150,11 @@ func TestMockValidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	newPayloadCh := make(chan engineapi.PayloadMessage)
-	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
+	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -167,7 +165,7 @@ func TestMockValidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	<-newPayloadCh
+	beaconRequestList.WaitForRequest()
 
 	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
@@ -188,12 +186,11 @@ func TestMockInvalidExecution(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	newPayloadCh := make(chan engineapi.PayloadMessage)
-	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
+	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 
 	waitingForHeaders := uint32(1)
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -204,7 +201,7 @@ func TestMockInvalidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	<-newPayloadCh
+	beaconRequestList.WaitForRequest()
 	// Simulate invalid status
 	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
@@ -225,12 +222,11 @@ func TestNoTTD(t *testing.T) {
 
 	makeTestDb(ctx, db)
 
-	newPayloadCh := make(chan engineapi.PayloadMessage)
-	forkChoiceCh := make(chan engineapi.ForkChoiceMessage)
+	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 

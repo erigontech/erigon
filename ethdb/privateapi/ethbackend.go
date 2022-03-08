@@ -54,12 +54,10 @@ type EthBackendServer struct {
 	// Block proposing for proof-of-stake
 	payloadId       uint64
 	pendingPayloads map[uint64]*pendingPayload
-	// Send new Beacon Chain payloads to staged sync
-	newPayloadCh chan<- engineapi.PayloadMessage
-	// Send Beacon Chain fork choice updates to staged sync
-	forkChoiceCh chan<- engineapi.ForkChoiceMessage
+	// Send Beacon Chain requests to staged sync
+	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
-	statusCh <-chan PayloadStatus
+	statusCh chan PayloadStatus
 	// Determines whether stageloop is processing a block or not
 	waitingForBeaconChain *uint32       // atomic boolean flag
 	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
@@ -92,11 +90,11 @@ type pendingPayload struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, newPayloadCh chan<- engineapi.PayloadMessage, forkChoiceCh chan<- engineapi.ForkChoiceMessage, statusCh <-chan PayloadStatus,
+	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh chan PayloadStatus,
 	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
+		requestList: requestList, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
 		pendingPayloads: make(map[uint64]*pendingPayload), skipCycleHack: skipCycleHack,
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
@@ -297,13 +295,13 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	// Send the block over
-	s.newPayloadCh <- engineapi.PayloadMessage{
+	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
 			Transactions: req.Transactions,
 			Uncles:       nil,
 		},
-	}
+	})
 
 	payloadStatus := <-s.statusCh
 	if payloadStatus.CriticalError != nil {
@@ -395,7 +393,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
-	s.forkChoiceCh <- forkChoiceMessage
+	s.requestList.AddForkChoiceRequest(&forkChoiceMessage)
 
 	payloadStatus := <-s.statusCh
 	if payloadStatus.CriticalError != nil {
@@ -522,7 +520,10 @@ func (s *EthBackendServer) StartProposer() {
 	}()
 }
 
-func (s *EthBackendServer) StopProposer() {
+func (s *EthBackendServer) Shutdown() {
+	s.requestList.Interrupt()
+	s.statusCh <- PayloadStatus{CriticalError: errors.New("server is stopping")}
+
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
 

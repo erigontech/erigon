@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -53,8 +52,7 @@ type HeadersCfg struct {
 	noP2PDiscovery        bool
 	tmpdir                string
 	snapshotDir           *dir.Rw
-	newPayloadCh          chan engineapi.PayloadMessage
-	forkChoiceCh          chan engineapi.ForkChoiceMessage
+	beaconRequestList     *engineapi.RequestList
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.RoSnapshots
@@ -73,8 +71,7 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	newPayloadCh chan engineapi.PayloadMessage,
-	forkChoiceCh chan engineapi.ForkChoiceMessage,
+	beaconRequestList *engineapi.RequestList,
 	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -93,8 +90,7 @@ func StageHeadersCfg(
 		batchSize:             batchSize,
 		tmpdir:                tmpdir,
 		noP2PDiscovery:        noP2PDiscovery,
-		newPayloadCh:          newPayloadCh,
-		forkChoiceCh:          forkChoiceCh,
+		beaconRequestList:     beaconRequestList,
 		waitingForBeaconChain: waitingForBeaconChain,
 		snapshots:             snapshots,
 		snapshotDownloader:    snapshotDownloader,
@@ -186,26 +182,22 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
-	var payloadMessage engineapi.PayloadMessage
-	var forkChoiceMessage engineapi.ForkChoiceMessage
+	interrupted, id, request := cfg.beaconRequestList.WaitForRequest()
+	if interrupted {
+		if !useExternalTx {
+			return tx.Commit()
+		}
+		return nil
+	}
+
+	// TODO(yperbasis): remove later if not syncing
+	cfg.beaconRequestList.Remove(id)
 
 	// Decide what kind of action we need to take place
-	forkChoiceInsteadOfNewPayload := false
-	select {
-	case <-ctx.Done():
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
-		if !useExternalTx {
-			return tx.Commit()
-		}
-		return nil
-	case <-cfg.hd.SkipCycleHack:
-		if !useExternalTx {
-			return tx.Commit()
-		}
-		return nil
-	case forkChoiceMessage = <-cfg.forkChoiceCh:
-		forkChoiceInsteadOfNewPayload = true
-	case payloadMessage = <-cfg.newPayloadCh:
+	var payloadMessage *engineapi.PayloadMessage
+	forkChoiceMessage, forkChoiceInsteadOfNewPayload := request.(*engineapi.ForkChoiceMessage)
+	if !forkChoiceInsteadOfNewPayload {
+		payloadMessage = request.(*engineapi.PayloadMessage)
 	}
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
@@ -217,9 +209,9 @@ func HeadersPOS(
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	if forkChoiceInsteadOfNewPayload {
-		handleForkChoice(&forkChoiceMessage, s, u, ctx, tx, cfg, headerInserter)
+		handleForkChoice(forkChoiceMessage, s, u, ctx, tx, cfg, headerInserter)
 	} else {
-		if err := handleNewPayload(&payloadMessage, s, ctx, tx, cfg, headerInserter); err != nil {
+		if err := handleNewPayload(payloadMessage, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
 		}
 	}

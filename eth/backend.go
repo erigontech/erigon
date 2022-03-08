@@ -139,8 +139,7 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 	// When we receive something here, it means that the beacon chain transitioned
 	// to proof-of-stake so we start reverse syncing from the block
-	newPayloadCh          chan engineapi.PayloadMessage
-	forkChoiceCh          chan engineapi.ForkChoiceMessage
+	beaconRequestList     *engineapi.RequestList
 	waitingForBeaconChain uint32 // atomic boolean flag
 
 	downloadProtocols *downloader.Protocols
@@ -378,8 +377,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
-	backend.newPayloadCh = make(chan engineapi.PayloadMessage)
-	backend.forkChoiceCh = make(chan engineapi.ForkChoiceMessage)
+	backend.beaconRequestList = engineapi.NewRequestList()
 
 	// proof-of-work mining
 	mining := stagedsync.New(
@@ -417,7 +415,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.newPayloadCh, backend.forkChoiceCh, backend.sentryControlServer.Hd.PayloadStatusCh,
+		blockReader, chainConfig, backend.beaconRequestList, backend.sentryControlServer.Hd.PayloadStatusCh,
 		&backend.waitingForBeaconChain, backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
@@ -498,8 +496,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,
-		backend.downloaderClient)
+		backend.beaconRequestList, &backend.waitingForBeaconChain, backend.downloaderClient)
 	if err != nil {
 		return nil, err
 	}

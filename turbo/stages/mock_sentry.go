@@ -87,8 +87,7 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	// Beacon Chain
-	NewPayloadCh          chan engineapi.PayloadMessage
-	ForkChoiceCh          chan engineapi.ForkChoiceMessage
+	BeaconRequestList     *engineapi.RequestList
 	waitingForBeaconChain uint32
 }
 
@@ -288,8 +287,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	isBor := mock.ChainConfig.Bor != nil
 
-	mock.NewPayloadCh = make(chan engineapi.PayloadMessage)
-	mock.ForkChoiceCh = make(chan engineapi.ForkChoiceMessage)
+	mock.BeaconRequestList = engineapi.NewRequestList()
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
@@ -303,8 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				mock.NewPayloadCh,
-				mock.ForkChoiceCh,
+				mock.BeaconRequestList,
 				&mock.waitingForBeaconChain,
 				allSnapshots,
 				snapshotsDownloader,

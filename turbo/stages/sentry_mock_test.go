@@ -517,9 +517,7 @@ func TestForkchoiceToGenesis(t *testing.T) {
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
 
-	go func() {
-		m.ForkChoiceCh <- forkChoiceMessage
-	}()
+	m.BeaconRequestList.AddForkChoiceRequest(&forkChoiceMessage)
 
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
 	if err != nil {
