@@ -11,6 +11,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -210,7 +211,7 @@ var txsBeginEnd = Migration{
 					return err
 				}
 
-				if _, err := tx.IncrementSequence(kv.EthTx, bodyForStorage.BaseTxId+uint64(bodyForStorage.TxAmount)-currentSeq+1); err != nil {
+				if _, err := tx.IncrementSequence(kv.EthTx, bodyForStorage.BaseTxId+uint64(bodyForStorage.TxAmount)-currentSeq); err != nil {
 					return err
 				}
 			}
@@ -221,7 +222,7 @@ var txsBeginEnd = Migration{
 	},
 }
 
-func WriteRawBodyDeprecated(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func writeRawBodyDeprecated(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
@@ -278,4 +279,74 @@ func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common.Hash,
 		return nil
 	}
 	return body
+}
+
+func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+	for blockNum := from; ; blockNum++ {
+		h, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if h == (common.Hash{}) {
+			break
+		}
+		data := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
+		if len(data) == 0 {
+			break
+		}
+
+		bodyForStorage := new(types.BodyForStorage)
+		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
+			return err
+		}
+
+		// move txs to NonCanonical bucket, it has own sequence
+		newBaseId, err := tx.IncrementSequence(kv.NonCanonicalTxs, uint64(bodyForStorage.TxAmount))
+		if err != nil {
+			return err
+		}
+		id := newBaseId
+		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
+			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
+				return err
+			}
+			id++
+			return tx.Delete(kv.EthTx, k, nil)
+		}); err != nil {
+			return err
+		}
+
+		bodyForStorage.BaseTxId = newBaseId
+		if err := rawdb.WriteBodyForStorage(tx, h, blockNum, bodyForStorage); err != nil {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Unwinding transactions...", logPrefix), "current block", blockNum)
+		default:
+		}
+	}
+
+	// EthTx must have canonical id's - means need decrement it's sequence on unwind
+	c, err := tx.Cursor(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	k, _, err := c.Last()
+	if err != nil {
+		return err
+	}
+	var nextTxID uint64
+	if k != nil {
+		nextTxID = binary.BigEndian.Uint64(k) + 1
+	}
+	if err := rawdb.ResetSequence(tx, kv.EthTx, nextTxID); err != nil {
+		return err
+	}
+
+	return nil
 }

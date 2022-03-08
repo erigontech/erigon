@@ -31,19 +31,20 @@ func TestTxsBeginEnd(t *testing.T) {
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
 		for i := uint64(0); i < 10; i++ {
 			hash := common.Hash{byte(i)}
-			err = WriteRawBodyDeprecated(tx, hash, i, b)
+			err = writeRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
 			require.NoError(err)
 		}
-		if err := rawdb.MakeBodiesNonCanonical(tx, 7, context.Background(), "", logEvery); err != nil {
+		if err := makeBodiesNonCanonicalDeprecated(tx, 7, context.Background(), "", logEvery); err != nil {
 			return err
 		}
+
 		for i := uint64(7); i < 10; i++ {
 			err = rawdb.DeleteCanonicalHash(tx, i)
 			require.NoError(err)
 			hash := common.Hash{0xa, byte(i)}
-			err = WriteRawBodyDeprecated(tx, hash, i, b)
+			err = writeRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
 			require.NoError(err)
