@@ -348,7 +348,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	}
 
 	txs := make([]types.Transaction, b.TxAmount)
-	senders = make([]common.Address, b.TxAmount)
+	senders = make([]common.Address, b.TxAmount-2)
 	if b.TxAmount > 0 {
 		r := recsplit.NewIndexReader(sn.TxnIdsIdx)
 		binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-sn.TxnIdsIdx.BaseDataID())
@@ -356,11 +356,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		gg = sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
-		for i := uint32(0); i < b.TxAmount-1; i++ {
-			if i == 0 {
-				buf, _ = gg.Next(buf[:0])
-				continue
-			}
+		buf, _ = gg.Next(buf[:0]) //first system-tx
+		for i := uint32(0); i < b.TxAmount-2; i++ {
 			buf, _ = gg.Next(buf[:0])
 			senders[i].SetBytes(buf[1 : 1+20])
 			txRlp := buf[1+20:]
