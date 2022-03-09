@@ -22,9 +22,22 @@ type ForkChoiceMessage struct {
 	FinalizedBlockHash common.Hash
 }
 
+type RequestStatus int
+
+const ( // RequestStatus values
+	New = iota
+	Syncing
+	Synced
+)
+
+type RequestWithStatus struct {
+	Message interface{} // *PayloadMessage or *ForkChoiceMessage
+	Status  RequestStatus
+}
+
 type RequestList struct {
 	requestId int
-	requests  *treemap.Map
+	requests  *treemap.Map // map[int]*RequestWithStatus
 	interrupt bool
 	syncCond  *sync.Cond
 }
@@ -41,7 +54,10 @@ func (rl *RequestList) AddPayloadRequest(message *PayloadMessage) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	rl.requests.Put(rl.requestId, message)
+	rl.requests.Put(rl.requestId, &RequestWithStatus{
+		Message: message,
+		Status:  New,
+	})
 	rl.requestId++
 
 	rl.syncCond.Broadcast()
@@ -51,27 +67,41 @@ func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	rl.requests.Put(rl.requestId, message)
+	rl.requests.Put(rl.requestId, &RequestWithStatus{
+		Message: message,
+		Status:  New,
+	})
 	rl.requestId++
 
 	rl.syncCond.Broadcast()
 }
 
-func (rl *RequestList) WaitForRequest() (interrupted bool, id int, request interface{}) {
+func (rl *RequestList) firstReadyRequest() (id int, request *RequestWithStatus) {
+	foundKey, foundValue := rl.requests.Find(func(key interface{}, value interface{}) bool {
+		return value.(*RequestWithStatus).Status != Syncing
+	})
+	if foundKey != nil {
+		return foundKey.(int), foundValue.(*RequestWithStatus)
+	}
+	return 0, nil
+}
+
+func (rl *RequestList) WaitForRequest() (interrupted bool, id int, request *RequestWithStatus) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	for !rl.interrupt && rl.requests.Empty() {
+	for {
+		interrupted = rl.interrupt
+		if interrupted {
+			rl.interrupt = false
+			return
+		}
+		id, request = rl.firstReadyRequest()
+		if request != nil {
+			return
+		}
 		rl.syncCond.Wait()
 	}
-
-	if rl.interrupt {
-		rl.interrupt = false
-		return true, 0, nil
-	}
-
-	key, value := rl.requests.Min()
-	return false, key.(int), value
 }
 
 func (rl *RequestList) Interrupt() {

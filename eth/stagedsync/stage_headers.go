@@ -182,13 +182,15 @@ func HeadersPOS(
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	defer atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
-	interrupted, id, request := cfg.beaconRequestList.WaitForRequest()
+	interrupted, id, requestWithStatus := cfg.beaconRequestList.WaitForRequest()
 	if interrupted {
 		if !useExternalTx {
 			return tx.Commit()
 		}
 		return nil
 	}
+
+	request := requestWithStatus.Message
 
 	// TODO(yperbasis): remove later if not syncing
 	cfg.beaconRequestList.Remove(id)
