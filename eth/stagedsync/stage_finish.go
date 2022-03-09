@@ -4,6 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -139,7 +146,25 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		return err
 	}
 	notifier.OnNewHeader(headersRlp)
-
+	logs := make([]*remote.SubscribeLogsReply, 0)
+	block := rawdb.ReadCurrentBlock(tx)
+	logs = append(logs, BlockToLogsReply(block))
+	notifier.OnLogs(logs)
 	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
 	return nil
+}
+
+func BlockToLogsReply(block *types.Block) *remote.SubscribeLogsReply {
+	bodyRlp, _ := rlp.EncodeToBytes(block.Body())
+	return &remote.SubscribeLogsReply{
+		Address:          gointerfaces.ConvertAddressToH160(block.Header().Coinbase),
+		BlockHash:        gointerfaces.ConvertHashToH256(block.Hash()),
+		BlockNumber:      block.NumberU64(),
+		Data:             bodyRlp,
+		LogIndex:         0,   // TODO
+		Topics:           nil, // TODO
+		TransactionHash:  gointerfaces.ConvertHashToH256(block.Header().TxHash),
+		TransactionIndex: block.Header().Number.Uint64(),
+		Removed:          false, // TODO
+	}
 }

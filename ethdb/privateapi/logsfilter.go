@@ -5,6 +5,8 @@ import (
 	"io"
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -34,10 +36,10 @@ type LogsFilter struct {
 func NewLogsFilterAggregator() *LogsFilterAggregator {
 	return &LogsFilterAggregator{
 		aggLogsFilter: LogsFilter{
-			addrs:  map[common.Address]int{},
-			topics: map[common.Hash]int{},
+			addrs:  make(map[common.Address]int),
+			topics: make(map[common.Hash]int),
 		},
-		logsFilters:  map[uint64]*LogsFilter{},
+		logsFilters:  make(map[uint64]*LogsFilter),
 		nextFilterId: 0,
 	}
 }
@@ -47,7 +49,7 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender remote.ETHBACKEND_Subscri
 	defer a.logsFilterLock.Unlock()
 	filterId := a.nextFilterId
 	a.nextFilterId++
-	filter := &LogsFilter{addrs: map[common.Address]int{}, topics: map[common.Hash]int{}, sender: sender}
+	filter := &LogsFilter{addrs: make(map[common.Address]int), topics: make(map[common.Hash]int), sender: sender}
 	a.logsFilters[filterId] = filter
 	return filterId, filter
 }
@@ -63,7 +65,7 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
-	filter.addrs = map[common.Address]int{}
+	filter.addrs = make(map[common.Address]int)
 	if filterReq.GetAllAddresses() {
 		filter.allAddrs = 1
 	} else {
@@ -72,7 +74,7 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 			filter.addrs[gointerfaces.ConvertH160toAddress(addr)] = 1
 		}
 	}
-	filter.topics = map[common.Hash]int{}
+	filter.topics = make(map[common.Hash]int)
 	if filterReq.GetAllTopics() {
 		filter.allTopics = 1
 	} else {
@@ -114,7 +116,7 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 
 // SubscribeLogs
 // Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
-func (a *LogsFilterAggregator) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
 	filterId, filter := a.insertLogsFilter(server)
 	defer a.removeLogsFilter(filterId, filter)
 	// Listen to filter updates and modify the filters, until terminated
@@ -129,7 +131,45 @@ func (a *LogsFilterAggregator) SubscribeLogs(server remote.ETHBACKEND_SubscribeL
 	return nil
 }
 
-func (a *LogsFilterAggregator) distributeLogs(logs []remote.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
+	a.logsFilterLock.Lock()
+	a.logsFilterLock.Unlock()
+	filtersToDelete := make(map[uint64]*LogsFilter)
+filterLoop:
+	for filterId, filter := range a.logsFilters {
+		for _, log := range logs {
+			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
+			if !addrOk {
+				continue
+			}
+			// TODO
+			if filter.allTopics == 0 {
+				if !a.chooseTopics(filter.topics, log.GetTopics()) {
+					continue
+				}
+			}
+			if err := filter.sender.Send(log); err != nil {
+				filtersToDelete[filterId] = filter
+				continue filterLoop
+			}
+		}
+	}
+	// remove malfunctioned filters
+	for filterId, filter := range filtersToDelete {
+		a.subtractLogFilters(filter)
+		delete(a.logsFilters, filterId)
+	}
+	// clear map
+	filtersToDelete = make(map[uint64]*LogsFilter)
 
 	return nil
+}
+
+func (a *LogsFilterAggregator) chooseTopics(filterTopics map[common.Hash]int, logTopics []*types.H256) bool {
+	for _, logTopic := range logTopics {
+		if _, ok := filterTopics[gointerfaces.ConvertH256ToHash(logTopic)]; ok {
+			return true
+		}
+	}
+	return false
 }

@@ -14,7 +14,7 @@ import (
 type ChainEventNotifier interface {
 	OnNewHeader(newHeadersRlp [][]byte)
 	OnNewPendingLogs(types.Logs)
-	OnLogs([]remote.SubscribeLogsReply)
+	OnLogs([]*remote.SubscribeLogsReply)
 }
 
 type Notifications struct {

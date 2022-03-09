@@ -56,7 +56,7 @@ require (
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/iavl v0.12.0
 	github.com/tendermint/tendermint v0.31.11
-	github.com/torquem-ch/mdbx-go v0.22.14
+	github.com/torquem-ch/mdbx-go v0.22.15
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.5
@@ -78,6 +78,4 @@ require (
 	pgregory.net/rapid v0.4.7
 )
 
-replace (
-	github.com/ledgerwatch/erigon-lib => "./../erigon-lib"
-)
+replace github.com/ledgerwatch/erigon-lib => ./../erigon-lib

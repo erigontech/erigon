@@ -475,7 +475,6 @@ func (s *EthBackendServer) evictOldPendingPayloads() {
 }
 
 func (s *EthBackendServer) StartProposer() {
-
 	go func() {
 		s.syncCond.L.Lock()
 		defer s.syncCond.L.Unlock()
@@ -551,4 +550,11 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 		return nil, err
 	}
 	return nodesInfo, nil
+}
+
+func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+	if s.logsFilter != nil {
+		return s.logsFilter.subscribeLogs(server)
+	}
+	return fmt.Errorf("no logs filter available")
 }
