@@ -356,7 +356,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		gg = sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
-		for i := uint32(0); i < b.TxAmount; i++ {
+		for i := uint32(0); i < b.TxAmount-1; i++ {
 			if i == 0 {
 				buf, _ = gg.Next(buf[:0])
 				continue
