@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/big"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -356,6 +357,11 @@ var (
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
 		Value: 2,
+	}
+	DBReadConcurrencyFlag = cli.IntFlag{
+		Name:  "db.read.concurrency",
+		Usage: "Does limit amount of parallel db reads (Default: number of CPU)",
+		Value: runtime.NumCPU(),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
