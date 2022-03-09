@@ -133,7 +133,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 
 func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
-	a.logsFilterLock.Unlock()
+	defer a.logsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*LogsFilter)
 filterLoop:
 	for filterId, filter := range a.logsFilters {
@@ -159,8 +159,6 @@ filterLoop:
 		a.subtractLogFilters(filter)
 		delete(a.logsFilters, filterId)
 	}
-	// clear map
-	filtersToDelete = make(map[uint64]*LogsFilter)
 
 	return nil
 }
