@@ -67,6 +67,14 @@ func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
+	// purge previous fork choices that are still syncing
+	rl.requests = rl.requests.Select(func(key interface{}, value interface{}) bool {
+		req := value.(*RequestWithStatus)
+		_, isForkChoice := req.Message.(*ForkChoiceMessage)
+		return req.Status != Syncing || !isForkChoice
+	})
+	// TODO(yperbasis): potentially purge some non-syncing old fork choices?
+
 	rl.requests.Put(rl.requestId, &RequestWithStatus{
 		Message: message,
 		Status:  New,
@@ -118,4 +126,14 @@ func (rl *RequestList) Remove(id int) {
 	defer rl.syncCond.L.Unlock()
 
 	rl.requests.Remove(id)
+}
+
+func (rl *RequestList) SetStatus(id int, status RequestStatus) {
+	rl.syncCond.L.Lock()
+	defer rl.syncCond.L.Unlock()
+
+	value, found := rl.requests.Get(id)
+	if found {
+		value.(*RequestWithStatus).Status = status
+	}
 }
