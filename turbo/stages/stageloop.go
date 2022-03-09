@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -250,7 +249,6 @@ func NewStagedSync(
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	beaconRequestList *engineapi.RequestList,
 	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
@@ -279,7 +277,6 @@ func NewStagedSync(
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
-				beaconRequestList,
 				waitingForBeaconChain,
 				allSnapshots,
 				snapshotDownloader,

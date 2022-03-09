@@ -52,7 +52,6 @@ type HeadersCfg struct {
 	noP2PDiscovery        bool
 	tmpdir                string
 	snapshotDir           *dir.Rw
-	beaconRequestList     *engineapi.RequestList
 	waitingForBeaconChain *uint32 // atomic boolean flag
 
 	snapshots          *snapshotsync.RoSnapshots
@@ -71,7 +70,6 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	beaconRequestList *engineapi.RequestList,
 	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -90,7 +88,6 @@ func StageHeadersCfg(
 		batchSize:             batchSize,
 		tmpdir:                tmpdir,
 		noP2PDiscovery:        noP2PDiscovery,
-		beaconRequestList:     beaconRequestList,
 		waitingForBeaconChain: waitingForBeaconChain,
 		snapshots:             snapshots,
 		snapshotDownloader:    snapshotDownloader,
@@ -180,7 +177,7 @@ func HeadersPOS(
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
-	interrupted, requestId, requestWithStatus := cfg.beaconRequestList.WaitForRequest()
+	interrupted, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest()
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	if interrupted {
@@ -235,7 +232,7 @@ func handleForkChoice(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
-		cfg.beaconRequestList.Remove(requestId)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
@@ -247,7 +244,7 @@ func handleForkChoice(
 
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
-		cfg.beaconRequestList.Remove(requestId)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
@@ -255,7 +252,7 @@ func handleForkChoice(
 	}
 
 	if header == nil {
-		cfg.beaconRequestList.SetStatus(requestId, engineapi.Syncing)
+		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.Syncing)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
@@ -269,7 +266,7 @@ func handleForkChoice(
 		return nil
 	}
 
-	cfg.beaconRequestList.Remove(requestId)
+	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	headerNumber := header.Number.Uint64()
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
@@ -324,7 +321,7 @@ func handleNewPayload(
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
-		cfg.beaconRequestList.Remove(requestId)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		}
@@ -333,7 +330,7 @@ func handleNewPayload(
 
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
 		// previously received valid header
-		cfg.beaconRequestList.Remove(requestId)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
@@ -346,7 +343,7 @@ func handleNewPayload(
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
-		cfg.beaconRequestList.Remove(requestId)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
@@ -360,7 +357,7 @@ func handleNewPayload(
 	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
 
 	if parent == nil {
-		cfg.beaconRequestList.SetStatus(requestId, engineapi.Syncing)
+		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.Syncing)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
@@ -374,7 +371,7 @@ func handleNewPayload(
 		return nil
 	}
 
-	cfg.beaconRequestList.Remove(requestId)
+	cfg.hd.BeaconRequestList.Remove(requestId)
 
 	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, headerInserter)
 	if err != nil || !success {

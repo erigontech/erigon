@@ -87,7 +87,6 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	// Beacon Chain
-	BeaconRequestList     *engineapi.RequestList
 	waitingForBeaconChain uint32
 }
 
@@ -287,8 +286,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	isBor := mock.ChainConfig.Bor != nil
 
-	mock.BeaconRequestList = engineapi.NewRequestList()
-
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(
@@ -301,7 +298,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				mock.BeaconRequestList,
 				&mock.waitingForBeaconChain,
 				allSnapshots,
 				snapshotsDownloader,
@@ -515,4 +511,8 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
+}
+
+func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage) {
+	ms.downloader.Hd.BeaconRequestList.AddForkChoiceRequest(message)
 }

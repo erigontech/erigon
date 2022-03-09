@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
 type QueueID uint8
@@ -281,7 +282,8 @@ type HeaderDownload struct {
 	synced               bool                          // if we found a canonical hash during backward sync, in this case our sync process is done
 	posSync              bool                          // True if the chain is syncing backwards or not
 	headersCollector     *etl.Collector                // ETL collector for headers
-	PayloadStatusCh      chan privateapi.PayloadStatus // Channel to report payload validation/execution status (engine_newPayloadV1/forkchoiceUpdatedV1 response)
+	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
 	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
 	pendingHeaderHeight  uint64                        // Header to process after unwind (height)
 	pendingHeaderHash    common.Hash                   // Header to process after unwind (hash)
@@ -313,6 +315,7 @@ func NewHeaderDownload(
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
+		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
 	}
