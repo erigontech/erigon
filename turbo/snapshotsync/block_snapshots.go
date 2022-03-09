@@ -174,6 +174,15 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					return err
 				}
 
+				if bs.TxnIdsIdx != nil {
+					bs.TxnIdsIdx.Close()
+					bs.TxnIdsIdx = nil
+				}
+				bs.TxnIdsIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, TransactionsId)))
+				if err != nil {
+					return err
+				}
+
 				if bs.TxnHash2BlockNumIdx != nil {
 					bs.TxnHash2BlockNumIdx.Close()
 					bs.TxnHash2BlockNumIdx = nil
