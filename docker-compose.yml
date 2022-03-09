@@ -53,6 +53,7 @@ services:
     ports:
       - "8545:8545"
       - "8550:8550"
+      - "8551:8551"
     restart: unless-stopped
 
   downloader: # Service to download/seed historical data (need only if you use --experimental.snapshot)

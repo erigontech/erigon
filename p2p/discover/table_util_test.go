@@ -244,7 +244,7 @@ func hexEncPrivkey(h string) *ecdsa.PrivateKey {
 }
 
 // hexEncPubkey decodes h as a public key.
-func hexEncPubkey(h string) (ret encPubkey) {
+func hexEncPubkey(h string) (ret enode.PubkeyEncoded) {
 	b, err := hex.DecodeString(h)
 	if err != nil {
 		panic(err)

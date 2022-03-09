@@ -39,7 +39,7 @@ func TestUDPv4_Lookup(t *testing.T) {
 	test := newUDPTest(t)
 
 	// Lookup on empty table returns no nodes.
-	targetKey, _ := decodePubkey(crypto.S256(), lookupTestnet.target[:])
+	targetKey, _ := v4wire.DecodePubkey(crypto.S256(), v4wire.Pubkey(lookupTestnet.target))
 	if results := test.udp.LookupPubkey(targetKey); len(results) > 0 {
 		t.Fatalf("lookup on empty table returned %d results: %#v", len(results), results)
 	}
@@ -61,7 +61,7 @@ func TestUDPv4_Lookup(t *testing.T) {
 	results := <-resultC
 	t.Logf("results:")
 	for _, e := range results {
-		t.Logf("  ld=%d, %x", enode.LogDist(lookupTestnet.target.id(), e.ID()), e.ID().Bytes())
+		t.Logf("  ld=%d, %x", enode.LogDist(lookupTestnet.target.ID(), e.ID()), e.ID().Bytes())
 	}
 	if len(results) != bucketSize {
 		t.Errorf("wrong number of results: got %d, want %d", len(results), bucketSize)
@@ -150,7 +150,7 @@ func serveTestnet(test *udpTest, testnet *preminedTestnet) {
 			case *v4wire.Ping:
 				test.packetInFrom(nil, key, to, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash})
 			case *v4wire.Findnode:
-				dist := enode.LogDist(n.ID(), testnet.target.id())
+				dist := enode.LogDist(n.ID(), testnet.target.ID())
 				nodes := testnet.nodesAtDistance(dist - 1)
 				test.packetInFrom(nil, key, to, &v4wire.Neighbors{Expiration: futureExp, Nodes: nodes})
 			}
@@ -164,12 +164,12 @@ func checkLookupResults(t *testing.T, tn *preminedTestnet, results []*enode.Node
 	t.Helper()
 	t.Logf("results:")
 	for _, e := range results {
-		t.Logf("  ld=%d, %x", enode.LogDist(tn.target.id(), e.ID()), e.ID().Bytes())
+		t.Logf("  ld=%d, %x", enode.LogDist(tn.target.ID(), e.ID()), e.ID().Bytes())
 	}
 	if hasDuplicates(wrapNodes(results)) {
 		t.Errorf("result set contains duplicate entries")
 	}
-	if !sortedByDistanceTo(tn.target.id(), wrapNodes(results)) {
+	if !sortedByDistanceTo(tn.target.ID(), wrapNodes(results)) {
 		t.Errorf("result set not sorted by distance to target")
 	}
 	wantNodes := tn.closest(len(results))
@@ -239,7 +239,7 @@ var lookupTestnet = &preminedTestnet{
 }
 
 type preminedTestnet struct {
-	target encPubkey
+	target enode.PubkeyEncoded
 	dists  [hashBits + 1][]*ecdsa.PrivateKey
 }
 
@@ -311,7 +311,7 @@ func (tn *preminedTestnet) closest(n int) (nodes []*enode.Node) {
 		}
 	}
 	sort.Slice(nodes, func(i, j int) bool {
-		return enode.DistCmp(tn.target.id(), nodes[i].ID(), nodes[j].ID()) < 0
+		return enode.DistCmp(tn.target.ID(), nodes[i].ID(), nodes[j].ID()) < 0
 	})
 	return nodes[:n]
 }
@@ -326,11 +326,11 @@ func (tn *preminedTestnet) mine() {
 		tn.dists[i] = nil
 	}
 
-	targetSha := tn.target.id()
+	targetSha := tn.target.ID()
 	found, need := 0, 40
 	for found < need {
 		k := newkey()
-		ld := enode.LogDist(targetSha, encodePubkey(&k.PublicKey).id())
+		ld := enode.LogDist(targetSha, enode.PubkeyToIDV4(&k.PublicKey))
 		if len(tn.dists[ld]) < 8 {
 			tn.dists[ld] = append(tn.dists[ld], k)
 			found++

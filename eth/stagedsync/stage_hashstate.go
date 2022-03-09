@@ -109,7 +109,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 }
 
 func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	// Currently it does not require unwinding because it does not create any Intemediate Hash records
+	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, quit)
 	prom.TempDir = cfg.tmpDir

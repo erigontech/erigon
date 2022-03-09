@@ -565,7 +565,7 @@ func TestUDPv5_lookup(t *testing.T) {
 	test := newUDPV5Test(t)
 
 	// Lookup on empty table returns no nodes.
-	if results := test.udp.Lookup(lookupTestnet.target.id()); len(results) > 0 {
+	if results := test.udp.Lookup(lookupTestnet.target.ID()); len(results) > 0 {
 		t.Fatalf("lookup on empty table returned %d results: %#v", len(results), results)
 	}
 
@@ -584,7 +584,7 @@ func TestUDPv5_lookup(t *testing.T) {
 	// Start the lookup.
 	resultC := make(chan []*enode.Node, 1)
 	go func() {
-		resultC <- test.udp.Lookup(lookupTestnet.target.id())
+		resultC <- test.udp.Lookup(lookupTestnet.target.ID())
 		test.close()
 	}()
 
@@ -768,7 +768,7 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr *net.UDPAddr, pa
 
 // getNode ensures the test knows about a node at the given endpoint.
 func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr) *enode.LocalNode {
-	id := encodePubkey(&key.PublicKey).id()
+	id := enode.PubkeyToIDV4(&key.PublicKey)
 	ln := test.nodesByID[id]
 	if ln == nil {
 		db, err := enode.OpenDB(test.t.TempDir())

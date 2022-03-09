@@ -84,6 +84,11 @@ type MockSentry struct {
 	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
+
+	// Beacon Chain
+	NewPayloadCh          chan privateapi.PayloadMessage
+	ForkChoiceCh          chan privateapi.ForkChoiceMessage
+	waitingForBeaconChain uint32
 }
 
 func (ms *MockSentry) Close() {
@@ -282,6 +287,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	isBor := mock.ChainConfig.Bor != nil
 
+	mock.NewPayloadCh = make(chan privateapi.PayloadMessage)
+	mock.ForkChoiceCh = make(chan privateapi.ForkChoiceMessage)
+
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(
@@ -294,9 +302,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				nil,
-				nil,
-				nil,
+				mock.NewPayloadCh,
+				mock.ForkChoiceCh,
+				&mock.waitingForBeaconChain,
 				allSnapshots,
 				snapshotsDownloader,
 				blockReader,
@@ -378,7 +386,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	return mock
 }
 
-// Mock is conviniece function to create a mock with some pre-set values
+// Mock is convenience function to create a mock with some pre-set values
 func Mock(t *testing.T) *MockSentry {
 	funds := big.NewInt(1 * params.Ether)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -406,6 +414,21 @@ func MockWithTxPool(t *testing.T) *MockSentry {
 	}
 
 	return MockWithEverything(t, gspec, key, prune.DefaultMode, ethash.NewFaker(), true)
+}
+
+func MockWithZeroTTD(t *testing.T) *MockSentry {
+	funds := big.NewInt(1 * params.Ether)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	chainConfig := params.AllEthashProtocolChanges
+	chainConfig.TerminalTotalDifficulty = common.Big0
+	gspec := &core.Genesis{
+		Config: chainConfig,
+		Alloc: core.GenesisAlloc{
+			address: {Balance: funds},
+		},
+	}
+	return MockWithGenesis(t, gspec, key)
 }
 
 func (ms *MockSentry) EnableLogs() {

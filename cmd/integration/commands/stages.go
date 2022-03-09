@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -1007,45 +1006,13 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 
 func byChain() (*core.Genesis, *params.ChainConfig) {
 	var chainConfig *params.ChainConfig
-
 	var genesis *core.Genesis
-	switch chain {
-	case "", networkname.MainnetChainName:
+	if chain == "" {
 		chainConfig = params.MainnetChainConfig
 		genesis = core.DefaultGenesisBlock()
-	case networkname.SepoliaChainName:
-		chainConfig = params.SepoliaChainConfig
-		genesis = core.DefaultSepoliaGenesisBlock()
-	case networkname.RopstenChainName:
-		chainConfig = params.RopstenChainConfig
-		genesis = core.DefaultRopstenGenesisBlock()
-	case networkname.GoerliChainName:
-		chainConfig = params.GoerliChainConfig
-		genesis = core.DefaultGoerliGenesisBlock()
-	case networkname.BSCChainName:
-		chainConfig = params.BSCChainConfig
-		genesis = core.DefaultBSCGenesisBlock()
-	case networkname.ChapelChainName:
-		chainConfig = params.ChapelChainConfig
-		genesis = core.DefaultChapelGenesisBlock()
-	case networkname.RialtoChainName:
-		chainConfig = params.RialtoChainConfig
-		genesis = core.DefaultChapelGenesisBlock()
-	case networkname.RinkebyChainName:
-		chainConfig = params.RinkebyChainConfig
-		genesis = core.DefaultRinkebyGenesisBlock()
-	case networkname.SokolChainName:
-		chainConfig = params.SokolChainConfig
-		genesis = core.DefaultSokolGenesisBlock()
-	case networkname.FermionChainName:
-		chainConfig = params.FermionChainConfig
-		genesis = core.DefaultFermionGenesisBlock()
-	case networkname.MumbaiChainName:
-		chainConfig = params.MumbaiChainConfig
-		genesis = core.DefaultMumbaiGenesisBlock()
-	case networkname.BorMainnetChainName:
-		chainConfig = params.BorMainnetChainConfig
-		genesis = core.DefaultBorMainnetGenesisBlock()
+	} else {
+		chainConfig = params.ChainConfigByChainName(chain)
+		genesis = core.DefaultGenesisBlockByChainName(chain)
 	}
 	return genesis, chainConfig
 }

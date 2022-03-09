@@ -537,6 +537,10 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		return nil, err
 	}
 	migrator := migrations.NewMigrator(label)
+	if err := migrator.VerifyVersion(db); err != nil {
+		return nil, err
+	}
+
 	has, err := migrator.HasPendingMigrations(db)
 	if err != nil {
 		return nil, err

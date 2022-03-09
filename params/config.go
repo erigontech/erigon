@@ -1098,6 +1098,72 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 	}
 }
 
+func ChainConfigByChainName(chain string) *ChainConfig {
+	switch chain {
+	case networkname.MainnetChainName:
+		return MainnetChainConfig
+	case networkname.SepoliaChainName:
+		return SepoliaChainConfig
+	case networkname.RopstenChainName:
+		return RopstenChainConfig
+	case networkname.RinkebyChainName:
+		return RinkebyChainConfig
+	case networkname.GoerliChainName:
+		return GoerliChainConfig
+	case networkname.ErigonMineName:
+		return ErigonChainConfig
+	case networkname.SokolChainName:
+		return SokolChainConfig
+	case networkname.FermionChainName:
+		return FermionChainConfig
+	case networkname.BSCChainName:
+		return BSCChainConfig
+	case networkname.ChapelChainName:
+		return ChapelChainConfig
+	case networkname.RialtoChainName:
+		return RialtoChainConfig
+	case networkname.MumbaiChainName:
+		return MumbaiChainConfig
+	case networkname.BorMainnetChainName:
+		return BorMainnetChainConfig
+	default:
+		return nil
+	}
+}
+
+func GenesisHashByChainName(chain string) *common.Hash {
+	switch chain {
+	case networkname.MainnetChainName:
+		return &MainnetGenesisHash
+	case networkname.SepoliaChainName:
+		return &SepoliaGenesisHash
+	case networkname.RopstenChainName:
+		return &RopstenGenesisHash
+	case networkname.RinkebyChainName:
+		return &RinkebyGenesisHash
+	case networkname.GoerliChainName:
+		return &GoerliGenesisHash
+	case networkname.ErigonMineName:
+		return &ErigonGenesisHash
+	case networkname.SokolChainName:
+		return &SokolGenesisHash
+	case networkname.FermionChainName:
+		return &FermionGenesisHash
+	case networkname.BSCChainName:
+		return &BSCGenesisHash
+	case networkname.ChapelChainName:
+		return &ChapelGenesisHash
+	case networkname.RialtoChainName:
+		return &RialtoGenesisHash
+	case networkname.MumbaiChainName:
+		return &MumbaiGenesisHash
+	case networkname.BorMainnetChainName:
+		return &BorMainnetGenesisHash
+	default:
+		return nil
+	}
+}
+
 func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 	switch {
 	case genesisHash == MainnetGenesisHash:
@@ -1110,23 +1176,38 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return RinkebyChainConfig
 	case genesisHash == GoerliGenesisHash:
 		return GoerliChainConfig
-	case genesisHash == BSCGenesisHash:
-		return BSCChainConfig
-	case genesisHash == ChapelGenesisHash:
-		return ChapelChainConfig
-	case genesisHash == RialtoGenesisHash:
-		return RialtoChainConfig
 	case genesisHash == ErigonGenesisHash:
 		return ErigonChainConfig
 	case genesisHash == SokolGenesisHash:
 		return SokolChainConfig
 	case genesisHash == FermionGenesisHash:
 		return FermionChainConfig
+	case genesisHash == BSCGenesisHash:
+		return BSCChainConfig
+	case genesisHash == ChapelGenesisHash:
+		return ChapelChainConfig
+	case genesisHash == RialtoGenesisHash:
+		return RialtoChainConfig
 	case genesisHash == MumbaiGenesisHash:
 		return MumbaiChainConfig
 	case genesisHash == BorMainnetGenesisHash:
 		return BorMainnetChainConfig
 	default:
 		return nil
+	}
+}
+
+func NetworkIDByChainName(chain string) uint64 {
+	switch chain {
+	case networkname.RialtoChainName:
+		return 97
+	case networkname.DevChainName:
+		return 1337
+	default:
+		config := ChainConfigByChainName(chain)
+		if config == nil {
+			return 0
+		}
+		return config.ChainID.Uint64()
 	}
 }
