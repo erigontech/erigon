@@ -2851,7 +2851,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	w.a.aggChannel <- &aggTask
 	<-w.a.aggBackCh // Waiting for the B-tree based items have been added
 	handoverTime := time.Since(t)
-	if handoverTime > time.Millisecond {
+	if handoverTime > time.Second {
 		log.Info("Long handover to background aggregation", "from", blockFrom, "to", blockTo, "composition", aggTime, "handover", time.Since(t))
 	}
 	return nil
