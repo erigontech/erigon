@@ -156,6 +156,16 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 	}
 
 	var applied map[string][]byte
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		var err error
+		applied, err = AppliedMigrations(tx, false)
+		if err != nil {
+			return fmt.Errorf("reading applied migrations: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
 	if err := m.VerifyVersion(db); err != nil {
 		return err
 	}
