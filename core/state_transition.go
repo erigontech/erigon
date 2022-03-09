@@ -197,7 +197,7 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTransition {
 	isParlia := evm.ChainConfig().Parlia != nil
 	isBor := evm.ChainConfig().Bor != nil
-	st := &StateTransition{
+	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
 		msg:       msg,
@@ -214,7 +214,6 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 		isParlia: isParlia,
 		isBor:    isBor,
 	}
-	return st
 }
 
 // ApplyMessage computes the new state by applying the given message
