@@ -347,9 +347,9 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.TxnHashIdx.BaseDataID(), sn.Transactions.FilePath())
 	}
 
-	txs := make([]types.Transaction, b.TxAmount)
+	txs := make([]types.Transaction, b.TxAmount-2)
 	senders = make([]common.Address, b.TxAmount-2)
-	if b.TxAmount > 0 {
+	if b.TxAmount > 2 {
 		r := recsplit.NewIndexReader(sn.TxnIdsIdx)
 		binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-sn.TxnIdsIdx.BaseDataID())
 		txnOffset := r.Lookup(buf[:8])
