@@ -307,6 +307,9 @@ func (s *RoSnapshots) closeIndices() {
 		if s.TxnHashIdx != nil {
 			s.TxnHashIdx.Close()
 		}
+		if s.TxnIdsIdx != nil {
+			s.TxnIdsIdx.Close()
+		}
 		if s.TxnHash2BlockNumIdx != nil {
 			s.TxnHash2BlockNumIdx.Close()
 		}
