@@ -133,8 +133,6 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		receipt.TransactionIndex = uint(statedb.TxIndex())
 	}
 
-	if err != nil {
-	}
 	return receipt, result.ReturnData, err
 }
 
