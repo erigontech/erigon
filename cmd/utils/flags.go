@@ -1383,7 +1383,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.ImportMode = true
 	}
 
-	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
