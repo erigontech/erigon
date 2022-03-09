@@ -60,6 +60,7 @@ var DefaultFlags = []cli.Flag{
 	utils.WsCompressionFlag,
 	utils.StateCacheFlag,
 	utils.RpcBatchConcurrencyFlag,
+	utils.DBReadConcurrencyFlag,
 	utils.RpcAccessListFlag,
 	utils.RpcTraceCompatFlag,
 	utils.RpcGasCapFlag,

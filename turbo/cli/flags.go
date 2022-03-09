@@ -304,6 +304,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 
 		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
+		DBReadConcurrency:    ctx.GlobalInt(utils.DBReadConcurrencyFlag.Name),
 		RpcAllowListFilePath: ctx.GlobalString(utils.RpcAccessListFlag.Name),
 		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
 		MaxTraces:            ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
