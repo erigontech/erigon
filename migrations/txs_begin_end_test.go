@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -90,6 +91,10 @@ func TestTxsBeginEnd(t *testing.T) {
 		v, err := tx.ReadSequence(kv.NonCanonicalTxs)
 		require.NoError(err)
 		require.Zero(v)
+
+		has, err := tx.Has(kv.EthTx, dbutils.EncodeBlockNumber(0))
+		require.NoError(err)
+		require.False(has)
 
 		return nil
 	})
