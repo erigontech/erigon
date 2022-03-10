@@ -32,6 +32,7 @@ import (
 var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
+		txsBeginEnd,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -45,7 +46,7 @@ type Migration struct {
 
 var (
 	ErrMigrationNonUniqueName   = fmt.Errorf("please provide unique migration name")
-	ErrMigrationCommitNotCalled = fmt.Errorf("migration commit function was not called")
+	ErrMigrationCommitNotCalled = fmt.Errorf("migration before-commit function was not called")
 	ErrMigrationETLFilesDeleted = fmt.Errorf("db migration progress was interrupted after extraction step and ETL files was deleted, please contact development team for help or re-sync from scratch")
 )
 
@@ -167,7 +168,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		return err
 	}
 	if err := m.VerifyVersion(db); err != nil {
-		return err
+		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 
 	// migration names must be unique, protection against people's mistake
@@ -194,7 +195,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 			progress, err = tx.GetOne(kv.Migrations, []byte("_progress_"+v.Name))
 			return err
 		}); err != nil {
-			return err
+			return fmt.Errorf("migrator.Apply: %w", err)
 		}
 
 		if err := v.Up(db, filepath.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
@@ -224,7 +225,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 
 			return nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("migrator.Apply.Up: %s, %w", v.Name, err)
 		}
 
 		if !callbackCalled {
@@ -243,7 +244,7 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("migrator.Apply: %w", err)
 	}
 	log.Info("Updated DB schema to", "version", fmt.Sprintf("%d.%d.%d", kv.DBSchemaVersion.Major, kv.DBSchemaVersion.Minor, kv.DBSchemaVersion.Patch))
 	return nil

@@ -251,7 +251,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		workers = 1
 	}
 	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers, log.LvlInfo); err != nil {
-		return err
+		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	return nil
 }
