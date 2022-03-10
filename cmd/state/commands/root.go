@@ -7,15 +7,18 @@ import (
 	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/internal/debug"
-	"github.com/spf13/cobra"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 var (
 	genesisPath string
 	genesis     *core.Genesis
+	chainConfig *params.ChainConfig
 )
 
 func init() {
@@ -31,10 +34,19 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 
-		genesis = core.DefaultGenesisBlock()
+		genesis, chainConfig = getChainGenesisAndConfig()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)
 		}
+		if genesis.Config != nil && genesis.Config.ChainID.Cmp(chainConfig.ChainID) != 0 {
+			utils.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
+				chainConfig.ChainID.String(), genesis.Config.ChainID.String())
+		}
+		// Apply special hacks for BSC params
+		if chainConfig.Parlia != nil {
+			params.ApplyBinanceSmartChainParams()
+		}
+
 		if chaindata == "" {
 			chaindata = filepath.Join(datadir, "chaindata")
 		}
@@ -56,6 +68,15 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
 	return genesis
+}
+
+func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *params.ChainConfig) {
+	if chain == "" {
+		genesis, chainConfig = core.DefaultGenesisBlock(), params.MainnetChainConfig
+	} else {
+		genesis, chainConfig = core.DefaultGenesisBlockByChainName(chain), params.ChainConfigByChainName(chain)
+	}
+	return genesis, chainConfig
 }
 
 func Execute() {

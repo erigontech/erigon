@@ -19,6 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -34,8 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 const (
@@ -55,6 +56,8 @@ func init() {
 	withBlock(erigon2Cmd)
 	withDataDir(erigon2Cmd)
 	withSnapshotBlocks(erigon2Cmd)
+	withChain(erigon2Cmd)
+
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
@@ -70,7 +73,7 @@ var erigon2Cmd = &cobra.Command{
 			return fmt.Errorf("commitmentFrequency cannot be less than 1 or more than %d: %d", commitmentFrequency, aggregationStep)
 		}
 		logger := log.New()
-		return Erigon2(genesis, logger)
+		return Erigon2(genesis, chainConfig, logger)
 	},
 }
 
@@ -78,7 +81,7 @@ const (
 	logInterval = 30 * time.Second
 )
 
-func Erigon2(genesis *core.Genesis, logger log.Logger) error {
+func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -87,6 +90,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
+
 	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
@@ -116,8 +120,8 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
 	defer agg.Close()
-	chainConfig := genesis.Config
-	vmConfig := vm.Config{}
+
+	var vmConfig vm.Config
 
 	var blockReader interfaces.FullBlockReader
 	if snapshotBlocks {
@@ -164,49 +168,31 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			}
 		}
 	}
-	blockNum := uint64(0)
-	var txNum uint64 = 1
-	trace := false
+
+	logger.Info("Initialised chain configuration", "config", chainConfig)
+
+	var (
+		blockNum uint64 = 0
+		txNum    uint64 = 1
+		trace    bool
+	)
+
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	prevBlock := blockNum
-	prevTime := time.Now()
-	var prevHits, prevMisses uint64
-	var m runtime.MemStats
+
+	statx := &stat{
+		prevBlock: blockNum,
+		prevTime:  time.Now(),
+	}
+
 	for !interrupt {
 		select {
 		default:
 		case <-logEvery.C:
 			aStats := agg.Stats()
-			totalFiles := aStats.AccountsCount + aStats.CodeCount + aStats.StorageCount + aStats.CommitmentCount
-			totalDatSize := aStats.AccountsDatSize + aStats.CodeDatSize + aStats.StorageDatSize + aStats.CommitmentDatSize
-			totalIdxSize := aStats.AccountsIdxSize + aStats.CodeIdxSize + aStats.StorageIdxSize + aStats.CommitmentIdxSize
-			currentTime := time.Now()
-			interval := currentTime.Sub(prevTime)
-			speed := float64(blockNum-prevBlock) / (float64(interval) / float64(time.Second))
-			prevBlock = blockNum
-			prevTime = currentTime
-			hits := aStats.Hits - prevHits
-			misses := aStats.Misses - prevMisses
-			prevHits = aStats.Hits
-			prevMisses = aStats.Misses
-			var hitRatio float64
-			if hits+misses > 0 {
-				hitRatio = float64(hits) / float64(hits+misses)
-			}
-			runtime.ReadMemStats(&m)
-			log.Info("Progress", "block", blockNum, "blk/s", speed, "state files", totalFiles,
-				"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
-				"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
-				"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
-				"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
-				"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
-				"hit ratio", hitRatio, "hits+misses", hits+misses,
-				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
-			)
+			statx.delta(aStats, blockNum).print(aStats, logger)
 		}
 		blockNum++
-		//fmt.Printf("block %d\n", blockNum)
 		trace = traceBlock != 0 && blockNum == uint64(traceBlock)
 		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
 		if err != nil {
@@ -224,6 +210,7 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 		if b == nil {
+			log.Info("history: block is nil", "block", blockNum)
 			break
 		}
 		r := agg.MakeStateReader(blockNum)
@@ -267,10 +254,64 @@ func Erigon2(genesis *core.Genesis, logger log.Logger) error {
 			return err
 		}
 	}
+
+	aStats := agg.Stats()
+	statx.delta(aStats, blockNum).print(aStats, logger)
 	if w != nil {
 		w.Close()
 	}
 	return nil
+}
+
+type stat struct {
+	blockNum     uint64
+	hits         uint64
+	misses       uint64
+	prevBlock    uint64
+	prevMisses   uint64
+	prevHits     uint64
+	hitMissRatio float64
+	speed        float64
+	prevTime     time.Time
+	mem          runtime.MemStats
+}
+
+func (s *stat) print(aStats aggregator.FilesStats, logger log.Logger) {
+	totalFiles := aStats.AccountsCount + aStats.CodeCount + aStats.StorageCount + aStats.CommitmentCount
+	totalDatSize := aStats.AccountsDatSize + aStats.CodeDatSize + aStats.StorageDatSize + aStats.CommitmentDatSize
+	totalIdxSize := aStats.AccountsIdxSize + aStats.CodeIdxSize + aStats.StorageIdxSize + aStats.CommitmentIdxSize
+
+	logger.Info("Progress", "block", s.blockNum, "blk/s", s.speed, "state files", totalFiles,
+		"accounts", libcommon.ByteCount(uint64(aStats.AccountsDatSize+aStats.AccountsIdxSize)),
+		"code", libcommon.ByteCount(uint64(aStats.CodeDatSize+aStats.CodeIdxSize)),
+		"storage", libcommon.ByteCount(uint64(aStats.StorageDatSize+aStats.StorageIdxSize)),
+		"commitment", libcommon.ByteCount(uint64(aStats.CommitmentDatSize+aStats.CommitmentIdxSize)),
+		"total dat", libcommon.ByteCount(uint64(totalDatSize)), "total idx", libcommon.ByteCount(uint64(totalIdxSize)),
+		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
+		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
+	)
+}
+
+func (s *stat) delta(aStats aggregator.FilesStats, blockNum uint64) *stat {
+	currentTime := time.Now()
+	runtime.ReadMemStats(&s.mem)
+
+	interval := currentTime.Sub(s.prevTime).Seconds()
+	s.blockNum = blockNum
+	s.speed = float64(s.blockNum-s.prevBlock) / interval
+	s.prevBlock = blockNum
+	s.prevTime = currentTime
+
+	s.hits = aStats.Hits - s.prevHits
+	s.misses = aStats.Misses - s.prevMisses
+	s.prevHits = aStats.Hits
+	s.prevMisses = aStats.Misses
+
+	total := s.hits + s.misses
+	if total > 0 {
+		s.hitMissRatio = float64(s.hits) / float64(total)
+	}
+	return s
 }
 
 func runBlock2(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWrapper, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
