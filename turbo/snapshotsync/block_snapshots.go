@@ -837,7 +837,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
 	}
 	if err := f.Compress(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("compress: %w", err)
 	}
 
 	_, fileName := filepath.Split(segmentFile)
@@ -901,7 +901,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		return err
 	}
 	if err := f.Compress(); err != nil {
-		return fmt.Errorf("Compress: %w", err)
+		return fmt.Errorf("compress: %w", err)
 	}
 
 	return nil
@@ -956,7 +956,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		return err
 	}
 	if err := f.Compress(); err != nil {
-		return err
+		return fmt.Errorf("compress: %w", err)
 	}
 
 	return nil
