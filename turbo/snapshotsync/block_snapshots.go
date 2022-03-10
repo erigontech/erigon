@@ -734,7 +734,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 		if tv == nil {
 			if err := f.AddWord(nil); err != nil {
-				return err
+				return fmt.Errorf("AddWord1: %d", err)
 			}
 			return nil
 		}
@@ -745,7 +745,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return err
 		}
 		if err := f.AddWord(valueBuf); err != nil {
-			return err
+			return fmt.Errorf("AddWord2: %d", err)
 		}
 		return nil
 	}
