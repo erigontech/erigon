@@ -269,6 +269,10 @@ func (s *GrpcServer) Transactions(ctx context.Context, in *txpool_proto.Transact
 		if err != nil {
 			return nil, err
 		}
+		if txnRlp == nil {
+			reply.RlpTxs[i] = []byte{}
+			continue
+		}
 		reply.RlpTxs[i] = txnRlp
 	}
 
