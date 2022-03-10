@@ -271,6 +271,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
+			fmt.Println("eth.go")
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}

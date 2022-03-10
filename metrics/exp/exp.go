@@ -46,6 +46,7 @@ func ExpHandler(r metrics.Registry) http.Handler {
 // This function enables metrics reporting separate from pprof.
 func Setup(address string) {
 	http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		metrics2.WritePrometheus(w, true)
 	})
 	//m.Handle("/debug/metrics", ExpHandler(metrics.DefaultRegistry))

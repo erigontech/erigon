@@ -241,6 +241,7 @@ func StartPProf(address string, withMetrics bool) {
 	// from the registry into expvar, and execute regular expvar handler.
 	if withMetrics {
 		http.HandleFunc("/debug/metrics/prometheus", func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 			metrics2.WritePrometheus(w, true)
 		})
 	}
