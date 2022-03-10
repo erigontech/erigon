@@ -730,7 +730,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		binary.BigEndian.PutUint64(numBuf, txId)
 		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
 		if err != nil {
-			panic(err)
 			return err
 		}
 		if tv == nil {
@@ -743,7 +742,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		parseCtx.WithSender(false)
 		valueBuf, err = parse(tv, valueBuf, nil, 0)
 		if err != nil {
-			panic(err)
 			return err
 		}
 		if err := f.AddWord(valueBuf); err != nil {
@@ -765,25 +763,18 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		h := common.BytesToHash(v)
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		if dataRLP == nil {
-			tx.ForAmount(kv.BlockBody, nil, 10, func(k, v []byte) error {
-				fmt.Printf("found: %d,%x\n", binary.BigEndian.Uint64(k), k[8:])
-				return nil
-			})
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
 		}
 		var body types.BodyForStorage
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
-			panic(e)
 			return false, e
 		}
 		lastBody = body
 		if body.TxAmount == 0 {
-			panic(err)
 			return true, nil
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
-			panic(err)
 			return false, err
 		}
 
@@ -794,7 +785,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		j := 0
 
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
-			panic(err)
 			return false, err
 		}
 		count++
