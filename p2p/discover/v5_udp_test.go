@@ -807,7 +807,7 @@ func (test *udpV5Test) waitPacketOut(validate interface{}) (closed bool) {
 	codec := &testCodec{test: test, id: ln.ID()}
 	frame, p, err := codec.decodeFrame(dgram.data)
 	if err != nil {
-		test.t.Errorf("sent packet decode error: %w", err)
+		test.t.Errorf("sent packet decode error: %s", err)
 		return false
 	}
 	if !reflect.TypeOf(p).AssignableTo(exptype) {
