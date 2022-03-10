@@ -456,7 +456,7 @@ func verifyAndSaveNewPoSHeader(
 }
 
 func downloadMissingPoSHeaders(
-	hashToDownloadPoS common.Hash,
+	hashToDownload common.Hash,
 	heightToDownload uint64,
 	s *StageState,
 	ctx context.Context,
@@ -470,11 +470,10 @@ func downloadMissingPoSHeaders(
 		return
 	}
 
-	cfg.hd.SetFetching(true)
-	cfg.hd.SetHashToDownloadPoS(hashToDownloadPoS)
+	cfg.hd.SetHashToDownloadPoS(hashToDownload)
 	cfg.hd.SetHeightToDownloadPoS(heightToDownload)
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownloadPoS)
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
 
 	stopped := false
 	prevProgress := uint64(0)
@@ -486,7 +485,6 @@ func downloadMissingPoSHeaders(
 	defer func() {
 		cfg.hd.SetHeadersCollector(nil)
 		cfg.hd.Unsync()
-		cfg.hd.SetFetching(false)
 	}()
 
 	logEvery := time.NewTicker(logInterval)
@@ -497,7 +495,6 @@ func downloadMissingPoSHeaders(
 		sentToPeer := false
 		maxRequests := 4096
 		for !sentToPeer && !stopped && maxRequests != 0 {
-			// TODO(yperbasis): handle the case when are not able to sync a chain
 			req = cfg.hd.RequestMoreHeadersForPOS()
 			_, sentToPeer = cfg.headerReqSend(ctx, &req)
 			maxRequests--
@@ -526,7 +523,8 @@ func downloadMissingPoSHeaders(
 		// Cleanup timer
 		timer.Stop()
 	}
-	// If the user stopped it, we don't update anything
+
+	// TODO(yperbasis): handle the case when we are not able to sync a chain
 	if !cfg.hd.Synced() {
 		return
 	}

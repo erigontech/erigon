@@ -105,7 +105,7 @@ type Anchor struct {
 	links         []*Link     // Links attached immediately to this anchor
 	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
-	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is neeeded
+	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
 	timeouts      int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
 	idx           int    // Index of the anchor in the queue to be able to modify specific items
 }
@@ -120,7 +120,7 @@ type Anchor struct {
 // As anchors are moved around in the binary heap, they internally track their
 // position in the heap (using `idx` field). This feature allows updating
 // the heap (using `Fix` function) in situations when anchor is accessed not
-// throught the priority queue, but through the map `anchor` in the
+// through the priority queue, but through the map `anchor` in the
 // HeaderDownloader type.
 type AnchorQueue []*Anchor
 
