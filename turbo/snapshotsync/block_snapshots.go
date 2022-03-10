@@ -701,7 +701,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	f, err := compress.NewCompressor(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("NewCompressor: %w, %s", err, segmentFile)
 	}
 	defer f.Close()
 
@@ -901,7 +901,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		return err
 	}
 	if err := f.Compress(); err != nil {
-		return err
+		return fmt.Errorf("Compress: %w", err)
 	}
 
 	return nil
