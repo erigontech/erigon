@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	stack2 "github.com/go-stack/stack"
@@ -52,6 +53,7 @@ type MdbxOpts struct {
 	mapSize       datasize.ByteSize
 	flags         uint
 	log           log.Logger
+	syncPeriod    time.Duration
 	augumentLimit uint64
 	pageSize      uint64
 	roTxsLimiter  chan struct{}
@@ -121,6 +123,11 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 
 func (opts MdbxOpts) Readonly() MdbxOpts {
 	opts.flags = opts.flags | mdbx.Readonly
+	return opts
+}
+
+func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts {
+	opts.syncPeriod = period
 	return opts
 }
 
@@ -225,6 +232,15 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+
+	if opts.syncPeriod != 0 {
+		// the option value is in 1/65536 of second units
+		optValue := uint64(opts.syncPeriod / (time.Second / 65536))
+		if err = env.SetOption(mdbx.OptSyncPeriod, optValue); err != nil {
+			env.Close()
+			return nil, err
+		}
 	}
 
 	if opts.roTxsLimiter == nil {
