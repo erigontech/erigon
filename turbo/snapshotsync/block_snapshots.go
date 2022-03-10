@@ -821,7 +821,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			}
 			return nil
 		}); err != nil {
-			return false, err
+			return false, fmt.Errorf("ForAmount: %w", err)
 		}
 
 		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
@@ -831,7 +831,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		count++
 		return true, nil
 	}); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
 	if lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID != count {
 		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
