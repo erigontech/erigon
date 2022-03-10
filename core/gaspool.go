@@ -41,6 +41,7 @@ func (gp *GasPool) SubGas(amount uint64) error {
 		return ErrGasLimitReached
 	}
 	*(*uint64)(gp) -= amount
+	fmt.Println()
 	return nil
 }
 

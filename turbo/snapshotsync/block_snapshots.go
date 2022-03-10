@@ -44,6 +44,7 @@ type BlocksSnapshot struct {
 	BodyNumberIdx       *recsplit.Index        // block_num_u64     -> bodies_segment_offset
 	HeaderHashIdx       *recsplit.Index        // header_hash       -> headers_segment_offset
 	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
+	TxnIdsIdx           *recsplit.Index        // transaction_id    -> transactions_segment_offset
 	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
 
 	From, To uint64 // [from,to)
@@ -59,6 +60,7 @@ const (
 
 const (
 	Transactions2Block Type = "transactions-to-block"
+	TransactionsId     Type = "transactions-id"
 )
 
 var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
@@ -168,6 +170,15 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					bs.TxnHashIdx = nil
 				}
 				bs.TxnHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions)))
+				if err != nil {
+					return err
+				}
+
+				if bs.TxnIdsIdx != nil {
+					bs.TxnIdsIdx.Close()
+					bs.TxnIdsIdx = nil
+				}
+				bs.TxnIdsIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, TransactionsId)))
 				if err != nil {
 					return err
 				}
@@ -295,6 +306,9 @@ func (s *RoSnapshots) closeIndices() {
 		}
 		if s.TxnHashIdx != nil {
 			s.TxnHashIdx.Close()
+		}
+		if s.TxnIdsIdx != nil {
+			s.TxnIdsIdx.Close()
 		}
 		if s.TxnHash2BlockNumIdx != nil {
 			s.TxnHash2BlockNumIdx.Close()
@@ -658,20 +672,21 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, t
 	return nil
 }
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
-	segmentFile := filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Bodies))
+	segmentFile := filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Transactions))
+	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
+		return fmt.Errorf("DumpTxs: %w", err)
+	}
+
+	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Bodies))
 	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return err
+		return fmt.Errorf("DumpBodies: %w", err)
 	}
 
 	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Headers))
 	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return err
+		return fmt.Errorf("DumpHeaders: %w", err)
 	}
 
-	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Transactions))
-	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -686,7 +701,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	f, err := compress.NewCompressor(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("NewCompressor: %w, %s", err, segmentFile)
 	}
 	defer f.Close()
 
@@ -695,13 +710,50 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	parseCtx := txpool.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
 	slot := txpool.TxSlot{}
+	var sender [20]byte
+	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
+		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
+			return valueBuf, err
+		}
+		if len(senders) > 0 {
+			sender = senders[j]
+		}
+
+		valueBuf = valueBuf[:0]
+		valueBuf = append(valueBuf, slot.IdHash[:1]...)
+		valueBuf = append(valueBuf, sender[:]...)
+		valueBuf = append(valueBuf, v...)
+		return valueBuf, nil
+	}
 	valueBuf := make([]byte, 16*4096)
+	addSystemTx := func(tx kv.Tx, txId uint64) error {
+		binary.BigEndian.PutUint64(numBuf, txId)
+		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
+		if err != nil {
+			return err
+		}
+		if tv == nil {
+			if err := f.AddWord(nil); err != nil {
+				return fmt.Errorf("AddWord1: %d", err)
+			}
+			return nil
+		}
+
+		parseCtx.WithSender(false)
+		valueBuf, err = parse(tv, valueBuf, nil, 0)
+		if err != nil {
+			return err
+		}
+		if err := f.AddWord(valueBuf); err != nil {
+			return fmt.Errorf("AddWord2: %d", err)
+		}
+		return nil
+	}
 
 	firstIDSaved := false
 
 	from := dbutils.EncodeBlockNumber(blockFrom)
 	var lastBody types.BodyForStorage
-	var sender [20]byte
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
 		if blockNum >= blockTo {
@@ -710,6 +762,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 		h := common.BytesToHash(v)
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
+		if dataRLP == nil {
+			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
+		}
 		var body types.BodyForStorage
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
 			return false, e
@@ -723,31 +778,33 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, err
 		}
 
-		binary.BigEndian.PutUint64(numBuf, body.BaseTxId)
-
 		if !firstIDSaved {
 			firstIDSaved = true
 			firstTxID = body.BaseTxId
 		}
 		j := 0
-		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount, func(tk, tv []byte) error {
+
+		if err := addSystemTx(tx, body.BaseTxId); err != nil {
+			return false, err
+		}
+		count++
+		if prevTxID > 0 {
+			prevTxID++
+		} else {
+			prevTxID = body.BaseTxId
+		}
+		binary.BigEndian.PutUint64(numBuf, body.BaseTxId+1)
+		if err := tx.ForAmount(kv.EthTx, numBuf[:8], body.TxAmount-2, func(tk, tv []byte) error {
 			id := binary.BigEndian.Uint64(tk)
 			if prevTxID != 0 && id != prevTxID+1 {
 				panic(fmt.Sprintf("no gaps in tx ids are allowed: block %d does jump from %d to %d", blockNum, prevTxID, id))
 			}
 			prevTxID = id
 			parseCtx.WithSender(len(senders) == 0)
-			if _, err := parseCtx.ParseTransaction(tv, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
+			valueBuf, err = parse(tv, valueBuf, senders, j)
+			if err != nil {
 				return err
 			}
-			if len(senders) > 0 {
-				sender = senders[j]
-			}
-
-			valueBuf = valueBuf[:0]
-			valueBuf = append(valueBuf, slot.IdHash[:1]...)
-			valueBuf = append(valueBuf, sender[:]...)
-			valueBuf = append(valueBuf, tv...)
 			if err := f.AddWord(valueBuf); err != nil {
 				return err
 			}
@@ -767,17 +824,23 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			}
 			return nil
 		}); err != nil {
+			return false, fmt.Errorf("ForAmount: %w", err)
+		}
+
+		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
 			return false, err
 		}
+		prevTxID++
+		count++
 		return true, nil
 	}); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
 	if lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID != count {
 		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
 	}
 	if err := f.Compress(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("compress: %w", err)
 	}
 
 	_, fileName := filepath.Split(segmentFile)
@@ -841,7 +904,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 		return err
 	}
 	if err := f.Compress(); err != nil {
-		return err
+		return fmt.Errorf("compress: %w", err)
 	}
 
 	return nil
@@ -896,11 +959,13 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 		return err
 	}
 	if err := f.Compress(); err != nil {
-		return err
+		return fmt.Errorf("compress: %w", err)
 	}
 
 	return nil
 }
+
+var EmptyTxHash = common.Hash{}
 
 func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSnapshot, firstTxID, firstBlockNum, expectedCount uint64, segmentFilePath, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
 	dir, _ := filepath.Split(segmentFilePath)
@@ -914,8 +979,8 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 	buf := make([]byte, 1024)
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
+		KeyCount:   d.Count() - d.EmptyWordsCount(),
+		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
@@ -925,9 +990,21 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 	if err != nil {
 		return err
 	}
-	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+	txnIdIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
-		Enums:      true,
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, TransactionsId)),
+		BaseDataID: firstTxID,
+	})
+	if err != nil {
+		return err
+	}
+	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   d.Count() - d.EmptyWordsCount(),
+		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
@@ -940,12 +1017,14 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 
 RETRY:
 	txnHashIdx.NoLogs(true)
+	txnIdIdx.NoLogs(true)
 	txnHash2BlockNumIdx.NoLogs(true)
 
 	ch := forEachAsync(ctx, d)
 	type txHashWithOffet struct {
 		txnHash   [32]byte
 		i, offset uint64
+		empty     bool // block may have empty txn in the beginning or end of block. such txs have no hash, but have ID
 		err       error
 	}
 	txsCh := make(chan txHashWithOffet, 1024)
@@ -963,6 +1042,12 @@ RETRY:
 				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
+			if len(it.word) == 0 {
+				txsCh <- txHashWithOffet{empty: true, i: it.i, offset: it.offset}
+				txsCh2 <- txHashWithOffet{empty: true, i: it.i, offset: it.offset}
+				continue
+			}
+
 			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
 				txsCh <- txHashWithOffet{err: it.err}
 				txsCh2 <- txHashWithOffet{err: it.err}
@@ -974,8 +1059,9 @@ RETRY:
 	}()
 
 	wg := sync.WaitGroup{}
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	defer close(errCh)
+	num := make([]byte, 8)
 
 	wg.Add(1)
 	go func() {
@@ -987,8 +1073,18 @@ RETRY:
 				errCh <- it.err
 				return
 			}
+			j++
+			binary.BigEndian.PutUint64(num, it.i)
+			if err := txnIdIdx.AddKey(num, it.offset); err != nil {
+				errCh <- it.err
+				return
+			}
+			if it.empty {
+				continue
+			}
 			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
 				errCh <- it.err
+				return
 			}
 
 			select {
@@ -997,14 +1093,22 @@ RETRY:
 				return
 			default:
 			}
-			j++
 		}
 
 		if j != expectedCount {
 			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
 		}
 
-		errCh <- txnHashIdx.Build()
+		if err := txnHashIdx.Build(); err != nil {
+			errCh <- fmt.Errorf("txnHashIdx: %w", err)
+		} else {
+			errCh <- nil
+		}
+		if err := txnIdIdx.Build(); err != nil {
+			errCh <- fmt.Errorf("txnIdIdx: %w", err)
+		} else {
+			errCh <- nil
+		}
 	}()
 	wg.Add(1)
 	go func() {
@@ -1034,6 +1138,10 @@ RETRY:
 					blockNum++
 				}
 
+				if it.empty {
+					continue
+				}
+
 				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
 					return err
 				}
@@ -1053,17 +1161,22 @@ RETRY:
 			errCh <- err
 			return
 		}
-		errCh <- txnHash2BlockNumIdx.Build()
+		if err := txnHash2BlockNumIdx.Build(); err != nil {
+			errCh <- fmt.Errorf("txnHash2BlockNumIdx: %w", err)
+		} else {
+			errCh <- nil
+		}
 	}()
 
 	wg.Wait()
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		err = <-errCh
 		if err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 				txnHashIdx.ResetNextSalt()
+				txnIdIdx.ResetNextSalt()
 				txnHash2BlockNumIdx.ResetNextSalt()
 				goto RETRY
 			}

@@ -67,6 +67,6 @@ func (b adapterHandler) Handle(r lg.Record) {
 
 		log.Error(str)
 	default:
-		log.Warn("unknown logtype", "msg", r.String())
+		log.Debug(r.String(), "log_type", "unknown")
 	}
 }

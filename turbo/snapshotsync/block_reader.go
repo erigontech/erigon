@@ -3,6 +3,7 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 
@@ -346,14 +347,17 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.TxnHashIdx.BaseDataID(), sn.Transactions.FilePath())
 	}
 
-	txs := make([]types.Transaction, b.TxAmount)
-	senders = make([]common.Address, b.TxAmount)
-	if b.TxAmount > 0 {
-		txnOffset := sn.TxnHashIdx.Lookup2(b.BaseTxId - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
+	txs := make([]types.Transaction, b.TxAmount-2)
+	senders = make([]common.Address, b.TxAmount-2)
+	if b.TxAmount > 2 {
+		r := recsplit.NewIndexReader(sn.TxnIdsIdx)
+		binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-sn.TxnIdsIdx.BaseDataID())
+		txnOffset := r.Lookup(buf[:8])
 		gg = sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
-		for i := uint32(0); i < b.TxAmount; i++ {
+		buf, _ = gg.Next(buf[:0]) //first system-tx
+		for i := uint32(0); i < b.TxAmount-2; i++ {
 			buf, _ = gg.Next(buf[:0])
 			senders[i].SetBytes(buf[1 : 1+20])
 			txRlp := buf[1+20:]
@@ -429,7 +433,7 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 
 	body := new(types.Body)
 	body.Uncles = b.Uncles
-	return body, b.BaseTxId, b.TxAmount, nil
+	return body, b.BaseTxId + 1, b.TxAmount - 2, nil // empty txs in the beginning and end of block
 }
 
 func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeight uint64, sn *BlocksSnapshot, buf []byte) (*types.Body, []common.Address, uint64, uint32, error) {
@@ -441,7 +445,9 @@ func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeig
 	senders := make([]common.Address, txsAmount)
 	reader := bytes.NewReader(buf)
 	if txsAmount > 0 {
-		txnOffset := sn.TxnHashIdx.Lookup2(baseTxnID - sn.TxnHashIdx.BaseDataID()) // need subtract baseID of indexFile
+		r := recsplit.NewIndexReader(sn.TxnIdsIdx)
+		binary.BigEndian.PutUint64(buf[:8], baseTxnID-sn.TxnIdsIdx.BaseDataID())
+		txnOffset := r.Lookup(buf[:8])
 		gg := sn.Transactions.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
@@ -467,9 +473,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		sn := back.sn.blocks[i]
 
 		reader := recsplit.NewIndexReader(sn.TxnHashIdx)
-		localID := reader.Lookup(txnHash[:])
-		txnID = localID + sn.TxnHashIdx.BaseDataID()
-		offset := sn.TxnHashIdx.Lookup2(localID)
+		offset := reader.Lookup(txnHash[:])
 		gg := sn.Transactions.MakeGetter()
 		gg.Reset(offset)
 		//fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
@@ -480,10 +484,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 		}
 
 		reader2 := recsplit.NewIndexReader(sn.TxnHash2BlockNumIdx)
-		localID = reader2.Lookup(txnHash[:])
-		blockNum = sn.TxnHash2BlockNumIdx.Lookup2(localID)
-		//fmt.Printf("try2: %d,%d,%d,%d,%d,%d\n", sn.TxnHash2BlockNumIdx.Lookup2(0), sn.TxnHash2BlockNumIdx.Lookup2(1), sn.TxnHash2BlockNumIdx.Lookup2(2), sn.TxnHash2BlockNumIdx.Lookup2(3), sn.TxnHash2BlockNumIdx.Lookup2(4), sn.TxnHash2BlockNumIdx.Lookup2(5))
-		//fmt.Printf("try3: %d,%d,%d,%d\n", sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xc2c3ba07f05ddd8552508e7facf25dc5bd6d16e95c12cff42cb8b9ea6bbfc225")), sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xca8a182f21b98318e94ec7884f572c0a1385dbc10a2bea62a38079eab7d8cfef")), sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xf1b3306dd4bfa2a86f7f1b3c22bf0b6b4da50f5d37f2fed89d1221cb3690c700")), sn.TxnHash2BlockNumIdx.Lookup(common.FromHex("0xf59129e464525261217833d4bafae0ed8be5a94044eafacb47a45a4b23802a70")))
+		blockNum = reader2.Lookup(txnHash[:])
 		sender := buf[1 : 1+20]
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {

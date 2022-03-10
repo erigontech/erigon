@@ -36,14 +36,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params/networkname"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -965,9 +964,12 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
 		// --dev mode can't use p2p networking.
 		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
-		cfg.ListenAddr = ":0"
+		if !ctx.GlobalIsSet(ListenPortFlag.Name) {
+			cfg.ListenAddr = ":0"
+		}
 		cfg.NoDiscovery = true
 		cfg.DiscoveryV5 = false
+		log.Info("Development chain flags set", "--nodiscover", cfg.NoDiscovery, "--v5disc", cfg.DiscoveryV5, "--port", cfg.ListenAddr)
 	}
 }
 
@@ -1383,7 +1385,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.ImportMode = true
 	}
 
-	CheckExclusive(ctx, MinerSigningKeyFileFlag, MinerEtherbaseFlag)
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
