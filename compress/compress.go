@@ -210,7 +210,7 @@ type CompressorSequential struct {
 	uncovered   []int                       // Buffer of intervals that are not covered by patterns
 	posMap      map[uint64]uint64           // Counter of use for each position within compressed word (for building huffman code for positions)
 
-	wordsCount uint64
+	wordsCount, emptyWordsCount uint64
 }
 
 // superstringLimit limits how large can one "superstring" get before it is processed
@@ -663,6 +663,9 @@ func NewCompressorSequential(logPrefix, outputFile string, tmpDir string, minPat
 // AddWord needs to be called repeatedly to provide all the superstrings to compress
 func (c *CompressorSequential) AddWord(word []byte) error {
 	c.wordsCount++
+	if len(word) == 0 {
+		c.emptyWordsCount++
+	}
 	if len(c.superstring)+2*len(word)+2 > superstringLimit {
 		// Adding this word would make superstring go over the limit
 		if err := c.processSuperstring(); err != nil {
@@ -955,8 +958,12 @@ func (c *CompressorSequential) optimiseCodes() error {
 	defer cf.Sync()
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
 	defer cw.Flush()
-	// 1-st, output amount of superstrings in file
+	// 1-st, output amount of words and emptyWords in file
 	binary.BigEndian.PutUint64(c.numBuf[:], c.wordsCount)
+	if _, err = cw.Write(c.numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(c.numBuf[:], c.emptyWordsCount)
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}

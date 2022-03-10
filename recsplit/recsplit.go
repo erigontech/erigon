@@ -202,8 +202,12 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.keysAdded = 0
 	rs.salt++
 	rs.hasher = murmur3.New128WithSeed(rs.salt)
+	if rs.bucketCollector != nil {
+		rs.bucketCollector.Close()
+	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	if rs.offsetCollector != nil {
+		rs.offsetCollector.Close()
 		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	}
 	rs.currentBucket = rs.currentBucket[:0]

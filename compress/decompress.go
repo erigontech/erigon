@@ -47,8 +47,9 @@ type Decompressor struct {
 	dict           *huffmanNodePattern
 	posDict        *huffmanNodePos
 	wordsStart     uint64 // Offset of whether the superstrings actually start
-	count          uint64
 	size           int64
+
+	wordsCount, emptyWordsCount uint64
 }
 
 func NewDecompressor(compressedFile string) (*Decompressor, error) {
@@ -65,22 +66,23 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 		return nil, err
 	}
 	d.size = stat.Size()
-	if d.size < 24 {
+	if d.size < 40 {
 		return nil, fmt.Errorf("compressed file is too short: %d", d.size)
 	}
 	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
 	d.data = d.mmapHandle1[:d.size]
-	d.count = binary.BigEndian.Uint64(d.data[:8])
-	dictSize := binary.BigEndian.Uint64(d.data[8:16])
-	rootOffset := binary.BigEndian.Uint64(d.data[16:24])
-	cutoff := binary.BigEndian.Uint64(d.data[24:32])
-	data := d.data[32 : 32+dictSize]
+	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
+	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
+	dictSize := binary.BigEndian.Uint64(d.data[16:24])
+	rootOffset := binary.BigEndian.Uint64(d.data[24:32])
+	cutoff := binary.BigEndian.Uint64(d.data[32:40])
+	data := d.data[40 : 40+dictSize]
 	if dictSize > 0 {
 		d.dict = buildHuffmanPattern(data, rootOffset, cutoff)
 	}
-	pos := 32 + dictSize
+	pos := 40 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
 	rootOffset = binary.BigEndian.Uint64(d.data[pos+8 : pos+16])
 	cutoff = binary.BigEndian.Uint64(d.data[pos+16 : pos+24])
@@ -204,7 +206,8 @@ func (g *Getter) nextPattern() []byte {
 	return node.pattern
 }
 
-func (d *Decompressor) Count() int { return int(d.count) }
+func (d *Decompressor) Count() int           { return int(d.wordsCount) }
+func (d *Decompressor) EmptyWordsCount() int { return int(d.emptyWordsCount) }
 
 // MakeGetter creates an object that can be used to access superstrings in the decompressor's file
 // Getter is not thread-safe, but there can be multiple getters used simultaneously and concurrently

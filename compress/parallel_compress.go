@@ -303,7 +303,7 @@ func reducedict(trace bool, logPrefix, segmentFilePath, tmpDir string, datFile *
 	defer intermediateFile.Close()
 	intermediateW := bufio.NewWriterSize(intermediateFile, etl.BufIOSize)
 
-	var inCount, outCount uint64 // Counters words sent to compression and returned for compression
+	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
 	if err = datFile.ForEach(func(v []byte, compression bool) error {
 		if workers > 1 {
@@ -387,6 +387,10 @@ func reducedict(trace bool, logPrefix, segmentFilePath, tmpDir string, datFile *
 			uncompPosMap[0]++
 		}
 		inCount++
+		if len(v) == 0 {
+			emptyWordsCount++
+		}
+
 		select {
 		default:
 		case <-logEvery.C:
@@ -512,8 +516,12 @@ func reducedict(trace bool, logPrefix, segmentFilePath, tmpDir string, datFile *
 		return err
 	}
 	cw := bufio.NewWriterSize(cf, etl.BufIOSize)
-	// 1-st, output dictionary
+	// 1-st, output amount of words - just a useful metadata
 	binary.BigEndian.PutUint64(numBuf[:], inCount) // Dictionary size
+	if _, err = cw.Write(numBuf[:8]); err != nil {
+		return err
+	}
+	binary.BigEndian.PutUint64(numBuf[:], emptyWordsCount)
 	if _, err = cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
