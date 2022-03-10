@@ -235,9 +235,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.syncPeriod != 0 {
-		// the option value is in 1/65536 of second units
-		optValue := uint64(opts.syncPeriod / (time.Second / 65536))
-		if err = env.SetOption(mdbx.OptSyncPeriod, optValue); err != nil {
+		if err = env.SetSyncPeriod(opts.syncPeriod); err != nil {
 			env.Close()
 			return nil, err
 		}
