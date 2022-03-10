@@ -305,6 +305,7 @@ func (tab *Table) doRefresh(done chan struct{}) {
 
 func (tab *Table) loadSeedNodes() {
 	seeds := wrapNodes(tab.db.QuerySeeds(seedCount, seedMaxAge))
+	tab.log.Debug("QuerySeeds read nodes from the node DB", "count", len(seeds))
 	seeds = append(seeds, tab.nursery...)
 	for i := range seeds {
 		seed := seeds[i]
