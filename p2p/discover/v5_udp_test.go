@@ -755,7 +755,7 @@ func (test *udpV5Test) packetInFrom(key *ecdsa.PrivateKey, addr *net.UDPAddr, pa
 	codec := &testCodec{test: test, id: ln.ID()}
 	enc, _, err := codec.Encode(test.udp.Self().ID(), addr.String(), packet, nil)
 	if err != nil {
-		test.t.Errorf("%s encode error: %w", packet.Name(), err)
+		test.t.Errorf("%s encode error: %s", packet.Name(), err)
 	}
 	if test.udp.dispatchReadPacket(addr, enc) {
 		<-test.udp.readNextCh // unblock UDPv5.dispatch
@@ -807,7 +807,7 @@ func (test *udpV5Test) waitPacketOut(validate interface{}) (closed bool) {
 	codec := &testCodec{test: test, id: ln.ID()}
 	frame, p, err := codec.decodeFrame(dgram.data)
 	if err != nil {
-		test.t.Errorf("sent packet decode error: %w", err)
+		test.t.Errorf("sent packet decode error: %s", err)
 		return false
 	}
 	if !reflect.TypeOf(p).AssignableTo(exptype) {
