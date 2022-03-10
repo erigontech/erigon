@@ -35,6 +35,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
+
+	mdbx1 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 // Keys in the node database.
@@ -110,7 +112,14 @@ func newMemoryDB(logger log.Logger) (*DB, error) {
 func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	var db kv.RwDB
 	var err error
-	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(1024 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
+	db, err = mdbx.NewMDBX(logger).
+		Path(path).
+		Label(kv.SentryDB).
+		WithTablessCfg(bucketsConfig).
+		MapSize(1024 * datasize.MB).
+		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
+		Open()
 	if err != nil {
 		return nil, err
 	}
