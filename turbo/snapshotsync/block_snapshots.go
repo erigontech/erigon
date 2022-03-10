@@ -766,14 +766,17 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		var body types.BodyForStorage
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
+			panic(e)
 			return false, e
 		}
 		lastBody = body
 		if body.TxAmount == 0 {
+			panic(err)
 			return true, nil
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
+			panic(err)
 			return false, err
 		}
 
@@ -784,6 +787,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		j := 0
 
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
+			panic(err)
 			return false, err
 		}
 		count++
@@ -827,6 +831,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 
 		if err := addSystemTx(tx, body.BaseTxId+uint64(body.TxAmount)-1); err != nil {
+			panic(err)
 			return false, err
 		}
 		prevTxID++
