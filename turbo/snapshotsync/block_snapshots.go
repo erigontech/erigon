@@ -730,6 +730,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		binary.BigEndian.PutUint64(numBuf, txId)
 		tv, err := tx.GetOne(kv.EthTx, numBuf[:8])
 		if err != nil {
+			panic(err)
 			return err
 		}
 		if tv == nil {
@@ -742,6 +743,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		parseCtx.WithSender(false)
 		valueBuf, err = parse(tv, valueBuf, nil, 0)
 		if err != nil {
+			panic(err)
 			return err
 		}
 		if err := f.AddWord(valueBuf); err != nil {
