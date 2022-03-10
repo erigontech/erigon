@@ -765,6 +765,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		h := common.BytesToHash(v)
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		if dataRLP == nil {
+			tx.ForAmount(kv.BlockBody, nil, 10, func(k, v []byte) error {
+				fmt.Printf("found: %d,%x\n", binary.BigEndian.Uint64(k), k[8:])
+				return nil
+			})
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
 		}
 		var body types.BodyForStorage
