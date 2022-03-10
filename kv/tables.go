@@ -282,7 +282,12 @@ const (
 	// Proof-of-stake
 	// Beacon chain head that is been executed at the current time
 	CurrentExecutionPayload = "CurrentExecutionPayload"
-	// this bucket stored in separated database
+
+	// Node database tables (see nodedb.go)
+
+	// NodeRecords stores P2P node records (ENR)
+	NodeRecords = "NodeRecord"
+	// Inodes stores P2P discovery service info about the nodes
 	Inodes = "Inode"
 
 	// Transaction senders - stored separately from the block bodies
