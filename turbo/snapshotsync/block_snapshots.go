@@ -674,17 +674,17 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, t
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapshotDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
 	segmentFile := filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Transactions))
 	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return fmt.Errorf("DumpTxs: %w\n", err)
+		return fmt.Errorf("DumpTxs: %w", err)
 	}
 
 	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Bodies))
 	if err := DumpBodies(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return fmt.Errorf("DumpBodies: %w\n", err)
+		return fmt.Errorf("DumpBodies: %w", err)
 	}
 
 	segmentFile = filepath.Join(snapshotDir, SegmentFileName(blockFrom, blockTo, Headers))
 	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return fmt.Errorf("DumpHeaders: %w\n", err)
+		return fmt.Errorf("DumpHeaders: %w", err)
 	}
 
 	return nil
