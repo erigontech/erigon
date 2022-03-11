@@ -177,7 +177,7 @@ func HeadersPOS(
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
-	interrupted, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest()
+	interrupted, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForNewRequest()
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	if interrupted {
@@ -252,7 +252,7 @@ func handleForkChoice(
 	}
 
 	if header == nil {
-		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.Syncing)
+		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
@@ -357,7 +357,7 @@ func handleNewPayload(
 	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
 
 	if parent == nil {
-		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.Syncing)
+		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}

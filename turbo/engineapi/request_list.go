@@ -26,8 +26,7 @@ type RequestStatus int
 
 const ( // RequestStatus values
 	New = iota
-	Syncing
-	Synced
+	DataWasMissing
 )
 
 type RequestWithStatus struct {
@@ -38,7 +37,7 @@ type RequestWithStatus struct {
 type RequestList struct {
 	requestId int
 	requests  *treemap.Map // map[int]*RequestWithStatus
-	interrupt bool
+	interrupt bool         // TODO(yperbasis): interruption type (Sync Finished, Skip Cycle, Stopped)
 	syncCond  *sync.Cond
 }
 
@@ -54,11 +53,12 @@ func (rl *RequestList) AddPayloadRequest(message *PayloadMessage) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
+	rl.requestId++
+
 	rl.requests.Put(rl.requestId, &RequestWithStatus{
 		Message: message,
 		Status:  New,
 	})
-	rl.requestId++
 
 	rl.syncCond.Broadcast()
 }
@@ -67,26 +67,29 @@ func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	// purge previous fork choices that are still syncing
-	rl.requests = rl.requests.Select(func(key interface{}, value interface{}) bool {
-		req := value.(*RequestWithStatus)
-		_, isForkChoice := req.Message.(*ForkChoiceMessage)
-		return req.Status != Syncing || !isForkChoice
-	})
-	// TODO(yperbasis): potentially purge some non-syncing old fork choices?
+	rl.requestId++
+
+	/*
+		// purge previous fork choices that are still syncing
+		rl.requests = rl.requests.Select(func(key interface{}, value interface{}) bool {
+			req := value.(*RequestWithStatus)
+			_, isForkChoice := req.Message.(*ForkChoiceMessage)
+			return req.Status != Syncing || !isForkChoice
+		})
+		// TODO(yperbasis): potentially purge some non-syncing old fork choices?
+	*/
 
 	rl.requests.Put(rl.requestId, &RequestWithStatus{
 		Message: message,
 		Status:  New,
 	})
-	rl.requestId++
 
 	rl.syncCond.Broadcast()
 }
 
-func (rl *RequestList) firstReadyRequest() (id int, request *RequestWithStatus) {
+func (rl *RequestList) firstNewRequest() (id int, request *RequestWithStatus) {
 	foundKey, foundValue := rl.requests.Find(func(key interface{}, value interface{}) bool {
-		return value.(*RequestWithStatus).Status != Syncing
+		return value.(*RequestWithStatus).Status == New
 	})
 	if foundKey != nil {
 		return foundKey.(int), foundValue.(*RequestWithStatus)
@@ -94,7 +97,7 @@ func (rl *RequestList) firstReadyRequest() (id int, request *RequestWithStatus) 
 	return 0, nil
 }
 
-func (rl *RequestList) WaitForRequest() (interrupted bool, id int, request *RequestWithStatus) {
+func (rl *RequestList) WaitForNewRequest() (interrupted bool, id int, request *RequestWithStatus) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -104,7 +107,7 @@ func (rl *RequestList) WaitForRequest() (interrupted bool, id int, request *Requ
 			rl.interrupt = false
 			return
 		}
-		id, request = rl.firstReadyRequest()
+		id, request = rl.firstNewRequest()
 		if request != nil {
 			return
 		}
