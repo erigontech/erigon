@@ -247,6 +247,14 @@ func (iq *InsertQueue) Pop() interface{} {
 	return x
 }
 
+type SyncStatus int
+
+const ( // SyncStatus values
+	Idle = iota
+	Syncing
+	Synced // if we found a canonical hash during backward sync, in this case our sync process is done
+)
+
 type HeaderDownload struct {
 	badHeaders         map[common.Hash]struct{}
 	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
@@ -279,7 +287,7 @@ type HeaderDownload struct {
 	topSeenHeightPoS     uint64
 	heightToDownloadPoS  uint64
 	hashToDownloadPoS    common.Hash
-	synced               bool                          // if we found a canonical hash during backward sync, in this case our sync process is done
+	posStatus            SyncStatus
 	posSync              bool                          // True if the chain is syncing backwards or not
 	headersCollector     *etl.Collector                // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync

@@ -465,10 +465,7 @@ func downloadMissingPoSHeaders(
 	headerInserter *headerdownload.HeaderInserter,
 ) (success bool, err error) {
 	cfg.hd.SetPOSSync(true)
-	err = cfg.hd.ReadProgressFromDb(tx)
-	if err != nil {
-		return
-	}
+	cfg.hd.SetPosStatus(headerdownload.Syncing)
 
 	cfg.hd.SetHashToDownloadPoS(hashToDownload)
 	cfg.hd.SetHeightToDownloadPoS(heightToDownload)
@@ -484,7 +481,7 @@ func downloadMissingPoSHeaders(
 	// Cleanup after we finish backward sync
 	defer func() {
 		cfg.hd.SetHeadersCollector(nil)
-		cfg.hd.Unsync()
+		cfg.hd.SetPosStatus(headerdownload.Idle)
 	}()
 
 	logEvery := time.NewTicker(logInterval)
@@ -500,7 +497,7 @@ func downloadMissingPoSHeaders(
 			maxRequests--
 		}
 
-		if cfg.hd.Synced() {
+		if cfg.hd.PosStatus() == headerdownload.Synced {
 			stopped = true
 		}
 		// Sleep and check for logs
@@ -525,7 +522,7 @@ func downloadMissingPoSHeaders(
 	}
 
 	// TODO(yperbasis): handle the case when we are not able to sync a chain
-	if !cfg.hd.Synced() {
+	if cfg.hd.PosStatus() != headerdownload.Synced {
 		return
 	}
 

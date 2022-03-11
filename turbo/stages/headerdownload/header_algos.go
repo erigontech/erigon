@@ -824,7 +824,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 			return err
 		}
 		if hh != nil {
-			hd.synced = true
+			hd.posStatus = Synced
 			return nil
 		}
 
@@ -1173,12 +1173,6 @@ func (hd *HeaderDownload) SetHeightToDownloadPoS(heightToDownloadPoS uint64) {
 	hd.heightToDownloadPoS = heightToDownloadPoS
 }
 
-func (hd *HeaderDownload) Unsync() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.synced = false
-}
-
 func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -1197,10 +1191,16 @@ func (hd *HeaderDownload) POSSync() bool {
 	return hd.posSync
 }
 
-func (hd *HeaderDownload) Synced() bool {
+func (hd *HeaderDownload) PosStatus() SyncStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.synced
+	return hd.posStatus
+}
+
+func (hd *HeaderDownload) SetPosStatus(status SyncStatus) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posStatus = status
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {
