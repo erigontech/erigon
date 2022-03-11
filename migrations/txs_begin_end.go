@@ -37,7 +37,7 @@ var txsBeginEnd = Migration{
 			}
 			if progress != nil {
 				latestBlock = binary.BigEndian.Uint64(progress)
-				log.Info("[migration] Continue migration", "from_block", latestBlock)
+				log.Info("[database version migration] Continue migration", "from_block", latestBlock)
 			} else {
 				latestBlock = bodiesProgress + 1 // include block 0
 			}
@@ -61,7 +61,7 @@ var txsBeginEnd = Migration{
 			case <-logEvery.C:
 				var m runtime.MemStats
 				runtime.ReadMemStats(&m)
-				log.Info("[migration] Adding system-txs",
+				log.Info("[database version migration] Adding system-txs",
 					"progress", fmt.Sprintf("%.2f%%", 100-100*float64(blockNum)/float64(latestBlock)), "block_num", blockNum,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			default:
