@@ -79,7 +79,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 
 	interrupt := false
 	blockNum := uint64(0)
-	var txNum uint64 = 1
+	var txNum uint64 = 2
 	trace := false
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -107,7 +107,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		if blockNum <= block {
 			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
 			// Skip that block, but increase txNum
-			txNum += uint64(txAmount) + 1
+			txNum += uint64(txAmount) + 2
 			continue
 		}
 		var b *types.Block
@@ -124,11 +124,12 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 			readWrapper.trace = blockNum == uint64(traceBlock)
 		}
 		writeWrapper := state.NewNoopWriter()
+		txNum++ // Pre block transaction
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
 		if txNum, _, err = runHistory2(trace, blockNum, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
-		txNum++
+		txNum++ // Post block transaction
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
