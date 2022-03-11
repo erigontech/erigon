@@ -3,6 +3,7 @@ package requests
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"io/ioutil"
 	"net/http"
 	"time"
@@ -111,4 +112,9 @@ func (req *RequestGenerator) parityStorageKeyListContent(address common.Address,
 	}
 
 	return fmt.Sprintf(template, address, quantity, offsetString, blockNum, req.reqID)
+}
+
+func (req *RequestGenerator) getLogs(fromBlock, toBlock hexutil.Uint64, address common.Address) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
+	return fmt.Sprintf(template, fromBlock, toBlock, address, req.reqID)
 }

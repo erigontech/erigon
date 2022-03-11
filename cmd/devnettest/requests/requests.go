@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
@@ -76,4 +77,17 @@ func ParityList(reqId int, account common.Address, quantity int, offset []byte, 
 
 	fmt.Printf("Storage keys: %v\n", parseResponse(b))
 
+}
+
+func GetLogs(reqId int, fromBlock, toBlock hexutil.Uint64, address common.Address) error {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.Log
+
+	res := reqGen.Erigon("eth_getLogs", reqGen.getLogs(fromBlock, toBlock, address), &b)
+	if res.Err != nil {
+		return fmt.Errorf("Error fetching logs: %v\n", res.Err)
+	}
+
+	fmt.Printf("Logs and events: %v\n", parseResponse(b))
+	return nil
 }

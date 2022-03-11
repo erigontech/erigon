@@ -74,7 +74,7 @@ var sendTxCmd = &cobra.Command{
 		}
 
 		// subscriptionContract is the handler to the contract for further operations
-		signedTx, subscriptionContract, transactOpts, err := createTransaction(txType)
+		signedTx, address, subscriptionContract, transactOpts, err := createTransaction(txType)
 		if err != nil {
 			panic(err)
 		}
@@ -90,41 +90,40 @@ var sendTxCmd = &cobra.Command{
 
 		fmt.Printf("subscription contract, transactOps: %+v, %+v\n", subscriptionContract, transactOpts)
 
-		//_, err = subscriptionContract.Fallback(transactOpts, []byte{})
-		//if err != nil {
-		//	fmt.Printf("error 3: %+v\n", err)
-		//	panic(err)
-		//}
-
 		// TODO: call eth_getLogs on address and this block number
+		if err := emitEventAndGetLogs(subscriptionContract, transactOpts, address); err != nil {
+			panic(err)
+		}
 	},
 }
 
-func createTransaction(transactionType string) (*types.Transaction, *contracts.Subscription, *bind.TransactOpts, error) {
+func createTransaction(transactionType string) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	signer := types.LatestSigner(params.AllCliqueProtocolChanges)
 	if transactionType == "regular" {
-		return createNonContractTx(signer)
+		tx, address, err := createNonContractTx(signer)
+		return tx, address, nil, nil, err
 	}
 	return createContractTx(signer)
 }
 
-func createNonContractTx(signer *types.Signer) (*types.Transaction, *contracts.Subscription, *bind.TransactOpts, error) {
+// createNonContractTx takes in a signer and returns the signed transaction and the address receiving the sent value
+func createNonContractTx(signer *types.Signer) (*types.Transaction, common.Address, error) {
 	toAddress := common.HexToAddress(sendAddr)
 	signedTx, err := types.SignTx(types.NewTransaction(nonce, toAddress, uint256.NewInt(sendValue),
 		params.TxGas, uint256.NewInt(gasPrice), nil), *signer, devnetSignPrivateKey)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, toAddress, err
 	}
-	return &signedTx, nil, nil, nil
+	return &signedTx, toAddress, nil
 }
 
-func createContractTx(signer *types.Signer) (*types.Transaction, *contracts.Subscription, *bind.TransactOpts, error) {
+func createContractTx(signer *types.Signer) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	const txGas uint64 = 200_000
 	gspec := core.DeveloperGenesisBlock(uint64(0), common.HexToAddress("67b1d87101671b127f5f8714789C7192f7ad340e"))
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(devnetSignPrivateKey, big.NewInt(1337))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, common.Address{}, nil, nil, err
 	}
 
 	transactOpts.GasLimit = txGas
@@ -133,18 +132,18 @@ func createContractTx(signer *types.Signer) (*types.Transaction, *contracts.Subs
 	transactOpts.Nonce = big.NewInt(int64(nonce))
 
 	// get transaction to sign and contract handler
-	_, txToSign, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
+	address, txToSign, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, common.Address{}, nil, nil, err
 	}
 
 	// sign the transaction with the private key
 	signedTx, err := types.SignTx(txToSign, *signer, devnetSignPrivateKey)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, common.Address{}, nil, nil, err
 	}
 
-	return &signedTx, subscriptionContract, transactOpts, nil
+	return &signedTx, address, subscriptionContract, transactOpts, nil
 }
 
 func searchBlockForTx(txnHash common.Hash) {
@@ -224,4 +223,23 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 	}
 
 	return false, nil
+}
+
+func emitEventAndGetLogs(subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) error {
+	if subContract == nil {
+		return nil
+	}
+
+	_, err := subContract.Fallback(opts, []byte{})
+	if err != nil {
+		fmt.Printf("error 3: %+v\n", err)
+		panic(err)
+	}
+
+	if err = requests.GetLogs(reqId, 0, 0, common.Address{}); err != nil {
+		fmt.Printf("error 4: %+v\n", err)
+		panic(err)
+	}
+
+	return nil
 }
