@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -172,7 +173,7 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(testNodeConfig(t))
 	defer stack.Close()
 
-	db, err := OpenDatabase(stack.Config(), log.New(), kv.ChainDB)
+	db, err := OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
@@ -196,14 +197,14 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t))
+	stack, err := New(testNodeConfig(t))
+	require.NoError(t, err)
 	defer stack.Close()
 
 	var db kv.RwDB
-	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(stack.Config(), log.New(), kv.ChainDB)
+			db, err = OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}

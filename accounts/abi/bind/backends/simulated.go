@@ -593,6 +593,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 		snapshot := b.pendingState.Snapshot()
 		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
+		fmt.Printf("err %+v\n", err)
 		b.pendingState.RevertToSnapshot(snapshot)
 
 		if err != nil {
@@ -634,6 +635,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
+			fmt.Println("sim.go")
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
@@ -643,9 +645,16 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
+	const baseFeeUpperLimit = 880000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = u256.Num1
+	}
+	if call.FeeCap == nil {
+		call.FeeCap = uint256.NewInt(baseFeeUpperLimit)
+	}
+	if call.Tip == nil {
+		call.Tip = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000

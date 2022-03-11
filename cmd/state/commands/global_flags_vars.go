@@ -3,6 +3,7 @@ package commands
 import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/paths"
+
 	"github.com/spf13/cobra"
 )
 
@@ -14,6 +15,7 @@ var (
 	changeSetBucket string
 	indexBucket     string
 	snapshotBlocks  bool
+	chain           string
 )
 
 func must(err error) {
@@ -49,4 +51,8 @@ func withIndexBucket(cmd *cobra.Command) {
 
 func withSnapshotBlocks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&snapshotBlocks, "experimental.snapshot", false, "")
+}
+
+func withChain(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
 }
