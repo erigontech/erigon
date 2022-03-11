@@ -142,7 +142,6 @@ filterLoop:
 			if !addrOk {
 				continue
 			}
-			// TODO
 			if filter.allTopics == 0 {
 				if !a.chooseTopics(filter.topics, log.GetTopics()) {
 					continue
