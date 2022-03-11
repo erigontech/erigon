@@ -104,6 +104,7 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	ln.SetStaticIP(realaddr.IP)
 	ln.Set(enr.UDP(realaddr.Port))
 	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
 	udp, err := ListenV5(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -729,6 +730,7 @@ func newUDPV5Test(t *testing.T) *udpV5Test {
 	ln.SetStaticIP(net.IP{10, 0, 0, 1})
 	ln.Set(enr.UDP(30303))
 	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
 	test.udp, err = ListenV5(ctx, test.pipe, ln, Config{
 		PrivateKey:   test.localkey,
 		Log:          testlog.Logger(t, log.LvlError),
