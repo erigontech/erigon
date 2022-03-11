@@ -105,6 +105,88 @@ func (c *SubscribeStreamC) Context() context.Context { return c.ctx }
 
 // -- end Subscribe
 
+// -- SubscribeLogs
+
+func (s *EthBackendClientDirect) SubscribeLogs(ctx context.Context, opts ...grpc.CallOption) (remote.ETHBACKEND_SubscribeLogsClient, error) {
+	subscribeLogsRequestChan := make(chan *subscribeLogsRequest, 16384)
+	subscribeLogsReplyChan := make(chan *subscribeLogsReply, 16384)
+	srv := &SubscribeLogsStreamS{
+		chSend: subscribeLogsReplyChan,
+		chRecv: subscribeLogsRequestChan,
+		ctx:    ctx,
+	}
+	go func() {
+		defer close(subscribeLogsRequestChan)
+		defer close(subscribeLogsReplyChan)
+		srv.Err(s.server.SubscribeLogs(srv))
+	}()
+	cli := &SubscribeLogsStreamC{
+		chSend: subscribeLogsRequestChan,
+		chRecv: subscribeLogsReplyChan,
+		ctx:    ctx,
+	}
+	return cli, nil
+}
+
+type SubscribeLogsStreamS struct {
+	chSend chan *subscribeLogsReply
+	chRecv chan *subscribeLogsRequest
+	ctx    context.Context
+	grpc.ServerStream
+}
+
+type subscribeLogsReply struct {
+	r   *remote.SubscribeLogsReply
+	err error
+}
+
+type subscribeLogsRequest struct {
+	r   *remote.LogsFilterRequest
+	err error
+}
+
+func (s *SubscribeLogsStreamS) Send(m *remote.SubscribeLogsReply) error {
+	s.chSend <- &subscribeLogsReply{r: m}
+	return nil
+}
+
+func (s *SubscribeLogsStreamS) Recv() (*remote.LogsFilterRequest, error) {
+	m, ok := <-s.chRecv
+	if !ok || m == nil {
+		return nil, io.EOF
+	}
+	return m.r, m.err
+}
+
+func (s *SubscribeLogsStreamS) Err(err error) {
+	if err == nil {
+		return
+	}
+	s.chSend <- &subscribeLogsReply{err: err}
+}
+
+type SubscribeLogsStreamC struct {
+	chSend chan *subscribeLogsRequest
+	chRecv chan *subscribeLogsReply
+	ctx    context.Context
+	grpc.ClientStream
+}
+
+func (c *SubscribeLogsStreamC) Send(m *remote.LogsFilterRequest) error {
+	c.chSend <- &subscribeLogsRequest{r: m}
+	return nil
+}
+
+func (c *SubscribeLogsStreamC) Recv() (*remote.SubscribeLogsReply, error) {
+	m, ok := <-c.chRecv
+	if !ok || m == nil {
+		return nil, io.EOF
+	}
+	return m.r, m.err
+}
+
+// -- end SubscribeLogs
+
 func (s *EthBackendClientDirect) Block(ctx context.Context, in *remote.BlockRequest, opts ...grpc.CallOption) (*remote.BlockReply, error) {
 	return s.server.Block(ctx, in)
 }
