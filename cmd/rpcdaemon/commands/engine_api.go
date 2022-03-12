@@ -242,7 +242,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       chainConfig.TerminalBlockHash,
-		TerminalBlockNumber:     (*hexutil.Big)(chainConfig.MergeForkBlock),
+		TerminalBlockNumber:     (*hexutil.Big)(chainConfig.TerminalBlockNumber),
 	}, nil
 }
 
