@@ -788,7 +788,7 @@ func reducedict(trace bool, logPrefix, segmentFilePath, tmpDir string, datFile *
 // No error channels for now
 func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup) {
 	defer completion.Done()
-	var dictVal [8]byte
+	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
 	var lcp, sa, inv []int32
 	for superstring := range superstringCh {
@@ -799,11 +799,14 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("Superstring", "len", len(superstring))
 		//start := time.Now()
-		sais.Sais(superstring, sa)
+		if err := sais.Sais(superstring, sa); err != nil {
+			panic(err)
+		}
 		//log.Info("Suffix array built", "in", time.Since(start))
 		// filter out suffixes that start with odd positions
 		n := len(sa) / 2
-		filtered := make([]int32, n)
+		filtered := sa[:n]
+		//filtered := make([]int32, n)
 		var j int
 		for i := 0; i < len(sa); i++ {
 			if sa[i]&1 == 0 {
@@ -937,8 +940,8 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				for s := 0; s < l; s++ {
 					dictKey[s] = superstring[(int(filtered[i])+s)*2+1]
 				}
-				binary.BigEndian.PutUint64(dictVal[:], score)
-				if err := dictCollector.Collect(dictKey, dictVal[:]); err != nil {
+				binary.BigEndian.PutUint64(dictVal, score)
+				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
 					log.Error("processSuperstring", "collect", err)
 				}
 				prevSkipped = false
