@@ -50,32 +50,62 @@ type BlocksSnapshot struct {
 	From, To uint64 // [from,to)
 }
 
-type Type string
+type Type int
 
 const (
-	Headers      Type = "headers"
-	Bodies       Type = "bodies"
-	Transactions Type = "transactions"
+	Headers Type = iota
+	Bodies
+	Transactions
+	NumberOfTypes
 )
 
+func (ft Type) String() string {
+	switch ft {
+	case Headers:
+		return "headers"
+	case Bodies:
+		return "bodies"
+	case Transactions:
+		return "transactions"
+	default:
+		panic(fmt.Sprintf("unknown file type: %d", ft))
+	}
+}
+
+func ParseFileType(s string) (Type, bool) {
+	switch s {
+	case "headers":
+		return Headers, true
+	case "bodies":
+		return Bodies, true
+	case "transactions":
+		return Transactions, true
+	default:
+		return NumberOfTypes, false
+	}
+}
+
+type IdxType string
+
 const (
-	Transactions2Block Type = "transactions-to-block"
-	TransactionsId     Type = "transactions-id"
+	Transactions2Block IdxType = "transactions-to-block"
+	TransactionsId     IdxType = "transactions-id"
 )
+
+func (it IdxType) String() string { return string(it) }
 
 var AllSnapshotTypes = []Type{Headers, Bodies, Transactions}
-var AllIdxTypes = []Type{Headers, Bodies, Transactions, Transactions2Block}
 
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, t Type) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, t)
+func FileName(from, to uint64, fileType string) string {
+	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, fileType)
 }
-func SegmentFileName(from, to uint64, t Type) string { return FileName(from, to, t) + ".seg" }
-func DatFileName(from, to uint64, t Type) string     { return FileName(from, to, t) + ".dat" }
-func IdxFileName(from, to uint64, t Type) string     { return FileName(from, to, t) + ".idx" }
+func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, to, t.String()) + ".seg" }
+func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
+func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
 
 func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
 
@@ -151,7 +181,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					bs.HeaderHashIdx.Close()
 					bs.HeaderHashIdx = nil
 				}
-				bs.HeaderHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Headers)))
+				bs.HeaderHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Headers.String())))
 				if err != nil {
 					return err
 				}
@@ -160,7 +190,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					bs.BodyNumberIdx.Close()
 					bs.BodyNumberIdx = nil
 				}
-				bs.BodyNumberIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Bodies)))
+				bs.BodyNumberIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Bodies.String())))
 				if err != nil {
 					return err
 				}
@@ -169,7 +199,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					bs.TxnHashIdx.Close()
 					bs.TxnHashIdx = nil
 				}
-				bs.TxnHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions)))
+				bs.TxnHashIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions.String())))
 				if err != nil {
 					return err
 				}
@@ -178,7 +208,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					bs.TxnIdsIdx.Close()
 					bs.TxnIdsIdx = nil
 				}
-				bs.TxnIdsIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, TransactionsId)))
+				bs.TxnIdsIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, TransactionsId.String())))
 				if err != nil {
 					return err
 				}
@@ -187,7 +217,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 					bs.TxnHash2BlockNumIdx.Close()
 					bs.TxnHash2BlockNumIdx = nil
 				}
-				bs.TxnHash2BlockNumIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions2Block)))
+				bs.TxnHash2BlockNumIdx, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(bs.From, bs.To, Transactions2Block.String())))
 				if err != nil {
 					return err
 				}
@@ -601,7 +631,11 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 		return
 	}
 	var snapshotType Type
-	switch Type(parts[3]) {
+	ft, ok := ParseFileType(parts[3])
+	if !ok {
+		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
+	}
+	switch ft {
 	case Headers:
 		snapshotType = Headers
 	case Bodies:
@@ -984,7 +1018,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, Transactions)),
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, Transactions.String())),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
@@ -996,7 +1030,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, TransactionsId)),
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, TransactionsId.String())),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
@@ -1008,7 +1042,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, sn *BlocksSna
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block)),
+		IndexFile:  filepath.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block.String())),
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
