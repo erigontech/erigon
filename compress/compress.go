@@ -168,7 +168,7 @@ func (c *Compressor) Compress() error {
 	}
 
 	defer os.Remove(c.tmpOutFilePath)
-	if err := reducedict(c.trace, c.logPrefix, c.tmpOutFilePath, c.tmpDir, c.uncompressedFile, c.workers, db); err != nil {
+	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db); err != nil {
 		return err
 	}
 
