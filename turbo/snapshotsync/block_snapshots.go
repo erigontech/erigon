@@ -666,7 +666,7 @@ func min(a, b uint64) uint64 {
 }
 
 func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
-	log.Log(lvl, "[snapshots] Retire Blocks", "from", blockFrom, "to", blockTo)
+	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
@@ -679,7 +679,6 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-
 	if err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 		return err
 	}
@@ -878,7 +877,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	}
 
 	_, fileName := filepath.Split(segmentFile)
-	log.Log(lvl, "[snapshots] Compression", "ratio", f.Ratio.String(), "file", fileName)
+	ext := filepath.Ext(fileName)
+	log.Log(lvl, "[snapshots] Compression", "ratio", f.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
 
 	return firstTxID, nil
 }
@@ -1427,6 +1427,8 @@ type mergeRange struct {
 	from, to uint64
 }
 
+func (r mergeRange) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
+
 func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []mergeRange) {
 	for i := len(snapshots.blocks) - 1; i > 0; i-- {
 		sn := snapshots.blocks[i]
@@ -1469,6 +1471,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw) error {
+	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
 	for _, r := range mergeRanges {
 		toMergeHeaders, toMergeBodies, toMergeTxs := m.filesByRange(snapshots, r.from, r.to)
 		if err := m.merge(ctx, toMergeBodies, filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Bodies))); err != nil {
@@ -1497,8 +1500,6 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 		_, fName := filepath.Split(f)
 		fileNames[i] = fName
 	}
-	_, fName := filepath.Split(targetFile)
-	log.Log(m.lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
 	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
 	if err != nil {
 		return err
@@ -1517,6 +1518,11 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 				word, _ = g.Next(word[:0])
 				if err := f.AddWord(word); err != nil {
 					return err
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 				}
 			}
 			return nil

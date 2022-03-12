@@ -403,7 +403,6 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 	}
 	//TODO: avoid too large deletes
 
-	log.Info("[snapshots] Retire blocks", "from", blockFrom, "to", blockTo)
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -432,6 +431,5 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 		defer wg.Done()
 	}()
 	wg.Wait()
-	fmt.Printf("sn runtime dump: %d-%d\n", blockFrom, blockTo)
 	return nil
 }
