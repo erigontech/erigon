@@ -1519,6 +1519,11 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 				if err := f.AddWord(word); err != nil {
 					return err
 				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 			}
 			return nil
 		}); err != nil {
