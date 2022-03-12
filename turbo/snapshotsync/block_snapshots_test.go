@@ -67,8 +67,8 @@ func TestMergeSnapshots(t *testing.T) {
 
 	N := uint64(7)
 	createFile(0, 500_000)
-	for i := uint64(500_000); i < 500_000+N*10_000; i += 10_000 {
-		createFile(i, i+10_000)
+	for i := uint64(500_000); i < 500_000+N*100_000; i += 100_000 {
+		createFile(i, i+100_000)
 	}
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
