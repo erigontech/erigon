@@ -52,9 +52,9 @@ type PayloadAttributes struct {
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
 type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.Big   `json:"terminalTotalDifficulty" gencodec:"required"`
-	TerminalBlockHash       common.Hash    `json:"terminalBlockHash"       gencodec:"required"`
-	TerminalBlockNumber     hexutil.Uint64 `json:"terminalBlockNumber"     gencodec:"required"`
+	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty" gencodec:"required"`
+	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"       gencodec:"required"`
+	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
 // EngineAPI Beacon chain communication endpoint
@@ -214,7 +214,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 
 	defer tx.Rollback()
 	// terminal block number must always be zero
-	if beaconConfig.TerminalBlockNumber != 0 {
+	if beaconConfig.TerminalBlockNumber.ToInt().Cmp(common.Big0) != 0 {
 		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", beaconConfig.TerminalBlockNumber)
 	}
 
@@ -242,7 +242,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       chainConfig.TerminalBlockHash,
-		TerminalBlockNumber:     hexutil.Uint64(chainConfig.TerminalBlockNumber),
+		TerminalBlockNumber:     (*hexutil.Big)(chainConfig.MergeForkBlock),
 	}, nil
 }
 

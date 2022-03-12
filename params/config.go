@@ -594,7 +594,7 @@ type ChainConfig struct {
 	// EIP-3675: Upgrade consensus to Proof-of-Stake
 	TerminalTotalDifficulty *big.Int    `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
 	TerminalBlockHash       common.Hash `json:"terminalBlockHash,omitempty"`       // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
-	TerminalBlockNumber     uint64      `json:"terminalBlockNumber,omitempty"`     // Enforce particular terminal block; see TERMINAL_BLOCK_NUMBER in EIP-3675
+	MergeForkBlock          *big.Int    `json:"terminalBlockNumber,omitempty"`     // Enforce particular terminal block; see TERMINAL_BLOCK_NUMBER in EIP-3675
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
