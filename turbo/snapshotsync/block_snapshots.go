@@ -1492,7 +1492,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 }
 
 func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string) error {
-	defer func(t time.Time) { fmt.Printf("block_snapshots.go:1495: %s, %s\n", time.Since(t), targetFile) }(time.Now())
 	fileNames := make([]string, len(toMerge))
 	for i, f := range toMerge {
 		_, fName := filepath.Split(f)
