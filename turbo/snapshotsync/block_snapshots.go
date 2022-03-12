@@ -679,7 +679,6 @@ func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-
 	if err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 		return err
 	}
@@ -1469,6 +1468,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw) error {
+	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
 	for _, r := range mergeRanges {
 		toMergeHeaders, toMergeBodies, toMergeTxs := m.filesByRange(snapshots, r.from, r.to)
 		if err := m.merge(ctx, toMergeBodies, filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Bodies))); err != nil {
@@ -1497,8 +1497,8 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 		_, fName := filepath.Split(f)
 		fileNames[i] = fName
 	}
-	_, fName := filepath.Split(targetFile)
-	log.Log(m.lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
+	//_, fName := filepath.Split(targetFile)
+	//log.Log(m.lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
 	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
 	if err != nil {
 		return err
