@@ -666,7 +666,7 @@ func min(a, b uint64) uint64 {
 }
 
 func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
-	log.Log(lvl, "[snapshots] Retire Blocks", "from", blockFrom, "to", blockTo)
+	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
@@ -877,7 +877,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	}
 
 	_, fileName := filepath.Split(segmentFile)
-	log.Log(lvl, "[snapshots] Compression", "ratio", f.Ratio.String(), "file", fileName)
+	ext := filepath.Ext(fileName)
+	log.Log(lvl, "[snapshots] Compression", "ratio", f.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
 
 	return firstTxID, nil
 }
@@ -1425,6 +1426,8 @@ func NewMerger(tmpDir string, workers int, lvl log.Lvl) *Merger {
 type mergeRange struct {
 	from, to uint64
 }
+
+func (r mergeRange) String() string { return fmt.Sprintf("%dk-%dk", r.from/1000, r.to/1000) }
 
 func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []mergeRange) {
 	for i := len(snapshots.blocks) - 1; i > 0; i-- {
