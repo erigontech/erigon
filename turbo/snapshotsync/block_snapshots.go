@@ -1498,8 +1498,6 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 		_, fName := filepath.Split(f)
 		fileNames[i] = fName
 	}
-	//_, fName := filepath.Split(targetFile)
-	//log.Log(m.lvl, "[snapshots] Merging", "files", fileNames, "to", fName)
 	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
 	if err != nil {
 		return err
