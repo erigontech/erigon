@@ -215,7 +215,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	defer tx.Rollback()
 	// terminal block number must always be zero
 	if beaconConfig.TerminalBlockNumber.ToInt().Cmp(common.Big0) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", beaconConfig.TerminalBlockNumber)
+		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", beaconConfig.TerminalBlockNumber.ToInt())
 	}
 
 	chainConfig, err := e.BaseAPI.chainConfig(tx)
