@@ -158,13 +158,8 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	snapshots.ReopenSegments()
 	snapshots.ReopenIndices()
 
-	//merger := snapshotsync.NewMerger(tmpDir, 1, log.LvlInfo)
-	//ranges := merger.FindMergeRanges(snapshots)
-	//fmt.Printf("a:%v\n", ranges)
-	//panic(1)
-
 	for i := from; i < to; i += every {
-		if err := snapshotsync.RetireBlocks(ctx, i, i+every, *chainID, tmpDir, snapshots, chainDB, runtime.NumCPU()/2, log.LvlInfo); err != nil {
+		if err := snapshotsync.RetireBlocks(ctx, i, i+every, *chainID, tmpDir, snapshots, chainDB, 1, log.LvlInfo); err != nil {
 			panic(err)
 			//return err
 		}
