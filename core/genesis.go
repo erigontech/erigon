@@ -178,7 +178,6 @@ func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *typ
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-
 	c, b, err := WriteGenesisBlock(tx, genesis)
 	if err != nil {
 		return c, b, err
