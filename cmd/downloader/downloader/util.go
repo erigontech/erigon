@@ -3,7 +3,7 @@ package downloader
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec
 	"errors"
 	"fmt"
 	"io"
@@ -206,7 +206,7 @@ func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good b
 	span.InitIndex()
 	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
 		p := info.Piece(i)
-		hash := sha1.New()
+		hash := sha1.New() //nolint:gosec
 		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
 		if err != nil {
 			return err
