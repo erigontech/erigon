@@ -17,7 +17,6 @@
 package aggregator
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io/fs"
@@ -27,11 +26,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -197,55 +196,32 @@ func (hr *HistoryReader) searchInHistory(bitmapType, historyType FileType, key [
 	searchTx := hr.txNum
 	hr.search.endBlock = searchBlock
 	hr.search.startBlock = searchBlock - (searchBlock % 500_000)
-	var lookupKey = make([]byte, len(key)+8)
-	copy(lookupKey, key)
-	var bitmapVal []byte
-	bm := roaring64.New()
+	var eliasVal []byte
 	var err error
 	var found bool
 	var foundTxNum uint64
 	var foundEndBlock uint64
 	hr.h.files[bitmapType].AscendGreaterOrEqual(&hr.search, func(i btree.Item) bool {
 		item := i.(*byEndBlockItem)
+		offset := item.indexReader.Lookup(key)
 		g := item.getter
-		for chunkEnd := hr.h.aggregationStep*(searchBlock/hr.h.aggregationStep) + hr.h.aggregationStep - 1; chunkEnd <= item.endBlock; chunkEnd += hr.h.aggregationStep {
-			if chunkEnd < item.startBlock {
-				continue
-			}
-			binary.BigEndian.PutUint64(lookupKey[len(key):], chunkEnd)
-			offset := item.indexReader.Lookup(lookupKey)
+		g.Reset(offset)
+		if keyMatch, _ := g.Match(key); keyMatch {
 			if trace {
-				fmt.Printf("Lookup [%x] in %s.[%d-%d].idx = %d\n", lookupKey, bitmapType.String(), item.startBlock, item.endBlock, offset)
+				fmt.Printf("Found bitmap for [%x] in %s.[%d-%d]\n", key, bitmapType.String(), item.startBlock, item.endBlock)
 			}
-			g.Reset(offset)
-			if keyMatch, _ := g.Match(lookupKey); keyMatch {
-				if trace {
-					fmt.Printf("Found bitmap for [%x] in %s.[%d-%d]\n", lookupKey, bitmapType.String(), item.startBlock, item.endBlock)
+			eliasVal, _ = g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+			it := ef.Iterator()
+			if trace {
+				for it.HasNext() {
+					fmt.Printf(" %d", it.Next())
 				}
-				bitmapVal, _ = g.Next(bitmapVal[:0])
-				bm.Clear()
-				if _, err = bm.ReadFrom(bytes.NewReader(bitmapVal)); err != nil {
-					return false
-				}
-				if searchTx == 0 {
-					foundTxNum = bm.Minimum()
-					foundEndBlock = item.endBlock
-					found = true
-					return false
-				}
-				searchRank := bm.Rank(searchTx - 1)
-				if trace {
-					fmt.Printf("searchRank = %d for searchTx = %d, cardinality = %d\n", searchRank, searchTx, bm.GetCardinality())
-				}
-				if trace && bm.GetCardinality() > 0 {
-					fmt.Printf("min = %d, max = %d\n", bm.Minimum(), bm.Maximum())
-				}
-				if searchRank >= bm.GetCardinality() {
-					continue
-				}
-				foundTxNum, _ = bm.Select(searchRank)
+				fmt.Printf("\n")
+			}
+			foundTxNum, found = ef.Search(searchTx)
+			if found {
 				foundEndBlock = item.endBlock
-				found = true
 				return false
 			}
 		}
@@ -261,6 +237,7 @@ func (hr *HistoryReader) searchInHistory(bitmapType, historyType FileType, key [
 	if trace {
 		fmt.Printf("found in tx %d, endBlock %d\n", foundTxNum, foundEndBlock)
 	}
+	var lookupKey = make([]byte, len(key)+8)
 	binary.BigEndian.PutUint64(lookupKey, foundTxNum)
 	copy(lookupKey[8:], key)
 	var historyItem *byEndBlockItem

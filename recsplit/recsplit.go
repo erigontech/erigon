@@ -570,7 +570,7 @@ func (rs *RecSplit) Build() error {
 	}
 
 	if rs.enums {
-		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset, rs.minDelta)
+		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
 			return err

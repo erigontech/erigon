@@ -280,6 +280,7 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	if l == 0 {
 		return g.data[g.dataP:g.dataP], g.dataP
 	}
+	g.nextPos(false)
 	pos := g.dataP
 	g.dataP += l
 	return g.data[pos:g.dataP], g.dataP

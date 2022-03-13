@@ -17,6 +17,7 @@
 package compress
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -151,6 +152,47 @@ func TestDecompressMatchPrefix(t *testing.T) {
 		}
 		g.Skip()
 		skipCount++
+		i++
+	}
+}
+
+func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed")
+	t.Name()
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	for k, w := range loremStrings {
+		if err = c.AddUncompressedWord([]byte(fmt.Sprintf("%s %d", w, k))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = c.Compress(); err != nil {
+		t.Fatal(err)
+	}
+	var d *Decompressor
+	if d, err = NewDecompressor(file); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestUncompressed(t *testing.T) {
+	d := prepareLoremDictUncompressed(t)
+	defer d.Close()
+	g := d.MakeGetter()
+	i := 0
+	for g.HasNext() {
+		w := loremStrings[i]
+		expected := []byte(fmt.Sprintf("%s %d", w, i+1))
+		expected = expected[:len(expected)/2]
+		actual, _ := g.NextUncompressed()
+		if bytes.Equal(expected, actual) {
+			t.Errorf("expected %s, actual %s", expected, actual)
+		}
 		i++
 	}
 }

@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2022 Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import (
 	"io"
 	"math"
 	"math/bits"
+	"sort"
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/bitutil"
@@ -52,16 +53,11 @@ type EliasFano struct {
 	u              uint64
 	l              uint64
 	maxOffset      uint64
-	minDelta       uint64
 	i              uint64
-	delta          uint64
 	wordsUpperBits int
 }
 
-func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
-	if minDelta > (1 << 32) {
-		panic(fmt.Sprintf("too big minDelat: %d", minDelta))
-	}
+func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 	if count == 0 {
 		panic(fmt.Sprintf("too small count: %d", count))
 	}
@@ -69,9 +65,8 @@ func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
 	ef := &EliasFano{
 		count:     count - 1,
 		maxOffset: maxOffset,
-		minDelta:  minDelta,
 	}
-	ef.u = maxOffset - ef.count*ef.minDelta + 1
+	ef.u = maxOffset + 1
 	ef.wordsUpperBits = ef.deriveFields()
 	return ef
 }
@@ -79,13 +74,12 @@ func NewEliasFano(count uint64, maxOffset, minDelta uint64) *EliasFano {
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
 	if ef.l != 0 {
-		set_bits(ef.lowerBits, ef.i*ef.l, int(ef.l), (offset-ef.delta)&ef.lowerBitsMask)
+		set_bits(ef.lowerBits, ef.i*ef.l, int(ef.l), offset&ef.lowerBitsMask)
 	}
 	//pos := ((offset - ef.delta) >> ef.l) + ef.i
-	set(ef.upperBits, ((offset-ef.delta)>>ef.l)+ef.i)
+	set(ef.upperBits, (offset>>ef.l)+ef.i)
 	//fmt.Printf("add:%x, pos=%x, set=%x, res=%x\n", offset, pos, pos/64, uint64(1)<<(pos%64))
 	ef.i++
-	ef.delta += ef.minDelta
 }
 
 func (ef EliasFano) jumpSizeWords() int {
@@ -101,9 +95,7 @@ func (ef *EliasFano) deriveFields() int {
 		ef.l = 0
 	} else {
 		ef.l = 63 ^ uint64(bits.LeadingZeros64(ef.u/(ef.count+1))) // pos of first non-zero bit
-		//fmt.Printf("lllllllll: %d, %d\n", 63^uint64(bits.LeadingZeros64(24/7)), msb(ef.u/(ef.count+1)))
 	}
-	//fmt.Printf("EF: %d, %d,%d\n", ef.count, ef.u, ef.l)
 	ef.lowerBitsMask = (uint64(1) << ef.l) - 1
 	wordsLowerBits := int(((ef.count+1)*ef.l+63)/64 + 1)
 	wordsUpperBits := int((ef.count + 1 + (ef.u >> ef.l) + 63) / 64)
@@ -139,10 +131,6 @@ func (ef *EliasFano) Build() {
 					if offset >= (1 << 32) {
 						fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
 						fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
-						fmt.Printf("ef.minDelta=%x\n", ef.minDelta)
-						//fmt.Printf("ef.upperBits=%x\n", ef.upperBits)
-						//fmt.Printf("ef.lowerBits=%x\n", ef.lowerBits)
-						//fmt.Printf("ef.wordsUpperBits=%b\n", ef.wordsUpperBits)
 						panic("")
 					}
 					// c % superQ is the bit index inside the group of 4096 bits
@@ -159,7 +147,7 @@ func (ef *EliasFano) Build() {
 	}
 }
 
-func (ef EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64, delta uint64) {
+func (ef EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
 	lower = i * ef.l
 	idx64 := lower / 64
 	shift := lower % 64
@@ -186,14 +174,13 @@ func (ef EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord 
 	}
 
 	sel = bitutil.Select64(window, d)
-	delta = i * ef.minDelta
-	val = ((currWord*64+uint64(sel)-i)<<ef.l | (lower & ef.lowerBitsMask)) + delta
+	val = ((currWord*64+uint64(sel)-i)<<ef.l | (lower & ef.lowerBitsMask))
 
 	return
 }
 
 func (ef EliasFano) Get(i uint64) uint64 {
-	val, _, _, _, _, _ := ef.get(i)
+	val, _, _, _, _ := ef.get(i)
 	return val
 }
 
@@ -202,8 +189,7 @@ func (ef EliasFano) Get2(i uint64) (val uint64, valNext uint64) {
 	var sel int
 	var currWord uint64
 	var lower uint64
-	var delta uint64
-	val, window, sel, currWord, lower, delta = ef.get(i)
+	val, window, sel, currWord, lower = ef.get(i)
 	window &= (uint64(0xffffffffffffffff) << sel) << 1
 	for window == 0 {
 		currWord++
@@ -211,23 +197,82 @@ func (ef EliasFano) Get2(i uint64) (val uint64, valNext uint64) {
 	}
 
 	lower >>= ef.l
-	valNext = ((currWord*64+uint64(bits.TrailingZeros64(window))-i-1)<<ef.l | (lower & ef.lowerBitsMask)) + delta + ef.minDelta
+	valNext = ((currWord*64+uint64(bits.TrailingZeros64(window))-i-1)<<ef.l | (lower & ef.lowerBitsMask))
 	return
+}
+
+// Search returns the value in the sequence, equal or greater than given value
+func (ef EliasFano) Search(offset uint64) (uint64, bool) {
+	i := uint64(sort.Search(int(ef.count+1), func(i int) bool {
+		val, _, _, _, _ := ef.get(uint64(i))
+		return val >= offset
+	}))
+	if i <= ef.count {
+		return ef.Get(i), true
+	}
+	return 0, false
+}
+
+func (ef EliasFano) Max() uint64 {
+	return ef.maxOffset
+}
+
+func (ef EliasFano) Count() uint64 {
+	return ef.count + 1
+}
+
+func (ef *EliasFano) Iterator() *EliasFanoIter {
+	return &EliasFanoIter{ef: ef, upperMask: 1, upperStep: uint64(1) << ef.l}
+}
+
+type EliasFanoIter struct {
+	ef        *EliasFano
+	idx       uint64
+	lowerIdx  uint64
+	upperIdx  uint64
+	upperMask uint64
+	upper     uint64
+	upperStep uint64
+}
+
+func (efi *EliasFanoIter) HasNext() bool {
+	return efi.idx <= efi.ef.count
+}
+
+func (efi *EliasFanoIter) Next() uint64 {
+	idx64 := efi.lowerIdx >> 6
+	shift := efi.lowerIdx & 63
+	lower := efi.ef.lowerBits[idx64] >> shift
+	if shift > 0 {
+		lower |= efi.ef.lowerBits[idx64+1] << (64 - shift)
+	}
+	if efi.upperMask == 0 {
+		efi.upperIdx++
+		efi.upperMask = 1
+	}
+	for efi.ef.upperBits[efi.upperIdx]&efi.upperMask == 0 {
+		efi.upper += efi.upperStep
+		efi.upperMask <<= 1
+		if efi.upperMask == 0 {
+			efi.upperIdx++
+			efi.upperMask = 1
+		}
+	}
+	efi.upperMask <<= 1
+	efi.lowerIdx += efi.ef.l
+	efi.idx++
+	val := (lower & efi.ef.lowerBitsMask) | efi.upper
+	return val
 }
 
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
 func (ef *EliasFano) Write(w io.Writer) error {
 	var numBuf [8]byte
 	binary.BigEndian.PutUint64(numBuf[:], ef.count)
-	//fmt.Printf("write: %d,%x\n", ef.count, numBuf)
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
 	binary.BigEndian.PutUint64(numBuf[:], ef.u)
-	if _, e := w.Write(numBuf[:]); e != nil {
-		return e
-	}
-	binary.BigEndian.PutUint64(numBuf[:], ef.minDelta)
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
@@ -239,19 +284,31 @@ func (ef *EliasFano) Write(w io.Writer) error {
 	return nil
 }
 
+// Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
+func (ef *EliasFano) AppendBytes(buf []byte) []byte {
+	var numBuf [8]byte
+	binary.BigEndian.PutUint64(numBuf[:], ef.count)
+	buf = append(buf, numBuf[:]...)
+	binary.BigEndian.PutUint64(numBuf[:], ef.u)
+	buf = append(buf, numBuf[:]...)
+	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
+	b := (*p)[:]
+	buf = append(buf, b[:len(ef.data)*8]...)
+	return buf
+}
+
 const maxDataSize = 0xFFFFFFFFFFFF
 
 // Read inputs the state of golomb rice encoding from a reader s
 func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef := &EliasFano{}
 	ef.count = binary.BigEndian.Uint64(r[:8])
-	//fmt.Printf("read: %d,%x\n", ef.count, r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
-	ef.minDelta = binary.BigEndian.Uint64(r[16:24])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[24]))
+	ef.maxOffset = ef.u - 1
+	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[16]))
 	ef.data = p[:]
 	ef.deriveFields()
-	return ef, 24 + 8*len(ef.data)
+	return ef, 16 + 8*len(ef.data)
 }
 
 // DoubleEliasFano can be used to encode two monotone sequences

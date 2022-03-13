@@ -23,7 +23,8 @@ import (
 	"testing"
 )
 
-// gotip test -trimpath -v -fuzz=FuzzEliasFano -fuzztime=10s ./recsplit
+// gotip test -trimpath -v -fuzz=FuzzSingleEliasFano ./recsplit/eliasfano32
+// gotip test -trimpath -v -fuzz=FuzzDoubleEliasFano ./recsplit/eliasfano32
 
 func FuzzSingleEliasFano(f *testing.F) {
 	f.Fuzz(func(t *testing.T, in []byte) {
@@ -40,14 +41,10 @@ func FuzzSingleEliasFano(f *testing.F) {
 		// Treat each byte of the sequence as difference between previous value and the next
 		count := len(in)
 		keys := make([]uint64, count+1)
-		var minDeltaCumKeys uint64
 		for i, b := range in {
 			keys[i+1] = keys[i] + uint64(b)
-			if i == 0 || uint64(b) < minDeltaCumKeys {
-				minDeltaCumKeys = uint64(b)
-			}
 		}
-		ef := NewEliasFano(uint64(count+1), keys[count], minDeltaCumKeys)
+		ef := NewEliasFano(uint64(count+1), keys[count])
 		for _, c := range keys {
 			ef.AddOffset(c)
 		}
@@ -78,26 +75,19 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		// Treat each byte of the sequence as difference between previous value and the next
 		numBuckets := len(in) / 2
 		cumKeys := make([]uint64, numBuckets+1)
-		var minDeltaCumKeys, minDeltaPosition uint64
 		position := make([]uint64, numBuckets+1)
 		for i, b := range in[:numBuckets] {
 			cumKeys[i+1] = cumKeys[i] + uint64(b)
-			if i == 0 || uint64(b) < minDeltaCumKeys {
-				minDeltaCumKeys = uint64(b)
-			}
 		}
 		for i, b := range in[numBuckets:] {
 			position[i+1] = position[i] + uint64(b)
-			if i == 0 || uint64(b) < minDeltaPosition {
-				minDeltaPosition = uint64(b)
-			}
 		}
-		ef1 := NewEliasFano(uint64(numBuckets+1), cumKeys[numBuckets], minDeltaCumKeys)
+		ef1 := NewEliasFano(uint64(numBuckets+1), cumKeys[numBuckets])
 		for _, c := range cumKeys {
 			ef1.AddOffset(c)
 		}
 		ef1.Build()
-		ef2 := NewEliasFano(uint64(numBuckets+1), position[numBuckets], minDeltaPosition)
+		ef2 := NewEliasFano(uint64(numBuckets+1), position[numBuckets])
 		for _, p := range position {
 			ef2.AddOffset(p)
 		}

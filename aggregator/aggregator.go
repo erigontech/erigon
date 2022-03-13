@@ -46,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	"golang.org/x/crypto/sha3"
@@ -694,6 +695,9 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 			if err = comp.AddWord(before); err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("produceChangeSets AddWord before: %w", err)
 			}
+			//if historyType == AccountHistory {
+			//	fmt.Printf("produce %s.%d-%d [%x]=>[%x]\n", historyType.String(), blockFrom, blockTo, txKey, before)
+			//}
 			var bitmap *roaring64.Bitmap
 			var ok bool
 			if bitmap, ok = bitmaps[string(key)]; !ok {
@@ -732,26 +736,28 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 			bitmapC.Close()
 		}
 	}()
-	bitmapKeys := make([]string, len(bitmaps))
+	idxKeys := make([]string, len(bitmaps))
 	i := 0
+	var buf []byte
 	for key := range bitmaps {
-		bitmapKeys[i] = key
+		idxKeys[i] = key
 		i++
 	}
-	sort.Strings(bitmapKeys)
-	var bitmapKey []byte
-	var bitmapVal []byte
-	for _, key := range bitmapKeys {
-		bitmapKey = append(bitmapKey[:0], []byte(key)...)
-		bitmapKey = append(bitmapKey, blockSuffix[:]...)
-		if err = bitmapC.AddWord(bitmapKey); err != nil {
+	sort.Strings(idxKeys)
+	for _, key := range idxKeys {
+		if err = bitmapC.AddWord([]byte(key)); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap add key: %w", err)
 		}
-		bitmaps[key].RunOptimize()
-		if bitmapVal, err = bitmaps[key].ToBytes(); err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmapVal production: %w", err)
+		bitmap := bitmaps[key]
+		ef := eliasfano32.NewEliasFano(bitmap.GetCardinality(), bitmap.Maximum())
+		it := bitmap.Iterator()
+		for it.HasNext() {
+			v := it.Next()
+			ef.AddOffset(v)
 		}
-		if err = bitmapC.AddWord(bitmapVal); err != nil {
+		ef.Build()
+		buf = ef.AppendBytes(buf[:0])
+		if err = bitmapC.AddUncompressedWord(buf); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap add val: %w", err)
 		}
 	}
@@ -765,7 +771,7 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap decompressor: %w", err)
 	}
 
-	bitmapI, err := buildIndex(bitmapD, bitmapIdxPath, c.dir, len(bitmapKeys))
+	bitmapI, err := buildIndex(bitmapD, bitmapIdxPath, c.dir, len(idxKeys))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap buildIndex: %w", err)
 	}
@@ -1444,14 +1450,18 @@ func (a *Aggregator) backgroundMerge() {
 			}
 			if len(toRemove[fType]) > 1 {
 				var valTransform func([]byte, []byte) ([]byte, error)
+				var mergeFunc func([]byte, []byte, []byte) ([]byte, error)
 				if fType == Commitment {
 					valTransform = cvt.commitmentValTransform
+					mergeFunc = mergeCommitments
+				} else {
+					mergeFunc = mergeReplace
 				}
 				var prefixLen int
 				if fType == Storage {
 					prefixLen = length.Addr
 				}
-				if newItems[fType], err = a.computeAggregation(fType, toRemove[fType], from, to, valTransform, true /* withIndex */, prefixLen); err != nil {
+				if newItems[fType], err = a.computeAggregation(fType, toRemove[fType], from, to, valTransform, mergeFunc, true /* valCompressed */, true /* withIndex */, prefixLen); err != nil {
 					a.mergeError <- fmt.Errorf("computeAggreation %s: %w", fType.String(), err)
 					return
 				}
@@ -1491,9 +1501,11 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 	var val []byte
 	var count int
 	g.Reset(0)
+	var key []byte
 	for g.HasNext() {
 		g.Skip() // Skip key on on the first pass
 		val, _ = g.Next(val[:0])
+		//fmt.Printf("reduce1 [%s.%d-%d] [%x]=>[%x]\n", fType.String(), item.startBlock, item.endBlock, key, val)
 		if err = comp.AddWord(val); err != nil {
 			return fmt.Errorf("reduceHistoryFiles AddWord: %w", err)
 		}
@@ -1525,11 +1537,11 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 		g.Reset(0)
 		g1.Reset(0)
 		var lastOffset uint64
-		var key []byte
 		for g.HasNext() {
 			key, _ = g.Next(key[:0])
 			g.Skip() // Skip value
 			_, pos := g1.Next(nil)
+			//fmt.Printf("reduce2 [%s.%d-%d] [%x]==>%d\n", fType.String(), item.startBlock, item.endBlock, key, lastOffset)
 			if err = rs.AddKey(key, lastOffset); err != nil {
 				return fmt.Errorf("reduceHistoryFiles %p AddKey: %w", rs, err)
 			}
@@ -1568,6 +1580,31 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 	return nil
 }
 
+func mergeReplace(preval, val, buf []byte) ([]byte, error) {
+	return append(buf, val...), nil
+}
+
+func mergeBitmaps(preval, val, buf []byte) ([]byte, error) {
+	preef, _ := eliasfano32.ReadEliasFano(preval)
+	ef, _ := eliasfano32.ReadEliasFano(val)
+	//fmt.Printf("mergeBitmaps [%x] (count=%d,max=%d) + [%x] (count=%d,max=%d)\n", preval, preef.Count(), preef.Max(), val, ef.Count(), ef.Max())
+	preIt := preef.Iterator()
+	efIt := ef.Iterator()
+	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
+	for preIt.HasNext() {
+		newEf.AddOffset(preIt.Next())
+	}
+	for efIt.HasNext() {
+		newEf.AddOffset(efIt.Next())
+	}
+	newEf.Build()
+	return newEf.AppendBytes(buf), nil
+}
+
+func mergeCommitments(preval, val, buf []byte) ([]byte, error) {
+	return commitment.MergeBranches(preval, val, buf)
+}
+
 func (a *Aggregator) backgroundHistoryMerge() {
 	defer a.historyWg.Done()
 	for range a.historyChannel {
@@ -1597,8 +1634,17 @@ func (a *Aggregator) backgroundHistoryMerge() {
 				}
 			}
 			if len(toRemove[fType]) > 1 {
-				if newItems[fType], err = a.computeAggregation(fType, toRemove[fType], from, to, nil, /* valTransform */
-					!finalMerge || fType == AccountBitmap || fType == StorageBitmap || fType == CodeBitmap /* withIndex */, 0 /* prefixLen */); err != nil {
+				isBitmap := fType == AccountBitmap || fType == StorageBitmap || fType == CodeBitmap
+				var mergeFunc func([]byte, []byte, []byte) ([]byte, error)
+				if isBitmap {
+					mergeFunc = mergeBitmaps
+				} else if fType == Commitment {
+					mergeFunc = mergeCommitments
+				} else {
+					mergeFunc = mergeReplace
+				}
+				if newItems[fType], err = a.computeAggregation(fType, toRemove[fType], from, to, nil /* valTransform */, mergeFunc,
+					!isBitmap /* valCompressed */, !finalMerge || isBitmap /* withIndex */, 0 /* prefixLen */); err != nil {
 					a.historyError <- fmt.Errorf("computeAggreation %s: %w", fType.String(), err)
 					return
 				}
@@ -2748,6 +2794,8 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 func (a *Aggregator) computeAggregation(fType FileType,
 	toAggregate []*byEndBlockItem, aggFrom uint64, aggTo uint64,
 	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
+	mergeFunc func(preval, val, buf []byte) ([]byte, error),
+	valCompressed bool,
 	withIndex bool, prefixLen int) (*byEndBlockItem, error) {
 	var item2 = &byEndBlockItem{startBlock: aggFrom, endBlock: aggTo}
 	var cp CursorHeap
@@ -2763,7 +2811,7 @@ func (a *Aggregator) computeAggregation(fType FileType,
 	}
 	var err error
 	var count int
-	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, prefixLen, fType, aggFrom, aggTo, a.diffDir, valTransform, fType == Commitment); err != nil {
+	if item2.decompressor, count, err = a.mergeIntoStateFile(&cp, prefixLen, fType, aggFrom, aggTo, a.diffDir, valTransform, mergeFunc, valCompressed); err != nil {
 		return nil, fmt.Errorf("mergeIntoStateFile %s [%d-%d]: %w", fType.String(), aggFrom, aggTo, err)
 	}
 	item2.getter = item2.decompressor.MakeGetter()
@@ -2861,7 +2909,8 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 	fType FileType, startBlock, endBlock uint64, dir string,
 	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
-	commitments bool,
+	mergeFunc func(preval, val, buf []byte) ([]byte, error),
+	valCompressed bool,
 ) (*compress.Decompressor, int, error) {
 	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), startBlock, endBlock))
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
@@ -2896,20 +2945,22 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 			if ci1.t != FILE_CURSOR {
 				return nil, 0, fmt.Errorf("mergeIntoStateFile: cursor of unexpected type: %d", ci1.t)
 			}
-			if commitments {
-				if mergedOnce {
-					//fmt.Printf("mergeIntoStateFile pre-merge prefix [%x], [%x]+[%x]\n", commitment.CompactToHex(lastKey), ci1.val, lastVal)
-					if lastVal, err = commitment.MergeBranches(ci1.val, lastVal, nil); err != nil {
-						return nil, 0, fmt.Errorf("mergeIntoStateFile: merge commitments: %w", err)
-					}
-					//fmt.Printf("mergeIntoStateFile post-merge  prefix [%x], [%x]\n", commitment.CompactToHex(lastKey), lastVal)
-				} else {
-					mergedOnce = true
+			if mergedOnce {
+				//fmt.Printf("mergeIntoStateFile pre-merge prefix [%x], [%x]+[%x]\n", commitment.CompactToHex(lastKey), ci1.val, lastVal)
+				if lastVal, err = mergeFunc(ci1.val, lastVal, nil); err != nil {
+					return nil, 0, fmt.Errorf("mergeIntoStateFile: merge values: %w", err)
 				}
+				//fmt.Printf("mergeIntoStateFile post-merge  prefix [%x], [%x]\n", commitment.CompactToHex(lastKey), lastVal)
+			} else {
+				mergedOnce = true
 			}
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.Next(ci1.key[:0])
-				ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+				if valCompressed {
+					ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+				} else {
+					ci1.val, _ = ci1.dg.NextUncompressed()
+				}
 				heap.Fix(cp, 0)
 			} else {
 				heap.Pop(cp)
@@ -2929,6 +2980,8 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 			// Its bit are set for children that are present in the tree, and unset for those that are not (deleted, for example)
 			// If all bits are zero (check below), this branch can be skipped, since it is empty
 			skip = startBlock == 0 && len(lastVal) >= 4 && lastVal[2] == 0 && lastVal[3] == 0
+		case AccountHistory, StorageHistory, CodeHistory:
+			skip = false
 		default:
 			// For the rest of types, empty value means deletion
 			skip = startBlock == 0 && len(lastVal) == 0
@@ -2958,9 +3011,18 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 					if err = comp.AddWord(transValBuf); err != nil {
 						return nil, 0, err
 					}
-				} else if err = comp.AddWord(valBuf); err != nil {
-					return nil, 0, err
+				} else if valCompressed {
+					if err = comp.AddWord(valBuf); err != nil {
+						return nil, 0, err
+					}
+				} else {
+					if err = comp.AddUncompressedWord(valBuf); err != nil {
+						return nil, 0, err
+					}
 				}
+				//if fType == AccountHistory {
+				//	fmt.Printf("merge %s.%d-%d [%x]=>[%x]\n", fType.String(), startBlock, endBlock, keyBuf, valBuf)
+				//}
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
@@ -2983,9 +3045,18 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 			if err = comp.AddWord(transValBuf); err != nil {
 				return nil, 0, err
 			}
-		} else if err = comp.AddWord(valBuf); err != nil {
-			return nil, 0, err
+		} else if valCompressed {
+			if err = comp.AddWord(valBuf); err != nil {
+				return nil, 0, err
+			}
+		} else {
+			if err = comp.AddUncompressedWord(valBuf); err != nil {
+				return nil, 0, err
+			}
 		}
+		//if fType == AccountHistory {
+		//	fmt.Printf("merge %s.%d-%d [%x]=>[%x]\n", fType.String(), startBlock, endBlock, keyBuf, valBuf)
+		//}
 	}
 	if err = comp.Compress(); err != nil {
 		return nil, 0, err
