@@ -35,10 +35,19 @@ type RequestWithStatus struct {
 	Status  RequestStatus
 }
 
+type Interrupt int
+
+const ( // Interrupt values
+	None  = iota
+	Yield // e.g. yield RW transaction to block building
+	Synced
+	Stopping
+)
+
 type RequestList struct {
 	requestId int
 	requests  *treemap.Map // map[int]*RequestWithStatus
-	interrupt bool         // TODO(yperbasis): interruption type (Sync Finished, Skip Cycle, Stopped)
+	interrupt Interrupt
 	waiting   uint32
 	syncCond  *sync.Cond
 }
@@ -71,15 +80,13 @@ func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
 
 	rl.requestId++
 
-	/*
-		// purge previous fork choices that are still syncing
-		rl.requests = rl.requests.Select(func(key interface{}, value interface{}) bool {
-			req := value.(*RequestWithStatus)
-			_, isForkChoice := req.Message.(*ForkChoiceMessage)
-			return req.Status != Syncing || !isForkChoice
-		})
-		// TODO(yperbasis): potentially purge some non-syncing old fork choices?
-	*/
+	// purge previous fork choices that are still syncing
+	rl.requests = rl.requests.Select(func(key interface{}, value interface{}) bool {
+		req := value.(*RequestWithStatus)
+		_, isForkChoice := req.Message.(*ForkChoiceMessage)
+		return req.Status == New || !isForkChoice
+	})
+	// TODO(yperbasis): potentially purge some non-syncing old fork choices?
 
 	rl.requests.Put(rl.requestId, &RequestWithStatus{
 		Message: message,
@@ -102,7 +109,7 @@ func (rl *RequestList) firstRequest(onlyNew bool) (id int, request *RequestWithS
 	return 0, nil
 }
 
-func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupted bool, id int, request *RequestWithStatus) {
+func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupt Interrupt, id int, request *RequestWithStatus) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -110,9 +117,11 @@ func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupted bool, id int, r
 	defer atomic.StoreUint32(&rl.waiting, 0)
 
 	for {
-		interrupted = rl.interrupt
-		if interrupted {
-			rl.interrupt = false
+		interrupt = rl.interrupt
+		if interrupt != None {
+			if interrupt != Stopping {
+				rl.interrupt = None
+			}
 			return
 		}
 		id, request = rl.firstRequest(onlyNew)
@@ -127,11 +136,11 @@ func (rl *RequestList) IsWaiting() bool {
 	return atomic.LoadUint32(&rl.waiting) != 0
 }
 
-func (rl *RequestList) Interrupt() {
+func (rl *RequestList) Interrupt(kind Interrupt) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	rl.interrupt = true
+	rl.interrupt = kind
 
 	rl.syncCond.Broadcast()
 }

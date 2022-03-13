@@ -57,7 +57,6 @@ type EthBackendServer struct {
 	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
 	statusCh           chan PayloadStatus
-	skipCycleHack      chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
 	assemblePayloadPOS assemblePayloadPOSFunc
 	proposing          bool
 	syncCond           *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
@@ -86,14 +85,13 @@ type pendingPayload struct {
 	built bool
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh chan PayloadStatus,
-	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events,
+	blockReader interfaces.BlockAndTxnReader, config *params.ChainConfig, requestList *engineapi.RequestList,
+	statusCh chan PayloadStatus, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
-		skipCycleHack: skipCycleHack, assemblePayloadPOS: assemblePayloadPOS, proposing: proposing,
-		syncCond: sync.NewCond(&sync.Mutex{}),
+		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -491,7 +489,7 @@ func (s *EthBackendServer) StartProposer() {
 			}
 
 			// Tell the stage headers to leave space for the write transaction for mining stages
-			s.skipCycleHack <- struct{}{} // TODO(yperbasis): remove skipCycleHack (use interrupt instead)
+			s.requestList.Interrupt(engineapi.Yield)
 
 			param := core.BlockProposerParametersPOS{
 				ParentHash:            blockToBuild.ParentHash(),
@@ -518,7 +516,7 @@ func (s *EthBackendServer) StartProposer() {
 }
 
 func (s *EthBackendServer) Shutdown() {
-	s.requestList.Interrupt()
+	s.requestList.Interrupt(engineapi.Stopping)
 	s.statusCh <- PayloadStatus{CriticalError: errors.New("server is stopping")}
 
 	s.syncCond.L.Lock()
