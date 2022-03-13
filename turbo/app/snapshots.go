@@ -72,6 +72,7 @@ var snapshotCommand = cli.Command{
 				utils.DataDirFlag,
 				SnapshotFromFlag,
 				SnapshotToFlag,
+				SnapshotEveryFlag,
 			}, debug.Flags...),
 		},
 	},
@@ -87,6 +88,11 @@ var (
 		Name:  "to",
 		Usage: "To block number. Zero - means unlimited.",
 		Value: 0,
+	}
+	SnapshotEveryFlag = cli.Uint64Flag{
+		Name:  "every",
+		Usage: "Do operation every N blocks",
+		Value: 1_000,
 	}
 	SnapshotSegmentSizeFlag = cli.Uint64Flag{
 		Name:  "segment.size",
@@ -135,8 +141,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
+	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
-	chainDB := mdbx.NewMDBX(log.New()).Path(path.Join(datadir, "chaindata")).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(path.Join(datadir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
@@ -148,10 +155,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
+	snapshots.ReopenSegments()
 
-	if err := snapshotsync.RetireBlocks(ctx, from, to, *chainID, tmpDir, snapshots, chainDB, 1, log.LvlInfo); err != nil {
-		panic(err)
-		//return err
+	for i := from; i < to; i += every {
+		if err := snapshotsync.RetireBlocks(ctx, i, i+every, *chainID, tmpDir, snapshots, chainDB, runtime.NumCPU()/2, log.LvlInfo); err != nil {
+			panic(err)
+			//return err
+		}
 	}
 	return nil
 }
@@ -171,7 +181,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	dir.MustExist(tmpDir)
 
-	chainDB := mdbx.NewMDBX(log.New()).Path(filepath.Join(datadir, "chaindata")).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(filepath.Join(datadir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapshotDir, tmpDir); err != nil {
