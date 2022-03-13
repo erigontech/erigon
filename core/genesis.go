@@ -178,6 +178,20 @@ func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *typ
 		return nil, nil, err
 	}
 	defer tx.Rollback()
+
+	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if chainConfig != nil {
+		return chainConfig, rawdb.ReadBlock(tx, genesisHash, 0), nil
+	}
+
 	c, b, err := WriteGenesisBlock(tx, genesis)
 	if err != nil {
 		return c, b, err
