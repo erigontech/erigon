@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
-	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -41,18 +40,17 @@ import (
 const ShortPoSReorgThresholdBlocks = 10
 
 type HeadersCfg struct {
-	db                    kv.RwDB
-	hd                    *headerdownload.HeaderDownload
-	bodyDownload          *bodydownload.BodyDownload
-	chainConfig           params.ChainConfig
-	headerReqSend         func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
-	announceNewHashes     func(context.Context, []headerdownload.Announce)
-	penalize              func(context.Context, []headerdownload.PenaltyItem)
-	batchSize             datasize.ByteSize
-	noP2PDiscovery        bool
-	tmpdir                string
-	snapshotDir           *dir.Rw
-	waitingForBeaconChain *uint32 // atomic boolean flag
+	db                kv.RwDB
+	hd                *headerdownload.HeaderDownload
+	bodyDownload      *bodydownload.BodyDownload
+	chainConfig       params.ChainConfig
+	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
+	announceNewHashes func(context.Context, []headerdownload.Announce)
+	penalize          func(context.Context, []headerdownload.PenaltyItem)
+	batchSize         datasize.ByteSize
+	noP2PDiscovery    bool
+	tmpdir            string
+	snapshotDir       *dir.Rw
 
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
@@ -70,7 +68,6 @@ func StageHeadersCfg(
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
 	noP2PDiscovery bool,
-	waitingForBeaconChain *uint32, // atomic boolean flag
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
@@ -78,22 +75,21 @@ func StageHeadersCfg(
 	snapshotDir *dir.Rw,
 ) HeadersCfg {
 	return HeadersCfg{
-		db:                    db,
-		hd:                    headerDownload,
-		bodyDownload:          bodyDownload,
-		chainConfig:           chainConfig,
-		headerReqSend:         headerReqSend,
-		announceNewHashes:     announceNewHashes,
-		penalize:              penalize,
-		batchSize:             batchSize,
-		tmpdir:                tmpdir,
-		noP2PDiscovery:        noP2PDiscovery,
-		waitingForBeaconChain: waitingForBeaconChain,
-		snapshots:             snapshots,
-		snapshotDownloader:    snapshotDownloader,
-		blockReader:           blockReader,
-		snapshotHashesCfg:     snapshothashes.KnownConfig(chainConfig.ChainName),
-		snapshotDir:           snapshotDir,
+		db:                 db,
+		hd:                 headerDownload,
+		bodyDownload:       bodyDownload,
+		chainConfig:        chainConfig,
+		headerReqSend:      headerReqSend,
+		announceNewHashes:  announceNewHashes,
+		penalize:           penalize,
+		batchSize:          batchSize,
+		tmpdir:             tmpdir,
+		noP2PDiscovery:     noP2PDiscovery,
+		snapshots:          snapshots,
+		snapshotDownloader: snapshotDownloader,
+		blockReader:        blockReader,
+		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
+		snapshotDir:        snapshotDir,
 	}
 }
 
@@ -177,10 +173,7 @@ func HeadersPOS(
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
-
-	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
 	interrupted, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
-	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	if interrupted {
 		if !useExternalTx {

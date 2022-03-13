@@ -249,7 +249,6 @@ func NewStagedSync(
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
@@ -277,7 +276,6 @@ func NewStagedSync(
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
-				waitingForBeaconChain,
 				allSnapshots,
 				snapshotDownloader,
 				blockReader,

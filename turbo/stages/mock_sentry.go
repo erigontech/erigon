@@ -85,9 +85,6 @@ type MockSentry struct {
 	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
-
-	// Beacon Chain
-	waitingForBeaconChain uint32
 }
 
 func (ms *MockSentry) Close() {
@@ -298,7 +295,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				&mock.waitingForBeaconChain,
 				allSnapshots,
 				snapshotsDownloader,
 				blockReader,

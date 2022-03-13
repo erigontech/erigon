@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -57,14 +56,12 @@ type EthBackendServer struct {
 	// Send Beacon Chain requests to staged sync
 	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
-	statusCh chan PayloadStatus
-	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32       // atomic boolean flag
-	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
-	assemblePayloadPOS    assemblePayloadPOSFunc
-	proposing             bool
-	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	shutdown              bool
+	statusCh           chan PayloadStatus
+	skipCycleHack      chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
+	assemblePayloadPOS assemblePayloadPOSFunc
+	proposing          bool
+	syncCond           *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	shutdown           bool
 }
 
 type EthBackend interface {
@@ -91,12 +88,12 @@ type pendingPayload struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh chan PayloadStatus,
-	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+	skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		requestList: requestList, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]*pendingPayload), skipCycleHack: skipCycleHack,
-		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
+		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
+		skipCycleHack: skipCycleHack, assemblePayloadPOS: assemblePayloadPOS, proposing: proposing,
+		syncCond: sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -226,19 +223,19 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
 	for i := 0; i < 20; i++ {
-		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+		if !s.requestList.IsWaiting() {
 			// This might happen, for example, in the following scenario:
 			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
 			// 2) We happily process NewPayload and stage loop is at the end.
 			// 3) We start processing ForkChoiceUpdated,
 			// but the stage loop hasn't moved yet from the end to the beginning of HeadersPOS
-			// and thus waitingForBeaconChain is not set yet.
+			// and thus requestList.WaitForRequest() is not called yet.
 
 			// TODO(yperbasis): find a more elegant solution
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
-	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
+	return !s.requestList.IsWaiting()
 }
 
 // EngineNewPayloadV1, validates and possibly executes payload
@@ -494,7 +491,7 @@ func (s *EthBackendServer) StartProposer() {
 			}
 
 			// Tell the stage headers to leave space for the write transaction for mining stages
-			s.skipCycleHack <- struct{}{}
+			s.skipCycleHack <- struct{}{} // TODO(yperbasis): remove skipCycleHack (use interrupt instead)
 
 			param := core.BlockProposerParametersPOS{
 				ParentHash:            blockToBuild.ParentHash(),

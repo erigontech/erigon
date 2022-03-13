@@ -2,6 +2,7 @@ package engineapi
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/emirpasic/gods/maps/treemap"
 
@@ -38,6 +39,7 @@ type RequestList struct {
 	requestId int
 	requests  *treemap.Map // map[int]*RequestWithStatus
 	interrupt bool         // TODO(yperbasis): interruption type (Sync Finished, Skip Cycle, Stopped)
+	waiting   uint32
 	syncCond  *sync.Cond
 }
 
@@ -104,6 +106,9 @@ func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupted bool, id int, r
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
+	atomic.StoreUint32(&rl.waiting, 1)
+	defer atomic.StoreUint32(&rl.waiting, 0)
+
 	for {
 		interrupted = rl.interrupt
 		if interrupted {
@@ -116,6 +121,10 @@ func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupted bool, id int, r
 		}
 		rl.syncCond.Wait()
 	}
+}
+
+func (rl *RequestList) IsWaiting() bool {
+	return atomic.LoadUint32(&rl.waiting) != 0
 }
 
 func (rl *RequestList) Interrupt() {

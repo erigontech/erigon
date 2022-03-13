@@ -2,7 +2,6 @@ package privateapi
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -92,9 +91,8 @@ func TestMockDownloadRequest(t *testing.T) {
 	makeTestDb(ctx, db)
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
-	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -107,7 +105,6 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	beaconRequestList.WaitForRequest(true)
 	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
-	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
 	require.NoError(err)
 	require.Equal(reply.Status, remote.EngineStatus_SYNCING)
@@ -152,9 +149,8 @@ func TestMockValidExecution(t *testing.T) {
 
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
-	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -189,8 +185,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 
-	waitingForHeaders := uint32(1)
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -224,9 +219,8 @@ func TestNoTTD(t *testing.T) {
 
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
-	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, beaconRequestList, statusCh, &waitingForHeaders, nil, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, nil, false)
 
 	var err error
 
