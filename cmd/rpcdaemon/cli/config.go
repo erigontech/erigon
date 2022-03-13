@@ -54,7 +54,7 @@ var rootCmd = &cobra.Command{
 }
 
 const JwtTokenExpiry = 5 * time.Second
-const JwtDefaultFile = "/tmp/jwt.hex"
+const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
