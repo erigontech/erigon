@@ -87,17 +87,20 @@ func (rl *RequestList) AddForkChoiceRequest(message *ForkChoiceMessage) {
 	rl.syncCond.Broadcast()
 }
 
-func (rl *RequestList) firstNewRequest() (id int, request *RequestWithStatus) {
-	foundKey, foundValue := rl.requests.Find(func(key interface{}, value interface{}) bool {
-		return value.(*RequestWithStatus).Status == New
-	})
+func (rl *RequestList) firstRequest(onlyNew bool) (id int, request *RequestWithStatus) {
+	foundKey, foundValue := rl.requests.Min()
+	if onlyNew {
+		foundKey, foundValue = rl.requests.Find(func(key interface{}, value interface{}) bool {
+			return value.(*RequestWithStatus).Status == New
+		})
+	}
 	if foundKey != nil {
 		return foundKey.(int), foundValue.(*RequestWithStatus)
 	}
 	return 0, nil
 }
 
-func (rl *RequestList) WaitForNewRequest() (interrupted bool, id int, request *RequestWithStatus) {
+func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupted bool, id int, request *RequestWithStatus) {
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
@@ -107,7 +110,7 @@ func (rl *RequestList) WaitForNewRequest() (interrupted bool, id int, request *R
 			rl.interrupt = false
 			return
 		}
-		id, request = rl.firstNewRequest()
+		id, request = rl.firstRequest(onlyNew)
 		if request != nil {
 			return
 		}

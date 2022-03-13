@@ -176,8 +176,10 @@ func HeadersPOS(
 ) error {
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
+	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
+
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 1)
-	interrupted, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForNewRequest()
+	interrupted, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
 	atomic.StoreUint32(cfg.waitingForBeaconChain, 0)
 
 	if interrupted {

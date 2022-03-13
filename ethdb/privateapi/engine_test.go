@@ -105,7 +105,7 @@ func TestMockDownloadRequest(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForNewRequest()
+	beaconRequestList.WaitForRequest(true)
 	statusCh <- PayloadStatus{Status: remote.EngineStatus_SYNCING}
 	atomic.StoreUint32(&waitingForHeaders, 0)
 	<-done
@@ -165,7 +165,7 @@ func TestMockValidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForNewRequest()
+	beaconRequestList.WaitForRequest(true)
 
 	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_VALID,
@@ -201,7 +201,7 @@ func TestMockInvalidExecution(t *testing.T) {
 		done <- true
 	}()
 
-	beaconRequestList.WaitForNewRequest()
+	beaconRequestList.WaitForRequest(true)
 	// Simulate invalid status
 	statusCh <- PayloadStatus{
 		Status:          remote.EngineStatus_INVALID,
