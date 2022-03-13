@@ -239,6 +239,14 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", beaconConfig.TerminalBlockHash, chainConfig.TerminalBlockHash)
 	}
 
+	if chainConfig.TerminalBlockNumber == nil {
+		return TransitionConfiguration{
+			TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
+			TerminalBlockHash:       chainConfig.TerminalBlockHash,
+			TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
+		}, nil
+	}
+
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       chainConfig.TerminalBlockHash,
