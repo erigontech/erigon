@@ -693,7 +693,7 @@ func (br *BlockRetire) Wait() *BlockRetireResult {
 }
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil
-	if br.working.Load() == true {
+	if br.working.Load() {
 		return
 	}
 
@@ -709,7 +709,6 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 			BlockTo:   blockTo,
 			Err:       err,
 		}
-		return
 	}()
 }
 
