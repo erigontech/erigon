@@ -229,11 +229,6 @@ type EthReceipt struct {
 	Result Receipt `json:"result"`
 }
 
-type EthLogs struct {
-	CommonResponse
-	Result []*Log `json:"result"`
-}
-
 type EthGetProof struct {
 	CommonResponse
 	Result AccountResult `json:"result"`
