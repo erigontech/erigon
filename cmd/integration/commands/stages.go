@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -551,20 +552,26 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, allSnapshots(chainConfig))
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig)))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
-		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)
+		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+			return err
+		}
+	} else if pruneTo > 0 {
+		p, err := sync.PruneStageState(stages.Senders, s.BlockNumber, tx, db)
 		if err != nil {
 			return err
 		}
+		if err = stagedsync.PruneSendersStage(p, tx, cfg, ctx); err != nil {
+			return err
+		}
+		return nil
 	} else {
-		err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx)
-		if err != nil {
+		if err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx); err != nil {
 			return err
 		}
 	}
-
 	return tx.Commit()
 }
 

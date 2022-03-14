@@ -665,6 +665,54 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
+type BlockRetire struct {
+	working atomic.Bool
+	wg      *sync.WaitGroup
+	result  *BlockRetireResult
+
+	workers   int
+	tmpDir    string
+	snapshots *RoSnapshots
+	db        kv.RoDB
+}
+
+type BlockRetireResult struct {
+	BlockFrom, BlockTo uint64
+	Err                error
+}
+
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db}
+}
+func (br *BlockRetire) Snapshots() *RoSnapshots    { return br.snapshots }
+func (br *BlockRetire) Working() bool              { return br.working.Load() }
+func (br *BlockRetire) Result() *BlockRetireResult { return br.result }
+func (br *BlockRetire) Wait() *BlockRetireResult {
+	br.wg.Wait()
+	return br.result
+}
+func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
+	br.result = nil
+	if br.working.Load() == true {
+		return
+	}
+
+	br.wg.Add(1)
+	go func() {
+		br.working.Store(true)
+		defer br.working.Store(false)
+		defer br.wg.Done()
+
+		err := RetireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, lvl)
+		br.result = &BlockRetireResult{
+			BlockFrom: blockFrom,
+			BlockTo:   blockTo,
+			Err:       err,
+		}
+		return
+	}()
+}
+
 func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
