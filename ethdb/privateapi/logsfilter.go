@@ -5,11 +5,9 @@ import (
 	"io"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/common"
 )
 
