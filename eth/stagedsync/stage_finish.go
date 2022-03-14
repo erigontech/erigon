@@ -121,8 +121,10 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var notifyFrom uint64
+	var isUnwind bool
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo
+		isUnwind = true
 	} else {
 		heightSpan := finishStageAfterSync - finishStageBeforeSync
 		if heightSpan > 1024 {
@@ -147,7 +149,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	notifier.OnNewHeader(headersRlp)
 	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
-	logs, err := ReadLogs(tx, notifyFrom)
+	logs, err := ReadLogs(tx, notifyFrom, isUnwind)
 	if err != nil {
 		return err
 	}
@@ -156,7 +158,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	return nil
 }
 
-func ReadLogs(tx kv.Tx, from uint64) ([]*remote.SubscribeLogsReply, error) {
+func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsReply, error) {
 	logs, err := tx.Cursor(kv.Log)
 	if err != nil {
 		return nil, err
@@ -186,7 +188,7 @@ func ReadLogs(tx kv.Tx, from uint64) ([]*remote.SubscribeLogsReply, error) {
 				Topics:           make([]*types2.H256, 0),
 				TransactionHash:  gointerfaces.ConvertHashToH256(l.TxHash),
 				TransactionIndex: uint64(l.TxIndex),
-				Removed:          l.Removed,
+				Removed:          isUnwind,
 			}
 			for _, topic := range l.Topics {
 				r.Topics = append(r.Topics, gointerfaces.ConvertHashToH256(topic))
