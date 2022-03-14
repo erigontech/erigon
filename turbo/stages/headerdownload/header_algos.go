@@ -620,17 +620,37 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
+func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	// Assemble the request
-	return HeaderRequest{
-		Hash:    hd.hashToDownloadPoS,
-		Number:  hd.heightToDownloadPoS,
+
+	anchor := hd.posAnchor
+	if anchor == nil {
+		log.Trace("No PoS anchor")
+		return
+	}
+
+	// Only process the anchors for which the nextRetryTime has already come
+	if anchor.nextRetryTime > currentTime {
+		return
+	}
+
+	timeout = anchor.timeouts >= 10
+	if timeout {
+		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
+		return
+	}
+
+	// Request ancestors
+	request = &HeaderRequest{
+		Anchor:  anchor,
+		Hash:    anchor.parentHash,
+		Number:  anchor.blockHeight - 1,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
 	}
+	return
 }
 
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
@@ -789,10 +809,14 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
-func (hd *HeaderDownload) SetHashToDownloadPoS(hash common.Hash) {
+func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.hashToDownloadPoS = hash
+
+	hd.posAnchor = &Anchor{
+		parentHash:  hash,
+		blockHeight: height + 1,
+	}
 }
 
 func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
@@ -808,27 +832,31 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
-		if header.Hash() != hd.hashToDownloadPoS {
-			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.hashToDownloadPoS)
+		if header.Hash() != hd.posAnchor.parentHash {
+			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.posAnchor.parentHash)
 		}
 
-		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
+		headerNumber := header.Number.Uint64()
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, header.Hash()), segmentFragment.HeaderRaw); err != nil {
 			return err
 		}
 
-		hd.hashToDownloadPoS = header.ParentHash
-		hd.heightToDownloadPoS = header.Number.Uint64() - 1
-
-		hh, err := hd.headerReader.Header(context.Background(), tx, hd.hashToDownloadPoS, hd.heightToDownloadPoS)
+		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
 		if err != nil {
 			return err
 		}
 		if hh != nil {
+			hd.posAnchor = nil
 			hd.posStatus = Synced
 			return nil
 		}
 
-		if hd.heightToDownloadPoS == 0 {
+		hd.posAnchor = &Anchor{
+			parentHash:  header.ParentHash,
+			blockHeight: headerNumber,
+		}
+
+		if headerNumber <= 1 {
 			return errors.New("wrong genesis in PoS sync")
 		}
 	}
@@ -847,8 +875,8 @@ func (hd *HeaderDownload) GrabAnnounces() []Announce {
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	if hd.posSync {
-		return hd.heightToDownloadPoS
+	if hd.posSync && hd.posAnchor != nil {
+		return hd.posAnchor.blockHeight - 1
 	} else {
 		return hd.highestInDb
 	}
@@ -1165,12 +1193,6 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.fetching = fetching
-}
-
-func (hd *HeaderDownload) SetHeightToDownloadPoS(heightToDownloadPoS uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.heightToDownloadPoS = heightToDownloadPoS
 }
 
 func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {

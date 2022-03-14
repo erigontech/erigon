@@ -253,6 +253,7 @@ const ( // SyncStatus values
 	Idle = iota
 	Syncing
 	Synced // if we found a canonical hash during backward sync, in this case our sync process is done
+	Timeout
 )
 
 type HeaderDownload struct {
@@ -283,12 +284,11 @@ type HeaderDownload struct {
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          interfaces.HeaderReader
 
-	// proof-of-stake
+	// Proof of Stake (PoS)
 	topSeenHeightPoS     uint64
-	heightToDownloadPoS  uint64
-	hashToDownloadPoS    common.Hash
+	posAnchor            *Anchor
 	posStatus            SyncStatus
-	posSync              bool                          // True if the chain is syncing backwards or not
+	posSync              bool                          // Whether the chain is syncing in the PoS mode
 	headersCollector     *etl.Collector                // ETL collector for headers
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)

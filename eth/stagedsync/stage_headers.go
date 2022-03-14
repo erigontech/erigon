@@ -462,8 +462,7 @@ func downloadMissingPoSHeaders(
 	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetPosStatus(headerdownload.Syncing)
 
-	cfg.hd.SetHashToDownloadPoS(hashToDownload)
-	cfg.hd.SetHeightToDownloadPoS(heightToDownload)
+	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
 
@@ -482,21 +481,32 @@ func downloadMissingPoSHeaders(
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	var req headerdownload.HeaderRequest
 	for !stopped {
-		sentToPeer := false
-		maxRequests := 4096
-		for !sentToPeer && !stopped && maxRequests != 0 {
-			req = cfg.hd.RequestMoreHeadersForPOS()
-			_, sentToPeer = cfg.headerReqSend(ctx, &req)
-			maxRequests--
+		currentTime := uint64(time.Now().Unix())
+		timeout, req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
+		if timeout {
+			cfg.hd.SetPosStatus(headerdownload.Timeout)
+			break
 		}
 
 		if cfg.hd.PosStatus() == headerdownload.Synced {
-			stopped = true
+			break
 		}
+
+		if req != nil {
+			_, sentToPeer := cfg.headerReqSend(ctx, req)
+			if sentToPeer {
+				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+				log.Trace("Sent request", "height", req.Number)
+			}
+		}
+		if len(penalties) > 0 {
+			cfg.penalize(ctx, penalties)
+		}
+
 		// Sleep and check for logs
-		timer := time.NewTimer(2 * time.Millisecond)
+		timer := time.NewTimer(200 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			stopped = true
