@@ -29,7 +29,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -125,11 +124,6 @@ const MaxNeighbors = 12
 // Pubkey represents an encoded 64-byte secp256k1 public key.
 type Pubkey [64]byte
 
-// ID returns the node ID corresponding to the public key.
-func (e Pubkey) ID() enode.ID {
-	return enode.ID(crypto.Keccak256Hash(e[:]))
-}
-
 // Node represents information about a node.
 type Node struct {
 	IP  net.IP // len 4 for IPv4 or 16 for IPv6
@@ -192,6 +186,7 @@ func seqFromTail(tail []rlp.RawValue) uint64 {
 		return 0
 	}
 	var seq uint64
+	//goland:noinspection GoUnhandledErrorResult
 	rlp.DecodeBytes(tail[0], &seq) //nolint:errcheck
 	return seq
 }
@@ -279,7 +274,8 @@ func recoverNodeKey(hash, sig []byte) (key Pubkey, err error) {
 	return key, nil
 }
 
-// EncodePubkey encodes a secp256k1 public key.
+// EncodePubkey converts a public key into a binary format.
+// The logic matches DecodePubkey.
 func EncodePubkey(key *ecdsa.PublicKey) Pubkey {
 	var e Pubkey
 	math.ReadBits(key.X, e[:len(e)/2])

@@ -26,7 +26,6 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 )
@@ -192,12 +191,4 @@ func (n *Node) URLv4() string {
 		}
 	}
 	return u.String()
-}
-
-// PubkeyToIDV4 derives the v4 node address from the given public key.
-func PubkeyToIDV4(key *ecdsa.PublicKey) ID {
-	e := make([]byte, 64)
-	math.ReadBits(key.X, e[:len(e)/2])
-	math.ReadBits(key.Y, e[len(e)/2:])
-	return ID(crypto.Keccak256Hash(e))
 }

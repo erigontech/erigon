@@ -35,6 +35,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
+
+	mdbx1 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 // Keys in the node database.
@@ -61,7 +63,7 @@ const (
 const (
 	dbNodeExpiration = 24 * time.Hour // Time after which an unseen node should be dropped.
 	dbCleanupCycle   = time.Hour      // Time period for running the expiration task.
-	dbVersion        = 9
+	dbVersion        = 10
 )
 
 var (
@@ -88,9 +90,10 @@ func OpenDB(path string) (*DB, error) {
 	return newPersistentDB(logger, path)
 }
 
-var bucketsConfig = func(defaultBuckets kv.TableCfg) kv.TableCfg {
+func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 	return kv.TableCfg{
-		kv.Inodes: {},
+		kv.Inodes:      {},
+		kv.NodeRecords: {},
 	}
 }
 
@@ -110,7 +113,14 @@ func newMemoryDB(logger log.Logger) (*DB, error) {
 func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	var db kv.RwDB
 	var err error
-	db, err = mdbx.NewMDBX(logger).Path(path).Label(kv.SentryDB).MapSize(1024 * datasize.MB).WithTablessCfg(bucketsConfig).Open()
+	db, err = mdbx.NewMDBX(logger).
+		Path(path).
+		Label(kv.SentryDB).
+		WithTablessCfg(bucketsConfig).
+		MapSize(1024 * datasize.MB).
+		Flags(func(f uint) uint { return f ^ mdbx1.Durable | mdbx1.SafeNoSync }).
+		SyncPeriod(2 * time.Second).
+		Open()
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +151,7 @@ func newPersistentDB(logger log.Logger, path string) (*DB, error) {
 	}
 	if blob != nil && !bytes.Equal(blob, currentVer) {
 		db.Close()
-		if err := os.Remove(path); err != nil {
+		if err := os.RemoveAll(path); err != nil {
 			return nil, err
 		}
 		return newPersistentDB(logger, path)
@@ -274,7 +284,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 func (db *DB) Node(id ID) *Node {
 	var blob []byte
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		v, errGet := tx.GetOne(kv.Inodes, nodeKey(id))
+		v, errGet := tx.GetOne(kv.NodeRecords, nodeKey(id))
 		if errGet != nil {
 			return errGet
 		}
@@ -312,7 +322,7 @@ func (db *DB) UpdateNode(node *Node) error {
 		return err
 	}
 	if err := db.kv.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.Inodes, nodeKey(node.ID()), blob)
+		return tx.Put(kv.NodeRecords, nodeKey(node.ID()), blob)
 	}); err != nil {
 		return err
 	}
@@ -340,22 +350,29 @@ func (db *DB) DeleteNode(id ID) {
 
 func deleteRange(db kv.RwDB, prefix []byte) {
 	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		c, err := tx.RwCursor(kv.Inodes)
-		if err != nil {
-			return err
-		}
-		for k, _, err := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
-			if err != nil {
+		for bucket := range bucketsConfig(nil) {
+			if err := deleteRangeInBucket(tx, prefix, bucket); err != nil {
 				return err
-			}
-			if err := c.Delete(k, nil); err != nil {
-				return nil
 			}
 		}
 		return nil
 	}); err != nil {
 		log.Warn("nodeDB.deleteRange failed", "err", err)
 	}
+}
+
+func deleteRangeInBucket(tx kv.RwTx, prefix []byte, bucket string) error {
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	var k []byte
+	for k, _, err = c.Seek(prefix); (err == nil) && (k != nil) && bytes.HasPrefix(k, prefix); k, _, err = c.Next() {
+		if err = c.DeleteCurrent(); err != nil {
+			break
+		}
+	}
+	return err
 }
 
 // ensureExpirer is a small helper method ensuring that the data expiration
@@ -528,7 +545,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	)
 
 	if err := db.kv.View(context.Background(), func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.Inodes)
+		c, err := tx.Cursor(kv.NodeRecords)
 		if err != nil {
 			return err
 		}

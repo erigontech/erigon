@@ -18,6 +18,7 @@ package discover
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
@@ -28,7 +29,6 @@ import (
 	"net"
 	"reflect"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 
@@ -74,10 +74,15 @@ func newUDPTest(t *testing.T) *udpTest {
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey)
-	test.udp, _ = ListenV4(test.pipe, ln, Config{
+	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
+	test.udp, err = ListenV4(ctx, test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlInfo),
 	})
+	if err != nil {
+		panic(err)
+	}
 	test.table = test.udp.tab
 	// Wait for initial refresh so the table doesn't send unexpected findnode.
 	<-test.table.initDone
@@ -261,7 +266,8 @@ func TestUDPv4_findnode(t *testing.T) {
 	// put a few nodes into the table. their exact
 	// distribution shouldn't matter much, although we need to
 	// take care not to overflow any bucket.
-	nodes := &nodesByDistance{target: testTarget.ID()}
+	testTargetID := enode.PubkeyEncoded(testTarget).ID()
+	nodes := &nodesByDistance{target: testTargetID}
 	live := make(map[enode.ID]bool)
 	numCandidates := 2 * bucketSize
 	for i := 0; i < numCandidates; i++ {
@@ -279,11 +285,11 @@ func TestUDPv4_findnode(t *testing.T) {
 
 	// ensure there's a bond with the test node,
 	// findnode won't be accepted otherwise.
-	remoteID := v4wire.EncodePubkey(&test.remotekey.PublicKey).ID()
+	remoteID := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 	test.table.db.UpdateLastPongReceived(remoteID, test.remoteaddr.IP, time.Now())
 
 	// check that closest neighbors are returned.
-	expected := test.table.findnodeByID(testTarget.ID(), bucketSize, true)
+	expected := test.table.findnodeByID(testTargetID, bucketSize, true)
 	test.packetIn(nil, &v4wire.Findnode{Target: testTarget, Expiration: futureExp})
 	waitNeighbors := func(want []*node) {
 		test.waitPacketOut(func(p *v4wire.Neighbors, to *net.UDPAddr, hash []byte) {
@@ -291,11 +297,12 @@ func TestUDPv4_findnode(t *testing.T) {
 				t.Errorf("wrong number of results: got %d, want %d", len(p.Nodes), bucketSize)
 			}
 			for i, n := range p.Nodes {
-				if n.ID.ID() != want[i].ID() {
+				nodeID := enode.PubkeyEncoded(n.ID).ID()
+				if nodeID != want[i].ID() {
 					t.Errorf("result mismatch at %d:\n  got:  %v\n  want: %v", i, n, expected.entries[i])
 				}
-				if !live[n.ID.ID()] {
-					t.Errorf("result includes dead node %v", n.ID.ID())
+				if !live[nodeID] {
+					t.Errorf("result includes dead node %v", nodeID)
 				}
 			}
 		})
@@ -319,7 +326,7 @@ func TestUDPv4_findnodeMultiReply(t *testing.T) {
 	// queue a pending findnode request
 	resultc, errc := make(chan []*node), make(chan error)
 	go func() {
-		rid := encodePubkey(&test.remotekey.PublicKey).id()
+		rid := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 		ns, err := test.udp.findnode(rid, test.remoteaddr, testTarget)
 		if err != nil && len(ns) == 0 {
 			errc <- err
@@ -443,7 +450,7 @@ func TestUDPv4_successfulPing(t *testing.T) {
 	// pong packet.
 	select {
 	case n := <-added:
-		rid := encodePubkey(&test.remotekey.PublicKey).id()
+		rid := enode.PubkeyToIDV4(&test.remotekey.PublicKey)
 		if n.ID() != rid {
 			t.Errorf("node has wrong ID: got %v, want %v", n.ID(), rid)
 		}
@@ -583,7 +590,9 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	udp, err := ListenV4(socket, ln, cfg)
+	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
+	udp, err := ListenV4(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -592,11 +601,8 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 
 // dgramPipe is a fake UDP socket. It queues all sent datagrams.
 type dgramPipe struct {
-	mu      *sync.Mutex
-	cond    *sync.Cond
-	closing chan struct{}
-	closed  bool
-	queue   []dgram
+	queue  chan dgram
+	closed chan struct{}
 }
 
 type dgram struct {
@@ -605,11 +611,9 @@ type dgram struct {
 }
 
 func newpipe() *dgramPipe {
-	mu := new(sync.Mutex)
 	return &dgramPipe{
-		closing: make(chan struct{}),
-		cond:    &sync.Cond{L: mu},
-		mu:      mu,
+		make(chan dgram, 1000),
+		make(chan struct{}),
 	}
 }
 
@@ -617,30 +621,24 @@ func newpipe() *dgramPipe {
 func (c *dgramPipe) WriteToUDP(b []byte, to *net.UDPAddr) (n int, err error) {
 	msg := make([]byte, len(b))
 	copy(msg, b)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return 0, errors.New("closed")
-	}
-	c.queue = append(c.queue, dgram{*to, b})
-	c.cond.Signal()
+
+	n = 0
+	err = errors.New("closed")
+	defer recover()
+
+	c.queue <- dgram{*to, b}
 	return len(b), nil
 }
 
 // ReadFromUDP just hangs until the pipe is closed.
 func (c *dgramPipe) ReadFromUDP(b []byte) (n int, addr *net.UDPAddr, err error) {
-	<-c.closing
+	<-c.closed
 	return 0, nil, io.EOF
 }
 
 func (c *dgramPipe) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.closed {
-		close(c.closing)
-		c.closed = true
-	}
-	c.cond.Broadcast()
+	close(c.queue)
+	close(c.closed)
 	return nil
 }
 
@@ -649,29 +647,16 @@ func (c *dgramPipe) LocalAddr() net.Addr {
 }
 
 func (c *dgramPipe) receive() (dgram, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
-	var timedOut bool
-	timer := time.AfterFunc(3*time.Second, func() {
-		c.mu.Lock()
-		timedOut = true
-		c.mu.Unlock()
-		c.cond.Broadcast()
-	})
-	defer timer.Stop()
-
-	for len(c.queue) == 0 && !c.closed && !timedOut {
-		c.cond.Wait()
-	}
-	if c.closed {
+	select {
+	case p, isOpen := <-c.queue:
+		if isOpen {
+			return p, nil
+		}
 		return dgram{}, errClosed
-	}
-	if timedOut {
+	case <-ctx.Done():
 		return dgram{}, errTimeout
 	}
-	p := c.queue[0]
-	copy(c.queue, c.queue[1:])
-	c.queue = c.queue[:len(c.queue)-1]
-	return p, nil
 }
