@@ -513,25 +513,22 @@ func (s *RoSnapshots) Close() {
 	s.Txs.Close()
 }
 func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(*HeaderSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() {
+	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
 		return false, nil
 	}
 	return s.Headers.ViewSegment(blockNum, f)
 }
-func (s *RoSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
-	if !s.indicesReady.Load() {
-		return nil, false
+func (s *RoSnapshots) ViewBodies(blockNum uint64, f func(*BodySegment) error) (found bool, err error) {
+	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+		return false, nil
 	}
-
-	if blockNumber > s.segmentsAvailable.Load() {
-		return nil, false
+	return s.Bodies.ViewSegment(blockNum, f)
+}
+func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(segment *TxnSegment) error) (found bool, err error) {
+	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+		return false, nil
 	}
-	for _, blocksSnapshot := range s.blocks {
-		if blocksSnapshot.Has(blockNumber) {
-			return blocksSnapshot, true
-		}
-	}
-	return snapshot, false
+	return s.Txs.ViewSegment(blockNum, f)
 }
 func (s *RoSnapshots) Blocks(blockNumber uint64) (snapshot *BlocksSnapshot, found bool) {
 	if !s.indicesReady.Load() {
