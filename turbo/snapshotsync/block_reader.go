@@ -200,8 +200,8 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 }
 
 // HeaderByHash - will search header in all snapshots starting from recent
-func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
-	h, err := rawdb.ReadHeaderByHash(tx, hash)
+func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (h *types.Header, err error) {
+	h, err = rawdb.ReadHeaderByHash(tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -210,16 +210,18 @@ func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Ge
 	}
 
 	buf := make([]byte, 128)
-	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
-		h, err := back.headerFromSnapshotByHash(hash, back.sn.blocks[i], buf)
-		if err != nil {
-			return nil, nil
+	if err := back.sn.Headers.View(func(segments []*HeaderSegment) error {
+		for i := len(segments) - 1; i >= 0; i-- {
+			h, err = back.headerFromSnapshotByHash(hash, segments[i], buf)
+			if err != nil {
+				return err
+			}
 		}
-		if h != nil {
-			return h, nil
-		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	return nil, nil
+	return h, nil
 }
 
 func (back *BlockReaderWithSnapshots) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
@@ -394,11 +396,11 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 // because HeaderByHash method will search header in all snapshots - and may request header which doesn't exists
 // but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
 // to make sure is to fetch it and compare hash
-func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *BlocksSnapshot, buf []byte) (*types.Header, error) {
-	reader := recsplit.NewIndexReader(sn.HeaderHashIdx)
+func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegment, buf []byte) (*types.Header, error) {
+	reader := recsplit.NewIndexReader(sn.idxHeaderHash)
 	localID := reader.Lookup(hash[:])
-	headerOffset := sn.HeaderHashIdx.Lookup2(localID)
-	gg := sn.Headers.MakeGetter()
+	headerOffset := sn.idxHeaderHash.Lookup2(localID)
+	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
 	if hash[0] != buf[0] {
