@@ -31,7 +31,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 
 func HexToInt(hexStr string) uint64 {
 	// Remove the 0x prefix
-	cleaned := strings.Replace(hexStr, "0x", "", -1)
+	cleaned := strings.ReplaceAll(hexStr, "0x", "")
 
 	result, _ := strconv.ParseUint(cleaned, 16, 64)
 	return result
