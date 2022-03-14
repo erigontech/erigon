@@ -968,7 +968,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	} else {
-		err = stagedsync.SpawnTxLookup(s, tx, cfg, ctx)
+		err = stagedsync.SpawnTxLookup(s, tx, block, cfg, ctx)
 		if err != nil {
 			return err
 		}

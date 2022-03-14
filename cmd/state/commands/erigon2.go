@@ -173,7 +173,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 
 	var (
 		blockNum uint64 = 0
-		txNum    uint64 = 1
+		txNum    uint64 = 2
 		trace    bool
 	)
 
@@ -201,7 +201,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if blockNum <= block {
 			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
 			// Skip that block, but increase txNum
-			txNum += uint64(txAmount) + 1
+			txNum += uint64(txAmount) + 2
 			continue
 		}
 		var b *types.Block
@@ -226,6 +226,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			}
 			return h
 		}
+		txNum++ // Pre-block transaction
 		if txNum, _, err = runBlock2(trace, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
@@ -235,7 +236,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if trace {
 			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
-		txNum++
+		txNum++ // Post-block transaction
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
