@@ -419,8 +419,10 @@ func retireBlocks(s *PruneState, cfg SendersCfg, ctx context.Context) (err error
 
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 	cfg.br.RetireBlocks(ctx, blockFrom, blockTo, *chainID, log.LvlDebug)
-	if err := cfg.br.Wait(); err != nil {
-		panic(err)
+	cfg.br.Wait()
+	res := cfg.br.Result()
+	if res.Err != nil {
+		panic(res.Err)
 	}
 
 	return nil

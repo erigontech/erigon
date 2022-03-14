@@ -687,10 +687,7 @@ func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.Ro
 func (br *BlockRetire) Snapshots() *RoSnapshots    { return br.snapshots }
 func (br *BlockRetire) Working() bool              { return br.working.Load() }
 func (br *BlockRetire) Result() *BlockRetireResult { return br.result }
-func (br *BlockRetire) Wait() *BlockRetireResult {
-	br.wg.Wait()
-	return br.result
-}
+func (br *BlockRetire) Wait()                      { br.wg.Wait() }
 func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil
 	if br.working.Load() {

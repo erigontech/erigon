@@ -161,8 +161,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	for i := from; i < to; i += every {
 		br.RetireBlocks(ctx, i, i+every, *chainID, log.LvlInfo)
-		if err := br.Wait(); err != nil {
-			panic(err)
+		br.Wait()
+		res := br.Result()
+		if res.Err != nil {
+			panic(res.Err)
 		}
 	}
 	return nil
