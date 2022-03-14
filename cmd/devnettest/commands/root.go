@@ -28,9 +28,4 @@ func Execute() error {
 
 func clearDevDB() {
 	fmt.Printf("Clearing ~/dev\n")
-	//
-	//_, err := exec.Command("rm", "-rf", "~/dev", "~/dev2").Output()
-	//if err != nil {
-	//	fmt.Println(err)
-	//}
 }
