@@ -543,11 +543,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	// Need to generate one
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
-	// if we're in --dev mode, don't bother saving, just show it
-	if fileName == "" {
-		log.Info("Generated ephemeral JWT secret", "secret", hexutil.Encode(jwtSecret))
-		return jwtSecret, nil
-	}
+
 	if err := os.WriteFile(fileName, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
 		return nil, err
 	}
