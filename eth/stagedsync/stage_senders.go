@@ -377,13 +377,12 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		if err := retireBlocks(s, tx, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocks: %w", err)
 		}
-	}
-
-	if cfg.prune.TxIndex.Enabled() {
+	} else {
 		if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
 			return err
 		}
 	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -400,12 +399,6 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 		if res.Err != nil {
 			return fmt.Errorf("[%s] retire blocks last error: %w", s.LogPrefix(), res.Err)
 		}
-
-		//TODO: avoid too large deletes
-		//if err := rawdb.DeleteAncientBlocks(tx, res.BlockFrom, res.BlockTo); err != nil {
-		//	return nil
-		//}
-		// TODO: seed new 500K files (calc sha1 hash in background)
 	}
 
 	canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
