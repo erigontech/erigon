@@ -190,7 +190,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 			ID:          stages.TxLookup,
 			Description: "Generate tx lookup index",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
-				return SpawnTxLookup(s, tx, txLookup, ctx)
+				return SpawnTxLookup(s, tx, 0 /* toBlock */, txLookup, ctx)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindTxLookup(u, s, tx, txLookup, ctx)

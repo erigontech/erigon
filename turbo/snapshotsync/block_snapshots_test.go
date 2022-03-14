@@ -31,7 +31,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string)
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, IdxFileName(from, to, name)),
+		IndexFile:  filepath.Join(dir, IdxFileName(from, to, name.String())),
 		LeafSize:   8,
 	})
 	require.NoError(t, err)
@@ -45,7 +45,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string)
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, IdxFileName(from, to, Transactions2Block)),
+			IndexFile:  filepath.Join(dir, IdxFileName(from, to, Transactions2Block.String())),
 			LeafSize:   8,
 		})
 		require.NoError(t, err)
@@ -57,7 +57,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string)
 	}
 }
 
-func TestMerge(t *testing.T) {
+func TestMergeSnapshots(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range AllSnapshotTypes {

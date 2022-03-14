@@ -43,7 +43,7 @@ func StageTxLookupCfg(
 	}
 }
 
-func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context) (err error) {
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -57,6 +57,9 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err
+	}
+	if toBlock > 0 {
+		endBlock = min(endBlock, toBlock)
 	}
 
 	startBlock := s.BlockNumber
