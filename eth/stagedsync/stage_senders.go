@@ -38,7 +38,7 @@ type SendersCfg struct {
 	tmpdir            string
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
-	br                *snapshotsync.BlockRetire
+	blockRetire       *snapshotsync.BlockRetire
 	snapshotHashesCfg *snapshothashes.Config
 }
 
@@ -56,7 +56,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 		tmpdir:            tmpdir,
 		chainConfig:       chainCfg,
 		prune:             prune,
-		br:                br,
+		blockRetire:       br,
 		snapshotHashesCfg: snapshothashes.KnownConfig(chainCfg.ChainName),
 	}
 }
@@ -103,8 +103,8 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer canonicalC.Close()
 
 	startFrom := s.BlockNumber + 1
-	if cfg.br.Snapshots() != nil && startFrom < cfg.br.Snapshots().BlocksAvailable() {
-		startFrom = cfg.br.Snapshots().BlocksAvailable()
+	if cfg.blockRetire.Snapshots() != nil && startFrom < cfg.blockRetire.Snapshots().BlocksAvailable() {
+		startFrom = cfg.blockRetire.Snapshots().BlocksAvailable()
 	}
 
 	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
@@ -373,8 +373,8 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if cfg.br.Snapshots() != nil && cfg.br.Snapshots().Cfg().RetireEnabled {
-		if err := retireBlocks(s, cfg, ctx); err != nil {
+	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().RetireEnabled {
+		if err := retireBlocks(s, tx, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocks: %w", err)
 		}
 	}
@@ -392,11 +392,11 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	return nil
 }
 
-func retireBlocks(s *PruneState, cfg SendersCfg, ctx context.Context) (err error) {
-	if cfg.br.Working() {
+func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	if cfg.blockRetire.Working() {
 		return nil
 	}
-	if res := cfg.br.Result(); res != nil {
+	if res := cfg.blockRetire.Result(); res != nil {
 		if res.Err != nil {
 			return fmt.Errorf("[%s] retire blocks last error: %w", s.LogPrefix(), res.Err)
 		}
@@ -408,22 +408,22 @@ func retireBlocks(s *PruneState, cfg SendersCfg, ctx context.Context) (err error
 		// TODO: seed new 500K files (calc sha1 hash in background)
 	}
 
-	if err := cfg.br.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
+	canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
+	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
+		return nil
+	}
+
+	// TODO: remove this check for the release
+	if err := cfg.blockRetire.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
 		return err
 	}
-	blockFrom := cfg.br.Snapshots().BlocksAvailable() + 1
-	blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
-	if blockTo-blockFrom < 1000 {
+	blockFrom, blockTo, ok := cfg.blockRetire.CanRetire(s.ForwardProgress)
+	if !ok {
 		return nil
 	}
 
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	cfg.br.RetireBlocks(ctx, blockFrom, blockTo, *chainID, log.LvlDebug)
-	cfg.br.Wait()
-	res := cfg.br.Result()
-	if res.Err != nil {
-		panic(res.Err)
-	}
+	cfg.blockRetire.RetireBlocksInBackground(ctx, blockFrom, blockTo, *chainID, log.LvlDebug)
 
 	return nil
 }

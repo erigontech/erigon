@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
@@ -684,11 +685,24 @@ type BlockRetireResult struct {
 func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB) *BlockRetire {
 	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db}
 }
-func (br *BlockRetire) Snapshots() *RoSnapshots    { return br.snapshots }
-func (br *BlockRetire) Working() bool              { return br.working.Load() }
-func (br *BlockRetire) Result() *BlockRetireResult { return br.result }
-func (br *BlockRetire) Wait()                      { br.wg.Wait() }
-func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
+func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
+func (br *BlockRetire) Working() bool           { return br.working.Load() }
+func (br *BlockRetire) Wait()                   { br.wg.Wait() }
+func (br *BlockRetire) Result() *BlockRetireResult {
+	r := br.result
+	br.result = nil
+	return r
+}
+func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64, can bool) {
+	blockFrom = br.snapshots.BlocksAvailable() + 1
+	blockTo = (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
+	return blockFrom, blockTo, blockTo-blockFrom >= 1000
+}
+func (br *BlockRetire) CanDeleteTo(curBlockNum uint64) (blockTo uint64) {
+	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
+	return min(hardLimit, br.snapshots.BlocksAvailable()+1)
+}
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil
 	if br.working.Load() {
 		return
@@ -700,7 +714,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 		defer br.working.Store(false)
 		defer br.wg.Done()
 
-		err := RetireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, lvl)
+		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, lvl)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -709,7 +723,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	}()
 }
 
-func RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
