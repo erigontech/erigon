@@ -182,14 +182,14 @@ func makeP2PServer(
 	if chainConfig != nil {
 		urls = params.BootnodeURLsOfChain(chainConfig.ChainName)
 	}
-
-	bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
-	if err != nil {
-		return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+	if len(p2pConfig.BootstrapNodes) == 0 {
+		bootstrapNodes, err := utils.ParseNodesFromURLs(urls)
+		if err != nil {
+			return nil, fmt.Errorf("bad option %s: %w", utils.BootnodesFlag.Name, err)
+		}
+		p2pConfig.BootstrapNodes = bootstrapNodes
+		p2pConfig.BootstrapNodesV5 = bootstrapNodes
 	}
-	p2pConfig.BootstrapNodes = bootstrapNodes
-	p2pConfig.BootstrapNodesV5 = bootstrapNodes
-
 	p2pConfig.Protocols = []p2p.Protocol{protocol}
 	return &p2p.Server{Config: p2pConfig}, nil
 }
