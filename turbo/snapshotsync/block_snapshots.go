@@ -1669,35 +1669,6 @@ func NewMerger(tmpDir string, workers int, lvl log.Lvl) *Merger {
 	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl}
 }
 
-/*
-	a.fileLocks[fType].RLock()
-	defer a.fileLocks[fType].RUnlock()
-	var maxEndBlock uint64
-	a.files[fType].Ascend(func(i btree.Item) bool {
-		item := i.(*byEndBlockItem)
-		if item.decompressor == nil {
-			return true // Skip B-tree based items
-		}
-		pre = append(pre, item)
-		if aggTo == 0 {
-			var doubleEnd uint64
-			nextDouble := item.endBlock
-			for nextDouble <= maxEndBlock && nextDouble-item.startBlock < maxSpan {
-				doubleEnd = nextDouble
-				nextDouble = doubleEnd + (doubleEnd - item.startBlock) + 1
-			}
-			if doubleEnd != item.endBlock {
-				aggFrom = item.startBlock
-				aggTo = doubleEnd
-			} else {
-				post = append(post, item)
-				return true
-			}
-		}
-		toAggregate = append(toAggregate, item)
-		return item.endBlock < aggTo
-	})
-*/
 type mergeRange struct {
 	from, to uint64
 }
