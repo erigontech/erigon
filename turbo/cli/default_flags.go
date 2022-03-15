@@ -70,7 +70,6 @@ var DefaultFlags = []cli.Flag{
 	utils.TraceMaxtracesFlag,
 
 	utils.SnapshotSyncFlag,
-	utils.SnapshotRetireFlag,
 	utils.SnapshotKeepBlocksFlag,
 	utils.DbPageSizeFlag,
 	utils.TorrentPortFlag,
