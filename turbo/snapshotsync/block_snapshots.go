@@ -223,16 +223,12 @@ type headerSegments struct {
 	segments []*HeaderSegment
 }
 
-func (s *headerSegments) Close() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *headerSegments) closeLocked() {
 	for i := range s.segments {
 		s.segments[i].close()
 	}
 }
-func (s *headerSegments) Reopen(dir string) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *headerSegments) reopen(dir string) error {
 	for i := range s.segments {
 		if err := s.segments[i].Reopen(dir); err != nil {
 			return err
@@ -262,16 +258,12 @@ type bodySegments struct {
 	segments []*BodySegment
 }
 
-func (s *bodySegments) Close() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *bodySegments) closeLocked() {
 	for i := range s.segments {
 		s.segments[i].close()
 	}
 }
-func (s *bodySegments) Reopen(dir string) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *bodySegments) reopen(dir string) error {
 	for i := range s.segments {
 		if err := s.segments[i].Reopen(dir); err != nil {
 			return err
@@ -301,16 +293,12 @@ type txnSegments struct {
 	segments []*TxnSegment
 }
 
-func (s *txnSegments) Close() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *txnSegments) closeLocked() {
 	for i := range s.segments {
 		s.segments[i].close()
 	}
 }
-func (s *txnSegments) Reopen(dir string) error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+func (s *txnSegments) reopen(dir string) error {
 	for i := range s.segments {
 		if err := s.segments[i].Reopen(dir); err != nil {
 			return err
@@ -402,18 +390,24 @@ func (s *RoSnapshots) ReopenIndices() error {
 }
 
 func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
+	s.Headers.lock.Lock()
+	defer s.Headers.lock.Unlock()
+	s.Bodies.lock.Lock()
+	defer s.Bodies.lock.Unlock()
+	s.Txs.lock.Lock()
+	defer s.Txs.lock.Unlock()
 	for _, t := range types {
 		switch t {
 		case Headers:
-			if err := s.Headers.Reopen(s.dir); err != nil {
+			if err := s.Headers.reopen(s.dir); err != nil {
 				return err
 			}
 		case Bodies:
-			if err := s.Bodies.Reopen(s.dir); err != nil {
+			if err := s.Bodies.reopen(s.dir); err != nil {
 				return err
 			}
 		case Transactions:
-			if err := s.Txs.Reopen(s.dir); err != nil {
+			if err := s.Txs.reopen(s.dir); err != nil {
 				return err
 			}
 		default:
@@ -422,8 +416,9 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 	}
 
 	//TODO: make calculatable?
-	if s.Headers.segments[len(s.Headers.segments)-1].To > 0 {
-		s.idxAvailable.Store(s.Headers.segments[len(s.Headers.segments)-1].To - 1)
+	segments := s.Headers.segments
+	if segments[len(segments)-1].To > 0 {
+		s.idxAvailable.Store(segments[len(segments)-1].To - 1)
 	} else {
 		s.idxAvailable.Store(0)
 	}
@@ -452,7 +447,14 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 }
 
 func (s *RoSnapshots) ReopenSegments() error {
-	s.closeSegments()
+	s.Headers.lock.Lock()
+	defer s.Headers.lock.Unlock()
+	s.Bodies.lock.Lock()
+	defer s.Bodies.lock.Unlock()
+	s.Txs.lock.Lock()
+	defer s.Txs.lock.Unlock()
+
+	s.closeSegmentsLocked()
 	files, err := segmentsOfType(s.dir, Headers)
 	if err != nil {
 		return err
@@ -506,19 +508,25 @@ func (s *RoSnapshots) ReopenSegments() error {
 }
 
 func (s *RoSnapshots) Close() {
-	s.closeSegments()
+	s.Headers.lock.Lock()
+	defer s.Headers.lock.Unlock()
+	s.Bodies.lock.Lock()
+	defer s.Bodies.lock.Unlock()
+	s.Txs.lock.Lock()
+	defer s.Txs.lock.Unlock()
+	s.closeSegmentsLocked()
 }
-func (s *RoSnapshots) closeSegments() {
+func (s *RoSnapshots) closeSegmentsLocked() {
 	if s.Headers != nil {
-		s.Headers.Close()
+		s.Headers.closeLocked()
 		s.Headers.segments = nil
 	}
 	if s.Bodies != nil {
-		s.Bodies.Close()
+		s.Bodies.closeLocked()
 		s.Bodies.segments = nil
 	}
 	if s.Txs != nil {
-		s.Txs.Close()
+		s.Txs.closeLocked()
 		s.Txs.segments = nil
 	}
 }
