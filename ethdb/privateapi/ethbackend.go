@@ -297,7 +297,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
-		log.Error("[NewPayload] invalid block hash", "stated", blockHash, "actual", header.Hash())
+		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 

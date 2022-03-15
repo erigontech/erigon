@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math/big"
 
@@ -126,6 +127,9 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	log.Info("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
+
+	json, _ := json.Marshal(payload)
+	log.Info("Received NewPayload", "json", json)
 
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
