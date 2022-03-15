@@ -128,8 +128,11 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
 	log.Info("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
-	json, _ := json.Marshal(payload)
-	log.Info("Received NewPayload", "json", json)
+	json, err := json.Marshal(payload)
+	if err != nil {
+		panic(err)
+	}
+	log.Info("Received NewPayload", "json", string(json))
 
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
