@@ -125,6 +125,8 @@ func init() {
 type Snapshot struct {
 	Enabled       bool
 	RetireEnabled bool
+
+	KeepBlocks bool
 }
 
 func (s Snapshot) String() string {
@@ -135,16 +137,20 @@ func (s Snapshot) String() string {
 	if s.RetireEnabled {
 		out = append(out, "--"+FlagSnapshotRetire+"=true")
 	}
+	if s.KeepBlocks {
+		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
+	}
 	return strings.Join(out, " ")
 }
 
 var (
-	FlagSnapshot       = "experimental.snapshot"
-	FlagSnapshotRetire = "experimental.snapshot.retire"
+	FlagSnapshot           = "experimental.snapshot"
+	FlagSnapshotRetire     = "experimental.snapshot.retire"
+	FlagSnapshotKeepBlocks = "experimental.snapshot.keepblocks"
 )
 
-func NewSnapshotCfg(enabled, retireEnabled bool) Snapshot {
-	return Snapshot{Enabled: enabled, RetireEnabled: retireEnabled}
+func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
+	return Snapshot{Enabled: enabled, RetireEnabled: true, KeepBlocks: keepBlocks}
 }
 
 // Config contains configuration options for ETH protocol.

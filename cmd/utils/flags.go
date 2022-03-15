@@ -623,6 +623,10 @@ var (
 		Name:  ethconfig.FlagSnapshotRetire,
 		Usage: "Delete(!) old blocks from DB, by moving them to snapshots",
 	}
+	SnapshotKeepBlocksFlag = cli.BoolFlag{
+		Name:  ethconfig.FlagSnapshotKeepBlocks,
+		Usage: "Keep ancient blocks in db (useful for debug)",
+	}
 	TorrentVerbosityFlag = cli.StringFlag{
 		Name:  "torrent.verbosity",
 		Value: lg.Warning.LogString(),
@@ -1333,9 +1337,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	if ctx.GlobalBool(SnapshotSyncFlag.Name) {
-		cfg.Snapshot.Enabled = true
-	}
+	cfg.Snapshot.Enabled = ctx.GlobalBool(SnapshotSyncFlag.Name)
 	if cfg.Snapshot.Enabled {
 		snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
 		if err != nil {
@@ -1343,9 +1345,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.SnapshotDir = snDir
 	}
-	if ctx.GlobalBool(SnapshotRetireFlag.Name) {
-		cfg.Snapshot.RetireEnabled = true
-	}
+	cfg.Snapshot.RetireEnabled = ctx.GlobalBool(SnapshotRetireFlag.Name)
+	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	torrentVerbosity := lg.Warning
 	if ctx.GlobalIsSet(TorrentVerbosityFlag.Name) {
 		torrentVerbosity = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]

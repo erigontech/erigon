@@ -373,7 +373,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().RetireEnabled {
+	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
 		if err := retireBlocks(s, tx, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocks: %w", err)
 		}
@@ -400,10 +400,11 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 			return fmt.Errorf("[%s] retire blocks last error: %w", s.LogPrefix(), res.Err)
 		}
 	}
-
-	canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
-	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
-		return nil
+	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
+		canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
+		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
+			return nil
+		}
 	}
 
 	// TODO: remove this check for the release

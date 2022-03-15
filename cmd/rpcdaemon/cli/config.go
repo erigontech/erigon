@@ -115,7 +115,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = filepath.Join(cfg.DataDir, "chaindata")
 			}
-			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.RetireEnabled)
+			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
