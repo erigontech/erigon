@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,4 +27,12 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	err = decoder.Decode(response)
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
+}
+
+func HexToInt(hexStr string) uint64 {
+	// Remove the 0x prefix
+	cleaned := strings.ReplaceAll(hexStr, "0x", "")
+
+	result, _ := strconv.ParseUint(cleaned, 16, 64)
+	return result
 }

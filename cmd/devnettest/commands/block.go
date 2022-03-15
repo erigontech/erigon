@@ -23,7 +23,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var devnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
+var (
+	devnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
+	signer                  = types.LatestSigner(params.AllCliqueProtocolChanges)
+)
 
 var (
 	sendAddr    string
@@ -74,7 +77,7 @@ var sendTxCmd = &cobra.Command{
 		}
 
 		// subscriptionContract is the handler to the contract for further operations
-		signedTx, subscriptionContract, transactOpts, err := createTransaction(txType)
+		signedTx, address, subscriptionContract, transactOpts, err := createTransaction(txType)
 		if err != nil {
 			panic(err)
 		}
@@ -85,46 +88,44 @@ var sendTxCmd = &cobra.Command{
 		}
 
 		if searchBlock {
-			searchBlockForTx(*hash)
+			_ = searchBlockForTx(*hash)
 		}
 
 		fmt.Printf("subscription contract, transactOps: %+v, %+v\n", subscriptionContract, transactOpts)
 
-		//_, err = subscriptionContract.Fallback(transactOpts, []byte{})
-		//if err != nil {
-		//	fmt.Printf("error 3: %+v\n", err)
-		//	panic(err)
-		//}
-
 		// TODO: call eth_getLogs on address and this block number
+		if err := emitEventAndGetLogs(subscriptionContract, transactOpts, address); err != nil {
+			panic(err)
+		}
 	},
 }
 
-func createTransaction(transactionType string) (*types.Transaction, *contracts.Subscription, *bind.TransactOpts, error) {
-	signer := types.LatestSigner(params.AllCliqueProtocolChanges)
+func createTransaction(transactionType string) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	if transactionType == "regular" {
-		return createNonContractTx(signer)
+		tx, address, err := createNonContractTx(signer)
+		return tx, address, nil, nil, err
 	}
 	return createContractTx(signer)
 }
 
-func createNonContractTx(signer *types.Signer) (*types.Transaction, *contracts.Subscription, *bind.TransactOpts, error) {
+// createNonContractTx takes in a signer and returns the signed transaction and the address receiving the sent value
+func createNonContractTx(signer *types.Signer) (*types.Transaction, common.Address, error) {
 	toAddress := common.HexToAddress(sendAddr)
 	signedTx, err := types.SignTx(types.NewTransaction(nonce, toAddress, uint256.NewInt(sendValue),
 		params.TxGas, uint256.NewInt(gasPrice), nil), *signer, devnetSignPrivateKey)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, toAddress, err
 	}
-	return &signedTx, nil, nil, nil
+	return &signedTx, toAddress, nil
 }
 
-func createContractTx(signer *types.Signer) (*types.Transaction, *contracts.Subscription, *bind.TransactOpts, error) {
+func createContractTx(signer *types.Signer) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	const txGas uint64 = 200_000
 	gspec := core.DeveloperGenesisBlock(uint64(0), common.HexToAddress("67b1d87101671b127f5f8714789C7192f7ad340e"))
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(devnetSignPrivateKey, big.NewInt(1337))
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, common.Address{}, nil, nil, err
 	}
 
 	transactOpts.GasLimit = txGas
@@ -133,21 +134,21 @@ func createContractTx(signer *types.Signer) (*types.Transaction, *contracts.Subs
 	transactOpts.Nonce = big.NewInt(int64(nonce))
 
 	// get transaction to sign and contract handler
-	_, txToSign, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
+	address, txToSign, subscriptionContract, err := contracts.DeploySubscription(transactOpts, contractBackend)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, common.Address{}, nil, nil, err
 	}
 
 	// sign the transaction with the private key
 	signedTx, err := types.SignTx(txToSign, *signer, devnetSignPrivateKey)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, common.Address{}, nil, nil, err
 	}
 
-	return &signedTx, subscriptionContract, transactOpts, nil
+	return &signedTx, address, subscriptionContract, transactOpts, nil
 }
 
-func searchBlockForTx(txnHash common.Hash) {
+func searchBlockForTx(txnHash common.Hash) uint64 {
 	url := "ws://127.0.0.1:8545"
 	client, clientErr := rpc.DialWebsocket(context.Background(), url, "")
 	if clientErr != nil {
@@ -157,44 +158,51 @@ func searchBlockForTx(txnHash common.Hash) {
 	fmt.Println()
 	fmt.Println("Connected to web socket successfully")
 
-	if err := subscribe(client, "eth_newHeads", txnHash); err != nil {
+	blockN, err := subscribe(client, "eth_newHeads", txnHash)
+	if err != nil {
 		fmt.Println("error occurred while subscribing", err)
 		panic(err)
 	}
+
+	return blockN
 }
 
-func subscribe(client *rpc.Client, method string, hash common.Hash) error {
+func subscribe(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
 	parts := strings.SplitN(method, "_", 2)
 	namespace := parts[0]
 	method = parts[1]
 	ch := make(chan interface{})
 	sub, err := client.Subscribe(context.Background(), namespace, ch, []interface{}{method}...)
 	if err != nil {
-		return err
+		return uint64(0), err
 	}
 	defer sub.Unsubscribe()
 
-	blockCount := 0
+	var (
+		blockCount int
+		blockN     uint64
+	)
 ForLoop:
 	for {
 		select {
 		case v := <-ch:
 			blockCount++
 			blockNumber := v.(map[string]interface{})["number"]
-			fmt.Printf("Searching for the transaction in block with number: %+v\n", blockNumber)
-			foundTx, err := blockHasHash(client, hash, blockNumber.(string))
+			fmt.Printf("Searching for the transaction in block with number: %+v, type: %[1]T\n", blockNumber.(string))
+			num, foundTx, err := blockHasHash(client, hash, blockNumber.(string))
 			if err != nil {
-				return err
+				return uint64(0), err
 			}
 			if foundTx || blockCount == 128 {
+				blockN = num
 				break ForLoop
 			}
 		case err := <-sub.Err():
-			return err
+			return uint64(0), err
 		}
 	}
 
-	return nil
+	return blockN, nil
 
 }
 
@@ -203,7 +211,7 @@ type Block struct {
 	Transactions []common.Hash
 }
 
-func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (bool, error) {
+func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (uint64, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -211,7 +219,7 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 	err := client.CallContext(ctx, &currentBlock, "eth_getBlockByNumber", blockNumber, false)
 	if err != nil {
 		fmt.Println("can't get latest block:", err)
-		return false, err
+		return uint64(0), false, err
 	}
 
 	for _, txnHash := range currentBlock.Transactions {
@@ -219,9 +227,42 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (boo
 			fmt.Println()
 			fmt.Printf("Block with number: %v was mined and included transaction with hash: %v ==> %+v\n", blockNumber, hash, currentBlock)
 			fmt.Println()
-			return true, nil
+			return requests.HexToInt(blockNumber), true, nil
 		}
 	}
 
-	return false, nil
+	return uint64(0), false, nil
+}
+
+func emitEventAndGetLogs(subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) error {
+	if subContract == nil {
+		return nil
+	}
+
+	opts.Nonce.Add(opts.Nonce, big.NewInt(1))
+
+	tx, err := subContract.Fallback(opts, []byte{})
+	if err != nil {
+		fmt.Printf("error 3: %+v\n", err)
+		panic(err)
+	}
+
+	signedTx, err := types.SignTx(tx, *signer, devnetSignPrivateKey)
+	if err != nil {
+		return err
+	}
+
+	hash, err := requests.SendTx(reqId, &signedTx)
+	if err != nil {
+		panic(err)
+	}
+
+	blockN := searchBlockForTx(*hash)
+
+	if err = requests.GetLogs(reqId, blockN, blockN, address); err != nil {
+		fmt.Printf("error 4: %+v\n", err)
+		panic(err)
+	}
+
+	return nil
 }
