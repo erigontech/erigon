@@ -198,7 +198,7 @@ func (sn *TxnSegment) close() {
 }
 func (sn *TxnSegment) reopen(dir string) (err error) {
 	sn.close()
-	fileName := SegmentFileName(sn.From, sn.To, Bodies)
+	fileName := SegmentFileName(sn.From, sn.To, Transactions)
 	sn.Seg, err = compress.NewDecompressor(path.Join(dir, fileName))
 	if err != nil {
 		return err

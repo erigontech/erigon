@@ -391,50 +391,59 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			return
 		}
 		if ok {
+			if b.TxAmount <= 2 {
+				block = types.NewBlockFromStorage(hash, h, nil, b.Uncles)
+				if len(senders) != block.Transactions().Len() {
+					return block, senders, nil // no senders is fine - will recover them on the fly
+				}
+				block.SendersToTxs(senders)
+				return block, senders, nil
+			}
+			reader := bytes.NewReader(nil)
 			txs := make([]types.Transaction, b.TxAmount-2)
 			senders = make([]common.Address, b.TxAmount-2)
-			reader := bytes.NewReader(nil)
-			if b.TxAmount > 2 {
-				ok, err = back.sn.ViewTxs(blockHeight, func(seg *TxnSegment) error {
-					if b.BaseTxId < seg.IdxTxnHash.BaseDataID() {
-						return fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, seg.IdxTxnHash.BaseDataID(), seg.Seg.FilePath())
-					}
-					r := recsplit.NewIndexReader(seg.IdxTxnId)
-					binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-seg.IdxTxnId.BaseDataID())
-					txnOffset := r.Lookup(buf[:8])
-					gg := seg.Seg.MakeGetter()
-					gg.Reset(txnOffset)
-					stream := rlp.NewStream(reader, 0)
-					buf, _ = gg.Next(buf[:0]) //first system-tx
-					for i := uint32(0); i < b.TxAmount-2; i++ {
-						buf, _ = gg.Next(buf[:0])
-						senders[i].SetBytes(buf[1 : 1+20])
-						txRlp := buf[1+20:]
-						reader.Reset(txRlp)
-						stream.Reset(reader, 0)
-						txs[i], err = types.DecodeTransaction(stream)
-						if err != nil {
-							return err
-						}
-						txs[i].SetSender(senders[i])
-					}
-					return nil
-				})
-				if err != nil {
-					return nil, nil, err
+			ok, err = back.sn.ViewTxs(blockHeight, func(seg *TxnSegment) error {
+				if b.BaseTxId < seg.IdxTxnHash.BaseDataID() {
+					return fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, seg.IdxTxnHash.BaseDataID(), seg.Seg.FilePath())
 				}
-				if ok {
-					block = types.NewBlockFromStorage(hash, h, txs, b.Uncles)
-					if len(senders) != block.Transactions().Len() {
-						return block, senders, nil // no senders is fine - will recover them on the fly
+				r := recsplit.NewIndexReader(seg.IdxTxnId)
+				binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-seg.IdxTxnId.BaseDataID())
+				txnOffset := r.Lookup(buf[:8])
+				gg := seg.Seg.MakeGetter()
+				gg.Reset(txnOffset)
+				stream := rlp.NewStream(reader, 0)
+				buf, _ = gg.Next(buf[:0]) //first system-tx
+				for i := uint32(0); i < b.TxAmount-2; i++ {
+					buf, _ = gg.Next(buf[:0])
+					if len(buf) < 1+20 {
+						return fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", seg.Seg.FilePath(), len(buf))
 					}
-					block.SendersToTxs(senders)
-					return block, senders, nil
+					senders[i].SetBytes(buf[1 : 1+20])
+					txRlp := buf[1+20:]
+					reader.Reset(txRlp)
+					stream.Reset(reader, 0)
+					txs[i], err = types.DecodeTransaction(stream)
+					if err != nil {
+						return err
+					}
+					txs[i].SetSender(senders[i])
 				}
+				return nil
+			})
+			if err != nil {
+				return nil, nil, err
 			}
+			if ok {
+				block = types.NewBlockFromStorage(hash, h, txs, b.Uncles)
+				if len(senders) != block.Transactions().Len() {
+					return block, senders, nil // no senders is fine - will recover them on the fly
+				}
+				block.SendersToTxs(senders)
+				return block, senders, nil
+			}
+
 		}
 	}
-
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
 		return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
@@ -543,7 +552,6 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		offset := reader.Lookup(txnHash[:])
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
-		//fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 		buf, _ = gg.Next(buf[:0])
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if txnHash[0] != buf[0] {
@@ -560,10 +568,8 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		txn.SetSender(common.BytesToAddress(sender))
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			//fmt.Printf("try_succeed: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 			return
 		}
-		//fmt.Printf("try_failed: %x, %x\n", txn.Hash(), txnHash)
 	}
 	return
 }
