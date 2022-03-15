@@ -414,7 +414,6 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 			panic(fmt.Sprintf("unknown snapshot type: %s", t))
 		}
 	}
-	fmt.Printf("b: %d\n", s.segmentsAvailable.Load())
 
 	//TODO: make calculatable?
 	segments := s.Headers.segments
@@ -503,7 +502,6 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.segmentsAvailable.Store(0)
 		}
 	}
-	fmt.Printf("a: %d\n", s.segmentsAvailable.Load())
 	s.segmentsReady.Store(true)
 	return nil
 }
