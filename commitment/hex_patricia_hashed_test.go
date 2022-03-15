@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -24,8 +25,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // In memory commitment and state to use with the tests
@@ -480,4 +482,66 @@ func TestEmptyState(t *testing.T) {
 		branchNodeUpdate := branchNodeUpdates[key]
 		fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
 	}
+}
+
+func TestEmptyUpdateState(t *testing.T) {
+	ms := NewMockState(t)
+	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn, ms.lockFn, ms.unlockFn)
+	hph.SetTrace(false)
+	plainKeys, hashedKeys, updates := NewUpdateBuilder().
+		Balance("00", 4).
+		Balance("01", 5).
+		Build()
+	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
+		t.Fatal(err)
+	}
+	branchNodeUpdates, err := hph.ProcessUpdates(plainKeys, hashedKeys, updates)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rh, err := hph.RootHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Printf("root %v\n", hex.EncodeToString(rh))
+
+	ms.applyBranchNodeUpdates(branchNodeUpdates)
+
+	fmt.Println("1. Updates applied")
+	var keys []string
+	for key := range branchNodeUpdates {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		branchNodeUpdate := branchNodeUpdates[key]
+		fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
+	}
+
+	// generate empty updates and do NOT reset tree
+	//hph.Reset()
+	hph.SetTrace(true)
+	plainKeys, hashedKeys, updates = NewUpdateBuilder().Build()
+	if err := ms.applyPlainUpdates(plainKeys, updates); err != nil {
+		t.Fatal(err)
+	}
+
+	branchNodeUpdates, err = hph.ProcessUpdates(plainKeys, hashedKeys, updates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms.applyBranchNodeUpdates(branchNodeUpdates)
+	fmt.Println("2. empty updates applied without state reset")
+
+	firstRH := rh
+	rh, err = hph.RootHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstRH, rh) {
+		t.Fatalf("expected root hash [%v] after update but got [%v]", hex.EncodeToString(firstRH), hex.EncodeToString(rh))
+	}
+	fmt.Printf("root %v\n", hex.EncodeToString(rh))
 }

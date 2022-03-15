@@ -2326,6 +2326,11 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 		j++
 		return true
 	})
+
+	if len(updates) == 0 {
+		return w.a.hph.RootHash()
+	}
+
 	w.a.hph.Reset()
 	w.a.hph.ResetFns(w.branchFn, w.accountFn, w.storageFn, w.lockFn, w.unlockFn)
 	w.a.hph.SetTrace(trace)
@@ -2376,6 +2381,7 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 			}
 		}
 	}
+
 	var rootHash []byte
 	if rootHash, err = w.a.hph.RootHash(); err != nil {
 		return nil, err
