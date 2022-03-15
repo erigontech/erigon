@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -183,8 +182,7 @@ func (back *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash c
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
-	sn   *RoSnapshots
-	lock sync.RWMutex
+	sn *RoSnapshots
 }
 
 func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapshots {
@@ -398,13 +396,13 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			reader := bytes.NewReader(nil)
 			if b.TxAmount > 2 {
 				ok, err = back.sn.ViewTxs(blockHeight, func(seg *TxnSegment) error {
-					if b.BaseTxId < seg.idxTxnHash.BaseDataID() {
-						return fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, seg.idxTxnHash.BaseDataID(), seg.seg.FilePath())
+					if b.BaseTxId < seg.IdxTxnHash.BaseDataID() {
+						return fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, seg.IdxTxnHash.BaseDataID(), seg.Seg.FilePath())
 					}
-					r := recsplit.NewIndexReader(seg.idxTxnId)
-					binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-seg.idxTxnId.BaseDataID())
+					r := recsplit.NewIndexReader(seg.IdxTxnId)
+					binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-seg.IdxTxnId.BaseDataID())
 					txnOffset := r.Lookup(buf[:8])
-					gg := seg.seg.MakeGetter()
+					gg := seg.Seg.MakeGetter()
 					gg.Reset(txnOffset)
 					stream := rlp.NewStream(reader, 0)
 					buf, _ = gg.Next(buf[:0]) //first system-tx
@@ -509,47 +507,15 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 	return body, b.BaseTxId + 1, b.TxAmount - 2, nil // empty txs in the beginning and end of block
 }
 
-func (back *BlockReaderWithSnapshots) bodyWithTransactionsFromSnapshot(blockHeight uint64, sn *BodySegment, txsSeg *TxnSegment, buf []byte) (*types.Body, []common.Address, uint64, uint32, error) {
-	body, baseTxnID, txsAmount, err := back.bodyFromSnapshot(blockHeight, sn, buf)
-	if err != nil {
-		return nil, nil, 0, 0, err
-	}
-	txs := make([]types.Transaction, txsAmount)
-	senders := make([]common.Address, txsAmount)
-	reader := bytes.NewReader(buf)
-	if txsAmount > 0 {
-		r := recsplit.NewIndexReader(txsSeg.idxTxnId)
-		binary.BigEndian.PutUint64(buf[:8], baseTxnID-txsSeg.idxTxnId.BaseDataID())
-		txnOffset := r.Lookup(buf[:8])
-		gg := txsSeg.seg.MakeGetter()
-		gg.Reset(txnOffset)
-		stream := rlp.NewStream(reader, 0)
-		for i := uint32(0); i < txsAmount; i++ {
-			buf, _ = gg.Next(buf[:0])
-			senders[i].SetBytes(buf[1 : 1+20])
-			txRlp := buf[1+20:]
-			reader.Reset(txRlp)
-			stream.Reset(reader, 0)
-			var err error
-			txs[i], err = types.DecodeTransaction(stream)
-			if err != nil {
-				return nil, nil, 0, 0, err
-			}
-		}
-	}
-
-	return body, senders, baseTxnID, txsAmount, nil
-}
-
 func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) ([]types.Transaction, []common.Address, error) {
 	txs := make([]types.Transaction, txsAmount)
 	senders := make([]common.Address, txsAmount)
 	reader := bytes.NewReader(buf)
 	if txsAmount > 0 {
-		r := recsplit.NewIndexReader(txsSeg.idxTxnId)
-		binary.BigEndian.PutUint64(buf[:8], baseTxnID-txsSeg.idxTxnId.BaseDataID())
+		r := recsplit.NewIndexReader(txsSeg.IdxTxnId)
+		binary.BigEndian.PutUint64(buf[:8], baseTxnID-txsSeg.IdxTxnId.BaseDataID())
 		txnOffset := r.Lookup(buf[:8])
-		gg := txsSeg.seg.MakeGetter()
+		gg := txsSeg.Seg.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
 		for i := uint32(0); i < txsAmount; i++ {
@@ -569,13 +535,13 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	return txs, senders, nil
 }
 
-func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
-	for i := len(back.sn.blocks) - 1; i >= 0; i-- {
-		sn := back.sn.blocks[i]
+func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
 
-		reader := recsplit.NewIndexReader(sn.TxnHashIdx)
+		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
 		offset := reader.Lookup(txnHash[:])
-		gg := sn.Transactions.MakeGetter()
+		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		//fmt.Printf("try: %d, %d, %d, %d\n", i, sn.From, localID, blockNum)
 		buf, _ = gg.Next(buf[:0])
@@ -584,7 +550,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, buf []byte)
 			continue
 		}
 
-		reader2 := recsplit.NewIndexReader(sn.TxnHash2BlockNumIdx)
+		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
 		blockNum = reader2.Lookup(txnHash[:])
 		sender := buf[1 : 1+20]
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
@@ -612,8 +578,18 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 		return *n, true, nil
 	}
 
-	txn, blockNum, _, err := back.txnByHash(txnHash, nil)
-	if err != nil {
+	var txn types.Transaction
+	var blockNum uint64
+	if err := back.sn.Txs.View(func(segments []*TxnSegment) error {
+		txn, blockNum, _, err = back.txnByHash(txnHash, segments, nil)
+		if err != nil {
+			return err
+		}
+		if txn == nil {
+			return nil
+		}
+		return nil
+	}); err != nil {
 		return 0, false, err
 	}
 	if txn == nil {
