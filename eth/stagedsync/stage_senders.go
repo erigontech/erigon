@@ -417,7 +417,7 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 	}
 
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	cfg.blockRetire.RetireBlocksInBackground(ctx, blockFrom, blockTo, *chainID, log.LvlDebug)
+	cfg.blockRetire.RetireBlocksInBackground(ctx, blockFrom, blockTo, *chainID, log.LvlInfo)
 
 	return nil
 }
