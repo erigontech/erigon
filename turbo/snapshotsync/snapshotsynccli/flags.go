@@ -8,8 +8,7 @@ import (
 )
 
 var (
-	blockSnapshotEnabledKey       = []byte("blocksSnapshotEnabled")
-	blockSnapshotRetireEnabledKey = []byte("blocksSnapshotRetireEnabled")
+	blockSnapshotEnabledKey = []byte("blocksSnapshotEnabled")
 )
 
 func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
@@ -19,13 +18,6 @@ func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
 	}
 	if !ok {
 		return fmt.Errorf("node was started with --%s=%v, can't change it", ethconfig.FlagSnapshot, v)
-	}
-	ok, v, err = kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotRetireEnabledKey, cfg.RetireEnabled)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("node was started with --%s=%v, can't change it", ethconfig.FlagSnapshotRetire, v)
 	}
 	return nil
 }

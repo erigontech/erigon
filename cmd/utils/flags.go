@@ -619,10 +619,6 @@ var (
 		Name:  "experimental.snapshot",
 		Usage: "Enabling experimental snapshot sync",
 	}
-	SnapshotRetireFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapshotRetire,
-		Usage: "Delete(!) old blocks from DB, by moving them to snapshots",
-	}
 	SnapshotKeepBlocksFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapshotKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
@@ -1345,7 +1341,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 		cfg.SnapshotDir = snDir
 	}
-	cfg.Snapshot.RetireEnabled = ctx.GlobalBool(SnapshotRetireFlag.Name)
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	torrentVerbosity := lg.Warning
 	if ctx.GlobalIsSet(TorrentVerbosityFlag.Name) {
