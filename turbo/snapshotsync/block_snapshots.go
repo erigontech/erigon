@@ -126,7 +126,7 @@ func (sn *HeaderSegment) close() {
 		sn.idxHeaderHash = nil
 	}
 }
-func (sn *HeaderSegment) Reopen(dir string) (err error) {
+func (sn *HeaderSegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := SegmentFileName(sn.From, sn.To, Headers)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
@@ -156,7 +156,7 @@ func (sn *BodySegment) close() {
 		sn.idxBodyNumber = nil
 	}
 }
-func (sn *BodySegment) Reopen(dir string) (err error) {
+func (sn *BodySegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := SegmentFileName(sn.From, sn.To, Bodies)
 	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
@@ -196,7 +196,7 @@ func (sn *TxnSegment) close() {
 		sn.IdxTxnHash2BlockNum = nil
 	}
 }
-func (sn *TxnSegment) Reopen(dir string) (err error) {
+func (sn *TxnSegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := SegmentFileName(sn.From, sn.To, Bodies)
 	sn.Seg, err = compress.NewDecompressor(path.Join(dir, fileName))
@@ -211,7 +211,7 @@ func (sn *TxnSegment) Reopen(dir string) (err error) {
 	if err != nil {
 		return err
 	}
-	sn.IdxTxnId, err = recsplit.OpenIndex(path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block.String())))
+	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(dir, IdxFileName(sn.From, sn.To, Transactions2Block.String())))
 	if err != nil {
 		return err
 	}
@@ -230,7 +230,7 @@ func (s *headerSegments) closeLocked() {
 }
 func (s *headerSegments) reopen(dir string) error {
 	for i := range s.segments {
-		if err := s.segments[i].Reopen(dir); err != nil {
+		if err := s.segments[i].reopen(dir); err != nil {
 			return err
 		}
 	}
@@ -265,7 +265,7 @@ func (s *bodySegments) closeLocked() {
 }
 func (s *bodySegments) reopen(dir string) error {
 	for i := range s.segments {
-		if err := s.segments[i].Reopen(dir); err != nil {
+		if err := s.segments[i].reopen(dir); err != nil {
 			return err
 		}
 	}
@@ -300,7 +300,7 @@ func (s *txnSegments) closeLocked() {
 }
 func (s *txnSegments) reopen(dir string) error {
 	for i := range s.segments {
-		if err := s.segments[i].Reopen(dir); err != nil {
+		if err := s.segments[i].reopen(dir); err != nil {
 			return err
 		}
 	}
