@@ -253,7 +253,6 @@ const ( // SyncStatus values
 	Idle = iota
 	Syncing
 	Synced // if we found a canonical hash during backward sync, in this case our sync process is done
-	Timeout
 )
 
 type HeaderDownload struct {
@@ -286,6 +285,7 @@ type HeaderDownload struct {
 
 	// Proof of Stake (PoS)
 	topSeenHeightPoS     uint64
+	requestId            int
 	posAnchor            *Anchor
 	posStatus            SyncStatus
 	posSync              bool                          // Whether the chain is syncing in the PoS mode

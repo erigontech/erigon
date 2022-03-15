@@ -176,6 +176,8 @@ func HeadersPOS(
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
 
 	if interrupt != engineapi.None {
+		// TODO(yperbasis): process Synced
+
 		if !useExternalTx {
 			return tx.Commit()
 		}
@@ -252,11 +254,9 @@ func handleForkChoice(
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 
-		/* TODO(yperbasis) restore
 		hashToDownload := headerHash
 		heighToDownload := cfg.hd.TopSeenHeight() // approximate
-		success, err := downloadMissingPoSHeaders(hashToDownload, heighToDownload, s, ctx, tx, cfg, headerInserter)
-		*/
+		attemptPoSDownload(requestId, hashToDownload, heighToDownload, s, cfg)
 
 		return nil
 	}
@@ -357,11 +357,9 @@ func handleNewPayload(
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		}
 
-		/* TODO(yperbasis) restore
 		hashToDownload := header.ParentHash
 		heightToDownload := headerNumber - 1
-		success, err := downloadMissingPoSHeaders(hashToDownload, heightToDownload, s, ctx, tx, cfg, headerInserter)
-		*/
+		attemptPoSDownload(requestId, hashToDownload, heightToDownload, s, cfg)
 
 		return nil
 	}
@@ -450,87 +448,96 @@ func verifyAndSaveNewPoSHeader(
 	return
 }
 
-func downloadMissingPoSHeaders(
+func attemptPoSDownload(
+	requestId int,
 	hashToDownload common.Hash,
 	heightToDownload uint64,
 	s *StageState,
-	ctx context.Context,
-	tx kv.RwTx,
 	cfg HeadersCfg,
-	headerInserter *headerdownload.HeaderInserter,
-) (success bool, err error) {
+) {
 	cfg.hd.SetPOSSync(true)
-	cfg.hd.SetPosStatus(headerdownload.Syncing)
 
-	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
-
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
-
-	stopped := false
-	prevProgress := uint64(0)
-
-	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer headerCollector.Close()
-	cfg.hd.SetHeadersCollector(headerCollector)
-	// Cleanup after we finish backward sync
-	defer func() {
-		cfg.hd.SetHeadersCollector(nil)
-		cfg.hd.SetPosStatus(headerdownload.Idle)
-	}()
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	for !stopped {
-		currentTime := uint64(time.Now().Unix())
-		timeout, req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
-		if timeout {
-			cfg.hd.SetPosStatus(headerdownload.Timeout)
-			break
-		}
-
-		if cfg.hd.PosStatus() == headerdownload.Synced {
-			break
-		}
-
-		if req != nil {
-			_, sentToPeer := cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-				log.Trace("Sent request", "height", req.Number)
-			}
-		}
-		if len(penalties) > 0 {
-			cfg.penalize(ctx, penalties)
-		}
-
-		// Sleep and check for logs
-		timer := time.NewTimer(200 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			stopped = true
-		case <-logEvery.C:
-			if prevProgress == 0 {
-				prevProgress = cfg.hd.Progress()
-			} else if cfg.hd.Progress() <= prevProgress {
-				diff := prevProgress - cfg.hd.Progress()
-				log.Info("Wrote Block Headers backwards", "now", cfg.hd.Progress(),
-					"blk/sec", float64(diff)/float64(logInterval/time.Second))
-				prevProgress = cfg.hd.Progress()
-			}
-		case <-timer.C:
-			log.Trace("RequestQueueTime (header) ticked")
-		}
-		// Cleanup timer
-		timer.Stop()
-	}
-
-	// TODO(yperbasis): handle the case when we are not able to sync a chain
-	if cfg.hd.PosStatus() != headerdownload.Synced {
+	if cfg.hd.PosStatus() != headerdownload.Idle {
+		log.Trace(fmt.Sprintf("[%s] Postponing PoS download since another one is in progress", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
 		return
 	}
 
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
+
+	cfg.hd.SetRequestId(requestId)
+
+	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
+
+	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	cfg.hd.SetHeadersCollector(headerCollector)
+
+	cfg.hd.SetPosStatus(headerdownload.Syncing)
+}
+
+// TODO(yperbasis) wire this function
+func StartPoSDownloader(ctx context.Context, cfg HeadersCfg) {
+	go func() {
+		prevProgress := uint64(0)
+
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		for {
+			if cfg.hd.PosStatus() == headerdownload.Syncing {
+				currentTime := uint64(time.Now().Unix())
+				timeout, req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
+				if timeout {
+					cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
+					cfg.hd.HeadersCollector().Close()
+					cfg.hd.SetHeadersCollector(nil)
+					cfg.hd.SetPosStatus(headerdownload.Idle)
+					continue
+				}
+
+				if cfg.hd.PosStatus() == headerdownload.Synced {
+					cfg.hd.BeaconRequestList.Interrupt(engineapi.Synced)
+					continue
+				}
+
+				if req != nil {
+					_, sentToPeer := cfg.headerReqSend(ctx, req)
+					if sentToPeer {
+						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+						cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+						log.Trace("Sent request", "height", req.Number)
+					}
+				}
+				if len(penalties) > 0 {
+					cfg.penalize(ctx, penalties)
+				}
+			} else {
+				prevProgress = 0
+			}
+
+			// Sleep and check for logs
+			timer := time.NewTimer(2 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				if prevProgress == 0 {
+					prevProgress = cfg.hd.Progress()
+				} else if cfg.hd.Progress() <= prevProgress {
+					diff := prevProgress - cfg.hd.Progress()
+					log.Info("Downloaded PoS Headers", "now", cfg.hd.Progress(),
+						"blk/sec", float64(diff)/float64(logInterval/time.Second))
+					prevProgress = cfg.hd.Progress()
+				}
+			case <-timer.C:
+				log.Trace("RequestQueueTime (header) ticked")
+			}
+			// Cleanup timer
+			timer.Stop()
+		}
+	}()
+}
+
+func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) error {
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
 		if err := rlp.DecodeBytes(value, &h); err != nil {
@@ -543,17 +550,17 @@ func downloadMissingPoSHeaders(
 		return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 	}
 
-	err = headerCollector.Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
+	err := cfg.hd.HeadersCollector().Load(tx, kv.Headers, headerLoadFunc, etl.TransformArgs{
 		LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	})
-	if err != nil {
-		return
-	}
 
-	success = true
-	return
+	cfg.hd.HeadersCollector().Close()
+	cfg.hd.SetHeadersCollector(nil)
+	cfg.hd.SetPosStatus(headerdownload.Idle)
+
+	return err
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers

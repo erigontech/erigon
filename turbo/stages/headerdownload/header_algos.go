@@ -1195,22 +1195,28 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.fetching = fetching
 }
 
+func (hd *HeaderDownload) HeadersCollector() *etl.Collector {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.headersCollector
+}
+
 func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.headersCollector = collector
 }
 
-func (hd *HeaderDownload) SetPOSSync(posSync bool) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.posSync = posSync
-}
-
 func (hd *HeaderDownload) POSSync() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.posSync
+}
+
+func (hd *HeaderDownload) SetPOSSync(posSync bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posSync = posSync
 }
 
 func (hd *HeaderDownload) PosStatus() SyncStatus {
@@ -1266,6 +1272,18 @@ func (hd *HeaderDownload) SetPendingHeader(blockHash common.Hash, blockHeight ui
 	defer hd.lock.Unlock()
 	hd.pendingHeaderHash = blockHash
 	hd.pendingHeaderHeight = blockHeight
+}
+
+func (hd *HeaderDownload) RequestId() int {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.requestId
+}
+
+func (hd *HeaderDownload) SetRequestId(requestId int) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.requestId = requestId
 }
 
 func (hd *HeaderDownload) ClearPendingHeader() {
