@@ -206,7 +206,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.Value != nil {
 		overflow := value.SetFromBig(args.Value.ToInt())
 		if overflow {
-			panic(fmt.Errorf("args.Value higher than 2^256-1"))
+			return types.Message{}, fmt.Errorf("args.Value higher than 2^256-1")
 		}
 	}
 	var data []byte
