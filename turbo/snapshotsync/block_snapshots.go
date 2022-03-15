@@ -417,7 +417,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 
 	//TODO: make calculatable?
 	segments := s.Headers.segments
-	if segments[len(segments)-1].To > 0 {
+	if len(segments) > 0 && segments[len(segments)-1].To > 0 {
 		s.idxAvailable.Store(segments[len(segments)-1].To - 1)
 	} else {
 		s.idxAvailable.Store(0)

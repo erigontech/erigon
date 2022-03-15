@@ -441,7 +441,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 				block.SendersToTxs(senders)
 				return block, senders, nil
 			}
-
 		}
 	}
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
