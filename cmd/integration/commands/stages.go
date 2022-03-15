@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -1043,12 +1044,18 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	return _allSnapshotsSingleton
 }
 
+var openBlockReaderOnce sync.Once
+var _blockReaderSingleton interfaces.FullBlockReader
+
 func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockReader) {
-	blockReader = snapshotsync.NewBlockReader()
-	if sn := allSnapshots(cc); sn != nil {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)
-	}
-	return blockReader
+	openBlockReaderOnce.Do(func() {
+		_blockReaderSingleton = snapshotsync.NewBlockReader()
+		if sn := allSnapshots(cc); sn != nil {
+			x := snapshotsync.NewBlockReaderWithSnapshots(sn)
+			_blockReaderSingleton = x
+		}
+	})
+	return _blockReaderSingleton
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
@@ -1106,8 +1113,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
+	br := getBlockReader(chainConfig)
 	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, getBlockReader(chainConfig))
+	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
 	if err != nil {
 		panic(err)
 	}
@@ -1119,10 +1127,19 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
+	cfg.Snapshot = allSnapshots(chainConfig).Cfg()
+	if cfg.Snapshot.Enabled {
+		snDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
+		if err != nil {
+			panic(err)
+		}
+		cfg.SnapshotDir = snDir
+	}
 
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
 		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
 		nil, nil, nil, nil, nil,
+		allSnapshots(chainConfig),
 	)
 	if err != nil {
 		panic(err)
@@ -1134,7 +1151,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, false, true, tmpdir, getBlockReader(chainConfig)),
+			stagedsync.StageTrieCfg(db, false, true, tmpdir, br),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

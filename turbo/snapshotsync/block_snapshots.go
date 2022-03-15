@@ -414,6 +414,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 			panic(fmt.Sprintf("unknown snapshot type: %s", t))
 		}
 	}
+	fmt.Printf("b: %d\n", s.segmentsAvailable.Load())
 
 	//TODO: make calculatable?
 	segments := s.Headers.segments
@@ -453,7 +454,6 @@ func (s *RoSnapshots) ReopenSegments() error {
 	defer s.Bodies.lock.Unlock()
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
-
 	s.closeSegmentsLocked()
 	files, err := segmentsOfType(s.dir, Headers)
 	if err != nil {
@@ -503,6 +503,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.segmentsAvailable.Store(0)
 		}
 	}
+	fmt.Printf("a: %d\n", s.segmentsAvailable.Load())
 	s.segmentsReady.Store(true)
 	return nil
 }
@@ -532,6 +533,8 @@ func (s *RoSnapshots) closeSegmentsLocked() {
 }
 func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
 	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+		fmt.Printf("c: %t, %d\n", s.indicesReady.Load(), s.segmentsAvailable.Load())
+		panic(1)
 		return false, nil
 	}
 	return s.Headers.ViewSegment(blockNum, f)
