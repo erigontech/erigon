@@ -308,7 +308,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	// Send the block over
+	log.Info("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	s.newPayloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
@@ -318,6 +318,8 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	payloadStatus := <-s.statusCh
+	log.Info("[NewPayload] got reply", "payloadStatus", payloadStatus)
+
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
@@ -407,9 +409,13 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
+
+	log.Info("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
 	s.forkChoiceCh <- forkChoiceMessage
 
 	payloadStatus := <-s.statusCh
+	log.Info("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
