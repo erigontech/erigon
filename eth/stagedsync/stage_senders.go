@@ -377,7 +377,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		if err := retireBlocks(s, tx, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocks: %w", err)
 		}
-	} else {
+	} else if cfg.prune.TxIndex.Enabled() {
 		if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
 			return err
 		}
