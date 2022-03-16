@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -1351,6 +1352,78 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 	}
 
 	return nil
+}
+
+const (
+	logInterval = 30 * time.Second
+)
+
+func (hd *HeaderDownload) StartPoSDownloader(
+	ctx context.Context,
+	headerReqSend func(context.Context, *HeaderRequest) (enode.ID, bool),
+	penalize func(context.Context, []PenaltyItem),
+) {
+	go func() {
+		prevProgress := uint64(0)
+
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		for {
+			if hd.PosStatus() == Syncing {
+				currentTime := uint64(time.Now().Unix())
+				timeout, req, penalties := hd.RequestMoreHeadersForPOS(currentTime)
+				if timeout {
+					log.Warn("Timeout", "requestId", hd.RequestId())
+					hd.BeaconRequestList.Remove(hd.RequestId())
+					hd.HeadersCollector().Close()
+					hd.SetHeadersCollector(nil)
+					hd.SetPosStatus(Idle)
+					continue
+				}
+
+				if hd.PosStatus() == Synced {
+					log.Info("Synced", "requestId", hd.RequestId())
+					hd.BeaconRequestList.Interrupt(engineapi.Synced)
+					continue
+				}
+
+				if req != nil {
+					_, sentToPeer := headerReqSend(ctx, req)
+					if sentToPeer {
+						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+						hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+						log.Trace("Sent request", "height", req.Number)
+					}
+				}
+				if len(penalties) > 0 {
+					penalize(ctx, penalties)
+				}
+			} else {
+				prevProgress = 0
+			}
+
+			// Sleep and check for logs
+			timer := time.NewTimer(2 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			case <-logEvery.C:
+				if prevProgress == 0 {
+					prevProgress = hd.Progress()
+				} else if hd.Progress() <= prevProgress {
+					diff := prevProgress - hd.Progress()
+					log.Info("Downloaded PoS Headers", "now", hd.Progress(),
+						"blk/sec", float64(diff)/float64(logInterval/time.Second))
+					prevProgress = hd.Progress()
+				}
+			case <-timer.C:
+				log.Trace("RequestQueueTime (header) ticked")
+			}
+			// Cleanup timer
+			timer.Stop()
+		}
+	}()
 }
 
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {

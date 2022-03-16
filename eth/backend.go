@@ -499,6 +499,8 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
+	backend.sentryControlServer.Hd.StartPoSDownloader(backend.sentryCtx, backend.sentryControlServer.SendHeaderRequest, backend.sentryControlServer.Penalize)
+
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
 		var badBlockHeader *types.Header

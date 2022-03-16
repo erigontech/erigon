@@ -175,9 +175,13 @@ func HeadersPOS(
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
 
-	if interrupt != engineapi.None {
-		// TODO(yperbasis): process Synced
+	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
+	if interrupt != engineapi.None {
+		if interrupt == engineapi.Synced {
+			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+		}
 		if !useExternalTx {
 			return tx.Commit()
 		}
@@ -195,9 +199,6 @@ func HeadersPOS(
 	}
 
 	cfg.hd.ClearPendingPayloadStatus()
-
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
-	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	if forkChoiceInsteadOfNewPayload {
 		handleForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter)
@@ -471,7 +472,7 @@ func attemptPoSDownload(
 		return
 	}
 
-	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload)
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
 	cfg.hd.SetRequestId(requestId)
 
@@ -481,69 +482,6 @@ func attemptPoSDownload(
 	cfg.hd.SetHeadersCollector(headerCollector)
 
 	cfg.hd.SetPosStatus(headerdownload.Syncing)
-}
-
-// TODO(yperbasis) wire this function
-func StartPoSDownloader(ctx context.Context, cfg HeadersCfg) {
-	go func() {
-		prevProgress := uint64(0)
-
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-
-		for {
-			if cfg.hd.PosStatus() == headerdownload.Syncing {
-				currentTime := uint64(time.Now().Unix())
-				timeout, req, penalties := cfg.hd.RequestMoreHeadersForPOS(currentTime)
-				if timeout {
-					cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
-					cfg.hd.HeadersCollector().Close()
-					cfg.hd.SetHeadersCollector(nil)
-					cfg.hd.SetPosStatus(headerdownload.Idle)
-					continue
-				}
-
-				if cfg.hd.PosStatus() == headerdownload.Synced {
-					cfg.hd.BeaconRequestList.Interrupt(engineapi.Synced)
-					continue
-				}
-
-				if req != nil {
-					_, sentToPeer := cfg.headerReqSend(ctx, req)
-					if sentToPeer {
-						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-						cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-						log.Trace("Sent request", "height", req.Number)
-					}
-				}
-				if len(penalties) > 0 {
-					cfg.penalize(ctx, penalties)
-				}
-			} else {
-				prevProgress = 0
-			}
-
-			// Sleep and check for logs
-			timer := time.NewTimer(2 * time.Millisecond)
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				if prevProgress == 0 {
-					prevProgress = cfg.hd.Progress()
-				} else if cfg.hd.Progress() <= prevProgress {
-					diff := prevProgress - cfg.hd.Progress()
-					log.Info("Downloaded PoS Headers", "now", cfg.hd.Progress(),
-						"blk/sec", float64(diff)/float64(logInterval/time.Second))
-					prevProgress = cfg.hd.Progress()
-				}
-			case <-timer.C:
-				log.Trace("RequestQueueTime (header) ticked")
-			}
-			// Cleanup timer
-			timer.Stop()
-		}
-	}()
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) error {
@@ -564,6 +502,13 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
 	})
+
+	if err != nil {
+		log.Warn("Removing beacon request due to", "err", err, "requestId", cfg.hd.RequestId())
+		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
+	} else {
+		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId())
+	}
 
 	cfg.hd.HeadersCollector().Close()
 	cfg.hd.SetHeadersCollector(nil)
