@@ -69,7 +69,7 @@ func resetState(db kv.RwDB, logger log.Logger, ctx context.Context) error {
 		return err
 	}
 
-	genesis, _ := byChain()
+	genesis, _ := byChain(chain)
 	if err := db.Update(ctx, func(tx kv.RwTx) error { return resetExec(tx, genesis) }); err != nil {
 		return err
 	}
