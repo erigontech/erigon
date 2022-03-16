@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
@@ -65,7 +66,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return rawdb.ReadHeader(tx, hash, number)
 	}
 
-	_, blockCtx, txCtx, ibs, reader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
+	_, blockCtx, _, ibs, reader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -82,6 +83,11 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), idx)
 		msg, _ := tx.AsMessage(*signer, block.BaseFee())
+		txCtx := vm.TxContext{
+			TxHash:   tx.Hash(),
+			Origin:   msg.From(),
+			GasPrice: msg.GasPrice().ToBig(),
+		}
 
 		transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
 		_ = ibs.FinalizeTx(chainConfig.Rules(blockCtx.BlockNumber), reader)
