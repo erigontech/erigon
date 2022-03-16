@@ -256,7 +256,7 @@ func handleForkChoice(
 
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
-		log.Info(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
@@ -333,7 +333,7 @@ func handleNewPayload(
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
-		log.Info(fmt.Sprintf("[%s] New payload err", s.LogPrefix()), "err", err)
+		log.Warn(fmt.Sprintf("[%s] New payload err", s.LogPrefix()), "err", err)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}

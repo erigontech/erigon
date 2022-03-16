@@ -312,7 +312,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	log.Info("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	log.Info("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
 	s.newPayloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
@@ -461,7 +461,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
-	// Unpause assemble process
+	log.Info("[ForkChoiceUpdated] unpause assemble process")
 	s.syncCond.Broadcast()
 
 	// successfully assembled the payload and assigned the correct id
@@ -534,9 +534,11 @@ func (s *EthBackendServer) StartProposer() {
 				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
 			}
 
+			log.Info("[Proposer] starting assembling...")
 			s.syncCond.L.Unlock()
 			block, err := s.assemblePayloadPOS(&param)
 			s.syncCond.L.Lock()
+			log.Info("[Proposer] payload assembled")
 
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
