@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -272,13 +273,31 @@ var cmdRunMigrations = &cobra.Command{
 }
 
 var cmdSetPrune = &cobra.Command{
-	Use:   "set_prune",
+	Use:   "force_set_prune",
 	Short: "Override existing --prune flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
 		return overrideStorageMode(db)
+	},
+}
+
+var cmdSetSnapshto = &cobra.Command{
+	Use:   "force_set_snapshot",
+	Short: "Override existing --snapshot flag value (if you know what you are doing)",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := log.New()
+		db := openDB(chaindata, logger, true)
+		defer db.Close()
+		_, chainConfig := byChain(chain)
+		snCfg := allSnapshots(chainConfig).Cfg()
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			return snapshotsynccli.ForceSetFlags(tx, snCfg)
+		}); err != nil {
+			return err
+		}
+		return nil
 	},
 }
 
@@ -399,6 +418,10 @@ func init() {
 	withChain(cmdRunMigrations)
 	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
+
+	withDataDir2(cmdSetSnapshto)
+	withChain(cmdSetSnapshto)
+	rootCmd.AddCommand(cmdSetSnapshto)
 
 	withDataDir(cmdSetPrune)
 	withChain(cmdSetPrune)
@@ -582,7 +605,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	tmpdir := filepath.Join(datadir, etl.TmpDirName)
 
 	if reset {
-		genesis, _ := byChain()
+		genesis, _ := byChain(chain)
 		if err := db.Update(ctx, func(tx kv.RwTx) error { return resetExec(tx, genesis) }); err != nil {
 			return err
 		}
@@ -1012,7 +1035,7 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 	})
 }
 
-func byChain() (*core.Genesis, *params.ChainConfig) {
+func byChain(chain string) (*core.Genesis, *params.ChainConfig) {
 	var chainConfig *params.ChainConfig
 	var genesis *core.Genesis
 	if chain == "" {
@@ -1078,7 +1101,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	vmConfig := &vm.Config{}
 
-	genesis, chainConfig := byChain()
+	genesis, chainConfig := byChain(chain)
 	var engine consensus.Engine
 	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
