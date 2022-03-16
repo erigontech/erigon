@@ -107,6 +107,24 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(1, a)
 }
 
+func TestCanRetire(t *testing.T) {
+	require := require.New(t)
+	cases := []struct {
+		inFrom, inTo, outFrom, outTo uint64
+		can                          bool
+	}{
+		{0, 1234, 0, 1000, true},
+		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
+		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
+		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
+	}
+	for _, tc := range cases {
+		from, to, can := canRetire(tc.inFrom, tc.inTo)
+		require.Equal(int(tc.outFrom), int(from))
+		require.Equal(int(tc.outTo), int(to))
+		require.Equal(tc.can, can, tc.inFrom, tc.inTo)
+	}
+}
 func TestRecompress(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) { createTestSegmentFile(t, from, to, Headers, dir) }

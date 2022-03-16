@@ -907,7 +907,7 @@ func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64,
 	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
-	blockFrom = from
+	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
 	jump := roundedTo1K - blockFrom
 	switch true { // only next segment sizes are allowed
@@ -919,6 +919,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 		blockTo = blockFrom + 10_000
 	case jump >= 1_000:
 		blockTo = blockFrom + 1_000
+	default:
+		blockTo = blockFrom
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
