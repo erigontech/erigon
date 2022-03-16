@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -551,20 +553,26 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, allSnapshots(chainConfig))
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig), db))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
-		err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx)
+		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+			return err
+		}
+	} else if pruneTo > 0 {
+		p, err := sync.PruneStageState(stages.Senders, s.BlockNumber, tx, db)
 		if err != nil {
 			return err
 		}
+		if err = stagedsync.PruneSendersStage(p, tx, cfg, ctx); err != nil {
+			return err
+		}
+		return nil
 	} else {
-		err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx)
-		if err != nil {
+		if err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx); err != nil {
 			return err
 		}
 	}
-
 	return tx.Commit()
 }
 
@@ -1023,7 +1031,7 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
-			snapshotCfg := ethconfig.NewSnapshotCfg(true, false)
+			snapshotCfg := ethconfig.NewSnapshotCfg(enableSnapshot, true)
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
@@ -1036,12 +1044,18 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	return _allSnapshotsSingleton
 }
 
+var openBlockReaderOnce sync.Once
+var _blockReaderSingleton interfaces.FullBlockReader
+
 func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockReader) {
-	blockReader = snapshotsync.NewBlockReader()
-	if sn := allSnapshots(cc); sn != nil {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(sn)
-	}
-	return blockReader
+	openBlockReaderOnce.Do(func() {
+		_blockReaderSingleton = snapshotsync.NewBlockReader()
+		if sn := allSnapshots(cc); sn != nil {
+			x := snapshotsync.NewBlockReaderWithSnapshots(sn)
+			_blockReaderSingleton = x
+		}
+	})
+	return _blockReaderSingleton
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (prune.Mode, consensus.Engine, *params.ChainConfig, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
@@ -1099,8 +1113,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
+	br := getBlockReader(chainConfig)
 	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, getBlockReader(chainConfig))
+	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
 	if err != nil {
 		panic(err)
 	}
@@ -1112,9 +1127,18 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
+	cfg.Snapshot = allSnapshots(chainConfig).Cfg()
+	if cfg.Snapshot.Enabled {
+		snDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
+		if err != nil {
+			panic(err)
+		}
+		cfg.SnapshotDir = snDir
+	}
 
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
-		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir, nil, nil,
+		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
+		nil, nil, allSnapshots(chainConfig),
 	)
 	if err != nil {
 		panic(err)
@@ -1126,7 +1150,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, tmpdir),
 			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, tmpdir),
 			stagedsync.StageHashStateCfg(db, tmpdir),
-			stagedsync.StageTrieCfg(db, false, true, tmpdir, getBlockReader(chainConfig)),
+			stagedsync.StageTrieCfg(db, false, true, tmpdir, br),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, ctx.Done()),
 		),
 		stagedsync.MiningUnwindOrder,

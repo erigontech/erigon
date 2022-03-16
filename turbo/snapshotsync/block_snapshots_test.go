@@ -107,6 +107,24 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(1, a)
 }
 
+func TestCanRetire(t *testing.T) {
+	require := require.New(t)
+	cases := []struct {
+		inFrom, inTo, outFrom, outTo uint64
+		can                          bool
+	}{
+		{0, 1234, 0, 1000, true},
+		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
+		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
+		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
+	}
+	for _, tc := range cases {
+		from, to, can := canRetire(tc.inFrom, tc.inTo)
+		require.Equal(int(tc.outFrom), int(from))
+		require.Equal(int(tc.outTo), int(to))
+		require.Equal(tc.can, can, tc.inFrom, tc.inTo)
+	}
+}
 func TestRecompress(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) { createTestSegmentFile(t, from, to, Headers, dir) }
@@ -131,13 +149,13 @@ func TestOpenAllSnapshot(t *testing.T) {
 	defer s.Close()
 	err := s.ReopenSegments()
 	require.NoError(err)
-	require.Equal(0, len(s.blocks))
+	require.Equal(0, len(s.Headers.segments))
 	s.Close()
 
 	createFile(500_000, 1_000_000, Bodies)
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	require.Equal(0, len(s.blocks)) //because, no headers and transactions snapshot files are created
+	require.Equal(0, len(s.Bodies.segments)) //because, no headers and transactions snapshot files are created
 	s.Close()
 
 	createFile(500_000, 1_000_000, Headers)
@@ -145,7 +163,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s = NewRoSnapshots(cfg, dir)
 	err = s.ReopenSegments()
 	require.Error(err)
-	require.Equal(0, len(s.blocks)) //because, no gaps are allowed (expect snapshots from block 0)
+	require.Equal(0, len(s.Headers.segments)) //because, no gaps are allowed (expect snapshots from block 0)
 	s.Close()
 
 	createFile(0, 500_000, Bodies)
@@ -157,17 +175,26 @@ func TestOpenAllSnapshot(t *testing.T) {
 	err = s.ReopenSegments()
 	require.NoError(err)
 	s.indicesReady.Store(true)
-	require.Equal(2, len(s.blocks))
+	require.Equal(2, len(s.Headers.segments))
 
-	sn, ok := s.Blocks(10)
+	ok, err := s.ViewTxs(10, func(sn *TxnSegment) error {
+		require.Equal(int(sn.To), 500_000)
+		return nil
+	})
+	require.NoError(err)
 	require.True(ok)
-	require.Equal(int(sn.To), 500_000)
 
-	sn, ok = s.Blocks(500_000)
+	ok, err = s.ViewTxs(500_000, func(sn *TxnSegment) error {
+		require.Equal(int(sn.To), 1_000_000) // [from:to)
+		return nil
+	})
+	require.NoError(err)
 	require.True(ok)
-	require.Equal(int(sn.To), 1_000_000) // [from:to)
 
-	_, ok = s.Blocks(1_000_000)
+	ok, err = s.ViewTxs(1_000_000, func(sn *TxnSegment) error {
+		return nil
+	})
+	require.NoError(err)
 	require.False(ok)
 
 	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
@@ -177,7 +204,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	err = s.ReopenSegments()
 	require.NoError(err)
 	defer s.Close()
-	require.Equal(2, len(s.blocks))
+	require.Equal(2, len(s.Headers.segments))
 
 	createFile(500_000, 900_000, Headers)
 	createFile(500_000, 900_000, Bodies)

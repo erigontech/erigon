@@ -229,6 +229,7 @@ func handleForkChoice(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
+		log.Info(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -241,6 +242,7 @@ func handleForkChoice(
 
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -249,6 +251,7 @@ func handleForkChoice(
 	}
 
 	if header == nil {
+		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
@@ -289,7 +292,9 @@ func handleForkChoice(
 		}
 	}
 
+	log.Info(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
 	u.UnwindTo(forkingPoint, common.Hash{})
+	log.Info(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
 	cfg.hd.SetPendingHeader(headerHash, headerNumber)
 
@@ -316,6 +321,7 @@ func handleNewPayload(
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] New payload err", s.LogPrefix()), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
@@ -324,7 +330,7 @@ func handleNewPayload(
 	}
 
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
-		// previously received valid header
+		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -352,6 +358,7 @@ func handleNewPayload(
 	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
 
 	if parent == nil {
+		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
@@ -366,7 +373,9 @@ func handleNewPayload(
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
+	log.Info(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
 	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, headerInserter)
+	log.Info(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return err
 	}
@@ -1096,15 +1105,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 
-		sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
+			lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
-		}
-
-		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
-		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-			return err
 		}
 	}
 

@@ -1042,43 +1042,69 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 	return nil
 }
 
-// DeleteAncientBlocks - delete old block after moving it to snapshots. [from, to)
-func DeleteAncientBlocks(db kv.RwTx, blockFrom, blockTo uint64) error {
-	//doesn't delete Receipts - because Receipts are not in snapshots yet
+func min(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}
 
-	for n := blockFrom; n < blockTo; n++ {
+// DeleteAncientBlocks - delete old block after moving it to snapshots. [from, to)
+// doesn't delete reciepts
+func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	c, err := db.Cursor(kv.Headers)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var stopAtBlock uint64
+	{
+		k, _, err := c.First()
+		if err != nil {
+			return err
+		}
+		firstBlock := binary.BigEndian.Uint64(k)
+		stopAtBlock = min(blockTo, firstBlock+uint64(blocksDeleteLimit))
+	}
+	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+
+		n := binary.BigEndian.Uint64(k)
+		if n >= stopAtBlock {
+			break
+		}
+
 		canonicalHash, err := ReadCanonicalHash(db, n)
 		if err != nil {
 			return err
 		}
-		if err := db.ForPrefix(kv.Headers, dbutils.EncodeBlockNumber(n), func(k, v []byte) error {
-			isCanonical := bytes.Equal(k[8:], canonicalHash[:])
-			if err := db.Delete(kv.Headers, k, nil); err != nil {
+		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
+
+		b, err := ReadBodyForStorageByKey(db, k)
+		if err != nil {
+			return err
+		}
+		txIDBytes := make([]byte, 8)
+		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+			binary.BigEndian.PutUint64(txIDBytes, txID)
+			bucket := kv.EthTx
+			if !isCanonical {
+				bucket = kv.NonCanonicalTxs
+			}
+			if err := db.Delete(bucket, txIDBytes, nil); err != nil {
 				return err
 			}
-			b, err := ReadBodyForStorageByKey(db, k)
-			if err != nil {
-				return err
-			}
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				bucket := kv.EthTx
-				if !isCanonical {
-					bucket = kv.NonCanonicalTxs
-				}
-				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
-					return err
-				}
-			}
-			if err := db.Delete(kv.BlockBody, k, nil); err != nil {
-				return err
-			}
-			if err := db.Delete(kv.Senders, k, nil); err != nil {
-				return err
-			}
-			return nil
-		}); err != nil {
+		}
+		if err := db.Delete(kv.Headers, k, nil); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.BlockBody, k, nil); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.Senders, k, nil); err != nil {
 			return err
 		}
 	}
