@@ -534,14 +534,13 @@ func (s *EthBackendServer) StartProposer() {
 	}()
 }
 
-func (s *EthBackendServer) Shutdown() {
-	s.requestList.Interrupt(engineapi.Stopping)
+func (s *EthBackendServer) StopProposer() {
 	s.statusCh <- PayloadStatus{CriticalError: errors.New("server is stopping")}
 
-	log.Info("[EthBackendServer Shutdown] acquiring lock")
+	log.Info("[StopProposer] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[EthBackendServer Shutdown] lock acquired")
+	log.Info("[StopProposer] lock acquired")
 
 	s.shutdown = true
 	s.syncCond.Broadcast()

@@ -43,7 +43,7 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 		if healthCheck {
 			defer healthServer.Shutdown()
 		}
-		defer ethBackendSrv.Shutdown()
+		defer ethBackendSrv.StopProposer()
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}

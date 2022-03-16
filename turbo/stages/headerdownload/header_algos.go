@@ -1407,6 +1407,7 @@ func (hd *HeaderDownload) StartPoSDownloader(
 			timer := time.NewTimer(2 * time.Millisecond)
 			select {
 			case <-ctx.Done():
+				hd.BeaconRequestList.Interrupt(engineapi.Stopping)
 				return
 			case <-logEvery.C:
 				if prevProgress == 0 {
