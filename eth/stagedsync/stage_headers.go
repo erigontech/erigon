@@ -479,10 +479,12 @@ func attemptPoSDownload(
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
 	cfg.hd.SetRequestId(requestId)
-
 	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 
+	//nolint
 	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	// headerCollector is closed in verifyAndSaveDownloadedPoSHeaders, thus nolint
+
 	cfg.hd.SetHeadersCollector(headerCollector)
 
 	cfg.hd.SetPosStatus(headerdownload.Syncing)

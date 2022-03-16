@@ -1358,6 +1358,18 @@ const (
 	logInterval = 30 * time.Second
 )
 
+func (hd *HeaderDownload) cleanUpPoSDownload() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+
+	if hd.headersCollector != nil {
+		hd.headersCollector.Close()
+		hd.headersCollector = nil
+	}
+
+	hd.posStatus = Idle
+}
+
 func (hd *HeaderDownload) StartPoSDownloader(
 	ctx context.Context,
 	headerReqSend func(context.Context, *HeaderRequest) (enode.ID, bool),
@@ -1374,11 +1386,10 @@ func (hd *HeaderDownload) StartPoSDownloader(
 				currentTime := uint64(time.Now().Unix())
 				timeout, req, penalties := hd.RequestMoreHeadersForPOS(currentTime)
 				if timeout {
-					log.Warn("Timeout", "requestId", hd.RequestId())
-					hd.BeaconRequestList.Remove(hd.RequestId())
-					hd.HeadersCollector().Close()
-					hd.SetHeadersCollector(nil)
-					hd.SetPosStatus(Idle)
+					requestId := hd.RequestId()
+					log.Warn("Timeout", "requestId", requestId)
+					hd.BeaconRequestList.Remove(requestId)
+					hd.cleanUpPoSDownload()
 					continue
 				}
 
@@ -1407,19 +1418,22 @@ func (hd *HeaderDownload) StartPoSDownloader(
 			timer := time.NewTimer(2 * time.Millisecond)
 			select {
 			case <-ctx.Done():
+				hd.cleanUpPoSDownload()
 				hd.BeaconRequestList.Interrupt(engineapi.Stopping)
 				return
 			case <-logEvery.C:
-				if prevProgress == 0 {
-					prevProgress = hd.Progress()
-				} else if hd.Progress() <= prevProgress {
-					diff := prevProgress - hd.Progress()
-					log.Info("Downloaded PoS Headers", "now", hd.Progress(),
-						"blk/sec", float64(diff)/float64(logInterval/time.Second))
-					prevProgress = hd.Progress()
+				if hd.PosStatus() == Syncing {
+					progress := hd.Progress()
+					if prevProgress == 0 {
+						prevProgress = progress
+					} else if progress <= prevProgress {
+						diff := prevProgress - progress
+						log.Info("Downloaded PoS Headers", "now", progress,
+							"blk/sec", float64(diff)/float64(logInterval/time.Second))
+						prevProgress = progress
+					}
 				}
 			case <-timer.C:
-				log.Trace("RequestQueueTime (header) ticked")
 			}
 			// Cleanup timer
 			timer.Stop()
