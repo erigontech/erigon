@@ -123,8 +123,8 @@ func init() {
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
-	Enabled       bool
-	RetireEnabled bool
+	Enabled    bool
+	KeepBlocks bool
 }
 
 func (s Snapshot) String() string {
@@ -132,19 +132,19 @@ func (s Snapshot) String() string {
 	if s.Enabled {
 		out = append(out, "--"+FlagSnapshot+"=true")
 	}
-	if s.RetireEnabled {
-		out = append(out, "--"+FlagSnapshotRetire+"=true")
+	if s.KeepBlocks {
+		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
 	}
 	return strings.Join(out, " ")
 }
 
 var (
-	FlagSnapshot       = "experimental.snapshot"
-	FlagSnapshotRetire = "experimental.snapshot.retire"
+	FlagSnapshot           = "experimental.snapshot"
+	FlagSnapshotKeepBlocks = "experimental.snapshot.keepblocks"
 )
 
-func NewSnapshotCfg(enabled, retireEnabled bool) Snapshot {
-	return Snapshot{Enabled: enabled, RetireEnabled: retireEnabled}
+func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
+	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks}
 }
 
 // Config contains configuration options for ETH protocol.

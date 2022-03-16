@@ -157,10 +157,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
 	snapshots.ReopenSegments()
 
+	br := snapshotsync.NewBlockRetire(runtime.NumCPU()/2, tmpDir, snapshots, chainDB)
+
 	for i := from; i < to; i += every {
-		if err := snapshotsync.RetireBlocks(ctx, i, i+every, *chainID, tmpDir, snapshots, chainDB, runtime.NumCPU()/2, log.LvlInfo); err != nil {
-			panic(err)
-			//return err
+		br.RetireBlocksInBackground(ctx, i, i+every, *chainID, log.LvlInfo)
+		br.Wait()
+		res := br.Result()
+		if res.Err != nil {
+			panic(res.Err)
 		}
 	}
 	return nil

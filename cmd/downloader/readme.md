@@ -24,6 +24,8 @@ downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<
 erigon --experimental.snapshot --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
 ```
 
+Use `--experimental.snapshot.keepblocks=true` to don't delete retired blocks from DB
+
 ## How to create new network or bootnode
 
 ```shell

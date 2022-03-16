@@ -311,6 +311,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	}
 
 	var blockReader interfaces.FullBlockReader
+	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
 		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
 		snConfig.ExpectBlocks, err = RestoreExpectedExternalSnapshot(chainKv, snConfig)
@@ -318,7 +319,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			return nil, err
 		}
 
-		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
+		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
 		allSnapshots.AsyncOpenAll(ctx)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
@@ -502,7 +503,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
 		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,
-		backend.downloaderClient)
+		backend.downloaderClient, allSnapshots)
 	if err != nil {
 		return nil, err
 	}

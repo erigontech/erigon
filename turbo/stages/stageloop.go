@@ -253,11 +253,10 @@ func NewStagedSync(
 	forkChoiceCh chan privateapi.ForkChoiceMessage,
 	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
+	allSnapshots *snapshotsync.RoSnapshots,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
 	if cfg.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.SnapshotDir.Path)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
@@ -303,7 +302,7 @@ func NewStagedSync(
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, allSnapshots),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, snapshotsync.NewBlockRetire(1, tmpdir, allSnapshots, db)),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,

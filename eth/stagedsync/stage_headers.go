@@ -1082,15 +1082,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 
-		sn, ok := cfg.snapshots.Blocks(cfg.snapshots.BlocksAvailable())
+		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
+		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
+			lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+			if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
-		}
-
-		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
-		lastTxnID := sn.TxnHashIdx.BaseDataID() + uint64(sn.Transactions.Count())
-		if err := rawdb.ResetSequence(tx, kv.EthTx, lastTxnID+1); err != nil {
-			return err
 		}
 	}
 

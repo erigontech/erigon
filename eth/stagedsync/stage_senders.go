@@ -38,11 +38,11 @@ type SendersCfg struct {
 	tmpdir            string
 	prune             prune.Mode
 	chainConfig       *params.ChainConfig
-	snapshots         *snapshotsync.RoSnapshots
+	blockRetire       *snapshotsync.BlockRetire
 	snapshotHashesCfg *snapshothashes.Config
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, snapshots *snapshotsync.RoSnapshots) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -56,7 +56,7 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 		tmpdir:            tmpdir,
 		chainConfig:       chainCfg,
 		prune:             prune,
-		snapshots:         snapshots,
+		blockRetire:       br,
 		snapshotHashesCfg: snapshothashes.KnownConfig(chainCfg.ChainName),
 	}
 }
@@ -103,8 +103,8 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer canonicalC.Close()
 
 	startFrom := s.BlockNumber + 1
-	if cfg.snapshots != nil && startFrom < cfg.snapshots.BlocksAvailable() {
-		startFrom = cfg.snapshots.BlocksAvailable()
+	if cfg.blockRetire.Snapshots() != nil && startFrom < cfg.blockRetire.Snapshots().BlocksAvailable() {
+		startFrom = cfg.blockRetire.Snapshots().BlocksAvailable()
 	}
 
 	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
@@ -373,17 +373,16 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	if cfg.snapshots != nil && cfg.snapshots.Cfg().RetireEnabled {
+	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
 		if err := retireBlocks(s, tx, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocks: %w", err)
 		}
-	}
-
-	if cfg.prune.TxIndex.Enabled() {
+	} else if cfg.prune.TxIndex.Enabled() {
 		if err = PruneTable(tx, kv.Senders, s.LogPrefix(), to, logEvery, ctx); err != nil {
 			return err
 		}
 	}
+
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -393,43 +392,32 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 }
 
 func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	if err := cfg.snapshots.EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
-		return err
-	}
-	blockFrom := cfg.snapshots.BlocksAvailable() + 1
-	blockTo := s.ForwardProgress - params.FullImmutabilityThreshold
-	if blockTo-blockFrom < 1000 {
+	if cfg.blockRetire.Working() {
 		return nil
 	}
-	//TODO: avoid too large deletes
+	if res := cfg.blockRetire.Result(); res != nil {
+		if res.Err != nil {
+			return fmt.Errorf("[%s] retire blocks last error: %w", s.LogPrefix(), res.Err)
+		}
+	}
+	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
+		canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
+		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
+			return nil
+		}
+	}
+
+	// TODO: remove this check for the release
+	if err := cfg.blockRetire.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
+		return err
+	}
+	blockFrom, blockTo, ok := cfg.blockRetire.CanRetire(s.ForwardProgress)
+	if !ok {
+		return nil
+	}
 
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() { // move to own goroutine, because in this goroutine already living RwTx
-		// in future we will do it in background
-		if err := snapshotsync.RetireBlocks(ctx, blockFrom, blockTo, *chainID, cfg.tmpdir, cfg.snapshots, cfg.db, 1, log.LvlDebug); err != nil {
-			panic(err)
-			//return err
-		}
-		if err := cfg.snapshots.ReopenSegments(); err != nil {
-			panic(err)
-			//return err
-		}
-		if err := cfg.snapshots.ReopenIndices(); err != nil {
-			panic(err)
+	cfg.blockRetire.RetireBlocksInBackground(ctx, blockFrom, blockTo, *chainID, log.LvlInfo)
 
-			//return err
-		}
-		// RoSnapshots must be atomic? Or we can create new instance?
-		// seed new 500K files
-
-		//if err := rawdb.DeleteAncientBlocks(tx, blockFrom, blockTo); err != nil {
-		//	return nil
-		//}
-
-		defer wg.Done()
-	}()
-	wg.Wait()
 	return nil
 }
