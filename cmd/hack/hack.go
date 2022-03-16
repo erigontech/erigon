@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
@@ -2513,6 +2514,39 @@ func histStat1(chaindata string) error {
 	return nil
 }
 
+func golomb(chaindata string) error {
+	files, err := os.ReadDir(chaindata)
+	if err != nil {
+		return err
+	}
+	keys := []string{"account", "storage", "code", "commitment", "ahistory", "shistory", "chistory"}
+	re := regexp.MustCompile(fmt.Sprintf("(%s).([0-9]+)-([0-9]+).dat", strings.Join(keys, "|")))
+	for _, f := range files {
+		name := f.Name()
+		subs := re.FindStringSubmatch(name)
+		if len(subs) != 4 {
+			if len(subs) != 0 {
+				log.Warn("File ignored by changes scan, more than 4 submatches", "name", name, "submatches", len(subs))
+			}
+			continue
+		}
+		fmt.Printf("file %s\n", name)
+		var d *compress.Decompressor
+		if d, err = compress.NewDecompressor(filepath.Join(chaindata, name)); err != nil {
+			return err
+		}
+		defer d.Close()
+		g := d.MakeGetter()
+		inf, ie := f.Info()
+		if ie != nil {
+			return ie
+		}
+		gs := g.GolombSize() / 8
+		log.Info("Golomb size estimation", "file", name, "size", libcommon.ByteCount(uint64(inf.Size())), "golomb size", libcommon.ByteCount(uint64(gs)), "extra %", 100.0*(float64(gs)-float64(inf.Size()))/float64(inf.Size()))
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -2690,6 +2724,8 @@ func main() {
 		err = histStats()
 	case "histStat1":
 		err = histStat1(*chaindata)
+	case "golomb":
+		err = golomb(*chaindata)
 	}
 
 	if err != nil {
