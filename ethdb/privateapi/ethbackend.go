@@ -56,7 +56,7 @@ type EthBackendServer struct {
 	// Send Beacon Chain requests to staged sync
 	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
-	statusCh           chan PayloadStatus
+	statusCh           <-chan PayloadStatus
 	assemblePayloadPOS assemblePayloadPOSFunc
 	proposing          bool
 	syncCond           *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
@@ -87,7 +87,7 @@ type pendingPayload struct {
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events,
 	blockReader interfaces.BlockAndTxnReader, config *params.ChainConfig, requestList *engineapi.RequestList,
-	statusCh chan PayloadStatus, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+	statusCh <-chan PayloadStatus, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	return &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
@@ -535,8 +535,6 @@ func (s *EthBackendServer) StartProposer() {
 }
 
 func (s *EthBackendServer) StopProposer() {
-	s.statusCh <- PayloadStatus{CriticalError: errors.New("server is stopping")}
-
 	log.Info("[StopProposer] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()

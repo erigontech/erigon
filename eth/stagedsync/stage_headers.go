@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime"
@@ -179,6 +180,9 @@ func HeadersPOS(
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	if interrupt != engineapi.None {
+		if interrupt == engineapi.Stopping {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
+		}
 		if interrupt == engineapi.Synced {
 			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
 		}
