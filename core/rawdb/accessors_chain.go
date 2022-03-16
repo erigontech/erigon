@@ -517,64 +517,6 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	return body, bodyForStorage.BaseTxId + 1, bodyForStorage.TxAmount - 2 // 1 system txn in the begining of block, and 1 at the end
 }
 
-func ReadBodyWithoutSystemTx(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint64, uint32) {
-	data := ReadStorageBodyRLP(db, hash, number)
-	if len(data) == 0 {
-		return nil, 0, 0
-	}
-	bodyForStorage := new(types.BodyForStorage)
-	err := rlp.DecodeBytes(data, bodyForStorage)
-	if err != nil {
-		log.Error("Invalid block body RLP", "hash", hash, "err", err)
-		return nil, 0, 0
-	}
-	body := new(types.Body)
-	body.Uncles = bodyForStorage.Uncles
-	return body, bodyForStorage.BaseTxId, bodyForStorage.TxAmount
-}
-
-func ReadCanonicalBodyWithTransactionsExceptSystems(db kv.Getter, hash common.Hash, number uint64) *types.Body {
-	body, baseTxId, txAmount := ReadBodyWithoutSystemTx(db, hash, number)
-	if body == nil {
-		return nil
-	}
-	var err error
-	body.Transactions, err = CanonicalTransactions(db, baseTxId, txAmount)
-	if err != nil {
-		log.Error("failed ReadTransactionByHash", "hash", hash, "block", number, "err", err)
-		return nil
-	}
-	return body
-}
-
-func ReadBlockNoSystemTx(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
-	header := ReadHeader(tx, hash, number)
-	if header == nil {
-		return nil
-	}
-	body := ReadCanonicalBodyWithTransactionsExceptSystems(tx, hash, number)
-	if body == nil {
-		return nil
-	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles)
-}
-
-func ReadBlockWithSendersNoSystemTx(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	block := ReadBlockNoSystemTx(db, hash, number)
-	if block == nil {
-		return nil, nil, nil
-	}
-	senders, err := ReadSenders(db, hash, number)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(senders) != block.Transactions().Len() {
-		return block, senders, nil // no senders is fine - will recover them on the fly
-	}
-	block.SendersToTxs(senders)
-	return block, senders, nil
-}
-
 func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Address, error) {
 	data, err := db.GetOne(kv.Senders, dbutils.BlockBodyKey(number, hash))
 	if err != nil {

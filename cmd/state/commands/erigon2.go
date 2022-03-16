@@ -18,7 +18,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -165,11 +164,6 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		txNum uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
 	)
 
-	engine := initConsensusEngine(chainConfig, logger)
-	if engine.Type() == params.CliqueConsensus {
-		txNum = 0
-	}
-
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -185,6 +179,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		}
 	}()
 
+	engine := initConsensusEngine(chainConfig, logger)
 	var blockReader interfaces.FullBlockReader
 	if snapshotBlocks {
 		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
@@ -195,8 +190,6 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else if engine.Type() == params.CliqueConsensus {
-		blockReader = CliqueConsensusBlockReader(snapshotsync.NewBlockReader())
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
@@ -213,11 +206,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
 
 			// Skip that block, but increase txNum
-			txNum += uint64(txAmount)
-			if engine.Type() != params.CliqueConsensus {
-				txNum += 2 // Pre and Post block transaction
-			}
-
+			txNum += uint64(txAmount) + 2 // Pre and Post block transaction
 			continue
 		}
 
@@ -244,9 +233,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			return h
 		}
 
-		if engine.Type() != params.CliqueConsensus {
-			txNum++ // Pre-block transaction
-		}
+		txNum++ // Pre-block transaction
 
 		if txNum, _, err = processBlock(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, block, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
@@ -257,9 +244,8 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if trace {
 			fmt.Printf("FinishTx called for %d block %d\n", txNum, blockNum)
 		}
-		if engine.Type() != params.CliqueConsensus {
-			txNum++ // Post-block transaction
-		}
+
+		txNum++ // Post-block transaction
 
 		// Check for interrupts
 		select {
@@ -267,6 +253,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
 		default:
 		}
+
 		if commitments && (interrupt || blockNum%uint64(commitmentFrequency) == 0) {
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
@@ -574,28 +561,4 @@ func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger) (en
 		engine = ethash.NewFaker()
 	}
 	return
-}
-
-type cliqueConsensusBlockReader struct {
-	*snapshotsync.BlockReader
-}
-
-func CliqueConsensusBlockReader(fr *snapshotsync.BlockReader) interfaces.FullBlockReader {
-	return cliqueConsensusBlockReader{fr}
-}
-
-func (c cliqueConsensusBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-	if err != nil {
-		return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	if canonicalHash == hash {
-		block, senders, err = rawdb.ReadBlockWithSendersNoSystemTx(tx, hash, blockHeight)
-		if err != nil {
-			return nil, nil, err
-		}
-		return block, senders, nil
-	}
-
-	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 }
