@@ -60,8 +60,6 @@ var sendTxCmd = &cobra.Command{
 			return fmt.Errorf("tx type to create must either be 'contract' or 'regular'")
 		}
 		if txType == "regular" {
-			fmt.Println(sendAddr)
-			fmt.Println(sendValue)
 			if sendValue == 0 {
 				return fmt.Errorf("value must be > 0")
 			}
@@ -91,9 +89,6 @@ var sendTxCmd = &cobra.Command{
 			_ = searchBlockForTx(*hash)
 		}
 
-		fmt.Printf("subscription contract, transactOps: %+v, %+v\n", subscriptionContract, transactOpts)
-
-		// TODO: call eth_getLogs on address and this block number
 		if err := emitEventAndGetLogs(subscriptionContract, transactOpts, address); err != nil {
 			panic(err)
 		}
@@ -152,7 +147,6 @@ func searchBlockForTx(txnHash common.Hash) uint64 {
 	url := "ws://127.0.0.1:8545"
 	client, clientErr := rpc.DialWebsocket(context.Background(), url, "")
 	if clientErr != nil {
-		fmt.Println("error connecting to socket", clientErr)
 		panic(clientErr)
 	}
 	fmt.Println()
@@ -160,7 +154,6 @@ func searchBlockForTx(txnHash common.Hash) uint64 {
 
 	blockN, err := subscribe(client, "eth_newHeads", txnHash)
 	if err != nil {
-		fmt.Println("error occurred while subscribing", err)
 		panic(err)
 	}
 
@@ -218,7 +211,6 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (uin
 	var currentBlock Block
 	err := client.CallContext(ctx, &currentBlock, "eth_getBlockByNumber", blockNumber, false)
 	if err != nil {
-		fmt.Println("can't get latest block:", err)
 		return uint64(0), false, err
 	}
 
@@ -243,7 +235,6 @@ func emitEventAndGetLogs(subContract *contracts.Subscription, opts *bind.Transac
 
 	tx, err := subContract.Fallback(opts, []byte{})
 	if err != nil {
-		fmt.Printf("error 3: %+v\n", err)
 		panic(err)
 	}
 
@@ -260,7 +251,6 @@ func emitEventAndGetLogs(subContract *contracts.Subscription, opts *bind.Transac
 	blockN := searchBlockForTx(*hash)
 
 	if err = requests.GetLogs(reqId, blockN, blockN, address); err != nil {
-		fmt.Printf("error 4: %+v\n", err)
 		panic(err)
 	}
 

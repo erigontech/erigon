@@ -79,14 +79,13 @@ func ParityList(reqId int, account common.Address, quantity int, offset []byte, 
 
 func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error {
 	reqGen := initialiseRequestGenerator(reqId)
-	var b rpctest.Log
+	var b rpctest.EthGetLogs
 
-	reqq := reqGen.getLogs(fromBlock, toBlock, address)
-	res := reqGen.Erigon("eth_getLogs", reqq, &b)
+	res := reqGen.Erigon("eth_getLogs", reqGen.getLogs(fromBlock, toBlock, address), &b)
 	if res.Err != nil {
 		return fmt.Errorf("Error fetching logs: %v\n", res.Err)
 	}
 
-	fmt.Printf("Logs and events: %v\n", parseResponse(b))
+	fmt.Printf("Logs: %v\n", parseResponse(b))
 	return nil
 }

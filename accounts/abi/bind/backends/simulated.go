@@ -593,7 +593,6 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 		snapshot := b.pendingState.Snapshot()
 		res, err := b.callContract(ctx, call, b.pendingBlock, b.pendingState)
-		fmt.Printf("err %+v\n", err)
 		b.pendingState.RevertToSnapshot(snapshot)
 
 		if err != nil {
@@ -635,7 +634,6 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
-			fmt.Println("sim.go")
 			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
 		}
 	}
