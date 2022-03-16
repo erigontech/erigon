@@ -904,8 +904,23 @@ func (br *BlockRetire) Result() *BlockRetireResult {
 }
 func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = br.snapshots.BlocksAvailable() + 1
-	blockTo = (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
-	return blockFrom, blockTo, blockTo-blockFrom >= 1000
+	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
+}
+func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
+	blockFrom = from
+	roundedTo1K := (to / 1_000) * 1_000
+	jump := roundedTo1K - blockFrom
+	switch true { // only next segment sizes are allowed
+	case jump >= 500_000:
+		blockTo = blockFrom + 500_000
+	case jump >= 100_000:
+		blockTo = blockFrom + 100_000
+	case jump >= 10_000:
+		blockTo = blockFrom + 10_000
+	case jump >= 1_000:
+		blockTo = blockFrom + 1_000
+	}
+	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
 func (br *BlockRetire) CanDeleteTo(curBlockNum uint64) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
