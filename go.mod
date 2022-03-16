@@ -43,13 +43,14 @@ require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20220313224617-77eb94b53edc
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
+	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/pelletier/go-toml v1.9.4
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.6
 	github.com/quasilyte/go-ruleguard/dsl v0.3.17
 	github.com/rs/cors v1.8.2
 	github.com/shirou/gopsutil/v3 v3.22.2
-	github.com/spf13/cobra v1.2.1
+	github.com/spf13/cobra v1.4.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.1-0.20210427113832-6241f9ab9942
 	github.com/syndtr/goleveldb v1.0.0 // indirect
