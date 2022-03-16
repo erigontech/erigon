@@ -910,7 +910,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
 	jump := roundedTo1K - blockFrom
-	switch true { // only next segment sizes are allowed
+	switch { // only next segment sizes are allowed
 	case jump >= 500_000:
 		blockTo = blockFrom + 500_000
 	case jump >= 100_000:
