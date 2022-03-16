@@ -17,12 +17,12 @@ require (
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/matryer/moq v0.2.5
 	github.com/spaolacci/murmur3 v1.1.0
-	github.com/stretchr/testify v1.7.0
+	github.com/stretchr/testify v1.7.1
 	github.com/torquem-ch/mdbx-go v0.22.16
 	github.com/ugorji/go/codec v1.1.13
 	go.uber.org/atomic v1.9.0
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
-	golang.org/x/sys v0.0.0-20211030160813-b3129d9d1021
+	golang.org/x/crypto v0.0.0-20220131195533-30dcbda58838
+	golang.org/x/sys v0.0.0-20220204135822-1c1b9b1eba6a
 	google.golang.org/grpc v1.41.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
 	google.golang.org/protobuf v1.27.1
