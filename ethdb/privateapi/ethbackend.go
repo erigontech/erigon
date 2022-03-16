@@ -257,10 +257,13 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1, validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
+	log.Info("[NewPayload] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
+	log.Info("[NewPayload] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
+		log.Error("[NewPayload] not a proof-of-stake chain")
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
@@ -294,6 +297,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
+		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 
@@ -308,7 +312,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	// Send the block over
+	log.Info("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
 	s.newPayloadCh <- PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
@@ -318,6 +322,8 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 
 	payloadStatus := <-s.statusCh
+	log.Info("[NewPayload] got reply", "payloadStatus", payloadStatus)
+
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
@@ -329,8 +335,10 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
 	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
 
+	log.Info("[GetPayload] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
+	log.Info("[GetPayload] lock acquired")
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
@@ -383,8 +391,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
+	log.Info("[ForkChoiceUpdated] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
+	log.Info("[ForkChoiceUpdated] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -407,9 +417,13 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
+
+	log.Info("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
 	s.forkChoiceCh <- forkChoiceMessage
 
 	payloadStatus := <-s.statusCh
+	log.Info("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
 	}
@@ -447,7 +461,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
-	// Unpause assemble process
+	log.Info("[ForkChoiceUpdated] unpause assemble process")
 	s.syncCond.Broadcast()
 
 	// successfully assembled the payload and assigned the correct id
@@ -474,8 +488,10 @@ func (s *EthBackendServer) evictOldPendingPayloads() {
 func (s *EthBackendServer) StartProposer() {
 
 	go func() {
+		log.Info("[Proposer] acquiring lock")
 		s.syncCond.L.Lock()
 		defer s.syncCond.L.Unlock()
+		log.Info("[Proposer] lock acquired")
 
 		for {
 			var blockToBuild *types.Block
@@ -503,8 +519,9 @@ func (s *EthBackendServer) StartProposer() {
 					}
 				}
 
-				// Wait until we have to process new payloads
+				log.Info("[Proposer] Wait until we have to process new payloads")
 				s.syncCond.Wait()
+				log.Info("[Proposer] Wait finished")
 			}
 
 			// Tell the stage headers to leave space for the write transaction for mining stages
@@ -517,9 +534,11 @@ func (s *EthBackendServer) StartProposer() {
 				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
 			}
 
+			log.Info("[Proposer] starting assembling...")
 			s.syncCond.L.Unlock()
 			block, err := s.assemblePayloadPOS(&param)
 			s.syncCond.L.Lock()
+			log.Info("[Proposer] payload assembled")
 
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
@@ -535,8 +554,10 @@ func (s *EthBackendServer) StartProposer() {
 }
 
 func (s *EthBackendServer) StopProposer() {
+	log.Info("[StopProposer] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
+	log.Info("[StopProposer] lock acquired")
 
 	s.shutdown = true
 	s.syncCond.Broadcast()

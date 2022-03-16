@@ -246,6 +246,7 @@ func handleForkChoice(
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
+		log.Info(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_VALID,
 			LatestValidHash: currentHeadHash,
@@ -255,12 +256,14 @@ func handleForkChoice(
 
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
 
 	repliedWithSyncStatus := false
 	if header == nil {
+		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 		repliedWithSyncStatus = true
 
@@ -303,7 +306,9 @@ func handleForkChoice(
 		}
 	}
 
+	log.Info(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
 	u.UnwindTo(forkingPoint, common.Hash{})
+	log.Info(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
 	cfg.hd.SetPendingHeader(headerHash, headerNumber)
 
@@ -328,12 +333,13 @@ func handleNewPayload(
 
 	existingCanonicalHash, err := rawdb.ReadCanonicalHash(tx, headerNumber)
 	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] New payload err", s.LogPrefix()), "err", err)
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
 		return err
 	}
 
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
-		// previously received valid header
+		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header", s.LogPrefix()))
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 			Status:          remote.EngineStatus_VALID,
 			LatestValidHash: headerHash,
@@ -356,11 +362,14 @@ func handleNewPayload(
 	}
 
 	if parent != nil {
+		log.Info(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
 		success, err := verifyAndSaveNewPoSHeader(s, tx, cfg, header, headerInserter)
+		log.Info(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 		if err != nil || !success {
 			return err
 		}
 	} else {
+		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
 
 		hashToDownload := header.ParentHash
@@ -519,6 +528,9 @@ func downloadMissingPoSHeaders(
 		// Cleanup timer
 		timer.Stop()
 	}
+
+	log.Info(fmt.Sprintf("[%s] Downloading PoS headers finished", s.LogPrefix()))
+
 	// If the user stopped it, we don't update anything
 	if !cfg.hd.Synced() {
 		return
