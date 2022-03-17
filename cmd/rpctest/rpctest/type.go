@@ -2,7 +2,6 @@ package rpctest
 
 import (
 	"fmt"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -232,6 +231,11 @@ type EthReceipt struct {
 type EthGetProof struct {
 	CommonResponse
 	Result AccountResult `json:"result"`
+}
+
+type EthGetLogs struct {
+	CommonResponse
+	Result []Log `json:"result"`
 }
 
 // Result structs for GetProof

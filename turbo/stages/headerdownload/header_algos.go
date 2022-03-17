@@ -494,6 +494,9 @@ func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
 	case networkname.SepoliaChainName:
 		encodings = sepoliaPreverifiedHashes
 		height = sepoliaPreverifiedHeight
+	case networkname.GoerliChainName:
+		encodings = goerliPreverifiedHashes
+		height = goerliPreferifiedHeight
 	default:
 		log.Debug("Preverified hashes not found for", "chain", chain)
 		return nil, 0

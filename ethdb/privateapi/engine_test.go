@@ -92,7 +92,8 @@ func TestMockDownloadRequest(t *testing.T) {
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -150,7 +151,8 @@ func TestMockValidExecution(t *testing.T) {
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -185,7 +187,8 @@ func TestMockInvalidExecution(t *testing.T) {
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -220,7 +223,8 @@ func TestNoTTD(t *testing.T) {
 	beaconRequestList := engineapi.NewRequestList()
 	statusCh := make(chan PayloadStatus)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, false)
 
 	var err error
 

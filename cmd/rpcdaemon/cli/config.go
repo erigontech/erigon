@@ -287,26 +287,57 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
+	var cc *params.ChainConfig
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
+		if err != nil {
+			return err
+		}
+		cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
+	}
+	if cc == nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+	}
+
+	// if chain config has terminal total difficulty then rpc has to have these API's to function
+	if cc.TerminalTotalDifficulty != nil {
+		hasEthApiEnabled := false
+		hasEngineApiEnabled := false
+		hasNetApiEnabled := false
+
+		for _, api := range cfg.API {
+			switch api {
+			case "eth":
+				hasEthApiEnabled = true
+			case "engine":
+				hasEngineApiEnabled = true
+			case "net":
+				hasNetApiEnabled = true
+			}
+		}
+
+		if !hasEthApiEnabled {
+			cfg.API = append(cfg.API, "eth")
+		}
+
+		if !hasEngineApiEnabled {
+			cfg.API = append(cfg.API, "engine")
+		}
+
+		if !hasNetApiEnabled {
+			cfg.API = append(cfg.API, "net")
+		}
+
+	}
 
 	if cfg.SingleNodeMode {
 		if cfg.Snapshot.Enabled {
-			var cc *params.ChainConfig
-			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
-				if err != nil {
-					return err
-				}
-				cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
-				if err != nil {
-					return err
-				}
-				return nil
-			}); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
-			}
-			if cc == nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
-			}
 
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)

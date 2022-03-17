@@ -41,7 +41,7 @@ func (config NodeKeyConfig) load(keyfile string) (*ecdsa.PrivateKey, error) {
 
 func (config NodeKeyConfig) save(keyfile string, key *ecdsa.PrivateKey) error {
 	err := os.MkdirAll(path.Dir(keyfile), 0755)
-	if err != nil {
+	if err == nil {
 		err = crypto.SaveECDSA(keyfile, key)
 	}
 	if err != nil {
