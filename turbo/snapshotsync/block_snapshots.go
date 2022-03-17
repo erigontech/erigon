@@ -543,19 +543,19 @@ func (s *RoSnapshots) closeSegmentsLocked() {
 	}
 }
 func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
 		return false, nil
 	}
 	return s.Headers.ViewSegment(blockNum, f)
 }
 func (s *RoSnapshots) ViewBodies(blockNum uint64, f func(sn *BodySegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
 		return false, nil
 	}
 	return s.Bodies.ViewSegment(blockNum, f)
 }
 func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
 		return false, nil
 	}
 	return s.Txs.ViewSegment(blockNum, f)
