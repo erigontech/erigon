@@ -350,9 +350,11 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
 func (s *RoSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
 func (s *RoSnapshots) Dir() string              { return s.dir }
 func (s *RoSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable.Load() }
 func (s *RoSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
 func (s *RoSnapshots) IndicesAvailable() uint64 { return s.idxAvailable.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64 {
+	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
+}
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
@@ -397,18 +399,28 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 	defer s.Bodies.lock.Unlock()
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
+Loop:
 	for _, t := range types {
 		switch t {
 		case Headers:
 			if err := s.Headers.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		case Bodies:
 			if err := s.Bodies.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		case Transactions:
 			if err := s.Txs.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		default:
