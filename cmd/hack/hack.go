@@ -2530,7 +2530,6 @@ func golomb(chaindata string) error {
 			}
 			continue
 		}
-		fmt.Printf("file %s\n", name)
 		var d *compress.Decompressor
 		if d, err = compress.NewDecompressor(filepath.Join(chaindata, name)); err != nil {
 			return err
