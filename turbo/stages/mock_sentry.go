@@ -512,3 +512,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage) {
 	ms.downloader.Hd.BeaconRequestList.AddForkChoiceRequest(message)
 }
+
+func (ms *MockSentry) ReceivePayloadStatus() privateapi.PayloadStatus {
+	return <-ms.downloader.Hd.PayloadStatusCh
+}

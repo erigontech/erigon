@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -516,7 +517,6 @@ func TestForkchoiceToGenesis(t *testing.T) {
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
-
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
@@ -525,4 +525,43 @@ func TestForkchoiceToGenesis(t *testing.T) {
 	}
 
 	assert.Equal(t, headBlockHash, m.Genesis.Hash())
+
+	payloadStatus := m.ReceivePayloadStatus()
+	assert.Equal(t, payloadStatus.Status, remote.EngineStatus_VALID)
+}
+
+func TestBogusForkchoice(t *testing.T) {
+	m := stages.MockWithZeroTTD(t)
+
+	// Bogus forkChoice: head points to rubbish
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
+		HeadBlockHash:      common.HexToHash("11111111111111111111"),
+		SafeBlockHash:      m.Genesis.Hash(),
+		FinalizedBlockHash: m.Genesis.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+
+	_, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payloadStatus := m.ReceivePayloadStatus()
+	assert.Equal(t, payloadStatus.Status, remote.EngineStatus_SYNCING)
+
+	// Now send a correct forkChoice
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      m.Genesis.Hash(),
+		SafeBlockHash:      m.Genesis.Hash(),
+		FinalizedBlockHash: m.Genesis.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payloadStatus = m.ReceivePayloadStatus()
+	assert.Equal(t, payloadStatus.Status, remote.EngineStatus_VALID)
 }
