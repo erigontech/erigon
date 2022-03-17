@@ -1009,7 +1009,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			expect := cfg.snapshotHashesCfg.ExpectBlocks
 			if headers >= expect && bodies >= expect && txs >= expect {
 				if err := cfg.snapshots.ReopenSegments(); err != nil {
-					return err
+					return fmt.Errorf("ReopenSegments: %w", err)
 				}
 				if expect > cfg.snapshots.BlocksAvailable() {
 					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
@@ -1052,6 +1052,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		if err := cfg.snapshots.ReopenIndices(); err != nil {
+			return fmt.Errorf("ReopenSegments: %w", err)
 			return err
 		}
 		if expect > cfg.snapshots.IndicesAvailable() {
