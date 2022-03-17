@@ -360,6 +360,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	var buf []byte
 	var h *types.Header
 	ok, err := back.sn.ViewHeaders(blockHeight, func(seg *HeaderSegment) error {
+		fmt.Printf("a: %t, %t", seg == nil, seg.idxHeaderHash == nil)
 		headerOffset := seg.idxHeaderHash.Lookup2(blockHeight - seg.idxHeaderHash.BaseDataID())
 		gg := seg.seg.MakeGetter()
 		gg.Reset(headerOffset)
