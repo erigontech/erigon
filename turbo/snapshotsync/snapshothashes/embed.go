@@ -39,6 +39,7 @@ var (
 )
 
 func newConfig(preverified Preverified) *Config {
+	fmt.Printf("all: %+v\n", preverified)
 	return &Config{
 		ExpectBlocks: maxBlockNum(preverified),
 		Preverified:  preverified,
