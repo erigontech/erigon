@@ -324,8 +324,9 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		time.Sleep(time.Second)
 		fmt.Printf("alex: %d, %d\n", snapshothashes.KnownConfig(chainConfig.ChainName).ExpectBlocks, allSnapshots.BlocksAvailable())
-
+		fmt.Printf("%+v\n", snapshothashes.KnownConfig(chainConfig.ChainName).Preverified)
 		panic(1)
+
 		if len(stack.Config().DownloaderAddr) > 0 {
 			// connect to external Downloader
 			backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
