@@ -291,7 +291,10 @@ var cmdSetSnapshto = &cobra.Command{
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
 		_, chainConfig := byChain(chain)
-		snCfg := allSnapshots(chainConfig).Cfg()
+		var snCfg ethconfig.Snapshot
+		if allSnapshots(chainConfig) != nil {
+			snCfg = allSnapshots(chainConfig).Cfg()
+		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return snapshotsynccli.ForceSetFlags(tx, snCfg)
 		}); err != nil {
@@ -1150,7 +1153,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Snapshot = allSnapshots(chainConfig).Cfg()
+	allSn := allSnapshots(chainConfig)
+	if allSn != nil {
+		cfg.Snapshot = allSn.Cfg()
+	}
 	if cfg.Snapshot.Enabled {
 		snDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
 		if err != nil {
@@ -1162,7 +1168,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
 		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
 		nil, nil, nil, nil, nil,
-		allSnapshots(chainConfig),
+		allSn,
 	)
 	if err != nil {
 		panic(err)
