@@ -2,6 +2,7 @@ package snapshothashes
 
 import (
 	_ "embed"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -65,6 +66,7 @@ func maxBlockNum(preverified Preverified) uint64 {
 			panic(err)
 		}
 		if max < to {
+			fmt.Printf("max: %d, %s\n", to, fileName)
 			max = to
 		}
 	}
