@@ -291,7 +291,10 @@ var cmdSetSnapshto = &cobra.Command{
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
 		_, chainConfig := byChain(chain)
-		snCfg := allSnapshots(chainConfig).Cfg()
+		var snCfg ethconfig.Snapshot
+		if allSnapshots(chainConfig) != nil {
+			snCfg = allSnapshots(chainConfig).Cfg()
+		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return snapshotsynccli.ForceSetFlags(tx, snCfg)
 		}); err != nil {
