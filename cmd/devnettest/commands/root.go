@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -24,8 +22,4 @@ var rootCmd = &cobra.Command{
 // Execute executes the root command.
 func Execute() error {
 	return rootCmd.Execute()
-}
-
-func clearDevDB() {
-	fmt.Printf("Clearing ~/dev\n")
 }
