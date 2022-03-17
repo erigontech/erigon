@@ -401,14 +401,14 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 		}
 	}
 	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
-		canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
-		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
-			return nil
-		}
-	} else {
 		// TODO: remove this check for the release
 		if err := cfg.blockRetire.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
 			return err
+		}
+
+		canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
+		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
+			return nil
 		}
 	}
 
