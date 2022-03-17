@@ -1,14 +1,21 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -114,8 +121,10 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var notifyFrom uint64
+	var isUnwind bool
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo
+		isUnwind = true
 	} else {
 		heightSpan := finishStageAfterSync - finishStageBeforeSync
 		if heightSpan > 1024 {
@@ -139,7 +148,54 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		return err
 	}
 	notifier.OnNewHeader(headersRlp)
-
 	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
+	logs, err := ReadLogs(tx, notifyFrom, isUnwind)
+	if err != nil {
+		return err
+	}
+	notifier.OnLogs(logs)
+
 	return nil
+}
+
+func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsReply, error) {
+	logs, err := tx.Cursor(kv.Log)
+	if err != nil {
+		return nil, err
+	}
+	defer logs.Close()
+	reply := make([]*remote.SubscribeLogsReply, 0)
+	reader := bytes.NewReader(nil)
+
+	for k, v, err := logs.Seek(dbutils.LogKey(from, 0)); k != nil; k, v, err = logs.Next() {
+		if err != nil {
+			return nil, err
+		}
+		blockNum := binary.BigEndian.Uint64(k[:8])
+		var ll types.Logs
+		reader.Reset(v)
+		if err := cbor.Unmarshal(&ll, reader); err != nil {
+			return nil, fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+		}
+
+		for _, l := range ll {
+			r := &remote.SubscribeLogsReply{
+				Address:          gointerfaces.ConvertAddressToH160(l.Address),
+				BlockHash:        gointerfaces.ConvertHashToH256(l.BlockHash),
+				BlockNumber:      l.BlockNumber,
+				Data:             l.Data,
+				LogIndex:         uint64(l.Index),
+				Topics:           make([]*types2.H256, 0),
+				TransactionHash:  gointerfaces.ConvertHashToH256(l.TxHash),
+				TransactionIndex: uint64(l.TxIndex),
+				Removed:          isUnwind,
+			}
+			for _, topic := range l.Topics {
+				r.Topics = append(r.Topics, gointerfaces.ConvertHashToH256(topic))
+			}
+			reply = append(reply, r)
+		}
+	}
+
+	return reply, nil
 }

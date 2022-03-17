@@ -2,6 +2,7 @@ package privateapi
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -16,14 +17,15 @@ import (
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 // 2.1.0 - add NetPeerCount function
 // 2.2.0 - add NodesInfo function
-var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 2, Patch: 0}
+// 2.3.0 - add Subscribe to logs
+var EthBackendAPIVersion = &types2.VersionReply{Major: 2, Minor: 3, Patch: 0}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
-
-	ctx    context.Context
-	eth    EthBackend
-	events *Events
+	ctx                                  context.Context
+	eth                                  EthBackend
+	events                               *Events
+	logsFilter                           *LogsFilterAggregator
 }
 
 type EthBackend interface {
@@ -34,7 +36,9 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, events *Events) *EthBackendServer {
-	return &EthBackendServer{ctx: ctx, eth: eth, events: events}
+	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, logsFilter: NewLogsFilterAggregator()}
+	s.events.AddLogsSubscription(s.logsFilter.distributeLogs)
+	return s
 }
 
 func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
@@ -115,4 +119,11 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 		return nil, err
 	}
 	return nodesInfo, nil
+}
+
+func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+	if s.logsFilter != nil {
+		return s.logsFilter.subscribeLogs(server)
+	}
+	return fmt.Errorf("no logs filter available")
 }
