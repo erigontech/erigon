@@ -176,8 +176,8 @@ func TestNonceFromAddress(t *testing.T) {
 	{
 		var txSlots TxSlots
 		txSlot1 := &TxSlot{
-			tip:    9 * common.Ether,
-			feeCap: 300000,
+			tip:    300000,
+			feeCap: 9 * common.Ether,
 			gas:    100000,
 			nonce:  3,
 		}

@@ -685,7 +685,7 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool, stateCache kvcache.CacheV
 	}
 	// Transactor should have enough funds to cover the costs
 	total := uint256.NewInt(txn.gas)
-	total.Mul(total, uint256.NewInt(txn.tip))
+	total.Mul(total, uint256.NewInt(txn.feeCap))
 	total.Add(total, &txn.value)
 	if senderBalance.Cmp(total) < 0 {
 		if txn.traced {
