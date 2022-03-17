@@ -943,7 +943,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		defer br.working.Store(false)
 		defer br.wg.Done()
 
-		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, lvl)
+		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.snapshotDownloader, lvl)
 		if err != nil {
 			br.result = &BlockRetireResult{
 				BlockFrom: blockFrom,
@@ -951,25 +951,6 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 				Err:       err,
 			}
 			return
-		}
-
-		if blockTo-blockFrom == DEFAULT_SEGMENT_SIZE {
-			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
-			for _, t := range AllSnapshotTypes {
-				req.Items = append(req.Items, &proto_downloader.DownloadItem{
-					Path: SegmentFileName(blockFrom, blockTo, t),
-				})
-			}
-
-			_, err := br.snapshotDownloader.Download(ctx, req)
-			if err != nil {
-				br.result = &BlockRetireResult{
-					BlockFrom: blockFrom,
-					BlockTo:   blockTo,
-					Err:       err,
-				}
-				return
-			}
 		}
 
 		br.result = &BlockRetireResult{
@@ -980,7 +961,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 	}()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, snapshotDownloader proto_downloader.DownloaderClient, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
@@ -1005,6 +986,20 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("ReopenIndices: %w", err)
 	}
 
+	// start seed large .seg of large size
+	if blockTo-blockFrom == DEFAULT_SEGMENT_SIZE {
+		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
+		for _, t := range AllSnapshotTypes {
+			req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				Path: SegmentFileName(blockFrom, blockTo, t),
+			})
+		}
+		if snapshotDownloader != nil {
+			if _, err := snapshotDownloader.Download(ctx, req); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
