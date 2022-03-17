@@ -88,6 +88,7 @@ func KnownConfig(networkName string) *Config {
 	case networkname.MainnetChainName:
 		return MainnetChainSnapshotConfig
 	case networkname.GoerliChainName:
+		fmt.Printf("aaaa: %d\n", GoerliChainSnapshotConfig.ExpectBlocks)
 		return GoerliChainSnapshotConfig
 	case networkname.BSCChainName:
 		return BscChainSnapshotConfig
