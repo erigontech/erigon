@@ -313,11 +313,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
-		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
-		snConfig.ExpectBlocks, err = RestoreExpectedExternalSnapshot(chainKv, snConfig)
-		if err != nil {
-			return nil, err
-		}
+		//snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
+		//snConfig.ExpectBlocks, err = RestoreExpectedExternalSnapshot(chainKv, snConfig)
+		//if err != nil {
+		//	return nil, err
+		//}
 
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
 		allSnapshots.AsyncOpenAll(ctx)
