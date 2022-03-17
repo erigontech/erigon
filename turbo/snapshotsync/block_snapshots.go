@@ -397,18 +397,28 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 	defer s.Bodies.lock.Unlock()
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
+Loop:
 	for _, t := range types {
 		switch t {
 		case Headers:
 			if err := s.Headers.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		case Bodies:
 			if err := s.Bodies.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		case Transactions:
 			if err := s.Txs.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		default:
