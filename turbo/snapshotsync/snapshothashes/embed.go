@@ -39,11 +39,12 @@ var (
 )
 
 func newConfig(preverified Preverified) *Config {
-	fmt.Printf("all: %+v\n", preverified)
-	return &Config{
+	c := &Config{
 		ExpectBlocks: maxBlockNum(preverified),
 		Preverified:  preverified,
 	}
+	fmt.Printf("all: %d, %+v\n", c.ExpectBlocks, preverified)
+	return c
 }
 
 func maxBlockNum(preverified Preverified) uint64 {
