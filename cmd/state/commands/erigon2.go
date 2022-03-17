@@ -123,11 +123,6 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 
 	var blockReader interfaces.FullBlockReader
 	if snapshotBlocks {
-		//snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
-		//snConfig.ExpectBlocks, err = eth.RestoreExpectedExternalSnapshot(historyDb, snConfig)
-		//if err != nil {
-		//	return err
-		//}
 		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
