@@ -350,9 +350,11 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
 func (s *RoSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
 func (s *RoSnapshots) Dir() string              { return s.dir }
 func (s *RoSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable.Load() }
 func (s *RoSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
 func (s *RoSnapshots) IndicesAvailable() uint64 { return s.idxAvailable.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64 {
+	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
+}
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
