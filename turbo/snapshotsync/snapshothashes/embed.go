@@ -2,7 +2,6 @@ package snapshothashes
 
 import (
 	_ "embed"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -33,18 +32,13 @@ func fromToml(in []byte) (out Preverified) {
 }
 
 var (
-	MainnetChainSnapshotConfig = &Config{} //newConfig(Mainnet)
+	MainnetChainSnapshotConfig = newConfig(Mainnet)
 	GoerliChainSnapshotConfig  = newConfig(Goerli)
-	BscChainSnapshotConfig     = &Config{} //newConfig(Bsc)
+	BscChainSnapshotConfig     = newConfig(Bsc)
 )
 
 func newConfig(preverified Preverified) *Config {
-	c := &Config{
-		ExpectBlocks: maxBlockNum(preverified),
-		Preverified:  preverified,
-	}
-	fmt.Printf("all: %d, %+v\n", c.ExpectBlocks, preverified)
-	return c
+	return &Config{ExpectBlocks: maxBlockNum(preverified), Preverified: preverified}
 }
 
 func maxBlockNum(preverified Preverified) uint64 {
@@ -68,7 +62,6 @@ func maxBlockNum(preverified Preverified) uint64 {
 			panic(err)
 		}
 		if max < to {
-			fmt.Printf("max: %d, %s\n", to, fileName)
 			max = to
 		}
 	}
@@ -88,7 +81,6 @@ func KnownConfig(networkName string) *Config {
 	case networkname.MainnetChainName:
 		return MainnetChainSnapshotConfig
 	case networkname.GoerliChainName:
-		fmt.Printf("aaaa: %d\n", GoerliChainSnapshotConfig.ExpectBlocks)
 		return GoerliChainSnapshotConfig
 	case networkname.BSCChainName:
 		return BscChainSnapshotConfig
