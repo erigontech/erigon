@@ -94,7 +94,8 @@ func TestMockDownloadRequest(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -155,7 +156,8 @@ func TestMockValidExecution(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -192,7 +194,8 @@ func TestMockInvalidExecution(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 
 	waitingForHeaders := uint32(1)
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -229,7 +232,8 @@ func TestNoTTD(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 	waitingForHeaders := uint32(1)
 
-	backend := NewEthBackendServer(ctx, nil, db, nil, nil, &params.ChainConfig{}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
+	events := NewEvents()
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, newPayloadCh, forkChoiceCh, statusCh, &waitingForHeaders, nil, nil, false)
 
 	var err error
 
