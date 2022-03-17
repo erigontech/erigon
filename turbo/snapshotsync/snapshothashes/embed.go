@@ -33,9 +33,9 @@ func fromToml(in []byte) (out Preverified) {
 }
 
 var (
-	MainnetChainSnapshotConfig = newConfig(Mainnet)
+	MainnetChainSnapshotConfig = &Config{} //newConfig(Mainnet)
 	GoerliChainSnapshotConfig  = newConfig(Goerli)
-	BscChainSnapshotConfig     = newConfig(Bsc)
+	BscChainSnapshotConfig     = &Config{} //newConfig(Bsc)
 )
 
 func newConfig(preverified Preverified) *Config {
