@@ -22,6 +22,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -884,6 +885,8 @@ type BlockRetire struct {
 	tmpDir    string
 	snapshots *RoSnapshots
 	db        kv.RoDB
+
+	snapshotDownloader proto_downloader.DownloaderClient
 }
 
 type BlockRetireResult struct {
@@ -891,8 +894,8 @@ type BlockRetireResult struct {
 	Err                error
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db}
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, snapshotDownloader proto_downloader.DownloaderClient) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, snapshotDownloader: snapshotDownloader}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
@@ -950,11 +953,29 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 			return
 		}
 
-		//todo:		downloader.Download()
+		if blockTo-blockFrom == DEFAULT_SEGMENT_SIZE {
+			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
+			for _, t := range AllSnapshotTypes {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					Path: SegmentFileName(blockFrom, blockTo, t),
+				})
+			}
+
+			_, err := br.snapshotDownloader.Download(ctx, req)
+			if err != nil {
+				br.result = &BlockRetireResult{
+					BlockFrom: blockFrom,
+					BlockTo:   blockTo,
+					Err:       err,
+				}
+				return
+			}
+		}
+
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
-			Err:       err,
+			Err:       nil,
 		}
 	}()
 }
