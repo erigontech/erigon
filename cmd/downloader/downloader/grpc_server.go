@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 
 	"github.com/anacrolix/torrent"
@@ -61,7 +60,6 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	infoHashes := make([]metainfo.Hash, len(request.Items))
 	for i, it := range request.Items {
 		if it.TorrentHash == nil {
-			fmt.Printf("alex: add torrent file: %s\n", it.Path)
 			if err := BuildTorrentFileIfNeed(ctx, it.Path, s.snapshotDir); err != nil {
 				return nil, err
 			}
@@ -69,7 +67,6 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("alex: add torrent file done: %s, %x\n", it.Path, metaInfo.HashInfoBytes().Bytes())
 			infoHashes[i] = metaInfo.HashInfoBytes()
 		} else {
 			infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
