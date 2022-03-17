@@ -204,6 +204,25 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 	return result
 }
 
+func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *torrent.Client) (mi *metainfo.MetaInfo, err error) {
+	mi, err = metainfo.LoadFromFile(torrentFilePath)
+	if err != nil {
+		return nil, err
+	}
+	mi.AnnounceList = Trackers
+
+	t := time.Now()
+	_, err = torrentClient.AddTorrent(mi)
+	if err != nil {
+		return mi, err
+	}
+	took := time.Since(t)
+	if took > 3*time.Second {
+		log.Info("[torrent] Check validity", "file", torrentFilePath, "took", took)
+	}
+	return mi, nil
+}
+
 // AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
@@ -214,27 +233,15 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir *dir.Rw, torrentClient *t
 		return err
 	}
 	for _, torrentFilePath := range files {
+		if _, err := AddTorrentFile(ctx, torrentFilePath, torrentClient); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		mi, err := metainfo.LoadFromFile(torrentFilePath)
-		if err != nil {
-			return err
-		}
-		mi.AnnounceList = Trackers
-
-		t := time.Now()
-		_, err = torrentClient.AddTorrent(mi)
-		if err != nil {
-			return err
-		}
-		took := time.Since(t)
-		if took > 3*time.Second {
-			log.Info("[torrent] Check validity", "file", torrentFilePath, "took", took)
-		}
 	}
 
 	return nil

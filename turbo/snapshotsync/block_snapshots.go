@@ -941,6 +941,16 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		defer br.wg.Done()
 
 		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, lvl)
+		if err != nil {
+			br.result = &BlockRetireResult{
+				BlockFrom: blockFrom,
+				BlockTo:   blockTo,
+				Err:       err,
+			}
+			return
+		}
+
+		//todo:		downloader.Download()
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,

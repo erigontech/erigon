@@ -3,6 +3,8 @@ package downloader
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
@@ -58,8 +60,20 @@ type GrpcServer struct {
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
 	infoHashes := make([]metainfo.Hash, len(request.Items))
 	for i, it := range request.Items {
-		//TODO: if hash is empty - create .torrent file from path file (if it exists)
-		infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
+		if it.TorrentHash == nil {
+			fmt.Printf("alex: add torrent file: %s\n", it.Path)
+			if err := BuildTorrentFileIfNeed(ctx, it.Path, s.snapshotDir); err != nil {
+				return nil, err
+			}
+			metaInfo, err := AddTorrentFile(ctx, filepath.Join(s.snapshotDir.Path, it.Path+".torrent"), s.t.TorrentClient)
+			if err != nil {
+				return nil, err
+			}
+			fmt.Printf("alex: add torrent file done: %s, %x\n", it.Path, metaInfo.HashInfoBytes().Bytes())
+			infoHashes[i] = metaInfo.HashInfoBytes()
+		} else {
+			infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
+		}
 	}
 	if err := ResolveAbsentTorrents(ctx, s.t.TorrentClient, infoHashes, s.snapshotDir, s.silent); err != nil {
 		return nil, err
