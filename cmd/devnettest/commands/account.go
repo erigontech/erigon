@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/common"
@@ -25,22 +26,20 @@ var getBalanceCmd = &cobra.Command{
 	Use:   "get-balance",
 	Short: "Checks balance by address",
 	Args: func(cmd *cobra.Command, args []string) error {
-		var err error
 		switch blockNum {
 		case "pending", "latest", "earliest":
 		default:
-			err = fmt.Errorf("block number must be 'pending', 'latest' or 'earliest'")
-		}
-		if err != nil {
-			return err
+			return fmt.Errorf("block number must be 'pending', 'latest' or 'earliest'")
 		}
 		return nil
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if clearDev {
-			defer clearDevDB()
+			defer services.ClearDevDB()
 		}
 		toAddress := common.HexToAddress(addr)
-		requests.GetBalance(reqId, toAddress, blockNum)
+		if err := requests.GetBalance(reqId, toAddress, blockNum); err != nil {
+			fmt.Printf("could not get balance: %v", err)
+		}
 	},
 }

@@ -33,11 +33,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 )
 
 const (
@@ -182,11 +180,6 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	engine := initConsensusEngine(chainConfig, logger)
 	var blockReader interfaces.FullBlockReader
 	if snapshotBlocks {
-		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
-		snConfig.ExpectBlocks, err = eth.RestoreExpectedExternalSnapshot(historyDb, snConfig)
-		if err != nil {
-			return err
-		}
 		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)

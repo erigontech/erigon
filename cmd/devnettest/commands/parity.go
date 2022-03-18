@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
@@ -28,11 +30,13 @@ var listStorageKeysCmd = &cobra.Command{
 	Short: "Returns all storage keys of the given address",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if clearDev {
-			defer clearDevDB()
+			defer services.ClearDevDB()
 		}
 		toAddress := common.HexToAddress(addr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
-		requests.ParityList(reqId, toAddress, quantity, offset, blockNum)
+		if err := requests.ParityList(reqId, toAddress, quantity, offset, blockNum); err != nil {
+			fmt.Printf("error getting parity list: %v", err)
+		}
 		return nil
 	},
 }

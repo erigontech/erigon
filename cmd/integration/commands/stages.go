@@ -579,7 +579,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig), db))
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig), db, nil))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1058,6 +1058,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		if enableSnapshot {
 			snapshotCfg := ethconfig.NewSnapshotCfg(enableSnapshot, true)
+			dir.MustExist(filepath.Join(datadir, "snapshots"))
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
 				panic(err)
