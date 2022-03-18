@@ -4,31 +4,53 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
-func parseResponse(resp interface{}) string {
-	result, err := json.Marshal(resp)
+func post(client *http.Client, url, request string, response interface{}) error {
+	start := time.Now()
+	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("client failed to make post request: %v", err)
+	}
+	defer r.Body.Close()
+
+	if r.StatusCode != 200 {
+		return fmt.Errorf("status %s", r.Status)
 	}
 
-	return string(result)
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(response)
+	if err != nil {
+		return fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	log.Info("Got in", "time", time.Since(start).Seconds())
+	return nil
 }
 
-func GetBalance(reqId int, address common.Address, blockNum string) {
+func GetBalance(reqId int, address common.Address, blockNum string) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
-	res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b)
-	if res.Err != nil {
-		fmt.Printf("Error getting balance: %v\n", res.Err)
-		return
+	if res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b); res.Err != nil {
+		return fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	fmt.Printf("Balance retrieved: %v\n", parseResponse(b))
+	s, err := parseResponse(b)
+	if err != nil {
+		return fmt.Errorf("error parsing resonse: %v", err)
+	}
+
+	fmt.Printf("Balance retrieved: %v\n", s)
+	return nil
 }
 
 func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
@@ -36,56 +58,70 @@ func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
 	var b rpctest.EthSendRawTransaction
 
 	var buf bytes.Buffer
-	err := (*signedTx).MarshalBinary(&buf)
+	if err := (*signedTx).MarshalBinary(&buf); err != nil {
+		return nil, fmt.Errorf("failed to marshal binary: %v", err)
+	}
+
+	if res := reqGen.Erigon("eth_sendRawTransaction", reqGen.sendRawTransaction(buf.Bytes()), &b); res.Err != nil {
+		return nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
+	}
+
+	s, err := parseResponse(b)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error parsing resonse: %v", err)
 	}
 
-	res := reqGen.Erigon("eth_sendRawTransaction", reqGen.sendRawTransaction(buf.Bytes()), &b)
-	if res.Err != nil {
-		return nil, err
-	}
-
-	fmt.Printf("Submitted transaction successfully: %v\n", parseResponse(b))
+	fmt.Printf("Submitted transaction successfully: %v\n", s)
 	return &b.TxnHash, nil
 }
 
-func TxpoolContent(reqId int) {
+func TxpoolContent(reqId int) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthTxPool
 
-	res := reqGen.Erigon("txpool_content", reqGen.txpoolContent(), &b)
-	if res.Err != nil {
-		fmt.Printf("Error fetching txpool: %v\n", res.Err)
-		return
+	if res := reqGen.Erigon("txpool_content", reqGen.txpoolContent(), &b); res.Err != nil {
+		return fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
-	fmt.Printf("Txpool content: %v\n", parseResponse(b))
+	s, err := parseResponse(b)
+	if err != nil {
+		return fmt.Errorf("error parsing resonse: %v", err)
+	}
+
+	fmt.Printf("Txpool content: %v\n", s)
+	return nil
 }
 
-func ParityList(reqId int, account common.Address, quantity int, offset []byte, blockNum string) {
+func ParityList(reqId int, account common.Address, quantity int, offset []byte, blockNum string) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.ParityListStorageKeysResult
 
-	res := reqGen.Erigon("parity_listStorageKeys", reqGen.parityStorageKeyListContent(account, quantity, offset, blockNum), &b)
-	if res.Err != nil {
-		fmt.Printf("Error fetching storage keys: %v\n", res.Err)
-		return
+	if res := reqGen.Erigon("parity_listStorageKeys", reqGen.parityStorageKeyListContent(account, quantity, offset, blockNum), &b); res.Err != nil {
+		return fmt.Errorf("failed to fetch storage keys: %v", res.Err)
 	}
 
-	fmt.Printf("Storage keys: %v\n", parseResponse(b))
+	s, err := parseResponse(b)
+	if err != nil {
+		return fmt.Errorf("error parsing resonse: %v", err)
+	}
 
+	fmt.Printf("Storage keys: %v\n", s)
+	return nil
 }
 
 func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetLogs
 
-	res := reqGen.Erigon("eth_getLogs", reqGen.getLogs(fromBlock, toBlock, address), &b)
-	if res.Err != nil {
+	if res := reqGen.Erigon("eth_getLogs", reqGen.getLogs(fromBlock, toBlock, address), &b); res.Err != nil {
 		return fmt.Errorf("Error fetching logs: %v\n", res.Err)
 	}
 
-	fmt.Printf("Logs: %v\n", parseResponse(b))
+	s, err := parseResponse(b)
+	if err != nil {
+		return fmt.Errorf("error parsing resonse: %v", err)
+	}
+
+	fmt.Printf("Logs: %v\n", s)
 	return nil
 }
