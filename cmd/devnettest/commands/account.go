@@ -49,7 +49,7 @@ var getBalanceCmd = &cobra.Command{
 }
 
 var getTransactionCountCmd = &cobra.Command{
-	Use: "get-transaction-count",
+	Use:   "get-transaction-count",
 	Short: "Gets the total number of transactions sent out by an account, the nonce",
 	Args: func(cmd *cobra.Command, args []string) error {
 		switch blockNum {
