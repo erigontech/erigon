@@ -202,7 +202,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			return err
 		}
 
-		if blockNum < block {
+		if blockNum <= block {
 			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
 
 			// Skip that block, but increase txNum
