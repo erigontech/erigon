@@ -347,11 +347,12 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapshotDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
-func (s *RoSnapshots) Dir() string              { return s.dir }
-func (s *RoSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
-func (s *RoSnapshots) IndicesAvailable() uint64 { return s.idxAvailable.Load() }
+func (s *RoSnapshots) Cfg() ethconfig.Snapshot   { return s.cfg }
+func (s *RoSnapshots) Dir() string               { return s.dir }
+func (s *RoSnapshots) SegmentsReady() bool       { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesReady() bool        { return s.indicesReady.Load() }
+func (s *RoSnapshots) IndicesAvailable() uint64  { return s.idxAvailable.Load() }
+func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Load() }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
 }
@@ -714,7 +715,7 @@ func noGaps(in []FileInfo) (out []FileInfo, err error) {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, f.From)
+			return nil, fmt.Errorf("snapshot missed: from %d to %d", prevTo, f.From)
 		}
 		prevTo = f.To
 		out = append(out, f)
@@ -924,7 +925,16 @@ func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64,
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
-	jump := roundedTo1K - blockFrom
+	var maxJump uint64 = 1_000
+	if blockFrom%500_000 == 0 {
+		maxJump = 500_000
+	} else if blockFrom%100_000 == 0 {
+		maxJump = 100_000
+	} else if blockFrom%10_000 == 0 {
+		maxJump = 10_000
+	}
+	//roundedTo1K := (to / 1_000) * 1_000
+	jump := min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= 500_000:
 		blockTo = blockFrom + 500_000

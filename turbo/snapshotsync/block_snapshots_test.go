@@ -117,6 +117,7 @@ func TestCanRetire(t *testing.T) {
 		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
 		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
+		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
 	for _, tc := range cases {
 		from, to, can := canRetire(tc.inFrom, tc.inTo)
@@ -173,6 +174,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 	defer s.Close()
 
 	err = s.ReopenSegments()
+	require.NoError(err)
+	err = s.ReopenIndices()
 	require.NoError(err)
 	s.indicesReady.Store(true)
 	require.Equal(2, len(s.Headers.segments))
