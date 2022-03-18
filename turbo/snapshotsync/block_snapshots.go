@@ -606,6 +606,10 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 			}
 
 			if err := s.Bodies.View(func(bodySegments []*BodySegment) error {
+				if bodySegments[i].idxBodyNumber == nil {
+					return nil
+				}
+
 				// build txs idx
 				gg := bodySegments[i].seg.MakeGetter()
 				buf, _ := gg.Next(nil)
