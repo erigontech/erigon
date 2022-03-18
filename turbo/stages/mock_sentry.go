@@ -68,7 +68,7 @@ type MockSentry struct {
 	Key           *ecdsa.PrivateKey
 	Genesis       *types.Block
 	SentryClient  direct.SentryClient
-	PeerId        *ptypes.H512
+	PeerId        *ptypes.H256
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	streams       map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages  []*proto_sentry.OutboundMessageData
@@ -205,7 +205,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
+		PeerId: gointerfaces.ConvertHashToH256([32]byte{0x12, 0x34, 0x50}), // "12345"
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
