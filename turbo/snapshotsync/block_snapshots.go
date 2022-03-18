@@ -333,8 +333,8 @@ type RoSnapshots struct {
 	Txs     *txnSegments
 
 	dir               string
-	segmentsAvailable atomic.Uint64
-	idxAvailable      atomic.Uint64
+	segmentsAvailable atomic.Uint64 // all types of .seg files are available - up to this number
+	idxAvailable      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg               ethconfig.Snapshot
 }
 
