@@ -2,6 +2,8 @@ package commands_test
 
 import (
 	"bytes"
+	"testing"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/starknet"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -15,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestErrorStarknetSendRawTransaction(t *testing.T) {
@@ -32,7 +33,7 @@ func TestErrorStarknetSendRawTransaction(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
 	starknetClient := starknet.NewCAIROVMClient(conn)
-	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn))
+	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	for _, tt := range cases {
