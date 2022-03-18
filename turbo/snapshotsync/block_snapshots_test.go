@@ -175,6 +175,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 	err = s.ReopenSegments()
 	require.NoError(err)
+	err = s.ReopenIndices()
+	require.NoError(err)
 	s.indicesReady.Store(true)
 	require.Equal(2, len(s.Headers.segments))
 
