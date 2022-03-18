@@ -38,10 +38,7 @@ var (
 )
 
 func newConfig(preverified Preverified) *Config {
-	return &Config{
-		ExpectBlocks: maxBlockNum(preverified),
-		Preverified:  preverified,
-	}
+	return &Config{ExpectBlocks: maxBlockNum(preverified), Preverified: preverified}
 }
 
 func maxBlockNum(preverified Preverified) uint64 {

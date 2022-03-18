@@ -212,7 +212,10 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 }
 
 func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
-	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer) (eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error) {
+	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
+) (
+	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error,
+) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.New(stateCacheCfg)
 	} else {
@@ -228,7 +231,7 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-	ff = filters.New(ctx, eth, txPool, mining)
+	ff = filters.New(ctx, eth, txPool, mining, func() {})
 	return
 }
 
@@ -336,14 +339,19 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	}
 
+	var onNewSnapshot func()
 	if cfg.SingleNodeMode {
 		if cfg.Snapshot.Enabled {
-
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
+			onNewSnapshot = func() {
+				allSnapshots.ReopenSegments()
+				allSnapshots.ReopenIndices()
+			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
 			blockReader = snapshotsync.NewBlockReader()
+			onNewSnapshot = func() {}
 		}
 	}
 
@@ -409,7 +417,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		starknet = services.NewStarknetService(starknetConn)
 	}
 
-	ff = filters.New(ctx, eth, txPool, mining)
+	ff = filters.New(ctx, eth, txPool, mining, onNewSnapshot)
 
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }

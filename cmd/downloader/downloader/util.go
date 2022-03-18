@@ -85,6 +85,24 @@ func allSegmentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
+// BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
+func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (err error) {
+	torrentFilePath := filepath.Join(root.Path, originalFileName+".torrent")
+	if _, err := os.Stat(torrentFilePath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		info, err := BuildInfoBytesForFile(root.Path, originalFileName)
+		if err != nil {
+			return err
+		}
+		if err := CreateTorrentFile(root, info, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
 func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 	logEvery := time.NewTicker(20 * time.Second)
@@ -95,18 +113,8 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 		return err
 	}
 	for i, f := range files {
-		torrentFileName := filepath.Join(root.Path, f+".torrent")
-		if _, err := os.Stat(torrentFileName); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-			info, err := BuildInfoBytesForFile(root.Path, f)
-			if err != nil {
-				return err
-			}
-			if err := CreateTorrentFile(root, info, nil); err != nil {
-				return err
-			}
+		if err := BuildTorrentFileIfNeed(ctx, f, root); err != nil {
+			return err
 		}
 
 		select {
