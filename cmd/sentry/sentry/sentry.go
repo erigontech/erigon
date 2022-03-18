@@ -166,10 +166,10 @@ func (pi *PeerInfo) Removed() bool {
 	}
 }
 
-// ConvertH512ToPeerID() ensures the return type is enode.ID rather than [32]byte
+// ConvertH256ToPeerID() ensures the return type is enode.ID rather than [32]byte
 // so that short variable declarations will still be formatted as hex in logs
-func ConvertH512ToPeerID(h512 *proto_types.H512) enode.ID {
-	return gointerfaces.ConvertH512ToHash(h512)
+func ConvertH256ToPeerID(h256 *proto_types.H256) enode.ID {
+	return gointerfaces.ConvertH256ToHash(h256)
 }
 
 func makeP2PServer(
@@ -560,7 +560,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			defer ss.GoodPeers.Delete(peerID)
 			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
 				ss.GoodPeers.Store(peerID, peerInfo)
-				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
+				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH256(peerID))
 				return ss.startSync(ctx, bestHash, peerID)
 			})
 			if err != nil {
@@ -579,7 +579,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			); err != nil {
 				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			}
-			ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
+			ss.sendGonePeerToClients(gointerfaces.ConvertHashToH256(peerID))
 			return nil
 		},
 		NodeInfo: func() interface{} {
@@ -693,7 +693,7 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 			return fmt.Errorf("startSync encode packet failed: %w", err)
 		}
 		if _, err := ss.SendMessageById(ctx, &proto_sentry.SendMessageByIdRequest{
-			PeerId: gointerfaces.ConvertHashToH512(peerID),
+			PeerId: gointerfaces.ConvertHashToH256(peerID),
 			Data: &proto_sentry.OutboundMessageData{
 				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 				Data: b,
@@ -707,13 +707,13 @@ func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash,
 
 func (ss *SentryServerImpl) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
-	peerID := ConvertH512ToPeerID(req.PeerId)
+	peerID := ConvertH256ToPeerID(req.PeerId)
 	ss.removePeer(peerID)
 	return &emptypb.Empty{}, nil
 }
 
 func (ss *SentryServerImpl) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
-	peerID := ConvertH512ToPeerID(req.PeerId)
+	peerID := ConvertH256ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 		peerInfo.SetIncreasedHeight(req.MinBlock)
 	}
@@ -758,7 +758,7 @@ func (ss *SentryServerImpl) SendMessageByMinBlock(_ context.Context, inreq *prot
 			break
 		}
 		ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
-		reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+		reply.Peers = []*proto_types.H256{gointerfaces.ConvertHashToH256(peerInfo.ID())}
 	}
 	return reply, lastErr
 }
@@ -777,7 +777,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 		return reply, fmt.Errorf("sendMessageById not implemented for message Id: %s", inreq.Data.Id)
 	}
 
-	peerID := ConvertH512ToPeerID(inreq.PeerId)
+	peerID := ConvertH256ToPeerID(inreq.PeerId)
 	peerInfo := ss.getPeer(peerID)
 	if peerInfo == nil {
 		//TODO: enable after support peer to sentry mapping
@@ -786,7 +786,7 @@ func (ss *SentryServerImpl) SendMessageById(_ context.Context, inreq *proto_sent
 	}
 
 	ss.writePeer("sendMessageById", peerInfo, msgcode, inreq.Data.Data, 0)
-	reply.Peers = []*proto_types.H512{inreq.PeerId}
+	reply.Peers = []*proto_types.H256{inreq.PeerId}
 	return reply, nil
 }
 
@@ -816,7 +816,7 @@ func (ss *SentryServerImpl) SendMessageToRandomPeers(ctx context.Context, req *p
 	var lastErr error
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		ss.writePeer("sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
-		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerInfo.ID()))
 		i++
 		return i < sendToAmount
 	})
@@ -836,7 +836,7 @@ func (ss *SentryServerImpl) SendMessageToAll(ctx context.Context, req *proto_sen
 	var lastErr error
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		ss.writePeer("SendMessageToAll", peerInfo, msgcode, req.Data, 0)
-		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
+		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH256(peerInfo.ID()))
 		return true
 	})
 	return reply, lastErr
@@ -926,7 +926,7 @@ func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID enode.ID, 
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
 	req := &proto_sentry.InboundMessage{
-		PeerId: gointerfaces.ConvertHashToH512(peerID),
+		PeerId: gointerfaces.ConvertHashToH256(peerID),
 		Id:     msgID,
 		Data:   b,
 	}
@@ -1010,13 +1010,13 @@ func (ss *SentryServerImpl) Close() {
 	}
 }
 
-func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
+func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "err", err)
 	}
 }
 
-func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H512) {
+func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H256) {
 	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
 		log.Warn("Sending gone peer notice to core P2P failed", "err", err)
 	}

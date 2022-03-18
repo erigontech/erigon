@@ -96,10 +96,7 @@ type PubkeyEncoded v4wire.Pubkey
 
 // ID returns the node ID corresponding to the public key.
 func (e PubkeyEncoded) ID() ID {
-	b := crypto.Keccak512(e[:])
-	var a ID
-	copy(a[:], b)
-	return a
+	return ID(crypto.Keccak256Hash(e[:]))
 }
 
 // Secp256k1 is the "secp256k1" key, which holds a public key.
