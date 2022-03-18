@@ -487,7 +487,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			} else {
 				var canRequestMore bool
 				for _, segment := range segments {
-					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
+					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
 					canRequestMore = canRequestMore || requestMore
 					if len(penalties) > 0 {
 						cs.Penalize(ctx, penalties)
@@ -557,7 +557,7 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH256ToPeerID(inreq.PeerId)) // There is only one segment in this case
+			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -583,7 +583,7 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH256ToPeerID(inreq.PeerId)))
+	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH512ToPeerID(inreq.PeerId)))
 	return nil
 }
 
@@ -593,7 +593,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH256ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

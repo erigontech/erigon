@@ -20,11 +20,11 @@ type LogsSubscription func([]*remote.SubscribeLogsReply) error
 type Events struct {
 	id                        int
 	headerSubscriptions       map[int]chan [][]byte
+	newSnapshotSubscription   map[int]chan struct{}
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
 	logsSubscriptions         map[int]LogsSubscription
-	newSnapshotSubscription   map[int]NewSnapshotSubscription
 	lock                      sync.RWMutex
 }
 
@@ -35,7 +35,7 @@ func NewEvents() *Events {
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
 		logsSubscriptions:         map[int]LogsSubscription{},
-		newSnapshotSubscription:   map[int]NewSnapshotSubscription{},
+		newSnapshotSubscription:   map[int]chan struct{}{},
 	}
 }
 
@@ -48,6 +48,19 @@ func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	e.headerSubscriptions[id] = ch
 	return ch, func() {
 		delete(e.headerSubscriptions, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 8)
+	e.id++
+	id := e.id
+	e.newSnapshotSubscription[id] = ch
+	return ch, func() {
+		delete(e.newSnapshotSubscription, id)
 		close(ch)
 	}
 }
@@ -68,6 +81,24 @@ func (e *Events) AddLogsSubscription(s LogsSubscription) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	e.logsSubscriptions[len(e.logsSubscriptions)] = s
+}
+
+func (e *Events) OnNewSnapshot() {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.newSnapshotSubscription {
+		select {
+		case ch <- struct{}{}:
+		default: //if channel is full (slow consumer), drop old messages
+			for i := 0; i < cap(ch)/2; i++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+			ch <- struct{}{}
+		}
+	}
 }
 
 func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {

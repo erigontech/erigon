@@ -73,7 +73,7 @@ func (cs *ControlServerImpl) SendBodyRequest(ctx context.Context, req *bodydownl
 			if sentPeers == nil || len(sentPeers.Peers) == 0 {
 				continue
 			}
-			return ConvertH256ToPeerID(sentPeers.Peers[0]), true
+			return ConvertH512ToPeerID(sentPeers.Peers[0]), true
 		}
 	}
 	return enode.ID{}, false
@@ -125,7 +125,7 @@ func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerd
 			if sentPeers == nil || len(sentPeers.Peers) == 0 {
 				continue
 			}
-			return ConvertH256ToPeerID(sentPeers.Peers[0]), true
+			return ConvertH512ToPeerID(sentPeers.Peers[0]), true
 		}
 	}
 	return enode.ID{}, false

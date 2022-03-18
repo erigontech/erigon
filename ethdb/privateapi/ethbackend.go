@@ -155,6 +155,8 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	log.Trace("Establishing event subscription channel with the RPC daemon ...")
 	ch, clean := s.events.AddHeaderSubscription()
 	defer clean()
+	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
+	defer newSnClean()
 	log.Info("new subscription to newHeaders established")
 	defer func() {
 		if err != nil {
@@ -180,14 +182,9 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 					return err
 				}
 			}
-		case headersRlp := <-ch:
-			for _, headerRlp := range headersRlp {
-				if err = subscribeServer.Send(&remote.SubscribeReply{
-					Type: remote.Event_HEADER,
-					Data: headerRlp,
-				}); err != nil {
-					return err
-				}
+		case <-newSnCh:
+			if err = subscribeServer.Send(&remote.SubscribeReply{Type: remote.Event_NEW_SNAPSHOT}); err != nil {
+				return err
 			}
 		}
 	}
