@@ -39,7 +39,7 @@ func TestEthSubscribe(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	backend := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
-	ff := filters.New(ctx, backend, nil, nil)
+	ff := filters.New(ctx, backend, nil, nil, func() {})
 
 	newHeads := make(chan *types.Header)
 	defer close(newHeads)
