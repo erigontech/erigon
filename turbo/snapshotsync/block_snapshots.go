@@ -600,12 +600,17 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 		return err
 	}
 	if err := s.Txs.View(func(segments []*TxnSegment) error {
-		for i, sn := range segments {
-			if sn.From < from {
-				continue
-			}
+		return s.Bodies.View(func(bodySegments []*BodySegment) error {
+			for i, sn := range segments {
+				if sn.From < from {
+					continue
+				}
 
-			if err := s.Bodies.View(func(bodySegments []*BodySegment) error {
+				if bodySegments[i].idxBodyNumber == nil {
+					log.Info("[snapshots] Segment has no index, skip", "seg", bodySegments[i].seg.FilePath())
+					continue
+				}
+
 				// build txs idx
 				gg := bodySegments[i].seg.MakeGetter()
 				buf, _ := gg.Next(nil)
@@ -633,13 +638,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 					return err
 				}
 
-				return nil
-			}); err != nil {
-				return nil
 			}
-
-		}
-		return nil
+			return nil
+		})
 	}); err != nil {
 		return nil
 	}
