@@ -35,7 +35,7 @@ var listStorageKeysCmd = &cobra.Command{
 		toAddress := common.HexToAddress(addr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
 		if err := requests.ParityList(reqId, toAddress, quantity, offset, blockNum); err != nil {
-			fmt.Printf("error getting parity list: %v", err)
+			fmt.Printf("error getting parity list: %v\n", err)
 		}
 		return nil
 	},
