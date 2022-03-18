@@ -58,6 +58,10 @@ enum Event {
   HEADER = 0;
   PENDING_LOGS = 1;
   PENDING_BLOCK = 2;
+  // NEW_SNAPSHOT - one or many new snapshots (of snapshot sync) were created,
+  // client need to close old file descriptors and open new (on new segments),
+  // then server can remove old files
+  NEW_SNAPSHOT = 3;
 }
 
 message EtherbaseRequest {}

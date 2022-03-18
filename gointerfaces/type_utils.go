@@ -51,6 +51,19 @@ func ConvertH256ToHash(h256 *types.H256) [32]byte {
 	return hash
 }
 
+func ConvertH512ToHash(h512 *types.H512) [64]byte {
+	var b [64]byte
+	binary.BigEndian.PutUint64(b[0:], h512.Hi.Hi.Hi)
+	binary.BigEndian.PutUint64(b[8:], h512.Hi.Hi.Lo)
+	binary.BigEndian.PutUint64(b[16:], h512.Hi.Lo.Hi)
+	binary.BigEndian.PutUint64(b[24:], h512.Hi.Lo.Lo)
+	binary.BigEndian.PutUint64(b[32:], h512.Lo.Hi.Hi)
+	binary.BigEndian.PutUint64(b[40:], h512.Lo.Hi.Lo)
+	binary.BigEndian.PutUint64(b[48:], h512.Lo.Lo.Hi)
+	binary.BigEndian.PutUint64(b[56:], h512.Lo.Lo.Lo)
+	return b
+}
+
 func ConvertHashesToH256(hashes [][32]byte) []*types.H256 {
 	res := make([]*types.H256, len(hashes))
 	for i := range hashes {
@@ -64,6 +77,10 @@ func ConvertHashToH256(hash [32]byte) *types.H256 {
 		Lo: &types.H128{Lo: binary.BigEndian.Uint64(hash[24:]), Hi: binary.BigEndian.Uint64(hash[16:])},
 		Hi: &types.H128{Lo: binary.BigEndian.Uint64(hash[8:]), Hi: binary.BigEndian.Uint64(hash[0:])},
 	}
+}
+
+func ConvertHashToH512(hash [64]byte) *types.H512 {
+	return ConvertBytesToH512(hash[:])
 }
 
 func ConvertH160toAddress(h160 *types.H160) [20]byte {
@@ -100,15 +117,7 @@ func ConvertUint256IntToH256(i *uint256.Int) *types.H256 {
 }
 
 func ConvertH512ToBytes(h512 *types.H512) []byte {
-	var b [64]byte
-	binary.BigEndian.PutUint64(b[0:], h512.Hi.Hi.Hi)
-	binary.BigEndian.PutUint64(b[8:], h512.Hi.Hi.Lo)
-	binary.BigEndian.PutUint64(b[16:], h512.Hi.Lo.Hi)
-	binary.BigEndian.PutUint64(b[24:], h512.Hi.Lo.Lo)
-	binary.BigEndian.PutUint64(b[32:], h512.Lo.Hi.Hi)
-	binary.BigEndian.PutUint64(b[40:], h512.Lo.Hi.Lo)
-	binary.BigEndian.PutUint64(b[48:], h512.Lo.Lo.Hi)
-	binary.BigEndian.PutUint64(b[56:], h512.Lo.Lo.Lo)
+	b := ConvertH512ToHash(h512)
 	return b[:]
 }
 
