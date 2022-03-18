@@ -39,9 +39,10 @@ type Filters struct {
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
+	onNewSnapshot    func()
 }
 
-func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
+func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
 	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -49,6 +50,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
 		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
+		onNewSnapshot:    onNewSnapshot,
 	}
 
 	go func() {
@@ -337,6 +339,8 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 				v <- &header
 			}
 		}
+	case remote.Event_NEW_SNAPSHOT:
+		ff.onNewSnapshot()
 	//case remote.Event_PENDING_LOGS:
 	//	payload := event.Data
 	//	var logs types.Logs

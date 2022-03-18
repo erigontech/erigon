@@ -9,6 +9,7 @@ import (
 
 type RpcEventType uint64
 
+type NewSnapshotSubscription func() error
 type HeaderSubscription func(headerRLP []byte) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
@@ -23,6 +24,7 @@ type Events struct {
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
 	logsSubscriptions         map[int]LogsSubscription
+	newSnapshotSubscription   map[int]NewSnapshotSubscription
 	lock                      sync.RWMutex
 }
 
@@ -33,6 +35,7 @@ func NewEvents() *Events {
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
 		logsSubscriptions:         map[int]LogsSubscription{},
+		newSnapshotSubscription:   map[int]NewSnapshotSubscription{},
 	}
 }
 

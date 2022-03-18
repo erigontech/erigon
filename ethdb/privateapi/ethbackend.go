@@ -180,6 +180,15 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 					return err
 				}
 			}
+		case headersRlp := <-ch:
+			for _, headerRlp := range headersRlp {
+				if err = subscribeServer.Send(&remote.SubscribeReply{
+					Type: remote.Event_HEADER,
+					Data: headerRlp,
+				}); err != nil {
+					return err
+				}
+			}
 		}
 	}
 }
