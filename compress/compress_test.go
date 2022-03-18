@@ -106,7 +106,7 @@ func TestCompressDict1(t *testing.T) {
 		word, _ := g.Next(nil)
 		expected := fmt.Sprintf("longlongword %d", i)
 		if string(word) != expected {
-			t.Errorf("expected %s, got (hex) %s", expected, word)
+			t.Errorf("expected %s, got (hex) [%s]", expected, word)
 		}
 		i++
 	}

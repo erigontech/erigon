@@ -25,16 +25,32 @@ import (
 	"github.com/ledgerwatch/erigon-lib/mmap"
 )
 
+type patternTable struct {
+	bitLen   int             // Number of bits to lookup in the table
+	patterns [][]byte        // Patterns corresponding to entries
+	lens     []byte          // Number of bits in the codes
+	ptrs     []*patternTable // pointers to deeper level tables
+}
+
+type posTable struct {
+	bitLen int // Number of bits to lookup in the table
+	pos    []uint64
+	lens   []byte
+	ptrs   []*posTable
+}
+
 type huffmanNodePos struct {
-	zero *huffmanNodePos
-	one  *huffmanNodePos
-	pos  uint64
+	zero     *huffmanNodePos
+	one      *huffmanNodePos
+	pos      uint64
+	maxDepth int
 }
 
 type huffmanNodePattern struct {
-	zero    *huffmanNodePattern
-	one     *huffmanNodePattern
-	pattern []byte
+	zero     *huffmanNodePattern
+	one      *huffmanNodePattern
+	pattern  []byte
+	maxDepth int
 }
 
 // Decompressor provides access to the superstrings in a file produced by a compressor
@@ -44,8 +60,8 @@ type Decompressor struct {
 	mmapHandle1    []byte                 // mmap handle for unix (this is used to close mmap)
 	mmapHandle2    *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	data           []byte                 // slice of correct size for the decompressor to work with
-	dict           *huffmanNodePattern
-	posDict        *huffmanNodePos
+	dict           *patternTable
+	posDict        *posTable
 	wordsStart     uint64 // Offset of whether the superstrings actually start
 	size           int64
 
@@ -80,7 +96,22 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	cutoff := binary.BigEndian.Uint64(d.data[32:40])
 	data := d.data[40 : 40+dictSize]
 	if dictSize > 0 {
-		d.dict = buildHuffmanPattern(data, rootOffset, cutoff)
+		tree := buildHuffmanPattern(data, rootOffset, cutoff)
+		var bitLen int
+		if tree.maxDepth > 9 {
+			bitLen = 9
+		} else {
+			bitLen = tree.maxDepth
+		}
+		//fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
+		tableSize := 1 << bitLen
+		d.dict = &patternTable{
+			bitLen:   bitLen,
+			patterns: make([][]byte, tableSize),
+			lens:     make([]byte, tableSize),
+			ptrs:     make([]*patternTable, tableSize),
+		}
+		buildPatternTable(tree, d.dict, 0, 0)
 	}
 	pos := 40 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
@@ -88,7 +119,22 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	cutoff = binary.BigEndian.Uint64(d.data[pos+16 : pos+24])
 	data = d.data[pos+24 : pos+24+dictSize]
 	if dictSize > 0 {
-		d.posDict = buildHuffmanPos(data, rootOffset, cutoff)
+		tree := buildHuffmanPos(data, rootOffset, cutoff)
+		var bitLen int
+		if tree.maxDepth > 9 {
+			bitLen = 9
+		} else {
+			bitLen = tree.maxDepth
+		}
+		//fmt.Printf("pos maxDepth=%d\n", tree.maxDepth)
+		tableSize := 1 << bitLen
+		d.posDict = &posTable{
+			bitLen: bitLen,
+			pos:    make([]uint64, tableSize),
+			lens:   make([]byte, tableSize),
+			ptrs:   make([]*posTable, tableSize),
+		}
+		buildPosTable(tree, d.posDict, 0, 0)
 	}
 	d.wordsStart = pos + 24 + dictSize
 	return d, nil
@@ -97,21 +143,125 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 func buildHuffmanPos(data []byte, offset uint64, cutoff uint64) *huffmanNodePos {
 	if offset < cutoff {
 		pos, _ := binary.Uvarint(data[offset:])
-		return &huffmanNodePos{pos: pos}
+		return &huffmanNodePos{pos: pos, maxDepth: 0}
 	}
 	offsetZero, n := binary.Uvarint(data[offset:])
 	offsetOne, _ := binary.Uvarint(data[offset+uint64(n):])
-	return &huffmanNodePos{zero: buildHuffmanPos(data, offsetZero, cutoff), one: buildHuffmanPos(data, offsetOne, cutoff)}
+	t0 := buildHuffmanPos(data, offsetZero, cutoff)
+	t1 := buildHuffmanPos(data, offsetOne, cutoff)
+	var maxDepth int
+	if t0.maxDepth > t1.maxDepth {
+		maxDepth = t0.maxDepth + 1
+	} else {
+		maxDepth = t1.maxDepth + 1
+	}
+	return &huffmanNodePos{zero: t0, one: t1, maxDepth: maxDepth}
 }
 
 func buildHuffmanPattern(data []byte, offset uint64, cutoff uint64) *huffmanNodePattern {
 	if offset < cutoff {
 		l, n := binary.Uvarint(data[offset:])
-		return &huffmanNodePattern{pattern: data[offset+uint64(n) : offset+uint64(n)+l]}
+		return &huffmanNodePattern{pattern: data[offset+uint64(n) : offset+uint64(n)+l], maxDepth: 0}
 	}
 	offsetZero, n := binary.Uvarint(data[offset:])
 	offsetOne, _ := binary.Uvarint(data[offset+uint64(n):])
-	return &huffmanNodePattern{zero: buildHuffmanPattern(data, offsetZero, cutoff), one: buildHuffmanPattern(data, offsetOne, cutoff)}
+	t0 := buildHuffmanPattern(data, offsetZero, cutoff)
+	t1 := buildHuffmanPattern(data, offsetOne, cutoff)
+	var maxDepth int
+	if t0.maxDepth > t1.maxDepth {
+		maxDepth = t0.maxDepth + 1
+	} else {
+		maxDepth = t1.maxDepth + 1
+	}
+	return &huffmanNodePattern{zero: t0, one: t1, maxDepth: maxDepth}
+}
+
+func buildPatternTable(tree *huffmanNodePattern, table *patternTable, code uint16, depth int) {
+	if tree.zero == nil && tree.one == nil {
+		if table.bitLen == depth {
+			table.patterns[code] = tree.pattern
+			//fmt.Printf(".[%b]%d=>[%s]\n", code, table.bitLen, tree.pattern)
+			table.lens[code] = byte(depth)
+			table.ptrs[code] = nil
+		} else {
+			codeStep := uint16(1) << depth
+			codeFrom := code
+			codeTo := code | (uint16(1) << table.bitLen)
+			for c := codeFrom; c < codeTo; c += codeStep {
+				table.patterns[c] = tree.pattern
+				//fmt.Printf("*[%b]%d=>[%s]\n", c, table.bitLen, tree.pattern)
+				table.lens[c] = byte(depth)
+				table.ptrs[c] = nil
+			}
+		}
+		return
+	}
+	if depth == 9 {
+		var bitLen int
+		if tree.maxDepth > 9 {
+			bitLen = 9
+		} else {
+			bitLen = tree.maxDepth
+		}
+		tableSize := 1 << bitLen
+		newTable := &patternTable{
+			bitLen:   bitLen,
+			patterns: make([][]byte, tableSize),
+			lens:     make([]byte, tableSize),
+			ptrs:     make([]*patternTable, tableSize),
+		}
+		table.patterns[code] = nil
+		table.lens[code] = byte(0)
+		table.ptrs[code] = newTable
+		buildPatternTable(tree, newTable, 0, 0)
+		return
+	}
+	buildPatternTable(tree.zero, table, code, depth+1)
+	buildPatternTable(tree.one, table, (uint16(1)<<depth)|code, depth+1)
+}
+
+func buildPosTable(tree *huffmanNodePos, table *posTable, code uint16, depth int) {
+	if tree.zero == nil && tree.one == nil {
+		if table.bitLen == depth {
+			table.pos[code] = tree.pos
+			//fmt.Printf(".[%b]%d=>%d\n", code, table.bitLen, tree.pos)
+			table.lens[code] = byte(depth)
+			table.ptrs[code] = nil
+		} else {
+			codeStep := uint16(1) << depth
+			codeFrom := code
+			codeTo := code | (uint16(1) << table.bitLen)
+			for c := codeFrom; c < codeTo; c += codeStep {
+				table.pos[c] = tree.pos
+				//fmt.Printf("*[%b]%d=>%d\n", c, table.bitLen, tree.pos)
+				table.lens[c] = byte(depth)
+				table.ptrs[c] = nil
+			}
+		}
+		return
+	}
+	if depth == 9 {
+		var bitLen int
+		if tree.maxDepth > 9 {
+			bitLen = 9
+		} else {
+			bitLen = tree.maxDepth
+		}
+		tableSize := 1 << bitLen
+		newTable := &posTable{
+			bitLen: bitLen,
+			pos:    make([]uint64, tableSize),
+			lens:   make([]byte, tableSize),
+			ptrs:   make([]*posTable, tableSize),
+		}
+		table.pos[code] = 0
+		table.lens[code] = byte(0)
+		table.ptrs[code] = newTable
+		buildPosTable(tree, newTable, 0, 0)
+		return
+	}
+	buildPosTable(tree.zero, table, code, depth+1)
+	buildPosTable(tree.one, table, (uint16(1)<<depth)|code, depth+1)
 }
 
 func (d *Decompressor) Size() int64 {
@@ -142,68 +292,70 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 type Getter struct {
 	data        []byte
 	dataP       uint64
-	patternDict *huffmanNodePattern
-	posDict     *huffmanNodePos
-	b           byte
-	mask        byte
+	dataBit     int // Value 0..7 - position of the bit
+	patternDict *patternTable
+	posDict     *posTable
 	fName       string
 }
 
 func (g *Getter) nextPos(clean bool) uint64 {
 	if clean {
-		g.mask = 0
-	}
-	node := g.posDict
-	if node.zero == nil && node.one == nil {
-		return node.pos
-	}
-	b := g.b
-	mask := g.mask
-	dataP := g.dataP
-	for node.zero != nil || node.one != nil {
-		if mask == 0 {
-			mask = 1
-			b = g.data[dataP]
-			dataP++
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
 		}
-		if b&mask == 0 {
-			node = node.zero
+	}
+	table := g.posDict
+	if table.bitLen == 0 {
+		return table.pos[0]
+	}
+	var l byte
+	var pos uint64
+	for l == 0 {
+		code := uint16(g.data[g.dataP]) >> g.dataBit
+		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
+			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
+		}
+		code &= (uint16(1) << table.bitLen) - 1
+		l = table.lens[code]
+		if l == 0 {
+			table = table.ptrs[code]
+			g.dataBit += 9
 		} else {
-			node = node.one
+			g.dataBit += int(l)
+			pos = table.pos[code]
 		}
-		mask <<= 1
+		g.dataP += uint64(g.dataBit / 8)
+		g.dataBit = g.dataBit % 8
 	}
-	g.b = b
-	g.mask = mask
-	g.dataP = dataP
-	return node.pos
+	return pos
 }
 
 func (g *Getter) nextPattern() []byte {
-	node := g.patternDict
-	if node.zero == nil && node.one == nil {
-		return node.pattern
+	table := g.patternDict
+	if table.bitLen == 0 {
+		return table.patterns[0]
 	}
-	b := g.b
-	mask := g.mask
-	dataP := g.dataP
-	for node.zero != nil || node.one != nil {
-		if mask == 0 {
-			mask = 1
-			b = g.data[dataP]
-			dataP++
+	var l byte
+	var pattern []byte
+	for l == 0 {
+		code := uint16(g.data[g.dataP]) >> g.dataBit
+		if 8-g.dataBit < table.bitLen && int(g.dataP)+1 < len(g.data) {
+			code |= uint16(g.data[g.dataP+1]) << (8 - g.dataBit)
 		}
-		if b&mask == 0 {
-			node = node.zero
+		code &= (uint16(1) << table.bitLen) - 1
+		l = table.lens[code]
+		if l == 0 {
+			table = table.ptrs[code]
+			g.dataBit += 9
 		} else {
-			node = node.one
+			g.dataBit += int(l)
+			pattern = table.patterns[code]
 		}
-		mask <<= 1
+		g.dataP += uint64(g.dataBit / 8)
+		g.dataBit = g.dataBit % 8
 	}
-	g.b = b
-	g.mask = mask
-	g.dataP = dataP
-	return node.pattern
+	return pattern
 }
 
 func (d *Decompressor) Count() int           { return int(d.wordsCount) }
@@ -218,8 +370,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 
 func (g *Getter) Reset(offset uint64) {
 	g.dataP = offset
-	g.mask = 0
-	g.b = 0
+	g.dataBit = 0
 }
 
 func (g *Getter) HasNext() bool {
@@ -234,6 +385,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	l := g.nextPos(true)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	if l == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
 		return buf, g.dataP
 	}
 	bufPos := len(buf) // Tracking position in buf where to insert part of the word
@@ -251,8 +406,13 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		copy(buf[bufPos:], g.nextPattern())
 	}
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 	postLoopPos := g.dataP
 	g.dataP = savePos
+	g.dataBit = 0
 	g.nextPos(true /* clean */) // Reset the state of huffman reader
 	bufPos = lastUncovered      // Restore to the beginning of buf
 	// Loop below fills the data which is not in the patterns
@@ -271,6 +431,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		postLoopPos += dif
 	}
 	g.dataP = postLoopPos
+	g.dataBit = 0
 	return buf, postLoopPos
 }
 
@@ -278,9 +439,17 @@ func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	l := g.nextPos(true)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	if l == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
 		return g.data[g.dataP:g.dataP], g.dataP
 	}
 	g.nextPos(false)
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 	pos := g.dataP
 	g.dataP += l
 	return g.data[pos:g.dataP], g.dataP
@@ -291,6 +460,10 @@ func (g *Getter) Skip() uint64 {
 	l := g.nextPos(true)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	if l == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
 		return g.dataP
 	}
 	wordLen := int(l)
@@ -308,6 +481,10 @@ func (g *Getter) Skip() uint64 {
 		}
 		lastUncovered = bufPos + len(g.nextPattern())
 	}
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 	if int(l) > lastUncovered {
 		add += l - uint64(lastUncovered)
 	}
@@ -324,8 +501,12 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	lenBuf := len(buf)
 	if l == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
 		if lenBuf != 0 {
-			g.dataP = savePos
+			g.dataP, g.dataBit = savePos, 0
 		}
 		return lenBuf == 0, g.dataP
 	}
@@ -336,12 +517,16 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 		bufPos += int(pos) - 1
 		pattern := g.nextPattern()
 		if lenBuf < bufPos+len(pattern) || !bytes.Equal(buf[bufPos:bufPos+len(pattern)], pattern) {
-			g.dataP = savePos
+			g.dataP, g.dataBit = savePos, 0
 			return false, savePos
 		}
 	}
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 	postLoopPos := g.dataP
-	g.dataP = savePos
+	g.dataP, g.dataBit = savePos, 0
 	g.nextPos(true /* clean */) // Reset the state of huffman decoder
 	// Second pass - we check spaces not covered by the patterns
 	var lastUncovered int
@@ -351,7 +536,7 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 		if bufPos > lastUncovered {
 			dif := uint64(bufPos - lastUncovered)
 			if lenBuf < bufPos || !bytes.Equal(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif]) {
-				g.dataP = savePos
+				g.dataP, g.dataBit = savePos, 0
 				return false, savePos
 			}
 			postLoopPos += dif
@@ -361,16 +546,16 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	if int(l) > lastUncovered {
 		dif := l - uint64(lastUncovered)
 		if lenBuf < int(l) || !bytes.Equal(buf[lastUncovered:l], g.data[postLoopPos:postLoopPos+dif]) {
-			g.dataP = savePos
+			g.dataP, g.dataBit = savePos, 0
 			return false, savePos
 		}
 		postLoopPos += dif
 	}
 	if lenBuf != int(l) {
-		g.dataP = savePos
+		g.dataP, g.dataBit = savePos, 0
 		return false, savePos
 	}
-	g.dataP = postLoopPos
+	g.dataP, g.dataBit = postLoopPos, 0
 	return true, postLoopPos
 }
 
@@ -378,15 +563,19 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 func (g *Getter) MatchPrefix(buf []byte) bool {
 	savePos := g.dataP
 	defer func() {
-		g.dataP = savePos
+		g.dataP, g.dataBit = savePos, 0
 	}()
 
 	l := g.nextPos(true /* clean */)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	lenBuf := len(buf)
 	if l == 0 {
+		if g.dataBit > 0 {
+			g.dataP++
+			g.dataBit = 0
+		}
 		if lenBuf != 0 {
-			g.dataP = savePos
+			g.dataP, g.dataBit = savePos, 0
 		}
 		return lenBuf == 0
 	}
@@ -407,8 +596,12 @@ func (g *Getter) MatchPrefix(buf []byte) bool {
 			return false
 		}
 	}
+	if g.dataBit > 0 {
+		g.dataP++
+		g.dataBit = 0
+	}
 	postLoopPos := g.dataP
-	g.dataP = savePos
+	g.dataP, g.dataBit = savePos, 0
 	g.nextPos(true /* clean */) // Reset the state of huffman decoder
 	// Second pass - we check spaces not covered by the patterns
 	var lastUncovered int
