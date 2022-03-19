@@ -564,7 +564,7 @@ func isWebsocket(r *http.Request) bool {
 // a new secret and stores to the default location.
 func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	var fileName string
-	if len(cfg.JWTSecretPath) > 0 {
+	if cfg.JWTSecretPath != JwtDefaultFile {
 		// path provided
 		fileName = cfg.JWTSecretPath
 	} else {

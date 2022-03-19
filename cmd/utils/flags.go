@@ -332,7 +332,7 @@ var (
 	JWTSecretPath = cli.StringFlag{
 		Name:  "jwt-secret",
 		Usage: "Token to ensure safe connection between CL and EL",
-		Value: "",
+		Value: "jwt.hex",
 	}
 
 	HttpCompressionFlag = cli.BoolFlag{
