@@ -45,6 +45,7 @@ var (
 	RopstenGenesisHash    = common.HexToHash("0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d")
 	RinkebyGenesisHash    = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash     = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
+	KilnDevnetGensisHash  = common.HexToHash("0x51c7fe41be669f69c45c33a56982cbde405313342d9e2b00d7c91a7b284dd4f8")
 	ErigonGenesisHash     = common.HexToHash("0xfecd5c85712e36f30f09ba3a42386b42c46b5ba5395a4246b952e655f9aa0f58")
 	SokolGenesisHash      = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
 	FermionGenesisHash    = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
@@ -178,6 +179,25 @@ var (
 			Period: 15,
 			Epoch:  30000,
 		},
+	}
+
+	KilnDevnetChainConfig = &ChainConfig{
+		ChainName:               networkname.KilnDevnetChainName,
+		Consensus:               EtHashConsensus,
+		ChainID:                 big.NewInt(1337802),
+		HomesteadBlock:          big.NewInt(0),
+		EIP150Block:             big.NewInt(0),
+		EIP155Block:             big.NewInt(0),
+		EIP158Block:             big.NewInt(0),
+		ByzantiumBlock:          big.NewInt(0),
+		ConstantinopleBlock:     big.NewInt(0),
+		PetersburgBlock:         big.NewInt(0),
+		IstanbulBlock:           big.NewInt(0),
+		BerlinBlock:             big.NewInt(0),
+		LondonBlock:             big.NewInt(0),
+		MergeForkBlock:          big.NewInt(1000),
+		TerminalTotalDifficulty: big.NewInt(20_000_000_000_000),
+		Ethash:                  &EthashConfig{},
 	}
 
 	BSCChainConfig = &ChainConfig{
@@ -1111,6 +1131,8 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return RinkebyChainConfig
 	case networkname.GoerliChainName:
 		return GoerliChainConfig
+	case networkname.KilnDevnetChainName:
+		return KilnDevnetChainConfig
 	case networkname.ErigonMineName:
 		return ErigonChainConfig
 	case networkname.SokolChainName:
@@ -1144,6 +1166,8 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &RinkebyGenesisHash
 	case networkname.GoerliChainName:
 		return &GoerliGenesisHash
+	case networkname.KilnDevnetChainName:
+		return &KilnDevnetGensisHash
 	case networkname.ErigonMineName:
 		return &ErigonGenesisHash
 	case networkname.SokolChainName:
@@ -1177,6 +1201,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return RinkebyChainConfig
 	case genesisHash == GoerliGenesisHash:
 		return GoerliChainConfig
+	case genesisHash == KilnDevnetGensisHash:
+		return KilnDevnetChainConfig
 	case genesisHash == ErigonGenesisHash:
 		return ErigonChainConfig
 	case genesisHash == SokolGenesisHash:
