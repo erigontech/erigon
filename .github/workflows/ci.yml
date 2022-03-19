@@ -44,7 +44,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.44
+          version: v1.45
           skip-pkg-cache: true
           skip-build-cache: true
       - run: make test
