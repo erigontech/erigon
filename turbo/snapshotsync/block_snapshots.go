@@ -1077,7 +1077,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 
 		valueBuf = valueBuf[:0]
-		valueBuf = append(valueBuf, slot.IdHash[:1]...)
+		valueBuf = append(valueBuf, slot.IDHash[:1]...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
@@ -1411,8 +1411,8 @@ RETRY:
 				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
-			txsCh <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
-			txsCh2 <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
+			txsCh <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
+			txsCh2 <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
 		}
 	}()
 
