@@ -25,9 +25,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
+	"golang.org/x/crypto/sha3"
 )
 
 // In memory commitment and state to use with the tests
@@ -39,6 +38,7 @@ type MockState struct {
 }
 
 func NewMockState(t *testing.T) *MockState {
+	t.Helper()
 	return &MockState{
 		t:  t,
 		sm: make(map[string][]byte),
@@ -367,9 +367,9 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 		key := preimages[hashedKey]
 		key2 := preimages2[hashedKey]
 		plainKey := make([]byte, len(key)+len(key2))
-		copy(plainKey[:], []byte(key))
+		copy(plainKey[:], key)
 		if key2 != nil {
-			copy(plainKey[len(key):], []byte(key2))
+			copy(plainKey[len(key):], key2)
 		}
 		plainKeys[i] = plainKey
 		u := &updates[i]

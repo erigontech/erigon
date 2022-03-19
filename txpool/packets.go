@@ -67,14 +67,14 @@ func ParseHash(payload []byte, pos int, hashbuf []byte) ([]byte, int, error) {
 }
 
 // EncodeGetPooledTransactions66 produces encoding of GetPooledTransactions66 packet
-func EncodeGetPooledTransactions66(hashes []byte, requestId uint64, encodeBuf []byte) ([]byte, error) {
+func EncodeGetPooledTransactions66(hashes []byte, requestID uint64, encodeBuf []byte) ([]byte, error) {
 	pos := 0
 	hashesLen := len(hashes) / length.Hash * 33
-	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestId)
+	dataLen := rlp.ListPrefixLen(hashesLen) + hashesLen + rlp.U64Len(requestID)
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	pos += rlp.EncodeU64(requestId, encodeBuf[pos:])
+	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
 	pos += rlp.EncodeHashes(hashes, encodeBuf[pos:])
 	_ = pos
 	return encodeBuf, nil
@@ -108,7 +108,7 @@ func ParseGetPooledTransactions66(payload []byte, pos int, hashbuf []byte) (requ
 
 // == Pooled transactions ==
 
-func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []byte) []byte {
+func EncodePooledTransactions66(txsRlp [][]byte, requestID uint64, encodeBuf []byte) []byte {
 	pos := 0
 	txsRlpLen := 0
 	for i := range txsRlp {
@@ -119,13 +119,13 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestId uint64, encodeBuf []b
 			txsRlpLen += rlp.StringLen(len(txsRlp[i]))
 		}
 	}
-	dataLen := rlp.U64Len(requestId) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
+	dataLen := rlp.U64Len(requestID) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
 
 	encodeBuf = common.EnsureEnoughSize(encodeBuf, rlp.ListPrefixLen(dataLen)+dataLen)
 
 	// Length Prefix for the entire structure
 	pos += rlp.EncodeListPrefix(dataLen, encodeBuf[pos:])
-	pos += rlp.EncodeU64(requestId, encodeBuf[pos:])
+	pos += rlp.EncodeU64(requestID, encodeBuf[pos:])
 	pos += rlp.EncodeListPrefix(txsRlpLen, encodeBuf[pos:])
 	for i := range txsRlp {
 		_, _, isLegacy, _ := rlp.Prefix(txsRlp[i], 0)

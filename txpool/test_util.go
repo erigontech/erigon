@@ -40,7 +40,7 @@ func NewMockSentry(ctx context.Context) *MockSentry {
 	return &MockSentry{ctx: ctx, SentryServerMock: &sentry.SentryServerMock{}}
 }
 
-var PeerId PeerID = gointerfaces.ConvertHashToH256([32]byte{0x12, 0x34, 0x50}) // "12345"
+var peerID PeerID = gointerfaces.ConvertHashToH256([32]byte{0x12, 0x34, 0x50}) // "12345"
 
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 	ms.lock.RLock()

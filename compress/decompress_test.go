@@ -26,6 +26,7 @@ import (
 )
 
 func prepareLoremDict(t *testing.T) *Decompressor {
+	t.Helper()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
@@ -157,6 +158,7 @@ func TestDecompressMatchPrefix(t *testing.T) {
 }
 
 func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
+	t.Helper()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()

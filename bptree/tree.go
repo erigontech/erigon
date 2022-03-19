@@ -109,14 +109,14 @@ func (t *Tree23) WalkPostOrder(w Walker) []interface{} {
 }
 
 func (t *Tree23) WalkKeysPostOrder() []Felt {
-	key_pointers := make([]*Felt, 0)
+	keyPointers := make([]*Felt, 0)
 	t.WalkPostOrder(func(n *Node23) interface{} {
 		if n.isLeaf && n.keyCount() > 0 {
-			key_pointers = append(key_pointers, n.keys[:len(n.keys)-1]...)
+			keyPointers = append(keyPointers, n.keys[:len(n.keys)-1]...)
 		}
 		return nil
 	})
-	keys := deref(key_pointers)
+	keys := deref(keyPointers)
 	return keys
 }
 
@@ -141,7 +141,7 @@ func (t *Tree23) Delete(keyToDelete []Felt) *Tree23 {
 }
 
 func (t *Tree23) DeleteWithStats(keysToDelete []Felt, stats *Stats) *Tree23 {
-	newRoot, nextKey, intermediateKeys := delete(t.root, keysToDelete, stats)
+	newRoot, nextKey, intermediateKeys := del(t.root, keysToDelete, stats)
 	t.root, _ = demote(newRoot, nextKey, intermediateKeys, stats)
 	stats.RehashedCount, stats.ClosingHashes = t.countDeleteRehashedNodes()
 	return t

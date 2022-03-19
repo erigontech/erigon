@@ -122,8 +122,8 @@ func TestParseTransactionRLP(t *testing.T) {
 					}
 					if tt.idHashStr != "" {
 						idHash := decodeHex(tt.idHashStr)
-						if !bytes.Equal(idHash, tx.IdHash[:]) {
-							t.Errorf("IdHash expected %x, got %x", idHash, tx.IdHash)
+						if !bytes.Equal(idHash, tx.IDHash[:]) {
+							t.Errorf("IdHash expected %x, got %x", idHash, tx.IDHash)
 						}
 					}
 					if tt.senderStr != "" {

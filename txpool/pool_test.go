@@ -135,7 +135,7 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot1.IdHash[0] = 1
+		txSlot1.IDHash[0] = 1
 		txSlots.Append(txSlot1, addr[:], true)
 
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -153,14 +153,14 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  4,
 		}
-		txSlot2.IdHash[0] = 2
+		txSlot2.IDHash[0] = 2
 		txSlot3 := &TxSlot{
 			tip:    300000,
 			feeCap: 300000,
 			gas:    100000,
 			nonce:  6,
 		}
-		txSlot3.IdHash[0] = 3
+		txSlot3.IDHash[0] = 3
 		txSlots.Append(txSlot2, addr[:], true)
 		txSlots.Append(txSlot3, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -181,7 +181,7 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot1.IdHash[0] = 4
+		txSlot1.IDHash[0] = 4
 		txSlots.Append(txSlot1, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -199,7 +199,7 @@ func TestNonceFromAddress(t *testing.T) {
 			gas:    100000,
 			nonce:  1,
 		}
-		txSlot1.IdHash[0] = 5
+		txSlot1.IDHash[0] = 5
 		txSlots.Append(txSlot1, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -259,7 +259,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot.IdHash[0] = 1
+		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -277,7 +277,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot.IdHash[0] = 2
+		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -297,7 +297,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot.IdHash[0] = 3
+		txSlot.IDHash[0] = 3
 		txSlots.Append(txSlot, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -317,7 +317,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot.IdHash[0] = 4
+		txSlot.IDHash[0] = 4
 		txSlots.Append(txSlot, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -380,7 +380,7 @@ func TestReverseNonces(t *testing.T) {
 			gas:    100000,
 			nonce:  3,
 		}
-		txSlot.IdHash[0] = 1
+		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -407,7 +407,7 @@ func TestReverseNonces(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 2
+		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
 
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -434,7 +434,7 @@ func TestReverseNonces(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 3
+		txSlot.IDHash[0] = 3
 		txSlots.Append(txSlot, addr[:], true)
 
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -509,8 +509,8 @@ func TestTxPoke(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 1
-		idHash = append(idHash, txSlot.IdHash[:]...)
+		txSlot.IDHash[0] = 1
+		idHash = append(idHash, txSlot.IDHash[:]...)
 		txSlots.Append(txSlot, addr[:], true)
 
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
@@ -537,7 +537,7 @@ func TestTxPoke(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 1
+		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -566,7 +566,7 @@ func TestTxPoke(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 2
+		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
 		reasons, err := pool.AddLocalTxs(ctx, txSlots)
 		assert.NoError(err)
@@ -596,7 +596,7 @@ func TestTxPoke(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 1
+		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
 		pool.AddRemoteTxs(ctx, txSlots)
 		nonce, ok := pool.NonceFromAddress(addr)
@@ -618,7 +618,7 @@ func TestTxPoke(t *testing.T) {
 			gas:    100000,
 			nonce:  2,
 		}
-		txSlot.IdHash[0] = 2
+		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
 		pool.AddRemoteTxs(ctx, txSlots)
 		nonce, ok := pool.NonceFromAddress(addr)

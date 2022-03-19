@@ -747,7 +747,7 @@ func (mf2 *MatchFinder2) Current() ([]byte, int) {
 				b[depth/8] |= uint8(1) << (7 - (depth % 8))
 			}
 			depth++
-			p = ((p & 0xffffffe0) << 1) | uint32((p&0x1f)-1)
+			p = ((p & 0xffffffe0) << 1) | (p & 0x1f) - 1
 		}
 	}
 	return b, depth

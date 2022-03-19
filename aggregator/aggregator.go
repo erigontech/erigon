@@ -226,7 +226,7 @@ func (cf *ChangeFile) openFile(blockNum uint64, write bool) error {
 		cf.path = filepath.Join(cf.dir, fmt.Sprintf("%s.%d-%d.chg", cf.namebase, startBlock, endBlock))
 		var err error
 		if write {
-			if cf.file, err = os.OpenFile(cf.path, os.O_RDWR|os.O_CREATE, 0755); err != nil {
+			if cf.file, err = os.OpenFile(cf.path, os.O_RDWR|os.O_CREATE, 0o755); err != nil {
 				return err
 			}
 		} else {
@@ -489,7 +489,7 @@ func (c *Changes) rewind() error {
 	return nil
 }
 
-func (c *Changes) nextTriple(keyBuf, beforeBuf []byte, afterBuf []byte) ([]byte, []byte, []byte, bool, error) {
+func (c *Changes) nextTriple(keyBuf, beforeBuf, afterBuf []byte) ([]byte, []byte, []byte, bool, error) {
 	key, bkeys, err := c.keys.nextWord(keyBuf)
 	if err != nil {
 		return keyBuf, beforeBuf, afterBuf, false, fmt.Errorf("next key: %w", err)
@@ -828,7 +828,7 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, commitments b
 
 const AggregatorPrefix = "aggregator"
 
-func btreeToFile(bt *btree.BTree, datPath string, tmpdir string, trace bool, workers int) (int, error) {
+func btreeToFile(bt *btree.BTree, datPath, tmpdir string, trace bool, workers int) (int, error) {
 	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, workers)
 	if err != nil {
 		return 0, err
@@ -1080,7 +1080,7 @@ func (a *Aggregator) rebuildRecentState() error {
 		for fType := FirstType; fType < NumberOfStateTypes; fType++ {
 			var changes Changes
 			changes.Init(fType.String(), a.aggregationStep, a.diffDir, false /* beforeOn */)
-			if changes.openFiles(item.startBlock, false /* write */); err != nil {
+			if err = changes.openFiles(item.startBlock, false /* write */); err != nil {
 				return false
 			}
 			if err = changes.aggregateToBtree(a.trees[fType], 0, fType == Commitment); err != nil {
@@ -2089,7 +2089,7 @@ func (w *Writer) branchFn(prefix []byte) []byte {
 		mergedVal = vi.(*AggregateItem).v
 	}
 	// Look in the files and merge, while it becomes complete
-	var startBlock uint64 = w.blockNum + 1
+	var startBlock = w.blockNum + 1
 	for mergedVal == nil || !commitment.IsComplete(mergedVal) {
 		if startBlock == 0 {
 			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactToHex(prefix), mergedVal, startBlock))
@@ -2705,7 +2705,7 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) {
 	}
 }
 
-func (w *Writer) WriteAccountStorage(addr []byte, loc []byte, value *uint256.Int, trace bool) {
+func (w *Writer) WriteAccountStorage(addr, loc []byte, value *uint256.Int, trace bool) {
 	dbkey := make([]byte, len(addr)+len(loc))
 	copy(dbkey[0:], addr)
 	copy(dbkey[len(addr):], loc)

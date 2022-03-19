@@ -18,6 +18,7 @@ package remotedbserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -101,7 +102,7 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 	for {
 		in, recvErr := stream.Recv()
 		if recvErr != nil {
-			if recvErr == io.EOF { // termination
+			if errors.Is(recvErr, io.EOF) { // termination
 				return nil
 			}
 			return fmt.Errorf("server-side error: %w", recvErr)

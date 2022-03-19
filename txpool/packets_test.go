@@ -84,11 +84,11 @@ var gpt66EncodeTests = []struct {
 	payloadStr  string
 	hashesStr   string
 	hashCount   int
-	requestId   uint64
+	requestID   uint64
 	expectedErr bool
 }{
 	{payloadStr: "e68306f854e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, requestId: 456788, expectedErr: false},
+		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, requestID: 456788, expectedErr: false},
 }
 
 // TestEncodeGPT66 tests the encoding of GetPoolTransactions66 packet
@@ -98,7 +98,7 @@ func TestEncodeGPT66(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
 			var err error
-			encodeBuf, err = EncodeGetPooledTransactions66(decodeHex(tt.hashesStr), tt.requestId, encodeBuf)
+			encodeBuf, err = EncodeGetPooledTransactions66(decodeHex(tt.hashesStr), tt.requestID, encodeBuf)
 			require.Equal(tt.expectedErr, err != nil)
 			require.Equal(decodeHex(tt.payloadStr), encodeBuf)
 			if err != nil {
@@ -106,7 +106,7 @@ func TestEncodeGPT66(t *testing.T) {
 			}
 			requestID, hashes, _, err := ParseGetPooledTransactions66(encodeBuf, 0, nil)
 			require.Equal(tt.expectedErr, err != nil)
-			require.Equal(tt.requestId, requestID)
+			require.Equal(tt.requestID, requestID)
 			require.Equal(decodeHex(tt.hashesStr), hashes)
 		})
 	}
@@ -115,7 +115,7 @@ func TestEncodeGPT66(t *testing.T) {
 var ptp66EncodeTests = []struct {
 	txs         [][]byte
 	encoded     string
-	requestId   uint64
+	requestID   uint64
 	chainID     uint64
 	expectedErr bool
 }{
@@ -123,22 +123,22 @@ var ptp66EncodeTests = []struct {
 		txs: [][]byte{
 			decodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
 		},
-		encoded: "f88088a4e61e8ad32f4845f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", requestId: 11882218248461043781, expectedErr: false, chainID: 5,
+		encoded: "f88088a4e61e8ad32f4845f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", requestID: 11882218248461043781, expectedErr: false, chainID: 5,
 	},
 	{
 		txs: [][]byte{
 			decodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
 			decodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
 		},
-		encoded: "f8d7820457f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", requestId: 1111, expectedErr: false, chainID: 1,
+		encoded: "f8d7820457f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", requestID: 1111, expectedErr: false, chainID: 1,
 	},
 }
 
 func TestPooledTransactionsPacket(t *testing.T) {
 	b := decodeHex("e317e1a084a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680")
-	requestId, out, pos, err := ParseGetPooledTransactions66(b, 0, nil)
+	requestID, out, pos, err := ParseGetPooledTransactions66(b, 0, nil)
 	require.NoError(t, err)
-	require.Equal(t, uint64(23), requestId)
+	require.Equal(t, uint64(23), requestID)
 	require.Equal(t, decodeHex("84a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680"), out)
 	require.Equal(t, 36, pos)
 }
@@ -148,14 +148,14 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
+			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			ctx := NewTxParseContext(*uint256.NewInt(tt.chainID))
 			slots := &TxSlots{}
-			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
+			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
 			require.NoError(err)
-			require.Equal(tt.requestId, requestId)
+			require.Equal(tt.requestID, requestID)
 			require.Equal(len(tt.txs), len(slots.txs))
 			for i, txn := range tt.txs {
 				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.txs[i].rlp))
@@ -166,15 +166,15 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 		t.Run("reject_all_"+strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestId, encodeBuf)
+			encodeBuf = EncodePooledTransactions66(tt.txs, tt.requestID, encodeBuf)
 			require.Equal(tt.encoded, fmt.Sprintf("%x", encodeBuf))
 
 			ctx := NewTxParseContext(*u256.N1)
 			ctx.validateHash = func(bytes []byte) error { return ErrRejected }
 			slots := &TxSlots{}
-			requestId, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
+			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots)
 			require.NoError(err)
-			require.Equal(tt.requestId, requestId)
+			require.Equal(tt.requestID, requestID)
 			require.Equal(0, len(slots.txs))
 			require.Equal(0, slots.senders.Len())
 			require.Equal(0, len(slots.isLocal))

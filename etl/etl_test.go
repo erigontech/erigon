@@ -268,6 +268,7 @@ func TestTransformDoubleOnLoad(t *testing.T) {
 }
 
 func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
+	t.Helper()
 	for i := 0; i < count; i++ {
 		k := []byte(fmt.Sprintf("%10d-key-%010d", i, i))
 		v := []byte(fmt.Sprintf("val-%099d", i))

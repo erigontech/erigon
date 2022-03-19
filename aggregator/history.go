@@ -179,7 +179,7 @@ type HistoryReader struct {
 	lastTx   bool // Whether it is the last transaction in the block
 }
 
-func (hr *HistoryReader) SetNums(blockNum uint64, txNum uint64, lastTx bool) {
+func (hr *HistoryReader) SetNums(blockNum, txNum uint64, lastTx bool) {
 	hr.blockNum = blockNum
 	hr.txNum = txNum
 	hr.lastTx = lastTx

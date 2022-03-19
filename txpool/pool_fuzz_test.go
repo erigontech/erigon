@@ -335,7 +335,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 				// side data structures must have all txs
 				assert.True(pool.all.has(tx), msg)
-				_, ok = pool.byHash[string(i.IdHash[:])]
+				_, ok = pool.byHash[string(i.IDHash[:])]
 				assert.True(ok)
 
 				// pools can't have more then 1 tx with same SenderID+Nonce
@@ -370,7 +370,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				}
 
 				assert.True(pool.all.has(tx), msg)
-				_, ok = pool.byHash[string(i.IdHash[:])]
+				_, ok = pool.byHash[string(i.IDHash[:])]
 				assert.True(ok, msg)
 			})
 
@@ -390,8 +390,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
 				}
 
-				assert.True(pool.all.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.IdHash)
-				_, ok = pool.byHash[string(i.IdHash[:])]
+				assert.True(pool.all.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.IDHash)
+				_, ok = pool.byHash[string(i.IDHash[:])]
 				assert.True(ok, msg)
 				assert.GreaterOrEqual(tx.Tx.feeCap, pool.cfg.MinFeeCap)
 			})
@@ -412,7 +412,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 			// mined txs must be removed
 			for i := range minedTxs.txs {
-				_, ok = pool.byHash[string(minedTxs.txs[i].IdHash[:])]
+				_, ok = pool.byHash[string(minedTxs.txs[i].IDHash[:])]
 				assert.False(ok, msg)
 			}
 
@@ -432,13 +432,13 @@ func FuzzOnNewBlocks(f *testing.F) {
 				for i := 0; i < newHashes.Len(); i++ {
 					newHash := newHashes.At(i)
 					for j := range unwindTxs.txs {
-						if bytes.Equal(unwindTxs.txs[j].IdHash[:], newHash) {
+						if bytes.Equal(unwindTxs.txs[j].IDHash[:], newHash) {
 							mt := pool.all.get(unwindTxs.txs[j].senderID, unwindTxs.txs[j].nonce)
 							require.True(mt != nil && mt.currentSubPool == PendingSubPool, msg)
 						}
 					}
 					for j := range minedTxs.txs {
-						if bytes.Equal(minedTxs.txs[j].IdHash[:], newHash) {
+						if bytes.Equal(minedTxs.txs[j].IDHash[:], newHash) {
 							mt := pool.all.get(unwindTxs.txs[j].senderID, unwindTxs.txs[j].nonce)
 							require.True(mt != nil && mt.currentSubPool == PendingSubPool, msg)
 						}
@@ -558,7 +558,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 func copyHashes(p *PendingPool) (hashes Hashes) {
 	for i := range p.best.ms {
-		hashes = append(hashes, p.best.ms[i].Tx.IdHash[:]...)
+		hashes = append(hashes, p.best.ms[i].Tx.IDHash[:]...)
 	}
 	return hashes
 }

@@ -285,7 +285,6 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	var wg sync.WaitGroup
 	if workers > 1 {
 		for i := 0; i < workers; i++ {
-			//nolint
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
@@ -918,13 +917,13 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				}
 
 				// Go back
-				var new bool
+				var isNew bool
 				for j > 0 && int(lcp[j-1]) >= l {
 					j--
-					new = true
+					isNew = true
 				}
 
-				if !new && !prevSkipped {
+				if !isNew && !prevSkipped {
 					break
 				}
 
@@ -960,7 +959,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
 					log.Error("processSuperstring", "collect", err)
 				}
-				prevSkipped = false
+				prevSkipped = false //nolint
 				break
 			}
 		}

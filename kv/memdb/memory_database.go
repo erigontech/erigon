@@ -37,55 +37,61 @@ func NewSentryDB() kv.RwDB {
 	return mdbx.NewMDBX(log.New()).InMem().Label(kv.SentryDB).WithTablessCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.SentryTablesCfg }).MustOpen()
 }
 
-func NewTestDB(t testing.TB) kv.RwDB {
+func NewTestDB(tb testing.TB) kv.RwDB {
+	tb.Helper()
 	db := New()
-	t.Cleanup(db.Close)
+	tb.Cleanup(db.Close)
 	return db
 }
 
-func NewTestPoolDB(t testing.TB) kv.RwDB {
+func NewTestPoolDB(tb testing.TB) kv.RwDB {
+	tb.Helper()
 	db := NewPoolDB()
-	t.Cleanup(db.Close)
+	tb.Cleanup(db.Close)
 	return db
 }
 
-func NewTestSentrylDB(t testing.TB) kv.RwDB {
+func NewTestSentrylDB(tb testing.TB) kv.RwDB {
+	tb.Helper()
 	db := NewPoolDB()
-	t.Cleanup(db.Close)
+	tb.Cleanup(db.Close)
 	return db
 }
 
-func NewTestTx(t testing.TB) (kv.RwDB, kv.RwTx) {
+func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
+	tb.Helper()
 	db := New()
-	t.Cleanup(db.Close)
-	tx, err := db.BeginRw(context.Background()) //nolint
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	t.Cleanup(tx.Rollback)
+	tb.Cleanup(tx.Rollback)
 	return db, tx
 }
 
-func NewTestPoolTx(t testing.TB) (kv.RwDB, kv.RwTx) {
-	db := NewTestPoolDB(t)
+func NewTestPoolTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
+	tb.Helper()
+	db := NewTestPoolDB(tb)
 	tx, err := db.BeginRw(context.Background()) //nolint
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	if t != nil {
-		t.Cleanup(tx.Rollback)
+	if tb != nil {
+		tb.Cleanup(tx.Rollback)
 	}
 	return db, tx
 }
 
-func NewTestSentryTx(t testing.TB) (kv.RwDB, kv.RwTx) {
-	db := NewTestSentrylDB(t)
+func NewTestSentryTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
+	tb.Helper()
+	db := NewTestSentrylDB(tb)
 	tx, err := db.BeginRw(context.Background()) //nolint
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	if t != nil {
-		t.Cleanup(tx.Rollback)
+	if tb != nil {
+		tb.Cleanup(tx.Rollback)
 	}
 	return db, tx
 }

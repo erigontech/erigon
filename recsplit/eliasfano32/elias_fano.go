@@ -74,7 +74,7 @@ func NewEliasFano(count uint64, maxOffset uint64) *EliasFano {
 func (ef *EliasFano) AddOffset(offset uint64) {
 	//fmt.Printf("0x%x,\n", offset)
 	if ef.l != 0 {
-		set_bits(ef.lowerBits, ef.i*ef.l, int(ef.l), offset&ef.lowerBitsMask)
+		setBits(ef.lowerBits, ef.i*ef.l, int(ef.l), offset&ef.lowerBitsMask)
 	}
 	//pos := ((offset - ef.delta) >> ef.l) + ef.i
 	set(ef.upperBits, (offset>>ef.l)+ef.i)
@@ -397,7 +397,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	for i, cumDelta, bitDelta := uint64(0), uint64(0), uint64(0); i <= ef.numBuckets; i, cumDelta, bitDelta = i+1, cumDelta+ef.cumKeysMinDelta, bitDelta+ef.posMinDelta {
 		if ef.lCumKeys != 0 {
 			//fmt.Printf("i=%d, set_bits cum for %d = %b\n", i, cumKeys[i]-cumDelta, (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
-			set_bits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), int(ef.lCumKeys), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition), int(ef.lCumKeys), (cumKeys[i]-cumDelta)&ef.lowerBitsMaskCumKeys)
 			//fmt.Printf("loweBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsCumKeys, ((cumKeys[i]-cumDelta)>>ef.lCumKeys)+i)
@@ -405,7 +405,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 
 		if ef.lPosition != 0 {
 			//fmt.Printf("i=%d, set_bits pos for %d = %b\n", i, position[i]-bitDelta, (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
-			set_bits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, int(ef.lPosition), (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
+			setBits(ef.lowerBits, i*(ef.lCumKeys+ef.lPosition)+ef.lCumKeys, int(ef.lPosition), (position[i]-bitDelta)&ef.lowerBitsMaskPosition)
 			//fmt.Printf("lowerBits %b\n", ef.lowerBits)
 		}
 		set(ef.upperBitsPosition, ((position[i]-bitDelta)>>ef.lPosition)+i)
@@ -473,9 +473,9 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 	//fmt.Printf("jump: %x\n", ef.jump)
 }
 
-// set_bits assumes that bits are set in monotonic order, so that
+// setBits assumes that bits are set in monotonic order, so that
 // we can skip the masking for the second word
-func set_bits(bits []uint64, start uint64, width int, value uint64) {
+func setBits(bits []uint64, start uint64, width int, value uint64) {
 	shift := int(start & 63)
 	idx64 := start >> 6
 	mask := (uint64(1)<<width - 1) << shift
@@ -565,12 +565,12 @@ func (ef DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
 	return
 }
 
-func (ef DoubleEliasFano) Get2(i uint64) (cumKeys uint64, position uint64) {
+func (ef DoubleEliasFano) Get2(i uint64) (cumKeys, position uint64) {
 	cumKeys, position, _, _, _, _, _ = ef.get2(i)
 	return
 }
 
-func (ef DoubleEliasFano) Get3(i uint64) (cumKeys uint64, cumKeysNext uint64, position uint64) {
+func (ef DoubleEliasFano) Get3(i uint64) (cumKeys, cumKeysNext, position uint64) {
 	var windowCumKeys uint64
 	var selectCumKeys int
 	var currWordCumKeys uint64

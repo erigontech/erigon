@@ -49,14 +49,14 @@ func (r RandomBinaryReader) Read(b []byte) (n int, err error) {
 	for i := 0; i < numKeys; i++ {
 		bytesRead, err := r.readAtRandomOffset(b[i*r.chunckSize : i*r.chunckSize+r.chunckSize])
 		if err != nil {
-			return i*r.chunckSize + bytesRead, fmt.Errorf("cannot random read at iteration %d: %v", i, err)
+			return i*r.chunckSize + bytesRead, fmt.Errorf("cannot random read at iteration %d: %w", i, err)
 		}
 		n += bytesRead
 	}
 	remainderSize := len(b) % r.chunckSize
 	bytesRead, err := r.readAtRandomOffset(b[numKeys*r.chunckSize : numKeys*r.chunckSize+remainderSize])
 	if err != nil {
-		return numKeys*r.chunckSize + bytesRead, fmt.Errorf("cannot random read remainder %d: %v", remainderSize, err)
+		return numKeys*r.chunckSize + bytesRead, fmt.Errorf("cannot random read remainder %d: %w", remainderSize, err)
 	}
 	n += bytesRead
 	return n, nil
@@ -65,16 +65,16 @@ func (r RandomBinaryReader) Read(b []byte) (n int, err error) {
 func (r RandomBinaryReader) readAtRandomOffset(b []byte) (n int, err error) {
 	randomValue, err := rand.Int(rand.Reader, big.NewInt(r.sourceFile.size-int64(len(b))))
 	if err != nil {
-		return 0, fmt.Errorf("cannot generate random offset: %v", err)
+		return 0, fmt.Errorf("cannot generate random offset: %w", err)
 	}
 	randomOffset := randomValue.Int64()
 	_, err = r.sourceFile.file.Seek(randomOffset, io.SeekStart)
 	if err != nil {
-		return 0, fmt.Errorf("cannot seek to offset %d: %v", randomOffset, err)
+		return 0, fmt.Errorf("cannot seek to offset %d: %w", randomOffset, err)
 	}
 	bytesRead, err := r.sourceFile.file.Read(b)
 	if err != nil {
-		return 0, fmt.Errorf("cannot read from source file: %v", err)
+		return 0, fmt.Errorf("cannot read from source file: %w", err)
 	}
 	return bytesRead, nil
 }

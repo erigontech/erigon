@@ -120,7 +120,7 @@ func Prefix(payload []byte, pos int) (dataPos int, dataLen int, isList bool, err
 	return
 }
 
-func List(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+func List(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err
@@ -131,7 +131,7 @@ func List(payload []byte, pos int) (dataPos int, dataLen int, err error) {
 	return
 }
 
-func String(payload []byte, pos int) (dataPos int, dataLen int, err error) {
+func String(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	dataPos, dataLen, isList, err := Prefix(payload, pos)
 	if err != nil {
 		return 0, 0, err

@@ -12,12 +12,12 @@ import (
 
 func Sais(data []byte, sa []int32) error {
 	size := C.int(len(data))
-	t_ptr := unsafe.Pointer(&data[0]) // source "text"
-	sa_ptr := unsafe.Pointer(&sa[0])
+	tPtr := unsafe.Pointer(&data[0]) // source "text"
+	saPtr := unsafe.Pointer(&sa[0])
 
 	result := C.sais(
-		(*C.uchar)(t_ptr),
-		(*C.int)(sa_ptr),
+		(*C.uchar)(tPtr),
+		(*C.int)(saPtr),
 		size,
 	)
 	if int(result) != 0 {

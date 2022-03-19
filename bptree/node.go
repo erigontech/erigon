@@ -128,10 +128,9 @@ func promote(nodes []*Node23, intermediateKeys []*Felt, stats *Stats) *Node23 {
 		}
 		promotedNodes = append(promotedNodes, makeInternalNode(nodes, intermediateKeys, stats))
 		return promote(promotedNodes, promotedKeys, stats)
-	} else {
-		promotedRoot := makeInternalNode(nodes, intermediateKeys, stats)
-		return promotedRoot
 	}
+	promotedRoot := makeInternalNode(nodes, intermediateKeys, stats)
+	return promotedRoot
 }
 
 func (n *Node23) reset() {
@@ -148,9 +147,8 @@ func (n *Node23) isValid() (bool, error) {
 	ensure(n.exposed || !n.updated, "isValid: node is not exposed but updated")
 	if n.isLeaf {
 		return n.isValidLeaf()
-	} else {
-		return n.isValidInternal()
 	}
+	return n.isValidInternal()
 }
 
 func (n *Node23) isValidLeaf() (bool, error) {
@@ -219,7 +217,7 @@ func (n *Node23) isValidInternal() (bool, error) {
 		// Check that each child subtree is a 2-3 tree
 		childValid, err := child.isValid()
 		if !childValid {
-			return false, fmt.Errorf("invalid child %v in %v, error: %v", child, n, err)
+			return false, fmt.Errorf("invalid child %v in %v, error: %w", child, n, err)
 		}
 	}
 	return true, nil
@@ -377,8 +375,8 @@ func (n *Node23) walkPostOrder(w Walker) []interface{} {
 	items := make([]interface{}, 0)
 	if !n.isLeaf {
 		for _, child := range n.children {
-			child_items := child.walkPostOrder(w)
-			items = append(items, child_items...)
+			childItems := child.walkPostOrder(w)
+			items = append(items, childItems...)
 		}
 	}
 	items = append(items, w(n))

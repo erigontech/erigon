@@ -73,7 +73,7 @@ func EncodeU64(i uint64, to []byte) int {
 	}
 
 	b := to[1:]
-	l := 0
+	var l int
 
 	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
 	switch {

@@ -54,17 +54,17 @@ func (factory *KeyBinaryFactory) readUniqueKeyValues(reader *bufio.Reader) KeyVa
 	keyRegistry := make(map[Felt]bool)
 	buffer := make([]byte, BufferSize)
 	for {
-		bytes_read, err := reader.Read(buffer)
+		bytesRead, err := reader.Read(buffer)
 		ensure(err == nil || err == io.EOF, fmt.Sprintf("readUniqueKeyValues: read error %s\n", err))
 		if err == io.EOF {
 			break
 		}
-		key_bytes_count := factory.keySize * (bytes_read / factory.keySize)
-		duplicated_keys := 0
-		for i := 0; i < key_bytes_count; i += factory.keySize {
+		keyBytesCount := factory.keySize * (bytesRead / factory.keySize)
+		duplicatedKeys := 0
+		for i := 0; i < keyBytesCount; i += factory.keySize {
 			key := factory.readKey(buffer, i)
 			if _, duplicated := keyRegistry[key]; duplicated {
-				duplicated_keys++
+				duplicatedKeys++
 				continue
 			}
 			keyRegistry[key] = true
@@ -81,20 +81,20 @@ func (factory *KeyBinaryFactory) readUniqueKeys(reader *bufio.Reader) Keys {
 	keyRegistry := make(map[Felt]bool)
 	buffer := make([]byte, BufferSize)
 	for {
-		bytes_read, err := reader.Read(buffer)
+		bytesRead, err := reader.Read(buffer)
 		if err == io.EOF {
 			break
 		}
-		key_bytes_count := factory.keySize * (bytes_read / factory.keySize)
-		duplicated_keys := 0
-		for i := 0; i < key_bytes_count; i += factory.keySize {
+		keyBytesCount := factory.keySize * (bytesRead / factory.keySize)
+		duplicatedKeys := 0
+		for i := 0; i < keyBytesCount; i += factory.keySize {
 			key := factory.readKey(buffer, i)
 			if _, duplicated := keyRegistry[key]; duplicated {
-				duplicated_keys++
+				duplicatedKeys++
 				continue
 			}
 			keyRegistry[key] = true
-			keys = append(keys, Felt(key))
+			keys = append(keys, key)
 		}
 	}
 	return keys

@@ -4,6 +4,11 @@ run:
 linters:
   disable-all: true
   enable:
+    - errorlint
+#    - unconvert
+    - predeclared
+    - wastedassign
+    - thelper
     - gofmt
     - deadcode
     - errcheck
@@ -16,8 +21,13 @@ linters:
     - varcheck
     - gocritic
     - bodyclose
-#    - gosec
+    - gosec
 #    - forcetypeassert
+#    - prealloc
+#    - contextcheck
+#    - goerr113
+#    - revive
+#    - stylecheck
 
 linters-settings:
   gocritic:
@@ -50,6 +60,10 @@ linters-settings:
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
     enabled-tags:
       - performance
+      - diagnostic
+    #      - style
+    #      - experimental
+    #      - opinionated
     disabled-tags:
       - experimental
     ruleguard:

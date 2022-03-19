@@ -166,12 +166,12 @@ func TestRemoteKvVersion(t *testing.T) {
 	f := func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return defaultBuckets
 	}
-	writeDb := mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen()
-	defer writeDb.Close()
+	writeDB := mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen()
+	defer writeDB.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDb))
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB))
 		if err := grpcServer.Serve(conn); err != nil {
 			logger.Error("private RPC server fail", "err", err)
 		}
@@ -207,6 +207,7 @@ func TestRemoteKvVersion(t *testing.T) {
 }
 
 func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {
+	t.Helper()
 	ctx := context.Background()
 	writeDBs = []kv.RwDB{
 		mdbx.NewMDBX(logger).InMem().WithTablessCfg(f).MustOpen(),
@@ -254,6 +255,7 @@ func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (write
 }
 
 func testMultiCursor(t *testing.T, db kv.RwDB, bucket1, bucket2 string) {
+	t.Helper()
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx kv.Tx) error {

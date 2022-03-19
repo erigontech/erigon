@@ -470,7 +470,7 @@ func (hph *HexPatriciaHashed) leafHashWithKeyVal(buf []byte, key []byte, val rlp
 	return buf, nil
 }
 
-func (cell *Cell) accountForHashing(buffer []byte, storageRootHash []byte) int {
+func (cell *Cell) accountForHashing(buffer, storageRootHash []byte) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
 		balanceBytes = cell.Balance.ByteLen()
@@ -538,7 +538,7 @@ func (cell *Cell) accountForHashing(buffer []byte, storageRootHash []byte) int {
 	return pos
 }
 
-func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf []byte, key []byte, val rlp.RlpSerializable) ([]byte, error) {
+func (hph *HexPatriciaHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -777,7 +777,7 @@ func branchToString(branchData []byte) string {
 			fieldBits := PartFlags(branchData[pos])
 			pos++
 			var err error
-			if pos, err = cell.fillFromFields(branchData, pos, PartFlags(fieldBits)); err != nil {
+			if pos, err = cell.fillFromFields(branchData, pos, fieldBits); err != nil {
 				// This is used for test output, so ok to panic
 				panic(err)
 			}
@@ -1421,7 +1421,7 @@ func (hph *HexPatriciaHashed) updateBalance(plainKey, hashedKey []byte, balance 
 	cell.Balance.Set(balance)
 }
 
-func (hph *HexPatriciaHashed) updateCode(plainKey, hashedKey []byte, codeHash []byte) {
+func (hph *HexPatriciaHashed) updateCode(plainKey, hashedKey, codeHash []byte) {
 	if hph.trace {
 		fmt.Printf("updateCode, activeRows = %d\n", hph.activeRows)
 	}
@@ -1437,7 +1437,7 @@ func (hph *HexPatriciaHashed) updateNonce(plainKey, hashedKey []byte, nonce uint
 	cell.Nonce = nonce
 }
 
-func (hph *HexPatriciaHashed) updateStorage(plainKey []byte, hashedKey []byte, value []byte) {
+func (hph *HexPatriciaHashed) updateStorage(plainKey, hashedKey, value []byte) {
 	if hph.trace {
 		fmt.Printf("updateStorage, activeRows = %d\n", hph.activeRows)
 	}

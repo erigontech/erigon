@@ -500,15 +500,15 @@ func (c *Coherent) evictRoots() {
 	}
 	to := c.latestViewID - ViewID(c.cfg.KeepViews)
 	var toDel []ViewID
-	for txId := range c.roots {
-		if txId > to {
+	for txID := range c.roots {
+		if txID > to {
 			continue
 		}
-		toDel = append(toDel, txId)
+		toDel = append(toDel, txID)
 	}
 	//log.Info("forget old roots", "list", fmt.Sprintf("%d", toDel))
-	for _, txId := range toDel {
-		delete(c.roots, txId)
+	for _, txID := range toDel {
+		delete(c.roots, txID)
 	}
 }
 func (c *Coherent) Len() int {

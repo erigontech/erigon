@@ -54,7 +54,7 @@ func TestFetch(t *testing.T) {
 	errs := m.Send(&sentry.InboundMessage{
 		Id:     sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
 		Data:   decodeHex("e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328"),
-		PeerId: PeerId,
+		PeerId: peerID,
 	})
 	for i, err := range errs {
 		if err != nil {

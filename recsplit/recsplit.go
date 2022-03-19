@@ -217,7 +217,7 @@ func (rs *RecSplit) ResetNextSalt() {
 	rs.bucketPosAcc = rs.bucketPosAcc[:1]   // First entry is always zero
 }
 
-func splitParams(m uint16, leafSize uint16, primaryAggrBound uint16, secondaryAggrBound uint16) (fanout, unit uint16) {
+func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fanout, unit uint16) {
 	if m > secondaryAggrBound { // High-level aggregation (fanout 2)
 		unit = secondaryAggrBound * (((m+1)/2 + secondaryAggrBound - 1) / secondaryAggrBound)
 		fanout = 2
@@ -231,7 +231,7 @@ func splitParams(m uint16, leafSize uint16, primaryAggrBound uint16, secondaryAg
 	return
 }
 
-func computeGolombRice(m uint16, table []uint32, leafSize uint16, primaryAggrBound uint16, secondaryAggrBound uint16) {
+func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, secondaryAggrBound uint16) {
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	k := make([]uint16, fanout)
 	k[fanout-1] = m
@@ -239,11 +239,11 @@ func computeGolombRice(m uint16, table []uint32, leafSize uint16, primaryAggrBou
 		k[i] = unit
 		k[fanout-1] -= k[i]
 	}
-	sqrt_prod := float64(1)
+	sqrtProd := float64(1)
 	for i := uint16(0); i < fanout; i++ {
-		sqrt_prod *= math.Sqrt(float64(k[i]))
+		sqrtProd *= math.Sqrt(float64(k[i]))
 	}
-	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrt_prod)
+	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrtProd)
 	golombRiceLength := uint32(math.Ceil(math.Log2(-math.Log((math.Sqrt(5)+1.0)/2.0) / math.Log1p(-p)))) // log2 Golomb modulus
 	if golombRiceLength > 0x1F {
 		panic("golombRiceLength > 0x1F")

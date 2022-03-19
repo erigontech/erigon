@@ -20,8 +20,8 @@ type Rw struct {
 }
 
 func convertFileLockError(err error, dir string) error {
-	if errno, ok := err.(syscall.Errno); ok && dirInUseErrnos[uint(errno)] {
-		return fmt.Errorf("%w: %s\n", ErrDirUsed, dir)
+	if errno, ok := err.(syscall.Errno); ok && dirInUseErrnos[uint(errno)] { //nolint
+		return fmt.Errorf("%w: %s", ErrDirUsed, dir)
 	}
 	return err
 }
@@ -43,7 +43,7 @@ func OpenRw(dir string) (*Rw, error) {
 		return nil, convertFileLockError(err, dir)
 	}
 	if !locked {
-		return nil, fmt.Errorf("%w: %s\n", ErrDirUsed, dir)
+		return nil, fmt.Errorf("%w: %s", ErrDirUsed, dir)
 	}
 	return &Rw{dirLock: l, Path: dir}, nil
 }

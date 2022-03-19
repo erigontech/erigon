@@ -23,6 +23,7 @@ import (
 )
 
 func assertNodeEqual(t *testing.T, expected, actual *Node23) {
+	t.Helper()
 	assert.Equal(t, expected.keysInLevelOrder(), actual.keysInLevelOrder(), "different keys by level")
 }
 

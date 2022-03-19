@@ -93,7 +93,6 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 	wg.Add(workers)
 	suffixCollectors := make([]*etl.Collector, workers)
 	for i := 0; i < workers; i++ {
-		//nolint
 		collector := etl.NewCollector(compressLogPrefix, tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		suffixCollectors[i] = collector
 		go processSuperstring(superstrings, collector, minPatternScore, wg)
@@ -1289,12 +1288,12 @@ func (c *CompressorSequential) processSuperstring() error {
 				continue
 			}
 			// Go back
-			var new bool
+			var isNew bool
 			for j > 0 && c.lcp[j-1] >= l {
 				j--
-				new = true
+				isNew = true
 			}
-			if !new {
+			if !isNew {
 				break
 			}
 			window := i - j + 2

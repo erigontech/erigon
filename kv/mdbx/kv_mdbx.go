@@ -984,7 +984,7 @@ func (tx *MdbxTx) ReadSequence(bucket string) (uint64, error) {
 		return 0, err
 	}
 
-	var currentV uint64 = 0
+	var currentV uint64
 	if len(v) > 0 {
 		currentV = binary.BigEndian.Uint64(v)
 	}

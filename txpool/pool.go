@@ -52,10 +52,10 @@ var (
 	processBatchTxsTimer    = metrics.NewSummary(`pool_process_remote_txs`)
 	addRemoteTxsTimer       = metrics.NewSummary(`pool_add_remote_txs`)
 	newBlockTimer           = metrics.NewSummary(`pool_new_block`)
-	writeToDbTimer          = metrics.NewSummary(`pool_write_to_db`)
+	writeToDBTimer          = metrics.NewSummary(`pool_write_to_db`)
 	propagateToNewPeerTimer = metrics.NewSummary(`pool_propagate_to_new_peer`)
 	propagateNewTxsTimer    = metrics.NewSummary(`pool_propagate_new_txs`)
-	writeToDbBytesCounter   = metrics.GetOrCreateCounter(`pool_write_to_db_bytes`)
+	writeToDBBytesCounter   = metrics.GetOrCreateCounter(`pool_write_to_db_bytes`)
 )
 
 const ASSERT = false
@@ -611,7 +611,7 @@ func (p *TxPool) Best(n uint16, txs *TxsRlp, tx kv.Tx) error {
 			// Skip transactions with very large gas limit
 			continue
 		}
-		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, best.ms[i].Tx.IdHash[:])
+		rlpTx, sender, isLocal, err := p.getRlpLocked(tx, best.ms[i].Tx.IDHash[:])
 		if err != nil {
 			return err
 		}
@@ -636,7 +636,7 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs TxSlots) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	for i, txn := range newTxs.txs {
-		_, ok := p.unprocessedRemoteByHash[string(txn.IdHash[:])]
+		_, ok := p.unprocessedRemoteByHash[string(txn.IDHash[:])]
 		if ok {
 			continue
 		}
@@ -648,29 +648,29 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool, stateCache kvcache.CacheV
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && txn.feeCap < p.cfg.MinFeeCap {
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IdHash, isLocal, txn.feeCap, p.cfg.MinFeeCap))
+			log.Info(fmt.Sprintf("TX TRACING: validateTx underpriced idHash=%x local=%t, feeCap=%d, cfg.MinFeeCap=%d", txn.IDHash, isLocal, txn.feeCap, p.cfg.MinFeeCap))
 		}
 		return UnderPriced
 	}
 	gas, reason := CalcIntrinsicGas(uint64(txn.dataLen), uint64(txn.dataNonZeroLen), nil, txn.creation, true, true)
 	if txn.traced {
-		log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IdHash, gas))
+		log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
 	if reason != Success {
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IdHash, reason))
+			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas calculated failed idHash=%x reason=%s", txn.IDHash, reason))
 		}
 		return reason
 	}
 	if gas > txn.gas {
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IdHash, gas, txn.gas))
+			log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.gas))
 		}
 		return IntrinsicGas
 	}
 	if uint64(p.all.count(txn.senderID)) > p.cfg.AccountSlots {
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IdHash, p.all.count(txn.senderID), p.cfg.AccountSlots))
+			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.senderID), p.cfg.AccountSlots))
 		}
 		return Spammer
 	}
@@ -679,7 +679,7 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool, stateCache kvcache.CacheV
 	senderNonce, senderBalance, _ := p.senders.info(stateCache, txn.senderID)
 	if senderNonce > txn.nonce {
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx nonce too low idHash=%x nonce in state=%d, txn.nonce=%d", txn.IdHash, senderNonce, txn.nonce))
+			log.Info(fmt.Sprintf("TX TRACING: validateTx nonce too low idHash=%x nonce in state=%d, txn.nonce=%d", txn.IDHash, senderNonce, txn.nonce))
 		}
 		return NonceTooLow
 	}
@@ -689,7 +689,7 @@ func (p *TxPool) validateTx(txn *TxSlot, isLocal bool, stateCache kvcache.CacheV
 	total.Add(total, &txn.value)
 	if senderBalance.Cmp(total) < 0 {
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IdHash, senderBalance, total))
+			log.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
 		}
 		return InsufficientFunds
 	}
@@ -773,7 +773,7 @@ func fillDiscardReasons(reasons []DiscardReason, newTxs TxSlots, discardReasonsL
 		if reasons[i] != NotSet {
 			continue
 		}
-		reason, ok := discardReasonsLRU.Get(string(newTxs.txs[i].IdHash[:]))
+		reason, ok := discardReasonsLRU.Get(string(newTxs.txs[i].IDHash[:]))
 		if ok {
 			reasons[i] = reason.(DiscardReason)
 		} else {
@@ -831,9 +831,9 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions TxSlots) ([]Di
 		if reason == Success {
 			txn := newTxs.txs[i]
 			if txn.traced {
-				log.Info(fmt.Sprintf("TX TRACING: AddLocalTxs promotes idHash=%x, senderId=%d", txn.IdHash, txn.senderID))
+				log.Info(fmt.Sprintf("TX TRACING: AddLocalTxs promotes idHash=%x, senderId=%d", txn.IDHash, txn.senderID))
 			}
-			p.promoted = append(p.promoted, txn.IdHash[:]...)
+			p.promoted = append(p.promoted, txn.IDHash[:]...)
 		}
 	}
 	if p.promoted.Len() > 0 {
@@ -881,7 +881,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	sendersWithChangedState := map[uint64]struct{}{}
 	discardReasons := make([]DiscardReason, len(newTxs.txs))
 	for i, txn := range newTxs.txs {
-		if found, ok := byHash[string(txn.IdHash[:])]; ok {
+		if found, ok := byHash[string(txn.IDHash[:])]; ok {
 			discardReasons[i] = DuplicateHash
 			// In case if the transation is stuck, "poke" it to rebroadcast
 			// TODO refactor to return the list of promoted hashes instead of using added inside the pool
@@ -889,11 +889,11 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 				switch found.currentSubPool {
 				case PendingSubPool:
 					if pending.adding {
-						pending.added = append(pending.added, found.Tx.IdHash[:]...)
+						pending.added = append(pending.added, found.Tx.IDHash[:]...)
 					}
 				case BaseFeeSubPool:
 					if baseFee.adding {
-						baseFee.added = append(baseFee.added, found.Tx.IdHash[:]...)
+						baseFee.added = append(baseFee.added, found.Tx.IDHash[:]...)
 					}
 				}
 			}
@@ -906,7 +906,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 		}
 		discardReasons[i] = NotSet
 		if txn.traced {
-			log.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IdHash, mt.Tx.senderID))
+			log.Info(fmt.Sprintf("TX TRACING: schedule sendersWithChangedState idHash=%x senderId=%d", txn.IDHash, mt.Tx.senderID))
 		}
 		sendersWithChangedState[mt.Tx.senderID] = struct{}{}
 	}
@@ -948,7 +948,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	// time (up to some "immutability threshold").
 	sendersWithChangedState := map[uint64]struct{}{}
 	for i, txn := range newTxs.txs {
-		if _, ok := byHash[string(txn.IdHash[:])]; ok {
+		if _, ok := byHash[string(txn.IDHash[:])]; ok {
 			continue
 		}
 		mt := newMetaTx(txn, newTxs.isLocal[i], blockNum)
@@ -1011,11 +1011,11 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 				switch found.currentSubPool {
 				case PendingSubPool:
 					if p.pending.adding {
-						p.pending.added = append(p.pending.added, found.Tx.IdHash[:]...)
+						p.pending.added = append(p.pending.added, found.Tx.IDHash[:]...)
 					}
 				case BaseFeeSubPool:
 					if p.baseFee.adding {
-						p.baseFee.added = append(p.baseFee.added, found.Tx.IdHash[:]...)
+						p.baseFee.added = append(p.baseFee.added, found.Tx.IDHash[:]...)
 					}
 				}
 			}
@@ -1036,7 +1036,7 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 		p.discardLocked(found, ReplacedByHigherTip)
 	}
 
-	p.byHash[string(mt.Tx.IdHash[:])] = mt
+	p.byHash[string(mt.Tx.IDHash[:])] = mt
 
 	if replaced := p.all.replaceOrInsert(mt); replaced != nil {
 		if ASSERT {
@@ -1045,7 +1045,7 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 	}
 
 	if mt.subPool&IsLocal != 0 {
-		p.isLocalLRU.Add(string(mt.Tx.IdHash[:]), struct{}{})
+		p.isLocalLRU.Add(string(mt.Tx.IDHash[:]), struct{}{})
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt)
@@ -1055,20 +1055,20 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 // dropping transaction from all sub-structures and from db
 // Important: don't call it while iterating by all
 func (p *TxPool) discardLocked(mt *metaTx, reason DiscardReason) {
-	delete(p.byHash, string(mt.Tx.IdHash[:]))
+	delete(p.byHash, string(mt.Tx.IDHash[:]))
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt)
-	p.discardReasonsLRU.Add(string(mt.Tx.IdHash[:]), reason)
+	p.discardReasonsLRU.Add(string(mt.Tx.IDHash[:]), reason)
 }
 
 func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
-	senderId, found := p.senders.getID(addr[:])
+	senderID, found := p.senders.getID(addr[:])
 	if !found {
 		return 0, false
 	}
-	return p.all.nonce(senderId)
+	return p.all.nonce(senderID)
 }
 
 // removeMined - apply new highest block (or batch of blocks)
@@ -1099,7 +1099,7 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*TxSlot, pending *Pending
 				return false
 			}
 			if mt.Tx.traced {
-				log.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IdHash, mt.Tx.senderID, mt.currentSubPool))
+				log.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.senderID, mt.currentSubPool))
 			}
 			toDel = append(toDel, mt)
 			// del from sub-pool
@@ -1137,11 +1137,11 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 	var toDel []*metaTx // can't delete items while iterate them
 	byNonce.ascend(senderID, func(mt *metaTx) bool {
 		if mt.Tx.traced {
-			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IdHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
+			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
 		}
 		if senderNonce > mt.Tx.nonce {
 			if mt.Tx.traced {
-				log.Info(fmt.Sprintf("TX TRACING: removing due to low nonce for idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IdHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
+				log.Info(fmt.Sprintf("TX TRACING: removing due to low nonce for idHash=%x senderID=%d, senderNonce=%d, txn.nonce=%d, currentSubPool=%s", mt.Tx.IDHash, senderID, senderNonce, mt.Tx.nonce, mt.currentSubPool))
 			}
 			// del from sub-pool
 			switch mt.currentSubPool {
@@ -1216,7 +1216,7 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 		}
 
 		if mt.Tx.traced {
-			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderId=%d subPool=%b", mt.Tx.IdHash, mt.Tx.senderID, mt.subPool))
+			log.Info(fmt.Sprintf("TX TRACING: onSenderStateChange loop iteration idHash=%x senderId=%d subPool=%b", mt.Tx.IDHash, mt.Tx.senderID, mt.subPool))
 		}
 
 		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
@@ -1313,7 +1313,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	for {
 		select {
 		case <-ctx.Done():
-			_, _ = p.flush(db)
+			_, _ = p.flush(ctx, db)
 			return
 		case <-logEvery.C:
 			p.logStats()
@@ -1333,12 +1333,12 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 		case <-commitEvery.C:
 			if db != nil && p.Started() {
 				t := time.Now()
-				written, err := p.flush(db)
+				written, err := p.flush(ctx, db)
 				if err != nil {
 					log.Error("[txpool] flush is local history", "err", err)
 					continue
 				}
-				writeToDbBytesCounter.Set(written)
+				writeToDBBytesCounter.Set(written)
 				log.Debug("[txpool] Commit", "written_kb", written/1024, "in", time.Since(t))
 			}
 		case h := <-newTxs:
@@ -1421,12 +1421,12 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	}
 }
 
-func (p *TxPool) flush(db kv.RwDB) (written uint64, err error) {
-	defer writeToDbTimer.UpdateDuration(time.Now())
+func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err error) {
+	defer writeToDBTimer.UpdateDuration(time.Now())
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	//it's important that write db tx is done inside lock, to make last writes visible for all read operations
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {
 			return err
@@ -1444,7 +1444,7 @@ func (p *TxPool) flush(db kv.RwDB) (written uint64, err error) {
 func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	for i, mt := range p.deletedTxs {
 		id := mt.Tx.senderID
-		idHash := mt.Tx.IdHash[:]
+		idHash := mt.Tx.IDHash[:]
 		if !p.all.hasTxs(id) {
 			addr, ok := p.senders.senderID2Addr[id]
 			if ok {
@@ -1708,7 +1708,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 		slot := mt.Tx
 		slotRlp := slot.rlp
 		if slot.rlp == nil {
-			v, err := tx.GetOne(kv.PoolTransaction, slot.IdHash[:])
+			v, err := tx.GetOne(kv.PoolTransaction, slot.IDHash[:])
 			if err != nil {
 				log.Warn("[txpool] foreach: get tx from db", "err", err)
 				return true
@@ -1727,7 +1727,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, DiscardReason) {
+func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList AccessList, isContractCreation, isHomestead, isEIP2028 bool) (uint64, DiscardReason) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -2034,19 +2034,19 @@ func (p *PendingPool) EnforceBestInvariants() {
 	sort.Sort(p.best)
 }
 
-func (p *PendingPool) Best() *metaTx {
+func (p *PendingPool) Best() *metaTx { //nolint
 	if len(p.best.ms) == 0 {
 		return nil
 	}
 	return p.best.ms[0]
 }
-func (p *PendingPool) Worst() *metaTx {
+func (p *PendingPool) Worst() *metaTx { //nolint
 	if len(p.worst.ms) == 0 {
 		return nil
 	}
 	return (p.worst.ms)[0]
 }
-func (p *PendingPool) PopWorst() *metaTx {
+func (p *PendingPool) PopWorst() *metaTx { //nolint
 	i := heap.Pop(p.worst).(*metaTx)
 	p.best.UnsafeRemove(i)
 	return i
@@ -2063,10 +2063,10 @@ func (p *PendingPool) Remove(i *metaTx) {
 
 func (p *PendingPool) Add(i *metaTx) {
 	if p.adding {
-		p.added = append(p.added, i.Tx.IdHash[:]...)
+		p.added = append(p.added, i.Tx.IDHash[:]...)
 	}
 	if i.Tx.traced {
-		log.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IdHash, i.Tx.senderID))
+		log.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IDHash, i.Tx.senderID))
 	}
 	i.currentSubPool = p.t
 	heap.Push(p.worst, i)
@@ -2108,24 +2108,24 @@ func (p *SubPool) EnforceInvariants() {
 	heap.Init(p.worst)
 	heap.Init(p.best)
 }
-func (p *SubPool) Best() *metaTx {
+func (p *SubPool) Best() *metaTx { //nolint
 	if len(p.best.ms) == 0 {
 		return nil
 	}
 	return p.best.ms[0]
 }
-func (p *SubPool) Worst() *metaTx {
+func (p *SubPool) Worst() *metaTx { //nolint
 	if len(p.worst.ms) == 0 {
 		return nil
 	}
 	return p.worst.ms[0]
 }
-func (p *SubPool) PopBest() *metaTx {
+func (p *SubPool) PopBest() *metaTx { //nolint
 	i := heap.Pop(p.best).(*metaTx)
 	heap.Remove(p.worst, i.worstIndex)
 	return i
 }
-func (p *SubPool) PopWorst() *metaTx {
+func (p *SubPool) PopWorst() *metaTx { //nolint
 	i := heap.Pop(p.worst).(*metaTx)
 	heap.Remove(p.best, i.bestIndex)
 	return i
@@ -2133,10 +2133,10 @@ func (p *SubPool) PopWorst() *metaTx {
 func (p *SubPool) Len() int { return p.best.Len() }
 func (p *SubPool) Add(i *metaTx) {
 	if p.adding {
-		p.added = append(p.added, i.Tx.IdHash[:]...)
+		p.added = append(p.added, i.Tx.IDHash[:]...)
 	}
 	if i.Tx.traced {
-		log.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IdHash, i.Tx.senderID))
+		log.Info(fmt.Sprintf("TX TRACING: moved to subpool %s, IdHash=%x, sender=%d", p.t, i.Tx.IDHash, i.Tx.senderID))
 	}
 	i.currentSubPool = p.t
 	heap.Push(p.best, i)

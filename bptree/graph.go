@@ -69,9 +69,9 @@ func (g *Node23Graph) saveDot(filename string, debug bool) {
 			down = "<D>D"
 			right = "<R>R"
 		}
-		var nodeId string
+		var nodeID string
 		if n.isLeaf {
-			next := ""
+			var next string
 			if n.keyCount() > 0 {
 				if n.nextKey() == nil {
 					next = "nil"
@@ -79,18 +79,18 @@ func (g *Node23Graph) saveDot(filename string, debug bool) {
 					next = strconv.FormatUint(uint64(*n.nextKey()), 10)
 				}
 				if debug {
-					nodeId = fmt.Sprintf("k=%v %s-%v", deref(n.keys[:len(n.keys)-1]), next, n.keys)
+					nodeID = fmt.Sprintf("k=%v %s-%v", deref(n.keys[:len(n.keys)-1]), next, n.keys)
 				} else {
-					nodeId = fmt.Sprintf("k=%v %s", deref(n.keys[:len(n.keys)-1]), next)
+					nodeID = fmt.Sprintf("k=%v %s", deref(n.keys[:len(n.keys)-1]), next)
 				}
 			} else {
-				nodeId = "k=[]"
+				nodeID = "k=[]"
 			}
 		} else {
 			if debug {
-				nodeId = fmt.Sprintf("k=%v-%v", deref(n.keys), n.keys)
+				nodeID = fmt.Sprintf("k=%v-%v", deref(n.keys), n.keys)
 			} else {
-				nodeId = fmt.Sprintf("k=%v", deref(n.keys))
+				nodeID = fmt.Sprintf("k=%v", deref(n.keys))
 			}
 		}
 		var color string
@@ -104,7 +104,7 @@ func (g *Node23Graph) saveDot(filename string, debug bool) {
 			ensure(!n.updated, fmt.Sprintf("saveDot: node %v is not exposed but updated", n))
 			color = palette[unexposedIndex]
 		}
-		s := fmt.Sprintf("%d [label=\"%s|{<C>%s|%s}|%s\" style=filled fillcolor=\"%s\"];\n", n.rawPointer(), left, nodeId, down, right, color)
+		s := fmt.Sprintf("%d [label=\"%s|{<C>%s|%s}|%s\" style=filled fillcolor=\"%s\"];\n", n.rawPointer(), left, nodeID, down, right, color)
 		if _, err := f.WriteString(s); err != nil {
 			log.Fatal(err)
 		}

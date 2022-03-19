@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -168,7 +169,7 @@ func (s *GrpcServer) FindUnknown(ctx context.Context, in *txpool_proto.TxHashes)
 }
 
 func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txpool_proto.AddReply, error) {
-	tx, err := s.db.BeginRo(context.Background())
+	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -192,14 +193,13 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		slots.txs[j] = &TxSlot{}
 		slots.isLocal[j] = true
 		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[j], slots.senders.At(j), false /* hasEnvelope */); err != nil {
-			switch err {
-			case ErrAlreadyKnown: // Noop, but need to handle to not count these
+			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
 				reply.Errors[i] = AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
-			case ErrRlpTooBig: // Noop, but need to handle to not count these
+			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
 				reply.Errors[i] = RLPTooLong.String()
 				reply.Imported[i] = txpool_proto.ImportResult_INVALID
-			default:
+			} else {
 				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpool_proto.ImportResult_INTERNAL_ERROR
 			}

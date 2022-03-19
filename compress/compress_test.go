@@ -74,6 +74,7 @@ func checksum(file string) uint32 {
 }
 
 func prepareDict(t *testing.T) *Decompressor {
+	t.Helper()
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()

@@ -239,18 +239,18 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 		if len(unknownHashes) > 0 {
 			var encodedRequest []byte
-			var messageId sentry.MessageId
+			var messageID sentry.MessageId
 			switch req.Id {
 			case sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66:
 				if encodedRequest, err = EncodeGetPooledTransactions66(unknownHashes, uint64(1), nil); err != nil {
 					return err
 				}
-				messageId = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
+				messageID = sentry.MessageId_GET_POOLED_TRANSACTIONS_66
 			default:
 				return fmt.Errorf("unexpected message: %s", req.Id.String())
 			}
 			if _, err = sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-				Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
+				Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
 				PeerId: req.PeerId,
 			}, &grpc.EmptyCallOption{}); err != nil {
 				return err
@@ -259,10 +259,10 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	case sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
 		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
-		var messageId sentry.MessageId
+		var messageID sentry.MessageId
 		switch req.Id {
 		case sentry.MessageId_GET_POOLED_TRANSACTIONS_66:
-			messageId = sentry.MessageId_POOLED_TRANSACTIONS_66
+			messageID = sentry.MessageId_POOLED_TRANSACTIONS_66
 			requestID, hashes, _, err := ParseGetPooledTransactions66(req.Data, 0, nil)
 			if err != nil {
 				return err
@@ -286,7 +286,7 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		}
 
 		if _, err := sentryClient.SendMessageById(f.ctx, &sentry.SendMessageByIdRequest{
-			Data:   &sentry.OutboundMessageData{Id: messageId, Data: encodedRequest},
+			Data:   &sentry.OutboundMessageData{Id: messageID, Data: encodedRequest},
 			PeerId: req.PeerId,
 		}, &grpc.EmptyCallOption{}); err != nil {
 			return err

@@ -44,7 +44,7 @@ type TxParsseConfig struct {
 type TxParseContext struct {
 	keccak1          hash.Hash
 	keccak2          hash.Hash
-	chainId, r, s, v uint256.Int // Signature values
+	chainID, r, s, v uint256.Int // Signature values
 	chainIDMul       uint256.Int
 	deriveChainID    uint256.Int // pre-allocated variable to calculate Sub(&ctx.v, &ctx.chainIDMul)
 	buf              [65]byte    // buffer needs to be enough for hashes (32 bytes) and for public key (65 bytes)
@@ -84,7 +84,7 @@ type TxSlot struct {
 	feeCap         uint64      // Maximum fee that transaction burns and gives to the miner/block proposer
 	gas            uint64      // Gas limit of the transaction
 	value          uint256.Int // Value transferred by the transaction
-	IdHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
+	IDHash         [32]byte    // Transaction hash for the purposes of using it as a transaction Id
 	senderID       uint64      // SenderID - require external mapping to it's address
 	traced         bool        // Whether transaction needs to be traced throughout transcation pool code and generate debug printing
 	creation       bool        // Set to true if "To" field of the transation is not set
@@ -309,7 +309,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	var vByte byte
 	sigHashEnd := p
 	sigHashLen := uint(sigHashEnd - sigHashPos)
-	var chainIdBits, chainIdLen int
+	var chainIDBits, chainIDLen int
 	if legacy {
 		p, err = rlp.U256(payload, p, &ctx.v)
 		if err != nil {
@@ -320,22 +320,22 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		if ctx.isProtected {
 			// Do not add chain id and two extra zeros
 			vByte = byte(ctx.v.Uint64() - 27)
-			ctx.chainId.Set(&ctx.cfg.chainID)
+			ctx.chainID.Set(&ctx.cfg.chainID)
 		} else {
-			ctx.chainId.Sub(&ctx.v, u256.N35)
-			ctx.chainId.Rsh(&ctx.chainId, 1)
-			if ctx.chainId.Cmp(&ctx.cfg.chainID) != 0 {
-				return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.chainId.Uint64(), ctx.cfg.chainID.Uint64())
+			ctx.chainID.Sub(&ctx.v, u256.N35)
+			ctx.chainID.Rsh(&ctx.chainID, 1)
+			if ctx.chainID.Cmp(&ctx.cfg.chainID) != 0 {
+				return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.chainID.Uint64(), ctx.cfg.chainID.Uint64())
 			}
 
-			chainIdBits = ctx.chainId.BitLen()
-			if chainIdBits <= 7 {
-				chainIdLen = 1
+			chainIDBits = ctx.chainID.BitLen()
+			if chainIDBits <= 7 {
+				chainIDLen = 1
 			} else {
-				chainIdLen = (chainIdBits + 7) / 8 // It is always < 56 bytes
+				chainIDLen = (chainIDBits + 7) / 8 // It is always < 56 bytes
 				sigHashLen++                       // For chainId len Prefix
 			}
-			sigHashLen += uint(chainIdLen) // For chainId
+			sigHashLen += uint(chainIDLen) // For chainId
 			sigHashLen += 2                // For two extra zeros
 
 			ctx.deriveChainID.Sub(&ctx.v, &ctx.chainIDMul)
@@ -352,10 +352,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		vByte = byte(v)
 		ctx.isProtected = true
-		ctx.chainId.Set(&ctx.cfg.chainID)
+		ctx.chainID.Set(&ctx.cfg.chainID)
 	}
-	if ctx.chainId.Cmp(&ctx.cfg.chainID) != 0 {
-		return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.chainId.Uint64(), ctx.cfg.chainID.Uint64())
+	if ctx.chainID.Cmp(&ctx.cfg.chainID) != 0 {
+		return 0, fmt.Errorf("%w: %s, %d (expected %d)", ErrParseTxn, "invalid chainID", ctx.chainID.Uint64(), ctx.cfg.chainID.Uint64())
 	}
 
 	// Next follows R of the signature
@@ -376,12 +376,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 	}
 	//ctx.keccak1.Sum(slot.IdHash[:0])
-	_, _ = ctx.keccak1.(io.Reader).Read(slot.IdHash[:32])
+	_, _ = ctx.keccak1.(io.Reader).Read(slot.IDHash[:32])
 	if !ctx.withSender {
 		return p, nil
 	}
 	if ctx.validateHash != nil {
-		if err := ctx.validateHash(slot.IdHash[:32]); err != nil {
+		if err := ctx.validateHash(slot.IDHash[:32]); err != nil {
 			return p, err
 		}
 	}
@@ -405,19 +405,19 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		return 0, fmt.Errorf("%w: computing signHash: %s", ErrParseTxn, err)
 	}
 	if legacy {
-		if chainIdLen > 0 {
-			if chainIdBits <= 7 {
-				ctx.buf[0] = byte(ctx.chainId.Uint64())
+		if chainIDLen > 0 {
+			if chainIDBits <= 7 {
+				ctx.buf[0] = byte(ctx.chainID.Uint64())
 				if _, err := ctx.keccak2.Write(ctx.buf[:1]); err != nil {
 					return 0, fmt.Errorf("%w: computing signHash (hashing legacy chainId): %s", ErrParseTxn, err)
 				}
 			} else {
-				binary.BigEndian.PutUint64(ctx.buf[1:9], ctx.chainId[3])
-				binary.BigEndian.PutUint64(ctx.buf[9:17], ctx.chainId[2])
-				binary.BigEndian.PutUint64(ctx.buf[17:25], ctx.chainId[1])
-				binary.BigEndian.PutUint64(ctx.buf[25:33], ctx.chainId[0])
-				ctx.buf[32-chainIdLen] = 128 + byte(chainIdLen)
-				if _, err = ctx.keccak2.Write(ctx.buf[32-chainIdLen : 33]); err != nil {
+				binary.BigEndian.PutUint64(ctx.buf[1:9], ctx.chainID[3])
+				binary.BigEndian.PutUint64(ctx.buf[9:17], ctx.chainID[2])
+				binary.BigEndian.PutUint64(ctx.buf[17:25], ctx.chainID[1])
+				binary.BigEndian.PutUint64(ctx.buf[25:33], ctx.chainID[0])
+				ctx.buf[32-chainIDLen] = 128 + byte(chainIDLen)
+				if _, err = ctx.keccak2.Write(ctx.buf[32-chainIDLen : 33]); err != nil {
 					return 0, fmt.Errorf("%w: computing signHash (hashing legacy chainId): %s", ErrParseTxn, err)
 				}
 			}
