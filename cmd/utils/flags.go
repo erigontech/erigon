@@ -330,7 +330,7 @@ var (
 	}
 
 	JWTSecretPath = cli.StringFlag{
-		Name:  "jwt-secret",
+		Name:  "authrpc.jwtsecret",
 		Usage: "Token to ensure safe connection between CL and EL",
 		Value: "jwt.hex",
 	}
