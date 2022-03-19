@@ -52,7 +52,7 @@ var DefaultFlags = []cli.Flag{
 	utils.HTTPPortFlag,
 	utils.EngineAddr,
 	utils.EnginePort,
-	JWTSecretPath,
+	utils.JWTSecretPath,
 	utils.HttpCompressionFlag,
 	utils.HTTPCORSDomainFlag,
 	utils.HTTPVirtualHostsFlag,
