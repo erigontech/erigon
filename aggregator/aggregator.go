@@ -688,10 +688,10 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 			totalRecords++
 			txKey = append(txKey[:8], key...)
 			// In the inital files and most merged file, the txKey is added to the file, but it gets removed in the final merge
-			if err = comp.AddWord(txKey); err != nil {
+			if err = comp.AddUncompressedWord(txKey); err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("produceChangeSets AddWord key: %w", err)
 			}
-			if err = comp.AddWord(before); err != nil {
+			if err = comp.AddUncompressedWord(before); err != nil {
 				return nil, nil, nil, nil, fmt.Errorf("produceChangeSets AddWord before: %w", err)
 			}
 			//if historyType == AccountHistory {
@@ -744,7 +744,7 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 	}
 	sort.Strings(idxKeys)
 	for _, key := range idxKeys {
-		if err = bitmapC.AddWord([]byte(key)); err != nil {
+		if err = bitmapC.AddUncompressedWord([]byte(key)); err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap add key: %w", err)
 		}
 		bitmap := bitmaps[key]
@@ -838,11 +838,11 @@ func btreeToFile(bt *btree.BTree, datPath, tmpdir string, trace bool, workers in
 	count := 0
 	bt.Ascend(func(i btree.Item) bool {
 		item := i.(*AggregateItem)
-		if err = comp.AddWord(item.k); err != nil {
+		if err = comp.AddUncompressedWord(item.k); err != nil {
 			return false
 		}
 		count++ // Only counting keys, not values
-		if err = comp.AddWord(item.v); err != nil {
+		if err = comp.AddUncompressedWord(item.v); err != nil {
 			return false
 		}
 		return true
@@ -945,8 +945,8 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 		aggregationStep: aggregationStep,
 		tracedKeys:      map[string]struct{}{},
 		keccak:          sha3.NewLegacyKeccak256(),
-		hph:             commitment.NewHexPatriciaHashed(length.Addr, nil, nil, nil, nil, nil),
-		aggChannel:      make(chan *AggregationTask),
+		hph:             commitment.NewHexPatriciaHashed(length.Addr, nil, nil, nil),
+		aggChannel:      make(chan *AggregationTask, 1024),
 		aggError:        make(chan error, 1),
 		mergeChannel:    make(chan struct{}, 1),
 		mergeError:      make(chan error, 1),
@@ -2065,18 +2065,6 @@ func (i *CommitmentItem) Less(than btree.Item) bool {
 	return bytes.Compare(i.hashedKey, than.(*CommitmentItem).hashedKey) < 0
 }
 
-func (w *Writer) lockFn() {
-	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
-		w.a.fileLocks[fType].RLock()
-	}
-}
-
-func (w *Writer) unlockFn() {
-	for fType := FirstType; fType < NumberOfStateTypes; fType++ {
-		w.a.fileLocks[fType].RUnlock()
-	}
-}
-
 func (w *Writer) branchFn(prefix []byte) []byte {
 	for lockFType := FirstType; lockFType < NumberOfStateTypes; lockFType++ {
 		w.a.fileLocks[lockFType].RLock()
@@ -2323,7 +2311,7 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 	}
 
 	w.a.hph.Reset()
-	w.a.hph.ResetFns(w.branchFn, w.accountFn, w.storageFn, w.lockFn, w.unlockFn)
+	w.a.hph.ResetFns(w.branchFn, w.accountFn, w.storageFn)
 	w.a.hph.SetTrace(trace)
 	branchNodeUpdates, err := w.a.hph.ProcessUpdates(plainKeys, hashedKeys, updates)
 	if err != nil {
@@ -2863,6 +2851,7 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 	if w.a.commitments {
 		typesLimit = AccountHistory
 	}
+	t0 := time.Now()
 	t := time.Now()
 	i := w.a.changesBtree.Get(&ChangesItem{startBlock: blockFrom, endBlock: blockTo})
 	if i == nil {
@@ -2897,12 +2886,17 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 		if fType < NumberOfStateTypes {
 			w.a.updateArch(aggTask.bt[fType], fType, uint32(aggTask.blockTo))
 		}
+	}
+	updateArchTime := time.Since(t)
+	t = time.Now()
+	for fType := FirstType; fType < typesLimit; fType++ {
 		w.a.addLocked(fType, &byEndBlockItem{startBlock: aggTask.blockFrom, endBlock: aggTask.blockTo, tree: aggTask.bt[fType]})
 	}
+	switchTime := time.Since(t)
 	w.a.aggChannel <- &aggTask
-	handoverTime := time.Since(t)
+	handoverTime := time.Since(t0)
 	if handoverTime > time.Second {
-		log.Info("Long handover to background aggregation", "from", blockFrom, "to", blockTo, "composition", aggTime, "handover", time.Since(t))
+		log.Info("Long handover to background aggregation", "from", blockFrom, "to", blockTo, "composition", aggTime, "arch update", updateArchTime, "switch", switchTime)
 	}
 	return nil
 }

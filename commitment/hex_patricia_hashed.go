@@ -78,8 +78,6 @@ type HexPatriciaHashed struct {
 	// Function used to load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	lockFn   func()
-	unlockFn func()
 	branchFn func(prefix []byte) []byte
 	// Function used to fetch account with given plain key
 	accountFn func(plainKey []byte, cell *Cell) []byte
@@ -97,8 +95,6 @@ func NewHexPatriciaHashed(accountKeyLen int,
 	branchFn func(prefix []byte) []byte,
 	accountFn func(plainKey []byte, cell *Cell) []byte,
 	storageFn func(plainKey []byte, cell *Cell) []byte,
-	lockFn func(),
-	unlockFn func(),
 ) *HexPatriciaHashed {
 	return &HexPatriciaHashed{
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
@@ -107,8 +103,6 @@ func NewHexPatriciaHashed(accountKeyLen int,
 		branchFn:      branchFn,
 		accountFn:     accountFn,
 		storageFn:     storageFn,
-		lockFn:        lockFn,
-		unlockFn:      unlockFn,
 	}
 }
 
@@ -835,14 +829,10 @@ func (hph *HexPatriciaHashed) ResetFns(
 	branchFn func(prefix []byte) []byte,
 	accountFn func(plainKey []byte, cell *Cell) []byte,
 	storageFn func(plainKey []byte, cell *Cell) []byte,
-	lockFn func(),
-	unlockFn func(),
 ) {
 	hph.branchFn = branchFn
 	hph.accountFn = accountFn
 	hph.storageFn = storageFn
-	hph.lockFn = lockFn
-	hph.unlockFn = unlockFn
 }
 
 func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
@@ -893,8 +883,6 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 }
 
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) error {
-	//hph.lockFn()
-	//defer hph.unlockFn()
 	branchData := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root

@@ -46,12 +46,6 @@ func NewMockState(t *testing.T) *MockState {
 	}
 }
 
-func (ms MockState) lockFn() {
-}
-
-func (ms MockState) unlockFn() {
-}
-
 func (ms MockState) branchFn(prefix []byte) []byte {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		return exBytes[2:] // Skip touchMap, but keep afterMap
@@ -401,7 +395,7 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 
 func TestEmptyState(t *testing.T) {
 	ms := NewMockState(t)
-	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn, ms.lockFn, ms.unlockFn)
+	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
 	plainKeys, hashedKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
@@ -486,7 +480,7 @@ func TestEmptyState(t *testing.T) {
 
 func TestEmptyUpdateState(t *testing.T) {
 	ms := NewMockState(t)
-	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn, ms.lockFn, ms.unlockFn)
+	hph := NewHexPatriciaHashed(1, ms.branchFn, ms.accountFn, ms.storageFn)
 	hph.SetTrace(false)
 	plainKeys, hashedKeys, updates := NewUpdateBuilder().
 		Balance("00", 4).
