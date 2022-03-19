@@ -157,6 +157,12 @@ var (
 		Name:  "healthcheck",
 		Usage: "Enable grpc health check",
 	}
+
+	JWTSecretPath = cli.StringFlag{
+		Name:  "jwt-secret",
+		Usage: "Token to ensure safe connection between CL and EL",
+		Value: "",
+	}
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -298,6 +304,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 		HttpPort:                ctx.GlobalInt(utils.HTTPPortFlag.Name),
 		EngineHTTPListenAddress: ctx.GlobalString(utils.EngineAddr.Name),
 		EnginePort:              ctx.GlobalInt(utils.EnginePort.Name),
+		JWTSecretPath:           ctx.GlobalString(utils.JWTSecretPath.Name),
 		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
 		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
