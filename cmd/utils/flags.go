@@ -329,6 +329,12 @@ var (
 		Value: node.DefaultEngineHTTPPort,
 	}
 
+	JWTSecretPath = cli.StringFlag{
+		Name:  "jwt-secret",
+		Usage: "Token to ensure safe connection between CL and EL",
+		Value: node.DefaultConfig.Http.JWTSecretPath,
+	}
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
