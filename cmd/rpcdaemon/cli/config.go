@@ -563,32 +563,24 @@ func isWebsocket(r *http.Request) bool {
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
 func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
-	var fileName string
-	if cfg.JWTSecretPath != JwtDefaultFile {
-		// path provided
-		fileName = cfg.JWTSecretPath
-	} else {
-		// no path provided, use default
-		fileName = JwtDefaultFile
-	}
 	// try reading from file
-	log.Info("Reading JWT secret", "path", fileName)
-	if data, err := os.ReadFile(fileName); err == nil {
+	log.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
+	if data, err := os.ReadFile(cfg.JWTSecretPath); err == nil {
 		jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
 		if len(jwtSecret) == 32 {
 			return jwtSecret, nil
 		}
-		log.Error("Invalid JWT secret", "path", fileName, "length", len(jwtSecret))
+		log.Error("Invalid JWT secret", "path", cfg.JWTSecretPath, "length", len(jwtSecret))
 		return nil, errors.New("invalid JWT secret")
 	}
 	// Need to generate one
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
 
-	if err := os.WriteFile(fileName, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
+	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
 		return nil, err
 	}
-	log.Info("Generated JWT secret", "path", fileName)
+	log.Info("Generated JWT secret", "path", cfg.JWTSecretPath)
 	return jwtSecret, nil
 }
 
