@@ -226,7 +226,7 @@ func (cf *ChangeFile) openFile(blockNum uint64, write bool) error {
 		cf.path = filepath.Join(cf.dir, fmt.Sprintf("%s.%d-%d.chg", cf.namebase, startBlock, endBlock))
 		var err error
 		if write {
-			if cf.file, err = os.OpenFile(cf.path, os.O_RDWR|os.O_CREATE, 0o755); err != nil {
+			if cf.file, err = os.OpenFile(cf.path, os.O_RDWR|os.O_CREATE, 0755); err != nil {
 				return err
 			}
 		} else {
