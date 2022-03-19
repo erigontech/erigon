@@ -99,7 +99,7 @@ func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNum
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, blockNumber)
+		stateReader = state.NewPlainState(tx, blockNumber+1)
 	}
 	return stateReader, nil
 }
