@@ -328,7 +328,7 @@ var (
 		Usage: "HTTP-RPC server listening port for the engineAPI",
 		Value: node.DefaultEngineHTTPPort,
 	}
-	
+
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
 		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
