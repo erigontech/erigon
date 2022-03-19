@@ -332,7 +332,7 @@ var (
 	JWTSecretPath = cli.StringFlag{
 		Name:  "jwt-secret",
 		Usage: "Token to ensure safe connection between CL and EL",
-		Value: node.DefaultConfig.Http.JWTSecretPath,
+		Value: "",
 	}
 
 	HttpCompressionFlag = cli.BoolFlag{
