@@ -15,7 +15,7 @@ var mockRequestCmd = &cobra.Command{
 	Short: "Mocks a request on the devnet",
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := requests.MockGetRequest(reqId); err != nil {
-			fmt.Printf("error mocking get request: %v", err)
+			fmt.Printf("error mocking get request: %v\n", err)
 		}
 	},
 }

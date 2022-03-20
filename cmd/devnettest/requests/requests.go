@@ -15,6 +15,7 @@ import (
 )
 
 func post(client *http.Client, url, request string, response interface{}) error {
+	fmt.Printf("Request: %+v\n", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
@@ -114,7 +115,7 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 	var b rpctest.EthGetLogs
 
 	if res := reqGen.Erigon("eth_getLogs", reqGen.getLogs(fromBlock, toBlock, address), &b); res.Err != nil {
-		return fmt.Errorf("Error fetching logs: %v\n", res.Err)
+		return fmt.Errorf("error fetching logs: %v\n", res.Err)
 	}
 
 	s, err := parseResponse(b)
@@ -123,5 +124,26 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 	}
 
 	fmt.Printf("Logs: %v\n", s)
+	return nil
+}
+
+func GetTransactionCount(reqId int, address common.Address, blockNum string) error {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.EthGetTransactionCount
+
+	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
+		return fmt.Errorf("error getting transaction count: %v\n", res.Err)
+	}
+
+	if b.Error != nil {
+		return fmt.Errorf("error populating response object: %v", b.Error)
+	}
+
+	s, err := parseResponse(b)
+	if err != nil {
+		return fmt.Errorf("error parsing resonse: %v", err)
+	}
+
+	fmt.Printf("Nonce: %v\n", s)
 	return nil
 }

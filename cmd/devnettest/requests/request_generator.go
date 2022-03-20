@@ -117,3 +117,8 @@ func (req *RequestGenerator) getLogs(fromBlock, toBlock uint64, address common.A
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, fromBlock, toBlock, address, req.reqID)
 }
+
+func (req *RequestGenerator) getTransactionCount(address common.Address, blockNum string) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getTransactionCount","params":["0x%x","%v"],"id":%d}`
+	return fmt.Sprintf(template, address, blockNum, req.reqID)
+}

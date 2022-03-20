@@ -1001,6 +1001,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "rinkeby")
 	case networkname.GoerliChainName:
 		filepath.Join(datadir, "goerli")
+	case networkname.KilnDevnetChainName:
+		filepath.Join(datadir, "kiln-devnet")
 	case networkname.SokolChainName:
 		return filepath.Join(datadir, "sokol")
 	case networkname.FermionChainName:
