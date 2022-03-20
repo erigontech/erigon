@@ -342,6 +342,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultPruneOrder,
 	)
 
+	mock.downloader.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
+
 	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
 	miningConfig.Noverify = false
@@ -507,6 +509,10 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
+}
+
+func (ms *MockSentry) SendPayloadRequest(message *engineapi.PayloadMessage) {
+	ms.downloader.Hd.BeaconRequestList.AddPayloadRequest(message)
 }
 
 func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage) {

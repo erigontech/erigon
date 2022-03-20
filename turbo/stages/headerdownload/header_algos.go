@@ -624,10 +624,7 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) RequestMoreHeadersForPOS(currentTime uint64) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-
+func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime uint64) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
 	anchor := hd.posAnchor
 	if anchor == nil {
 		log.Trace("No PoS anchor")
@@ -850,8 +847,10 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 			return err
 		}
 		if hh != nil {
+			log.Info("Synced", "requestId", hd.requestId)
 			hd.posAnchor = nil
 			hd.posStatus = Synced
+			hd.BeaconRequestList.Interrupt(engineapi.Synced)
 			return nil
 		}
 
@@ -1362,9 +1361,6 @@ const (
 )
 
 func (hd *HeaderDownload) cleanUpPoSDownload() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-
 	if hd.headersCollector != nil {
 		hd.headersCollector.Close()
 		hd.headersCollector = nil
@@ -1385,43 +1381,44 @@ func (hd *HeaderDownload) StartPoSDownloader(
 		defer logEvery.Stop()
 
 		for {
-			if hd.PosStatus() == Syncing {
-				currentTime := uint64(time.Now().Unix())
-				timeout, req, penalties := hd.RequestMoreHeadersForPOS(currentTime)
+			var req *HeaderRequest
+			var penalties []PenaltyItem
+			var currentTime uint64
+
+			hd.lock.Lock()
+			if hd.posStatus == Syncing {
+				currentTime = uint64(time.Now().Unix())
+				var timeout bool
+				timeout, req, penalties = hd.requestMoreHeadersForPOS(currentTime)
 				if timeout {
-					requestId := hd.RequestId()
-					log.Warn("Timeout", "requestId", requestId)
-					hd.BeaconRequestList.Remove(requestId)
+					log.Warn("Timeout", "requestId", hd.requestId)
+					hd.BeaconRequestList.Remove(hd.requestId)
 					hd.cleanUpPoSDownload()
-					continue
-				}
-
-				if hd.PosStatus() == Synced {
-					log.Info("Synced", "requestId", hd.RequestId())
-					hd.BeaconRequestList.Interrupt(engineapi.Synced)
-					continue
-				}
-
-				if req != nil {
-					_, sentToPeer := headerReqSend(ctx, req)
-					if sentToPeer {
-						// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-						hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-						log.Trace("Sent request", "height", req.Number)
-					}
-				}
-				if len(penalties) > 0 {
-					penalize(ctx, penalties)
 				}
 			} else {
 				prevProgress = 0
+			}
+			hd.lock.Unlock()
+
+			if req != nil {
+				_, sentToPeer := headerReqSend(ctx, req)
+				if sentToPeer {
+					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+					hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+					log.Trace("Sent request", "height", req.Number)
+				}
+			}
+			if len(penalties) > 0 {
+				penalize(ctx, penalties)
 			}
 
 			// Sleep and check for logs
 			timer := time.NewTimer(2 * time.Millisecond)
 			select {
 			case <-ctx.Done():
+				hd.lock.Lock()
 				hd.cleanUpPoSDownload()
+				hd.lock.Unlock()
 				hd.BeaconRequestList.Interrupt(engineapi.Stopping)
 				return
 			case <-logEvery.C:

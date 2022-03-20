@@ -451,7 +451,8 @@ func verifyAndSaveNewPoSHeader(
 		}
 	} else {
 		// Side chain or something weird
-		// TODO(yperbasis): Handle weird cases on the canonical chain
+		// TODO(yperbasis): considered non-canonical because some missing headers were donloaded but not canonized
+		// Or it's not a problem because forkChoice is updated frequently?
 		if requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_ACCEPTED}
 		}
