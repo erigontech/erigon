@@ -120,6 +120,7 @@ func (rl *RequestList) WaitForRequest(onlyNew bool) (interrupt Interrupt, id int
 		interrupt = rl.interrupt
 		if interrupt != None {
 			if interrupt != Stopping {
+				// clear the interrupt
 				rl.interrupt = None
 			}
 			return
@@ -150,6 +151,7 @@ func (rl *RequestList) Remove(id int) {
 	defer rl.syncCond.L.Unlock()
 
 	rl.requests.Remove(id)
+	// no need to broadcast
 }
 
 func (rl *RequestList) SetStatus(id int, status RequestStatus) {
@@ -160,4 +162,6 @@ func (rl *RequestList) SetStatus(id int, status RequestStatus) {
 	if found {
 		value.(*RequestWithStatus).Status = status
 	}
+
+	rl.syncCond.Broadcast()
 }
