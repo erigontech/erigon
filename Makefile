@@ -85,6 +85,9 @@ db-tools:
 	cp libmdbx/mdbx_stat $(GOBIN)
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
+torrent_hashes_update:
+	./cmd/downloader/auto_update.sh mainnet
+
 test:
 	$(GOTEST) --timeout 30m
 
