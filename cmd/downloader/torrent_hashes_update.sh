@@ -22,7 +22,7 @@ git push
 
 # update Erigon submodule
 cd ./../erigon
-cd turbo/snapshotsync/snapshothashes/erigon-snapshot
+cd turbo/snapshotsync/snapshothashes/erigon-snapshots
 git checkout main
 git pull
 cd ../../../../
