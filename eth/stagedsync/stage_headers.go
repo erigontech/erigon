@@ -1138,7 +1138,8 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		break
 	}
-
+	var prevBytesCompleted uint64
+	var interval = 10 * time.Second
 	// Print download progress until all segments are available
 	for {
 		select {
@@ -1153,10 +1154,15 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		} else if reply.Completed {
 			break
 		} else {
+			readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(interval.Seconds())
+			//result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
+
 			readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness))
+			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
+				"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+			)
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(interval)
 	}
 
 	if err := tx.Put(kv.DatabaseInfo, []byte(readyKey), []byte{1}); err != nil {
