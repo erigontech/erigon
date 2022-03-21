@@ -298,6 +298,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 		HttpPort:                ctx.GlobalInt(utils.HTTPPortFlag.Name),
 		EngineHTTPListenAddress: ctx.GlobalString(utils.EngineAddr.Name),
 		EnginePort:              ctx.GlobalInt(utils.EnginePort.Name),
+		JWTSecretPath:           ctx.GlobalString(utils.JWTSecretPath.Name),
 		HttpCORSDomain:          strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
 		HttpVirtualHost:         strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
 		API:                     strings.Split(ctx.GlobalString(utils.HTTPApiFlag.Name), ","),
