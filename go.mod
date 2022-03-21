@@ -4,10 +4,7 @@ go 1.16
 
 replace github.com/etcd-io/bbolt => go.etcd.io/bbolt v1.3.5
 
-
-replace (
-	github.com/ledgerwatch/erigon-lib => ./../erigon-lib
-)
+replace github.com/ledgerwatch/erigon-lib => ./../erigon-lib
 
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
@@ -45,7 +42,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220321040948-b3cbcf709805
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220321064242-9e5a50069c63
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/magiconair/properties v1.8.6 // indirect
