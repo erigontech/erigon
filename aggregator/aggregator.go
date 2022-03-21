@@ -1093,7 +1093,7 @@ func NewAggregator(diffDir string, unwindLimit uint64, aggregationStep uint64, c
 func (a *Aggregator) rebuildRecentState() error {
 	t := time.Now()
 	var err error
-	a.changesBtree.Descend(func(i btree.Item) bool {
+	a.changesBtree.Ascend(func(i btree.Item) bool {
 		item := i.(*ChangesItem)
 		for fType := FirstType; fType < NumberOfStateTypes; fType++ {
 			var changes Changes
