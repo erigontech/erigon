@@ -675,22 +675,6 @@ func latestSegment(dir string, ofType Type) (uint64, error) {
 	}
 	return maxBlock - 1, nil
 }
-func latestIdx(dir string, ofType Type) (uint64, error) {
-	files, err := idxFilesOfType(dir, ofType)
-	if err != nil {
-		return 0, err
-	}
-	var maxBlock uint64
-	for _, f := range files {
-		if maxBlock < f.To {
-			maxBlock = f.To
-		}
-	}
-	if maxBlock == 0 {
-		return 0, nil
-	}
-	return maxBlock - 1, nil
-}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -813,6 +797,7 @@ func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	return noGaps(noOverlaps(res))
 }
 
+// nolint
 func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
