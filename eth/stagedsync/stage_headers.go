@@ -992,7 +992,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if !cfg.snapshots.SegmentsReady() {
+	if !cfg.snapshots.SegmentsReady() || cfg.snapshots.SegmentsAvailable() < cfg.snapshotHashesCfg.ExpectBlocks {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
 		}
