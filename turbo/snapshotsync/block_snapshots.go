@@ -388,6 +388,35 @@ func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error)
 	}
 	return
 }
+func (s *RoSnapshots) idxAvailability() uint64 {
+	var headers, bodies, txs uint64
+	for i := len(s.Headers.segments); i >= 0; i++ {
+		seg := s.Headers.segments[i]
+		if seg.idxHeaderHash == nil {
+			continue
+		}
+		headers = seg.To - 1
+		break
+	}
+	for i := len(s.Bodies.segments); i >= 0; i++ {
+		seg := s.Bodies.segments[i]
+		if seg.idxBodyNumber == nil {
+			continue
+		}
+		bodies = seg.To - 1
+		break
+	}
+
+	for i := len(s.Txs.segments); i >= 0; i++ {
+		seg := s.Txs.segments[i]
+		if seg.IdxTxnId == nil || seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
+			continue
+		}
+		txs = seg.To - 1
+		break
+	}
+	return min(headers, min(bodies, txs))
+}
 
 func (s *RoSnapshots) ReopenIndices() error {
 	return s.ReopenSomeIndices(AllSnapshotTypes...)
@@ -429,14 +458,7 @@ Loop:
 		}
 	}
 
-	//TODO: make calculatable?
-	segments := s.Headers.segments
-	if len(segments) > 0 && segments[len(segments)-1].To > 0 {
-		s.idxAvailable.Store(segments[len(segments)-1].To - 1)
-	} else {
-		s.idxAvailable.Store(0)
-	}
-
+	s.idxAvailable.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return nil
 }
