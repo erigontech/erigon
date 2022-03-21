@@ -222,6 +222,10 @@ func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Ge
 	buf := make([]byte, 128)
 	if err := back.sn.Headers.View(func(segments []*HeaderSegment) error {
 		for i := len(segments) - 1; i >= 0; i-- {
+			if segments[i].idxHeaderHash == nil {
+				continue
+			}
+
 			h, err = back.headerFromSnapshotByHash(hash, segments[i], buf)
 			if err != nil {
 				return err
@@ -549,6 +553,9 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
+		if sn.IdxTxnId == nil || sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
+			continue
+		}
 
 		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
 		offset := reader.Lookup(txnHash[:])
