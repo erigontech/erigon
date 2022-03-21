@@ -238,7 +238,7 @@ func writeRawBodyDeprecated(db kv.StatelessRwTx, hash common.Hash, number uint64
 		return fmt.Errorf("failed to write body: %w", err)
 	}
 	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId); err != nil {
-		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
+		return fmt.Errorf("failed to WriteRawTransactions: %w, blockNum=%d", err, number)
 	}
 	return nil
 }

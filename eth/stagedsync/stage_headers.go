@@ -529,7 +529,7 @@ func HeadersPOW(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg); err != nil {
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
 		return err
 	}
 
@@ -944,21 +944,24 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
 	if cfg.snapshots == nil {
 		return nil
 	}
 
-	if !cfg.snapshots.SegmentsReady() || cfg.snapshots.SegmentsAvailable() < cfg.snapshotHashesCfg.ExpectBlocks {
+	if !initialCycle {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
 		}
-		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if err := cfg.snapshots.ReopenSegments(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
+		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if cfg.snapshots.SegmentsAvailable() < expect {
 			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.SegmentsAvailable())
+		}
+		if err := cfg.snapshots.ReopenIndices(); err != nil {
+			return fmt.Errorf("ReopenIndices: %w", err)
 		}
 	}
 
@@ -1084,25 +1087,34 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		break
 	}
+	var prevBytesCompleted uint64
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
 	// Print download progress until all segments are available
+Loop:
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
+		case <-logEvery.C:
+			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+				log.Warn("Error while waiting for snapshots progress", "err", err)
+			} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
+				log.Warn("Downloader has not enough snapshots (yet)")
+			} else if reply.Completed {
+				break Loop
+			} else {
+				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
+				//result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
+
+				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
+				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
+					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+				)
+				prevBytesCompleted = reply.BytesCompleted
+			}
 		}
-		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
-			log.Warn("Downloader has not enough snapshots (yet)")
-		} else if reply.Completed {
-			break
-		} else {
-			readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness))
-		}
-		time.Sleep(10 * time.Second)
 	}
 
 	if err := tx.Put(kv.DatabaseInfo, []byte(readyKey), []byte{1}); err != nil {
