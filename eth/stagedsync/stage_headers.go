@@ -59,6 +59,7 @@ type HeadersCfg struct {
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
+	downloaderCalled   bool
 	blockReader        interfaces.FullBlockReader
 }
 
@@ -992,6 +993,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
+	if !cfg.downloaderCalled {
+		fmt.Printf("called: %t\n", cfg.downloaderCalled)
+		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
+			return err
+		}
+		if err := cfg.snapshots.ReopenSegments(); err != nil {
+			return fmt.Errorf("ReopenSegments: %w", err)
+		}
+		cfg.downloaderCalled = true
+	}
 	if !cfg.snapshots.SegmentsReady() || cfg.snapshots.SegmentsAvailable() < cfg.snapshotHashesCfg.ExpectBlocks {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
