@@ -10,7 +10,6 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"golang.org/x/time/rate"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -49,7 +48,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, downloadRate, uploadRate data
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*16384) // default: unlimited
+	//torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*16384) // default: unlimited
 	//torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
 
 	// debug
