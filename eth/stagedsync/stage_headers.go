@@ -257,15 +257,9 @@ func handleForkChoice(
 
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
-		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-		}
-
 		hashToDownload := headerHash
 		heighToDownload := cfg.hd.TopSeenHeight() // approximate
-		attemptPoSDownload(requestId, hashToDownload, heighToDownload, s, cfg)
-
+		attemptPoSDownload(requestStatus, requestId, hashToDownload, heighToDownload, s, cfg)
 		return nil
 	}
 
@@ -364,15 +358,9 @@ func handleNewPayload(
 
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
-		cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
-		}
-
 		hashToDownload := header.ParentHash
 		heightToDownload := headerNumber - 1
-		attemptPoSDownload(requestId, hashToDownload, heightToDownload, s, cfg)
-
+		attemptPoSDownload(requestStatus, requestId, hashToDownload, heightToDownload, s, cfg)
 		return nil
 	}
 
@@ -464,12 +452,18 @@ func verifyAndSaveNewPoSHeader(
 }
 
 func attemptPoSDownload(
+	requestStatus engineapi.RequestStatus,
 	requestId int,
 	hashToDownload common.Hash,
 	heightToDownload uint64,
 	s *StageState,
 	cfg HeadersCfg,
 ) {
+	if requestStatus == engineapi.New {
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}
+	}
+	cfg.hd.BeaconRequestList.SetStatus(requestId, engineapi.DataWasMissing)
+
 	cfg.hd.SetPOSSync(true)
 
 	if cfg.hd.PosStatus() != headerdownload.Idle {
