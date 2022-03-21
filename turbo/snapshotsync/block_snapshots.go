@@ -1385,12 +1385,11 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, txsSegment *T
 	if err != nil {
 		return err
 	}
+	txnHashIdx.LogLvl(log.LvlDebug)
+	txnIdIdx.LogLvl(log.LvlDebug)
+	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 RETRY:
-	txnHashIdx.NoLogs(true)
-	txnIdIdx.NoLogs(true)
-	txnHash2BlockNumIdx.NoLogs(true)
-
 	ch := forEachAsync(ctx, d)
 	type txHashWithOffet struct {
 		txnHash   [32]byte
@@ -1675,6 +1674,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
+	rs.LogLvl(log.LvlDebug)
 
 RETRY:
 	ch := forEachAsync(ctx, d)
