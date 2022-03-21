@@ -1138,7 +1138,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		break
 	}
-	var prevBytesCompleted uint64
+	//var prevBytesCompleted uint64
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
