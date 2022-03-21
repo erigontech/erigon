@@ -6,12 +6,20 @@ network=$2
 #git reset --hard
 #git checkout devel
 #git pull
+
+# clean
+cd ./../erigon-snapshots
+git reset --hard
+git pull
+cd ../erigon
+
 # it will return only .seg of 500K (because Erigon send to Downloader only such files)
-go run -trimpath ./cmd/downloader torrent_hashes --datadir="$datadir" > ./../erigon-snpshots/"$network".toml
+go run -trimpath ./cmd/downloader torrent_hashes --datadir="$datadir" >./../erigon-snpshots/"$network".toml
 cd ./../erigon-snapshots
 git add "$network".toml
 git commit -m "ci: $network"
 git push
+
 # update Erigon submodule
 cd ./../erigon
 cd turbo/snapshotsync/snapshothashes/erigon-snapshots
