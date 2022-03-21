@@ -376,18 +376,6 @@ func (s *RoSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err e
 	}
 	return
 }
-func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error) {
-	if headers, err = latestIdx(s.dir, Headers); err != nil {
-		return
-	}
-	if bodies, err = latestIdx(s.dir, Bodies); err != nil {
-		return
-	}
-	if txs, err = latestIdx(s.dir, Transactions); err != nil {
-		return
-	}
-	return
-}
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
 	for i := len(s.Headers.segments); i >= 0; i++ {
