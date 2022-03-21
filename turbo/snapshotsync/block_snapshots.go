@@ -675,22 +675,6 @@ func latestSegment(dir string, ofType Type) (uint64, error) {
 	}
 	return maxBlock - 1, nil
 }
-func latestIdx(dir string, ofType Type) (uint64, error) {
-	files, err := idxFilesOfType(dir, ofType)
-	if err != nil {
-		return 0, err
-	}
-	var maxBlock uint64
-	for _, f := range files {
-		if maxBlock < f.To {
-			maxBlock = f.To
-		}
-	}
-	if maxBlock == 0 {
-		return 0, nil
-	}
-	return maxBlock - 1, nil
-}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -813,6 +797,7 @@ func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	return noGaps(noOverlaps(res))
 }
 
+// nolint
 func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
@@ -1385,12 +1370,11 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, txsSegment *T
 	if err != nil {
 		return err
 	}
+	txnHashIdx.LogLvl(log.LvlDebug)
+	txnIdIdx.LogLvl(log.LvlDebug)
+	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 RETRY:
-	txnHashIdx.NoLogs(true)
-	txnIdIdx.NoLogs(true)
-	txnHash2BlockNumIdx.NoLogs(true)
-
 	ch := forEachAsync(ctx, d)
 	type txHashWithOffet struct {
 		txnHash   [32]byte
@@ -1675,6 +1659,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
+	rs.LogLvl(log.LvlDebug)
 
 RETRY:
 	ch := forEachAsync(ctx, d)
