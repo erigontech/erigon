@@ -1003,6 +1003,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if cfg.snapshots.SegmentsAvailable() < expect {
 			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.SegmentsAvailable())
 		}
+		if err := cfg.snapshots.ReopenIndices(); err != nil {
+			return fmt.Errorf("ReopenIndices: %w", err)
+		}
 	}
 
 	// Create .idx files
