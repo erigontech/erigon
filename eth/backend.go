@@ -312,7 +312,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
-		allSnapshots.AsyncOpenAll(ctx)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {

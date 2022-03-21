@@ -397,7 +397,7 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 	}
 	if res := cfg.blockRetire.Result(); res != nil {
 		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w", s.LogPrefix(), res.Err)
+			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
 		}
 	}
 	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
