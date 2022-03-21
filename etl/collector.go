@@ -28,7 +28,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -47,7 +46,7 @@ type Collector struct {
 	dataProviders   []dataProvider
 	allFlushed      bool
 	autoClean       bool
-	noLogs          bool
+	logLvl          log.Lvl
 	bufType         int
 	logPrefix       string
 }
@@ -84,7 +83,7 @@ func NewCriticalCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Coll
 }
 
 func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
-	c := &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), logPrefix: logPrefix}
+	c := &Collector{autoClean: true, bufType: getTypeByBuffer(sortableBuffer), logPrefix: logPrefix, logLvl: log.LvlInfo}
 
 	c.flushBuffer = func(currentKey []byte, canStoreInRam bool) error {
 		if sortableBuffer.Len() == 0 {
@@ -98,7 +97,7 @@ func NewCollector(logPrefix, tmpdir string, sortableBuffer Buffer) *Collector {
 			c.allFlushed = true
 		} else {
 			doFsync := !c.autoClean /* is critical collector */
-			provider, err = FlushToDisk(sortableBuffer, tmpdir, doFsync, c.noLogs)
+			provider, err = FlushToDisk(sortableBuffer, tmpdir, doFsync, c.logLvl)
 		}
 		if err != nil {
 			return err
@@ -125,7 +124,7 @@ func (c *Collector) Collect(k, v []byte) error {
 	return c.extractNextFunc(k, k, v)
 }
 
-func (c *Collector) NoLogs(v bool) { c.noLogs = v }
+func (c *Collector) LogLvl(v log.Lvl) { c.logLvl = v }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
 	defer func() {
@@ -150,7 +149,7 @@ func (c *Collector) Close() {
 		totalSize += p.Dispose()
 	}
 	if totalSize > 0 {
-		log.Info(fmt.Sprintf("[%s] etl: temp files removed", c.logPrefix), "total size", datasize.ByteSize(totalSize).HumanReadable())
+		log.Log(c.logLvl, fmt.Sprintf("[%s] etl: temp files removed", c.logPrefix), "total size", common.ByteCount(totalSize))
 	}
 }
 

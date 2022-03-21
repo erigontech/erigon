@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 )
 
@@ -172,6 +173,15 @@ func (rs *RecSplit) Close() {
 	}
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
+	}
+}
+
+func (rs *RecSplit) LogLvl(lvl log.Lvl) {
+	if rs.bucketCollector != nil {
+		rs.bucketCollector.LogLvl(lvl)
+	}
+	if rs.offsetCollector != nil {
+		rs.offsetCollector.LogLvl(lvl)
 	}
 }
 
@@ -325,15 +335,6 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 	rs.keysAdded++
 	rs.prevOffset = offset
 	return nil
-}
-
-func (rs *RecSplit) NoLogs(v bool) {
-	if rs.bucketCollector != nil {
-		rs.bucketCollector.NoLogs(v)
-	}
-	if rs.offsetCollector != nil {
-		rs.offsetCollector.NoLogs(v)
-	}
 }
 
 func (rs *RecSplit) recsplitCurrentBucket() error {
