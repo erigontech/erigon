@@ -59,7 +59,6 @@ type HeadersCfg struct {
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
-	downloaderCalled   bool
 	blockReader        interfaces.FullBlockReader
 }
 
@@ -573,7 +572,7 @@ func HeadersPOW(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg); err != nil {
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
 		return err
 	}
 
@@ -988,29 +987,19 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 	return nil
 }
 
-func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
+func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
 	if cfg.snapshots == nil {
 		return nil
 	}
 
-	if !cfg.downloaderCalled {
-		fmt.Printf("called: %t\n", cfg.downloaderCalled)
+	if !initialCycle {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
 		}
 		if err := cfg.snapshots.ReopenSegments(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
-		}
-		cfg.downloaderCalled = true
-	}
-	if !cfg.snapshots.SegmentsReady() || cfg.snapshots.SegmentsAvailable() < cfg.snapshotHashesCfg.ExpectBlocks {
-		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
-			return err
 		}
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
-		if err := cfg.snapshots.ReopenSegments(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
-		}
 		if cfg.snapshots.SegmentsAvailable() < expect {
 			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.SegmentsAvailable())
 		}
