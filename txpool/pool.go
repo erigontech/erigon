@@ -1680,7 +1680,7 @@ func (p *TxPool) logStats() {
 	if cacheKeys > 0 {
 		ctx = append(ctx, "cache_keys", cacheKeys)
 	}
-	ctx = append(ctx, "alloc_mb", m.Alloc/1024/1024, "sys_mb", m.Sys/1024/1024)
+	ctx = append(ctx, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	log.Info("[txpool] stat", ctx...)
 	//if ASSERT {
 	//stats := kvcache.DebugStats(p.senders.cache)
