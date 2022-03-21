@@ -996,37 +996,12 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
 		}
-
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-
-		// Open segments
-		for {
-			headers, bodies, txs, err := cfg.snapshots.SegmentsAvailability()
-			if err != nil {
-				return err
-			}
-			expect := cfg.snapshotHashesCfg.ExpectBlocks
-			if headers >= expect && bodies >= expect && txs >= expect {
-				if err := cfg.snapshots.ReopenSegments(); err != nil {
-					return fmt.Errorf("ReopenSegments: %w", err)
-				}
-				if expect > cfg.snapshots.BlocksAvailable() {
-					return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.BlocksAvailable())
-				}
-
-				break
-			}
-			log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
-			time.Sleep(10 * time.Second)
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Waiting for snapshots up to block %d...", s.LogPrefix(), expect), "headers", headers, "bodies", bodies, "txs", txs)
-			default:
-			}
+		expect := cfg.snapshotHashesCfg.ExpectBlocks
+		if err := cfg.snapshots.ReopenSegments(); err != nil {
+			return fmt.Errorf("ReopenSegments: %w", err)
+		}
+		if cfg.snapshots.SegmentsAvailable() < expect {
+			return fmt.Errorf("not enough snapshots available: %d > %d", expect, cfg.snapshots.SegmentsAvailable())
 		}
 	}
 

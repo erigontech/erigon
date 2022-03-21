@@ -333,8 +333,8 @@ type RoSnapshots struct {
 	Txs     *txnSegments
 
 	dir               string
-	segmentsAvailable atomic.Uint64
-	idxAvailable      atomic.Uint64
+	segmentsAvailable atomic.Uint64 // all types of .seg files are available - up to this number
+	idxAvailable      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg               ethconfig.Snapshot
 }
 
@@ -563,6 +563,7 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 }
 
 func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, lvl log.Lvl) error {
+	log.Log(lvl, "[snapshots] Build indices", "from", from)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -995,7 +996,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return err
 	}
 	log.Log(lvl, "[snapshots] Merge done. Indexing new segments", "from", ranges[0].from)
-	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, ranges[0].from, lvl); err != nil {
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, min(ranges[0].from, snapshots.IndicesAvailable()), lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
 	}
 	if err := snapshots.ReopenIndices(); err != nil {
