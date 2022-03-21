@@ -1139,30 +1139,32 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		break
 	}
 	var prevBytesCompleted uint64
-	var interval = 10 * time.Second
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
 	// Print download progress until all segments are available
+Loop:
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
-		}
-		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
-			log.Warn("Downloader has not enough snapshots (yet)")
-		} else if reply.Completed {
-			break
-		} else {
-			readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(interval.Seconds())
-			//result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
+		case <-logEvery.C:
+			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+				log.Warn("Error while waiting for snapshots progress", "err", err)
+			} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
+				log.Warn("Downloader has not enough snapshots (yet)")
+			} else if reply.Completed {
+				break Loop
+			} else {
+				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
+				//result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
 
-			readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-			log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
-				"download", libcommon.ByteCount(readBytesPerSec)+"/s",
-			)
+				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
+				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
+					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+				)
+			}
 		}
-		time.Sleep(interval)
 	}
 
 	if err := tx.Put(kv.DatabaseInfo, []byte(readyKey), []byte{1}); err != nil {
