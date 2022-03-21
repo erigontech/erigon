@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-network=$1
-datadir=$2
+datadir=$1
+network=$2
 
 #git reset --hard
 #git checkout devel
