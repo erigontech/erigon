@@ -449,10 +449,10 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
-			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -709,6 +709,8 @@ func TmpFiles(dir string) (res []string, err error) {
 	return res, nil
 }
 
+var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
+
 func noGaps(in []FileInfo) (out []FileInfo, err error) {
 	var prevTo uint64
 	for _, f := range in {
@@ -716,7 +718,7 @@ func noGaps(in []FileInfo) (out []FileInfo, err error) {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("snapshot missed: from %d to %d", prevTo, f.From)
+			return nil, fmt.Errorf("%w: from %d to %d", ErrSnapshotMissed, prevTo, f.From)
 		}
 		prevTo = f.To
 		out = append(out, f)
