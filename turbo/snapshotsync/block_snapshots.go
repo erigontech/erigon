@@ -378,7 +378,7 @@ func (s *RoSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err e
 }
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
-	for i := len(s.Headers.segments) - 1; i >= 0; i++ {
+	for i := len(s.Headers.segments) - 1; i >= 0; i-- {
 		seg := s.Headers.segments[i]
 		if seg.idxHeaderHash == nil {
 			continue
@@ -386,7 +386,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		headers = seg.To - 1
 		break
 	}
-	for i := len(s.Bodies.segments) - 1; i >= 0; i++ {
+	for i := len(s.Bodies.segments) - 1; i >= 0; i-- {
 		seg := s.Bodies.segments[i]
 		if seg.idxBodyNumber == nil {
 			continue
@@ -395,7 +395,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		break
 	}
 
-	for i := len(s.Txs.segments) - 1; i >= 0; i++ {
+	for i := len(s.Txs.segments) - 1; i >= 0; i-- {
 		seg := s.Txs.segments[i]
 		if seg.IdxTxnId == nil || seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
 			continue
