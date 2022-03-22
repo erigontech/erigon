@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
@@ -623,17 +624,34 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) RequestMoreHeadersForPOS() HeaderRequest {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	// Assemble the request
-	return HeaderRequest{
-		Hash:    hd.hashToDownloadPoS,
-		Number:  hd.heightToDownloadPoS,
+func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime uint64) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
+	anchor := hd.posAnchor
+	if anchor == nil {
+		log.Trace("No PoS anchor")
+		return
+	}
+
+	// Only process the anchors for which the nextRetryTime has already come
+	if anchor.nextRetryTime > currentTime {
+		return
+	}
+
+	timeout = anchor.timeouts >= 10
+	if timeout {
+		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
+		return
+	}
+
+	// Request ancestors
+	request = &HeaderRequest{
+		Anchor:  anchor,
+		Hash:    anchor.parentHash,
+		Number:  anchor.blockHeight - 1,
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
 	}
+	return
 }
 
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
@@ -792,10 +810,14 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
-func (hd *HeaderDownload) SetHashToDownloadPoS(hash common.Hash) {
+func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.hashToDownloadPoS = hash
+
+	hd.posAnchor = &Anchor{
+		parentHash:  hash,
+		blockHeight: height + 1,
+	}
 }
 
 func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
@@ -811,27 +833,33 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
-		if header.Hash() != hd.hashToDownloadPoS {
-			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.hashToDownloadPoS)
+		if header.Hash() != hd.posAnchor.parentHash {
+			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.posAnchor.parentHash)
 		}
 
-		if err := hd.headersCollector.Collect(dbutils.HeaderKey(header.Number.Uint64(), header.Hash()), segmentFragment.HeaderRaw); err != nil {
+		headerNumber := header.Number.Uint64()
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, header.Hash()), segmentFragment.HeaderRaw); err != nil {
 			return err
 		}
 
-		hd.hashToDownloadPoS = header.ParentHash
-		hd.heightToDownloadPoS = header.Number.Uint64() - 1
-
-		hh, err := hd.headerReader.Header(context.Background(), tx, hd.hashToDownloadPoS, hd.heightToDownloadPoS)
+		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
 		if err != nil {
 			return err
 		}
 		if hh != nil {
-			hd.synced = true
+			log.Trace("Synced", "requestId", hd.requestId)
+			hd.posAnchor = nil
+			hd.posStatus = Synced
+			hd.BeaconRequestList.Interrupt(engineapi.Synced)
 			return nil
 		}
 
-		if hd.heightToDownloadPoS == 0 {
+		hd.posAnchor = &Anchor{
+			parentHash:  header.ParentHash,
+			blockHeight: headerNumber,
+		}
+
+		if headerNumber <= 1 {
 			return errors.New("wrong genesis in PoS sync")
 		}
 	}
@@ -850,8 +878,8 @@ func (hd *HeaderDownload) GrabAnnounces() []Announce {
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	if hd.posSync {
-		return hd.heightToDownloadPoS
+	if hd.posSync && hd.posAnchor != nil {
+		return hd.posAnchor.blockHeight - 1
 	} else {
 		return hd.highestInDb
 	}
@@ -1170,16 +1198,16 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.fetching = fetching
 }
 
-func (hd *HeaderDownload) SetHeightToDownloadPoS(heightToDownloadPoS uint64) {
+func (hd *HeaderDownload) SetPosStatus(status SyncStatus) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.heightToDownloadPoS = heightToDownloadPoS
+	hd.posStatus = status
 }
 
-func (hd *HeaderDownload) Unsync() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.synced = false
+func (hd *HeaderDownload) HeadersCollector() *etl.Collector {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.headersCollector
 }
 
 func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
@@ -1200,10 +1228,10 @@ func (hd *HeaderDownload) POSSync() bool {
 	return hd.posSync
 }
 
-func (hd *HeaderDownload) Synced() bool {
+func (hd *HeaderDownload) PosStatus() SyncStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.synced
+	return hd.posStatus
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {
@@ -1254,6 +1282,18 @@ func (hd *HeaderDownload) ClearPendingHeader() {
 	defer hd.lock.Unlock()
 	hd.pendingHeaderHash = common.Hash{}
 	hd.pendingHeaderHeight = 0
+}
+
+func (hd *HeaderDownload) RequestId() int {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.requestId
+}
+
+func (hd *HeaderDownload) SetRequestId(requestId int) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.requestId = requestId
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
@@ -1314,6 +1354,90 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 	}
 
 	return nil
+}
+
+const (
+	logInterval = 30 * time.Second
+)
+
+func (hd *HeaderDownload) cleanUpPoSDownload() {
+	if hd.headersCollector != nil {
+		hd.headersCollector.Close()
+		hd.headersCollector = nil
+	}
+	hd.posStatus = Idle
+}
+
+func (hd *HeaderDownload) StartPoSDownloader(
+	ctx context.Context,
+	headerReqSend func(context.Context, *HeaderRequest) (enode.ID, bool),
+	penalize func(context.Context, []PenaltyItem),
+) {
+	go func() {
+		prevProgress := uint64(0)
+
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		for {
+			var req *HeaderRequest
+			var penalties []PenaltyItem
+			var currentTime uint64
+
+			hd.lock.Lock()
+			if hd.posStatus == Syncing {
+				currentTime = uint64(time.Now().Unix())
+				var timeout bool
+				timeout, req, penalties = hd.requestMoreHeadersForPOS(currentTime)
+				if timeout {
+					log.Warn("Timeout", "requestId", hd.requestId)
+					hd.BeaconRequestList.Remove(hd.requestId)
+					hd.cleanUpPoSDownload()
+				}
+			} else {
+				prevProgress = 0
+			}
+			hd.lock.Unlock()
+
+			if req != nil {
+				_, sentToPeer := headerReqSend(ctx, req)
+				if sentToPeer {
+					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+					hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+					log.Trace("Sent request", "height", req.Number)
+				}
+			}
+			if len(penalties) > 0 {
+				penalize(ctx, penalties)
+			}
+
+			// Sleep and check for logs
+			timer := time.NewTimer(2 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				hd.lock.Lock()
+				hd.cleanUpPoSDownload()
+				hd.lock.Unlock()
+				hd.BeaconRequestList.Interrupt(engineapi.Stopping)
+				return
+			case <-logEvery.C:
+				if hd.PosStatus() == Syncing {
+					progress := hd.Progress()
+					if prevProgress == 0 {
+						prevProgress = progress
+					} else if progress <= prevProgress {
+						diff := prevProgress - progress
+						log.Info("Downloaded PoS Headers", "now", progress,
+							"blk/sec", float64(diff)/float64(logInterval/time.Second))
+						prevProgress = progress
+					}
+				}
+			case <-timer.C:
+			}
+			// Cleanup timer
+			timer.Stop()
+		}
+	}()
 }
 
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {

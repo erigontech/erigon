@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -84,11 +85,6 @@ type MockSentry struct {
 	TxPoolGrpcServer *txpool.GrpcServer
 	TxPool           *txpool.TxPool
 	txPoolDB         kv.RwDB
-
-	// Beacon Chain
-	NewPayloadCh          chan privateapi.PayloadMessage
-	ForkChoiceCh          chan privateapi.ForkChoiceMessage
-	waitingForBeaconChain uint32
 }
 
 func (ms *MockSentry) Close() {
@@ -287,9 +283,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	isBor := mock.ChainConfig.Bor != nil
 
-	mock.NewPayloadCh = make(chan privateapi.PayloadMessage)
-	mock.ForkChoiceCh = make(chan privateapi.ForkChoiceMessage)
-
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
 			stagedsync.StageHeadersCfg(
@@ -302,9 +295,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				penalize,
 				cfg.BatchSize,
 				false,
-				mock.NewPayloadCh,
-				mock.ForkChoiceCh,
-				&mock.waitingForBeaconChain,
 				allSnapshots,
 				snapshotsDownloader,
 				blockReader,
@@ -351,6 +341,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
+
+	mock.downloader.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
 	miningConfig := cfg.Miner
 	miningConfig.Enabled = true
@@ -517,4 +509,16 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
+}
+
+func (ms *MockSentry) SendPayloadRequest(message *engineapi.PayloadMessage) {
+	ms.downloader.Hd.BeaconRequestList.AddPayloadRequest(message)
+}
+
+func (ms *MockSentry) SendForkChoiceRequest(message *engineapi.ForkChoiceMessage) {
+	ms.downloader.Hd.BeaconRequestList.AddForkChoiceRequest(message)
+}
+
+func (ms *MockSentry) ReceivePayloadStatus() privateapi.PayloadStatus {
+	return <-ms.downloader.Hd.PayloadStatusCh
 }
