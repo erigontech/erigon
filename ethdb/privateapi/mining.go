@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// EthBackendServiceAPIVersion
+// MiningAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
 var MiningAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
