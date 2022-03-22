@@ -200,14 +200,8 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if ok {
-		if h == nil {
-			fmt.Printf("alex h is nil: %d, %d, %d\n", blockHeight, back.sn.segmentsAvailable.Load(), back.sn.IndicesAvailable())
-		}
 		return h, nil
-	} else {
-		fmt.Printf("alex not found: %d, %d, %d\n", blockHeight, back.sn.segmentsAvailable.Load(), back.sn.IndicesAvailable())
 	}
-
 	return rawdb.ReadHeaderByNumber(tx, blockHeight), nil
 }
 
