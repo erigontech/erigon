@@ -249,10 +249,10 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 
 // EngineNewPayloadV1, validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	log.Info("[NewPayload] acquiring lock")
+	log.Trace("[NewPayload] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[NewPayload] lock acquired")
+	log.Trace("[NewPayload] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		log.Error("[NewPayload] not a proof-of-stake chain")
@@ -300,7 +300,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
 		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
 		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
-		log.Info("[NewPayload] stage loop is busy")
+		log.Trace("[NewPayload] stage loop is busy")
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
@@ -327,10 +327,10 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
 	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
 
-	log.Info("[GetPayload] acquiring lock")
+	log.Trace("[GetPayload] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[GetPayload] lock acquired")
+	log.Trace("[GetPayload] lock acquired")
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
@@ -383,10 +383,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	log.Info("[ForkChoiceUpdated] acquiring lock")
+	log.Trace("[ForkChoiceUpdated] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[ForkChoiceUpdated] lock acquired")
+	log.Trace("[ForkChoiceUpdated] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -398,7 +398,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
 
 	if s.stageLoopIsBusy() {
-		log.Info("[ForkChoiceUpdated] stage loop is busy")
+		log.Trace("[ForkChoiceUpdated] stage loop is busy")
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
@@ -453,7 +453,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
-	log.Info("[ForkChoiceUpdated] unpause assemble process")
+	log.Trace("[ForkChoiceUpdated] unpause assemble process")
 	s.syncCond.Broadcast()
 
 	// successfully assembled the payload and assigned the correct id
@@ -479,10 +479,10 @@ func (s *EthBackendServer) evictOldPendingPayloads() {
 
 func (s *EthBackendServer) StartProposer() {
 	go func() {
-		log.Info("[Proposer] acquiring lock")
+		log.Trace("[Proposer] acquiring lock")
 		s.syncCond.L.Lock()
 		defer s.syncCond.L.Unlock()
-		log.Info("[Proposer] lock acquired")
+		log.Trace("[Proposer] lock acquired")
 
 		for {
 			var blockToBuild *types.Block
@@ -510,9 +510,9 @@ func (s *EthBackendServer) StartProposer() {
 					}
 				}
 
-				log.Info("[Proposer] Wait until we have to process new payloads")
+				log.Trace("[Proposer] Wait until we have to process new payloads")
 				s.syncCond.Wait()
-				log.Info("[Proposer] Wait finished")
+				log.Trace("[Proposer] Wait finished")
 			}
 
 			// Tell the stage headers to leave space for the write transaction for mining stages
@@ -525,11 +525,11 @@ func (s *EthBackendServer) StartProposer() {
 				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
 			}
 
-			log.Info("[Proposer] starting assembling...")
+			log.Trace("[Proposer] starting assembling...")
 			s.syncCond.L.Unlock()
 			block, err := s.assemblePayloadPOS(&param)
 			s.syncCond.L.Lock()
-			log.Info("[Proposer] payload assembled")
+			log.Trace("[Proposer] payload assembled")
 
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
@@ -545,10 +545,10 @@ func (s *EthBackendServer) StartProposer() {
 }
 
 func (s *EthBackendServer) StopProposer() {
-	log.Info("[StopProposer] acquiring lock")
+	log.Trace("[StopProposer] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[StopProposer] lock acquired")
+	log.Trace("[StopProposer] lock acquired")
 
 	s.shutdown = true
 	s.syncCond.Broadcast()
