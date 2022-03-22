@@ -6,6 +6,7 @@ const (
 	RopstenChainName    = "ropsten"
 	RinkebyChainName    = "rinkeby"
 	GoerliChainName     = "goerli"
+	KilnDevnetChainName = "kiln-devnet"
 	DevChainName        = "dev"
 	ErigonMineName      = "erigonmine"
 	SokolChainName      = "sokol"

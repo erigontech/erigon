@@ -50,22 +50,24 @@ var sendTxCmd = &cobra.Command{
 			defer services.ClearDevDB()
 		}
 
+		nonce = services.GetNonce(nonce)
+
 		// subscriptionContract is the handler to the contract for further operations
 		signedTx, address, subscriptionContract, transactOpts, err := services.CreateTransaction(txType, sendAddr, sendValue, nonce, searchBlock)
 		if err != nil {
-			fmt.Printf("failed to deploy subscription: %v", err)
+			fmt.Printf("failed to deploy subscription: %v\n", err)
 			return
 		}
 
 		hash, err := requests.SendTx(reqId, signedTx)
 		if err != nil {
-			fmt.Printf("failed to send transaction: %v", err)
+			fmt.Printf("failed to send transaction: %v\n", err)
 			return
 		}
 
 		if searchBlock {
 			if _, err := services.SearchBlockForTx(*hash); err != nil {
-				fmt.Printf("error searching block for tx: %v", err)
+				fmt.Printf("error searching block for tx: %v\n", err)
 				return
 			}
 		}
@@ -73,7 +75,7 @@ var sendTxCmd = &cobra.Command{
 		// if the contract is not nil, then the initial transaction created a contract. Emit an event
 		if subscriptionContract != nil {
 			if err := services.EmitEventAndGetLogs(reqId, subscriptionContract, transactOpts, address); err != nil {
-				fmt.Printf("failed to emit events: %v", err)
+				fmt.Printf("failed to emit events: %v\n", err)
 				return
 			}
 		}

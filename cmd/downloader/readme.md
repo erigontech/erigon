@@ -78,3 +78,9 @@ Technical details:
 # Use it if you see weird behavior, bugs, bans, hardware issues, etc...
 downloader torrent_hashes --verify --datadir=<your_datadir>
 ```
+
+## Faster rsync
+
+```
+rsync -aP --delete -e "ssh -T -o Compression=no -x" <src> <dst>
+```

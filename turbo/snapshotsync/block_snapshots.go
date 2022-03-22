@@ -333,8 +333,8 @@ type RoSnapshots struct {
 	Txs     *txnSegments
 
 	dir               string
-	segmentsAvailable atomic.Uint64
-	idxAvailable      atomic.Uint64
+	segmentsAvailable atomic.Uint64 // all types of .seg files are available - up to this number
+	idxAvailable      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg               ethconfig.Snapshot
 }
 
@@ -376,17 +376,34 @@ func (s *RoSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err e
 	}
 	return
 }
-func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error) {
-	if headers, err = latestIdx(s.dir, Headers); err != nil {
-		return
+func (s *RoSnapshots) idxAvailability() uint64 {
+	var headers, bodies, txs uint64
+	for i := len(s.Headers.segments) - 1; i >= 0; i-- {
+		seg := s.Headers.segments[i]
+		if seg.idxHeaderHash == nil {
+			continue
+		}
+		headers = seg.To - 1
+		break
 	}
-	if bodies, err = latestIdx(s.dir, Bodies); err != nil {
-		return
+	for i := len(s.Bodies.segments) - 1; i >= 0; i-- {
+		seg := s.Bodies.segments[i]
+		if seg.idxBodyNumber == nil {
+			continue
+		}
+		bodies = seg.To - 1
+		break
 	}
-	if txs, err = latestIdx(s.dir, Transactions); err != nil {
-		return
+
+	for i := len(s.Txs.segments) - 1; i >= 0; i-- {
+		seg := s.Txs.segments[i]
+		if seg.IdxTxnId == nil || seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
+			continue
+		}
+		txs = seg.To - 1
+		break
 	}
-	return
+	return min(headers, min(bodies, txs))
 }
 
 func (s *RoSnapshots) ReopenIndices() error {
@@ -429,14 +446,7 @@ Loop:
 		}
 	}
 
-	//TODO: make calculatable?
-	segments := s.Headers.segments
-	if len(segments) > 0 && segments[len(segments)-1].To > 0 {
-		s.idxAvailable.Store(segments[len(segments)-1].To - 1)
-	} else {
-		s.idxAvailable.Store(0)
-	}
-
+	s.idxAvailable.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return nil
 }
@@ -449,10 +459,10 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
-			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -563,6 +573,7 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 }
 
 func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, lvl log.Lvl) error {
+	log.Log(lvl, "[snapshots] Build indices", "from", from)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -664,22 +675,6 @@ func latestSegment(dir string, ofType Type) (uint64, error) {
 	}
 	return maxBlock - 1, nil
 }
-func latestIdx(dir string, ofType Type) (uint64, error) {
-	files, err := idxFilesOfType(dir, ofType)
-	if err != nil {
-		return 0, err
-	}
-	var maxBlock uint64
-	for _, f := range files {
-		if maxBlock < f.To {
-			maxBlock = f.To
-		}
-	}
-	if maxBlock == 0 {
-		return 0, nil
-	}
-	return maxBlock - 1, nil
-}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -709,6 +704,8 @@ func TmpFiles(dir string) (res []string, err error) {
 	return res, nil
 }
 
+var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
+
 func noGaps(in []FileInfo) (out []FileInfo, err error) {
 	var prevTo uint64
 	for _, f := range in {
@@ -716,7 +713,7 @@ func noGaps(in []FileInfo) (out []FileInfo, err error) {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("snapshot missed: from %d to %d", prevTo, f.From)
+			return nil, fmt.Errorf("%w: from %d to %d", ErrSnapshotMissed, prevTo, f.From)
 		}
 		prevTo = f.To
 		out = append(out, f)
@@ -800,6 +797,7 @@ func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	return noGaps(noOverlaps(res))
 }
 
+// nolint
 func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
@@ -993,7 +991,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return err
 	}
 	log.Log(lvl, "[snapshots] Merge done. Indexing new segments", "from", ranges[0].from)
-	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, ranges[0].from, lvl); err != nil {
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, min(ranges[0].from, snapshots.IndicesAvailable()), lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
 	}
 	if err := snapshots.ReopenIndices(); err != nil {
@@ -1077,7 +1075,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 
 		valueBuf = valueBuf[:0]
-		valueBuf = append(valueBuf, slot.IdHash[:1]...)
+		valueBuf = append(valueBuf, slot.IDHash[:1]...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
@@ -1372,12 +1370,11 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, txsSegment *T
 	if err != nil {
 		return err
 	}
+	txnHashIdx.LogLvl(log.LvlDebug)
+	txnIdIdx.LogLvl(log.LvlDebug)
+	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 RETRY:
-	txnHashIdx.NoLogs(true)
-	txnIdIdx.NoLogs(true)
-	txnHash2BlockNumIdx.NoLogs(true)
-
 	ch := forEachAsync(ctx, d)
 	type txHashWithOffet struct {
 		txnHash   [32]byte
@@ -1411,8 +1408,8 @@ RETRY:
 				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
-			txsCh <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
-			txsCh2 <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
+			txsCh <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
+			txsCh2 <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
 		}
 	}()
 
@@ -1662,6 +1659,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
+	rs.LogLvl(log.LvlDebug)
 
 RETRY:
 	ch := forEachAsync(ctx, d)

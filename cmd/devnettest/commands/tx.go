@@ -19,7 +19,7 @@ var txPoolCmd = &cobra.Command{
 			defer services.ClearDevDB()
 		}
 		if err := requests.TxpoolContent(reqId); err != nil {
-			fmt.Printf("error getting txpool content: %v", err)
+			fmt.Printf("error getting txpool content: %v\n", err)
 		}
 	},
 }
