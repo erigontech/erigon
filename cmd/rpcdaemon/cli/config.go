@@ -620,6 +620,10 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 	}
 
 	jwtSecret, err := obtainJWTSecret(cfg)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
+
 	var wsHandlerNonAuth http.Handler
 	var wsHandlerAuth http.Handler
 
