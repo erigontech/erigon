@@ -259,7 +259,7 @@ func handleForkChoice(
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
 		hashToDownload := headerHash
 		heighToDownload := cfg.hd.TopSeenHeight() // approximate
-		attemptPoSDownload(requestStatus, requestId, hashToDownload, heighToDownload, s, cfg)
+		schedulePoSDownload(requestStatus, requestId, hashToDownload, heighToDownload, s, cfg)
 		return nil
 	}
 
@@ -360,7 +360,7 @@ func handleNewPayload(
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
 		heightToDownload := headerNumber - 1
-		attemptPoSDownload(requestStatus, requestId, hashToDownload, heightToDownload, s, cfg)
+		schedulePoSDownload(requestStatus, requestId, hashToDownload, heightToDownload, s, cfg)
 		return nil
 	}
 
@@ -451,7 +451,7 @@ func verifyAndSaveNewPoSHeader(
 	return
 }
 
-func attemptPoSDownload(
+func schedulePoSDownload(
 	requestStatus engineapi.RequestStatus,
 	requestId int,
 	hashToDownload common.Hash,
