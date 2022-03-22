@@ -949,7 +949,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if !initialCycle {
+	if initialCycle {
 		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
 			return err
 		}
