@@ -847,7 +847,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 			return err
 		}
 		if hh != nil {
-			log.Info("Synced", "requestId", hd.requestId)
+			log.Trace("Synced", "requestId", hd.requestId)
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
@@ -1198,6 +1198,12 @@ func (hd *HeaderDownload) SetFetching(fetching bool) {
 	hd.fetching = fetching
 }
 
+func (hd *HeaderDownload) SetPosStatus(status SyncStatus) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posStatus = status
+}
+
 func (hd *HeaderDownload) HeadersCollector() *etl.Collector {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
@@ -1210,28 +1216,22 @@ func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
 	hd.headersCollector = collector
 }
 
-func (hd *HeaderDownload) POSSync() bool {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	return hd.posSync
-}
-
 func (hd *HeaderDownload) SetPOSSync(posSync bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.posSync = posSync
 }
 
+func (hd *HeaderDownload) POSSync() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.posSync
+}
+
 func (hd *HeaderDownload) PosStatus() SyncStatus {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.posStatus
-}
-
-func (hd *HeaderDownload) SetPosStatus(status SyncStatus) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.posStatus = status
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {
@@ -1277,6 +1277,13 @@ func (hd *HeaderDownload) SetPendingHeader(blockHash common.Hash, blockHeight ui
 	hd.pendingHeaderHeight = blockHeight
 }
 
+func (hd *HeaderDownload) ClearPendingHeader() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingHeaderHash = common.Hash{}
+	hd.pendingHeaderHeight = 0
+}
+
 func (hd *HeaderDownload) RequestId() int {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
@@ -1287,13 +1294,6 @@ func (hd *HeaderDownload) SetRequestId(requestId int) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.requestId = requestId
-}
-
-func (hd *HeaderDownload) ClearPendingHeader() {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.pendingHeaderHash = common.Hash{}
-	hd.pendingHeaderHeight = 0
 }
 
 func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
@@ -1365,7 +1365,6 @@ func (hd *HeaderDownload) cleanUpPoSDownload() {
 		hd.headersCollector.Close()
 		hd.headersCollector = nil
 	}
-
 	hd.posStatus = Idle
 }
 

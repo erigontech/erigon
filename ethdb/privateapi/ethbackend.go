@@ -87,9 +87,9 @@ type pendingPayload struct {
 	built bool
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events,
-	blockReader interfaces.BlockAndTxnReader, config *params.ChainConfig, requestList *engineapi.RequestList,
-	statusCh <-chan PayloadStatus, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
+	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
+	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
