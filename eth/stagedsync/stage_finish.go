@@ -20,17 +20,42 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const POSPandaBanner = `
+    ,,,         ,,,                                               ,,,         ,,,
+  ;"   ^;     ;'   ",                                           ;"   ^;     ;'   ",
+  ;    s$$$$$$$s     ;                                          ;    s$$$$$$$s     ;
+  ,  ss$$$$$$$$$$s  ,'  ooooooooo.    .oooooo.   .oooooo..o     ,  ss$$$$$$$$$$s  ,'
+  ;s$$$$$$$$$$$$$$$     '888   'Y88. d8P'  'Y8b d8P'    'Y8     ;s$$$$$$$$$$$$$$$
+  $$$$$$$$$$$$$$$$$$     888   .d88'888      888Y88bo.          $$$$$$$$$$$$$$$$$$
+ $$$$P""Y$$$Y""W$$$$$    888ooo88P' 888      888 '"Y8888o.     $$$$P""Y$$$Y""W$$$$$
+ $$$$  p"$$$"q  $$$$$    888        888      888     '"Y88b    $$$$  p"$$$"q  $$$$$
+ $$$$  .$$$$$.  $$$$     888        '88b    d88'oo     .d8P    $$$$  .$$$$$.  $$$$
+  $$DcaU$$$$$$$$$$      o888o        'Y8bood8P' 8""88888P'      $$DcaU$$$$$$$$$$
+    "Y$$$"*"$$$Y"                                                 "Y$$$"*"$$$Y"
+        "$b.$$"                                                       "$b.$$"
+       .o.                   .   o8o                         .                 .o8
+      .888.                .o8   '"'                       .o8                "888
+     .8"888.     .ooooo. .o888oooooo oooo    ooo .oooo.  .o888oo .ooooo.  .oooo888
+    .8' '888.   d88' '"Y8  888  '888  '88.  .8' 'P  )88b   888  d88' '88bd88' '888
+   .88ooo8888.  888        888   888   '88..8'   .oP"888   888  888ooo888888   888
+  .8'     '888. 888   .o8  888 . 888    '888'   d8(  888   888 .888    .o888   888
+ o88o     o8888o'Y8bod8P'  "888"o888o    '8'    'Y888""8o  "888"'Y8bod8P''Y8bod88P"
+
+`
+
 type FinishCfg struct {
-	db     kv.RwDB
-	tmpDir string
-	log    log.Logger
+	db          kv.RwDB
+	tmpDir      string
+	log         log.Logger
+	chainConfig *params.ChainConfig
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, chainConfig *params.ChainConfig, logger log.Logger) FinishCfg {
 	return FinishCfg{
-		db:     db,
-		log:    logger,
-		tmpDir: tmpDir,
+		db:          db,
+		log:         logger,
+		tmpDir:      tmpDir,
+		chainConfig: chainConfig,
 	}
 }
 
@@ -52,6 +77,19 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 	}
 	if executionAt <= s.BlockNumber {
 		return nil
+	}
+
+	isTransBefore, err := rawdb.Transitioned(tx, executionAt-1, cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
+	isTransNow, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
+	// Party time
+	if !isTransBefore && isTransNow {
+		fmt.Print(POSPandaBanner)
 	}
 
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
