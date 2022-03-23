@@ -25,7 +25,7 @@ require (
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/fortytw2/leaktest v1.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
-	github.com/goccy/go-json v0.7.4
+	github.com/goccy/go-json v0.9.6
 	github.com/gofrs/flock v0.8.1
 	github.com/golang-jwt/jwt/v4 v4.3.0
 	github.com/golang/snappy v0.0.4
