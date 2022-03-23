@@ -19,7 +19,6 @@ package eth
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -28,7 +27,6 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -77,7 +75,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -136,11 +133,6 @@ type Ethereum struct {
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
-	// When we receive something here, it means that the beacon chain transitioned
-	// to proof-of-stake so we start reverse syncing from the block
-	newPayloadCh          chan privateapi.PayloadMessage
-	forkChoiceCh          chan privateapi.ForkChoiceMessage
-	waitingForBeaconChain uint32 // atomic boolean flag
 
 	downloadProtocols *downloader.Protocols
 }
@@ -313,14 +305,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
-		snConfig := snapshothashes.KnownConfig(chainConfig.ChainName)
-		snConfig.ExpectBlocks, err = RestoreExpectedExternalSnapshot(chainKv, snConfig)
-		if err != nil {
-			return nil, err
-		}
-
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir.Path)
-		allSnapshots.AsyncOpenAll(ctx)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -382,8 +367,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
 	backend.minedBlocks = miner.MiningResultCh
-	backend.newPayloadCh = make(chan privateapi.PayloadMessage)
-	backend.forkChoiceCh = make(chan privateapi.ForkChoiceMessage)
 
 	// proof-of-work mining
 	mining := stagedsync.New(
@@ -418,11 +401,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		block := <-miningStatePos.MiningResultPOSCh
 		return block, nil
 	}
-	atomic.StoreUint32(&backend.waitingForBeaconChain, 0)
+
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.newPayloadCh, backend.forkChoiceCh, backend.sentryControlServer.Hd.PayloadStatusCh,
-		&backend.waitingForBeaconChain, backend.sentryControlServer.Hd.SkipCycleHack, assembleBlockPOS, config.Miner.EnabledPOS)
+		blockReader, chainConfig, backend.sentryControlServer.Hd.BeaconRequestList, backend.sentryControlServer.Hd.PayloadStatusCh,
+		assembleBlockPOS, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
 	// If we enabled the proposer flag we initiates the block proposing thread
 	if config.Miner.EnabledPOS && chainConfig.TerminalTotalDifficulty != nil {
@@ -502,11 +485,12 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
-		backend.newPayloadCh, backend.forkChoiceCh, &backend.waitingForBeaconChain,
 		backend.downloaderClient, allSnapshots)
 	if err != nil {
 		return nil, err
 	}
+
+	backend.sentryControlServer.Hd.StartPoSDownloader(backend.sentryCtx, backend.sentryControlServer.SendHeaderRequest, backend.sentryControlServer.Penalize)
 
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
@@ -562,49 +546,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	stack.RegisterAPIs(backend.APIs())
 	stack.RegisterLifecycle(backend)
 	return backend, nil
-}
-
-func RestoreExpectedExternalSnapshot(db kv.RwDB, snConfig *snapshothashes.Config) (uint64, error) {
-	const SyncedWithSnapshot = "synced_with_snapshot"
-	var snapshotToBlockInDB *uint64
-	// Check if we have an already initialized chain and fall back to
-	// that if so. Otherwise we need to generate a new genesis spec.
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		v, err := tx.GetOne(kv.DatabaseInfo, []byte(SyncedWithSnapshot))
-		if err != nil {
-			return err
-		}
-		if v != nil {
-			valueInDB := binary.BigEndian.Uint64(v)
-			snapshotToBlockInDB = &valueInDB
-			return nil
-		}
-
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-
-	if snapshotToBlockInDB != nil {
-		if *snapshotToBlockInDB != snConfig.ExpectBlocks {
-			return *snapshotToBlockInDB, nil //
-			//log.Warn(fmt.Sprintf("'incremental snapshots feature' not implemented yet. New snapshots available up to block %d, but this node was synced to snapshot %d and will keep other blocks in db. (it's safe, re-sync may reduce db size)", snapshotToBlockInDB, snConfig.ExpectBlocks))
-			//snConfig.ExpectBlocks = *snapshotToBlockInDB
-		}
-	}
-
-	if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-		num := make([]byte, 8)
-		binary.BigEndian.PutUint64(num, snConfig.ExpectBlocks)
-		if err := tx.Put(kv.DatabaseInfo, []byte(SyncedWithSnapshot), num); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return 0, err
-	}
-
-	return snConfig.ExpectBlocks, nil
 }
 
 func (s *Ethereum) APIs() []rpc.API {

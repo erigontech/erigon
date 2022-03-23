@@ -19,7 +19,7 @@ import (
 func TestPendingBlock(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
-	ff := filters.New(ctx, nil, nil, mining)
+	ff := filters.New(ctx, nil, nil, mining, func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), nil, nil, nil, mining, 5000000)
 	expect := uint64(12345)
@@ -45,7 +45,7 @@ func TestPendingBlock(t *testing.T) {
 func TestPendingLogs(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
-	ff := filters.New(ctx, nil, nil, mining)
+	ff := filters.New(ctx, nil, nil, mining, func() {})
 	expect := []byte{211}
 
 	ch := make(chan types.Logs, 1)

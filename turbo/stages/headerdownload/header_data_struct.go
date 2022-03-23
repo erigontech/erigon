@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
 type QueueID uint8
@@ -104,7 +105,7 @@ type Anchor struct {
 	links         []*Link     // Links attached immediately to this anchor
 	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
-	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is neeeded
+	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
 	timeouts      int    // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
 	idx           int    // Index of the anchor in the queue to be able to modify specific items
 }
@@ -119,7 +120,7 @@ type Anchor struct {
 // As anchors are moved around in the binary heap, they internally track their
 // position in the heap (using `idx` field). This feature allows updating
 // the heap (using `Fix` function) in situations when anchor is accessed not
-// throught the priority queue, but through the map `anchor` in the
+// through the priority queue, but through the map `anchor` in the
 // HeaderDownloader type.
 type AnchorQueue []*Anchor
 
@@ -246,6 +247,14 @@ func (iq *InsertQueue) Pop() interface{} {
 	return x
 }
 
+type SyncStatus int
+
+const ( // SyncStatus values
+	Idle = iota
+	Syncing
+	Synced // if we found a canonical hash during backward sync, in this case our sync process is done
+)
+
 type HeaderDownload struct {
 	badHeaders         map[common.Hash]struct{}
 	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
@@ -274,14 +283,15 @@ type HeaderDownload struct {
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          interfaces.HeaderReader
 
-	// proof-of-stake
+	// Proof of Stake (PoS)
 	topSeenHeightPoS     uint64
-	heightToDownloadPoS  uint64
-	hashToDownloadPoS    common.Hash
-	synced               bool                          // if we found a canonical hash during backward sync, in this case our sync process is done
-	posSync              bool                          // True if the chain is syncing backwards or not
+	requestId            int
+	posAnchor            *Anchor
+	posStatus            SyncStatus
+	posSync              bool                          // Whether the chain is syncing in the PoS mode
 	headersCollector     *etl.Collector                // ETL collector for headers
-	PayloadStatusCh      chan privateapi.PayloadStatus // Channel to report payload validation/execution status (engine_newPayloadV1/forkchoiceUpdatedV1 response)
+	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
 	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
 	pendingHeaderHeight  uint64                        // Header to process after unwind (height)
 	pendingHeaderHash    common.Hash                   // Header to process after unwind (hash)
@@ -313,6 +323,7 @@ func NewHeaderDownload(
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		SkipCycleHack:      make(chan struct{}),
+		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
 	}

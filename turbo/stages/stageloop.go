@@ -249,9 +249,6 @@ func NewStagedSync(
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
 	accumulator *shards.Accumulator,
-	newPayloadCh chan privateapi.PayloadMessage,
-	forkChoiceCh chan privateapi.ForkChoiceMessage,
-	waitingForBeaconChain *uint32,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	allSnapshots *snapshotsync.RoSnapshots,
 ) (*stagedsync.Sync, error) {
@@ -278,9 +275,6 @@ func NewStagedSync(
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
-				newPayloadCh,
-				forkChoiceCh,
-				waitingForBeaconChain,
 				allSnapshots,
 				snapshotDownloader,
 				blockReader,
@@ -302,7 +296,7 @@ func NewStagedSync(
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, snapshotsync.NewBlockRetire(1, tmpdir, allSnapshots, db)),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, snapshotsync.NewBlockRetire(1, tmpdir, allSnapshots, db, snapshotDownloader)),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,

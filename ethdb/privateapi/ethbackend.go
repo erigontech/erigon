@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -24,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -54,20 +54,15 @@ type EthBackendServer struct {
 	// Block proposing for proof-of-stake
 	payloadId       uint64
 	pendingPayloads map[uint64]*pendingPayload
-	// Send new Beacon Chain payloads to staged sync
-	newPayloadCh chan<- PayloadMessage
-	// Send Beacon Chain fork choice updates to staged sync
-	forkChoiceCh chan<- ForkChoiceMessage
+	// Send Beacon Chain requests to staged sync
+	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
-	statusCh <-chan PayloadStatus
-	// Determines whether stageloop is processing a block or not
-	waitingForBeaconChain *uint32       // atomic boolean flag
-	skipCycleHack         chan struct{} // with this channel we tell the stagedsync that we want to assemble a block
-	assemblePayloadPOS    assemblePayloadPOSFunc
-	proposing             bool
-	syncCond              *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	shutdown              bool
-	logsFilter            *LogsFilterAggregator
+	statusCh           <-chan PayloadStatus
+	assemblePayloadPOS assemblePayloadPOSFunc
+	proposing          bool
+	syncCond           *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	shutdown           bool
+	logsFilter         *LogsFilterAggregator
 }
 
 type EthBackend interface {
@@ -87,31 +82,17 @@ type PayloadStatus struct {
 	CriticalError   error
 }
 
-// The message we are going to send to the stage sync in NewPayload
-type PayloadMessage struct {
-	Header *types.Header
-	Body   *types.RawBody
-}
-
-// The message we are going to send to the stage sync in ForkchoiceUpdated
-type ForkChoiceMessage struct {
-	HeadBlockHash      common.Hash
-	SafeBlockHash      common.Hash
-	FinalizedBlockHash common.Hash
-}
-
 type pendingPayload struct {
 	block *types.Block
 	built bool
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
-	config *params.ChainConfig, newPayloadCh chan<- PayloadMessage, forkChoiceCh chan<- ForkChoiceMessage, statusCh <-chan PayloadStatus,
-	waitingForBeaconChain *uint32, skipCycleHack chan struct{}, assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
+	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		newPayloadCh: newPayloadCh, forkChoiceCh: forkChoiceCh, statusCh: statusCh, waitingForBeaconChain: waitingForBeaconChain,
-		pendingPayloads: make(map[uint64]*pendingPayload), skipCycleHack: skipCycleHack,
+		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
 		logsFilter: NewLogsFilterAggregator(),
 	}
@@ -155,6 +136,8 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 	log.Trace("Establishing event subscription channel with the RPC daemon ...")
 	ch, clean := s.events.AddHeaderSubscription()
 	defer clean()
+	newSnCh, newSnClean := s.events.AddNewSnapshotSubscription()
+	defer newSnClean()
 	log.Info("new subscription to newHeaders established")
 	defer func() {
 		if err != nil {
@@ -179,6 +162,10 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 				}); err != nil {
 					return err
 				}
+			}
+		case <-newSnCh:
+			if err = subscribeServer.Send(&remote.SubscribeReply{Type: remote.Event_NEW_SNAPSHOT}); err != nil {
+				return err
 			}
 		}
 	}
@@ -245,27 +232,27 @@ func convertPayloadStatus(payloadStatus *PayloadStatus) *remote.EnginePayloadSta
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
 	for i := 0; i < 20; i++ {
-		if atomic.LoadUint32(s.waitingForBeaconChain) == 0 {
+		if !s.requestList.IsWaiting() {
 			// This might happen, for example, in the following scenario:
 			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
 			// 2) We happily process NewPayload and stage loop is at the end.
 			// 3) We start processing ForkChoiceUpdated,
 			// but the stage loop hasn't moved yet from the end to the beginning of HeadersPOS
-			// and thus waitingForBeaconChain is not set yet.
+			// and thus requestList.WaitForRequest() is not called yet.
 
 			// TODO(yperbasis): find a more elegant solution
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
-	return atomic.LoadUint32(s.waitingForBeaconChain) == 0
+	return !s.requestList.IsWaiting()
 }
 
 // EngineNewPayloadV1, validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	log.Info("[NewPayload] acquiring lock")
+	log.Trace("[NewPayload] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[NewPayload] lock acquired")
+	log.Trace("[NewPayload] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		log.Error("[NewPayload] not a proof-of-stake chain")
@@ -313,21 +300,21 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		// The process of validating a payload on the canonical chain MUST NOT be affected by an active sync process on a side branch of the block tree.
 		// For example, if side branch B is SYNCING but the requisite data for validating a payload from canonical branch A is available, client software MUST initiate the validation process.
 		// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#payload-validation
-		log.Info("[NewPayload] stage loop is busy")
+		log.Trace("[NewPayload] stage loop is busy")
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	log.Info("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
-	s.newPayloadCh <- PayloadMessage{
+	log.Trace("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
+	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
 			Transactions: req.Transactions,
 			Uncles:       nil,
 		},
-	}
+	})
 
 	payloadStatus := <-s.statusCh
-	log.Info("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	log.Trace("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -340,10 +327,10 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
 	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
 
-	log.Info("[GetPayload] acquiring lock")
+	log.Trace("[GetPayload] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[GetPayload] lock acquired")
+	log.Trace("[GetPayload] lock acquired")
 
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
@@ -396,10 +383,10 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 // EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	log.Info("[ForkChoiceUpdated] acquiring lock")
+	log.Trace("[ForkChoiceUpdated] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[ForkChoiceUpdated] lock acquired")
+	log.Trace("[ForkChoiceUpdated] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
 		return nil, fmt.Errorf("not a proof-of-stake chain")
@@ -411,23 +398,23 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
 
 	if s.stageLoopIsBusy() {
-		log.Info("[ForkChoiceUpdated] stage loop is busy")
+		log.Trace("[ForkChoiceUpdated] stage loop is busy")
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING},
 		}, nil
 	}
 
-	forkChoiceMessage := ForkChoiceMessage{
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	log.Info("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
-	s.forkChoiceCh <- forkChoiceMessage
+	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
+	s.requestList.AddForkChoiceRequest(&forkChoiceMessage)
 
 	payloadStatus := <-s.statusCh
-	log.Info("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+	log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -466,7 +453,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
 
-	log.Info("[ForkChoiceUpdated] unpause assemble process")
+	log.Trace("[ForkChoiceUpdated] unpause assemble process")
 	s.syncCond.Broadcast()
 
 	// successfully assembled the payload and assigned the correct id
@@ -492,10 +479,10 @@ func (s *EthBackendServer) evictOldPendingPayloads() {
 
 func (s *EthBackendServer) StartProposer() {
 	go func() {
-		log.Info("[Proposer] acquiring lock")
+		log.Trace("[Proposer] acquiring lock")
 		s.syncCond.L.Lock()
 		defer s.syncCond.L.Unlock()
-		log.Info("[Proposer] lock acquired")
+		log.Trace("[Proposer] lock acquired")
 
 		for {
 			var blockToBuild *types.Block
@@ -523,13 +510,13 @@ func (s *EthBackendServer) StartProposer() {
 					}
 				}
 
-				log.Info("[Proposer] Wait until we have to process new payloads")
+				log.Trace("[Proposer] Wait until we have to process new payloads")
 				s.syncCond.Wait()
-				log.Info("[Proposer] Wait finished")
+				log.Trace("[Proposer] Wait finished")
 			}
 
 			// Tell the stage headers to leave space for the write transaction for mining stages
-			s.skipCycleHack <- struct{}{}
+			s.requestList.Interrupt(engineapi.Yield)
 
 			param := core.BlockProposerParametersPOS{
 				ParentHash:            blockToBuild.ParentHash(),
@@ -538,11 +525,11 @@ func (s *EthBackendServer) StartProposer() {
 				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
 			}
 
-			log.Info("[Proposer] starting assembling...")
+			log.Trace("[Proposer] starting assembling...")
 			s.syncCond.L.Unlock()
 			block, err := s.assemblePayloadPOS(&param)
 			s.syncCond.L.Lock()
-			log.Info("[Proposer] payload assembled")
+			log.Trace("[Proposer] payload assembled")
 
 			if err != nil {
 				log.Warn("Error during block assembling", "err", err.Error())
@@ -558,10 +545,10 @@ func (s *EthBackendServer) StartProposer() {
 }
 
 func (s *EthBackendServer) StopProposer() {
-	log.Info("[StopProposer] acquiring lock")
+	log.Trace("[StopProposer] acquiring lock")
 	s.syncCond.L.Lock()
 	defer s.syncCond.L.Unlock()
-	log.Info("[StopProposer] lock acquired")
+	log.Trace("[StopProposer] lock acquired")
 
 	s.shutdown = true
 	s.syncCond.Broadcast()

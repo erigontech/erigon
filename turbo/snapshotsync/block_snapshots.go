@@ -22,6 +22,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -332,8 +333,8 @@ type RoSnapshots struct {
 	Txs     *txnSegments
 
 	dir               string
-	segmentsAvailable atomic.Uint64
-	idxAvailable      atomic.Uint64
+	segmentsAvailable atomic.Uint64 // all types of .seg files are available - up to this number
+	idxAvailable      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg               ethconfig.Snapshot
 }
 
@@ -346,12 +347,15 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapshotDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.Snapshot  { return s.cfg }
-func (s *RoSnapshots) Dir() string              { return s.dir }
-func (s *RoSnapshots) SegmentsReady() bool      { return s.segmentsReady.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64  { return s.segmentsAvailable.Load() }
-func (s *RoSnapshots) IndicesReady() bool       { return s.indicesReady.Load() }
-func (s *RoSnapshots) IndicesAvailable() uint64 { return s.idxAvailable.Load() }
+func (s *RoSnapshots) Cfg() ethconfig.Snapshot   { return s.cfg }
+func (s *RoSnapshots) Dir() string               { return s.dir }
+func (s *RoSnapshots) SegmentsReady() bool       { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesReady() bool        { return s.indicesReady.Load() }
+func (s *RoSnapshots) IndicesAvailable() uint64  { return s.idxAvailable.Load() }
+func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64 {
+	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
+}
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
@@ -372,17 +376,34 @@ func (s *RoSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err e
 	}
 	return
 }
-func (s *RoSnapshots) IdxAvailability() (headers, bodies, txs uint64, err error) {
-	if headers, err = latestIdx(s.dir, Headers); err != nil {
-		return
+func (s *RoSnapshots) idxAvailability() uint64 {
+	var headers, bodies, txs uint64
+	for i := len(s.Headers.segments) - 1; i >= 0; i-- {
+		seg := s.Headers.segments[i]
+		if seg.idxHeaderHash == nil {
+			continue
+		}
+		headers = seg.To - 1
+		break
 	}
-	if bodies, err = latestIdx(s.dir, Bodies); err != nil {
-		return
+	for i := len(s.Bodies.segments) - 1; i >= 0; i-- {
+		seg := s.Bodies.segments[i]
+		if seg.idxBodyNumber == nil {
+			continue
+		}
+		bodies = seg.To - 1
+		break
 	}
-	if txs, err = latestIdx(s.dir, Transactions); err != nil {
-		return
+
+	for i := len(s.Txs.segments) - 1; i >= 0; i-- {
+		seg := s.Txs.segments[i]
+		if seg.IdxTxnId == nil || seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
+			continue
+		}
+		txs = seg.To - 1
+		break
 	}
-	return
+	return min(headers, min(bodies, txs))
 }
 
 func (s *RoSnapshots) ReopenIndices() error {
@@ -396,18 +417,28 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 	defer s.Bodies.lock.Unlock()
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
+Loop:
 	for _, t := range types {
 		switch t {
 		case Headers:
 			if err := s.Headers.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		case Bodies:
 			if err := s.Bodies.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		case Transactions:
 			if err := s.Txs.reopen(s.dir); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break Loop
+				}
 				return err
 			}
 		default:
@@ -415,14 +446,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 		}
 	}
 
-	//TODO: make calculatable?
-	segments := s.Headers.segments
-	if len(segments) > 0 && segments[len(segments)-1].To > 0 {
-		s.idxAvailable.Store(segments[len(segments)-1].To - 1)
-	} else {
-		s.idxAvailable.Store(0)
-	}
-
+	s.idxAvailable.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return nil
 }
@@ -435,10 +459,10 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
-			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -530,25 +554,26 @@ func (s *RoSnapshots) closeSegmentsLocked() {
 	}
 }
 func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
 		return false, nil
 	}
 	return s.Headers.ViewSegment(blockNum, f)
 }
 func (s *RoSnapshots) ViewBodies(blockNum uint64, f func(sn *BodySegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
 		return false, nil
 	}
 	return s.Bodies.ViewSegment(blockNum, f)
 }
 func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (found bool, err error) {
-	if !s.indicesReady.Load() || blockNum > s.segmentsAvailable.Load() {
+	if !s.indicesReady.Load() || blockNum > s.BlocksAvailable() {
 		return false, nil
 	}
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
 func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, lvl log.Lvl) error {
+	log.Log(lvl, "[snapshots] Build indices", "from", from)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -586,12 +611,17 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 		return err
 	}
 	if err := s.Txs.View(func(segments []*TxnSegment) error {
-		for i, sn := range segments {
-			if sn.From < from {
-				continue
-			}
+		return s.Bodies.View(func(bodySegments []*BodySegment) error {
+			for i, sn := range segments {
+				if sn.From < from {
+					continue
+				}
 
-			if err := s.Bodies.View(func(bodySegments []*BodySegment) error {
+				if bodySegments[i].idxBodyNumber == nil {
+					log.Info("[snapshots] Segment has no index, skip", "seg", bodySegments[i].seg.FilePath())
+					continue
+				}
+
 				// build txs idx
 				gg := bodySegments[i].seg.MakeGetter()
 				buf, _ := gg.Next(nil)
@@ -619,13 +649,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 					return err
 				}
 
-				return nil
-			}); err != nil {
-				return nil
 			}
-
-		}
-		return nil
+			return nil
+		})
 	}); err != nil {
 		return nil
 	}
@@ -635,22 +661,6 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 
 func latestSegment(dir string, ofType Type) (uint64, error) {
 	files, err := segmentsOfType(dir, ofType)
-	if err != nil {
-		return 0, err
-	}
-	var maxBlock uint64
-	for _, f := range files {
-		if maxBlock < f.To {
-			maxBlock = f.To
-		}
-	}
-	if maxBlock == 0 {
-		return 0, nil
-	}
-	return maxBlock - 1, nil
-}
-func latestIdx(dir string, ofType Type) (uint64, error) {
-	files, err := idxFilesOfType(dir, ofType)
 	if err != nil {
 		return 0, err
 	}
@@ -694,6 +704,8 @@ func TmpFiles(dir string) (res []string, err error) {
 	return res, nil
 }
 
+var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
+
 func noGaps(in []FileInfo) (out []FileInfo, err error) {
 	var prevTo uint64
 	for _, f := range in {
@@ -701,7 +713,7 @@ func noGaps(in []FileInfo) (out []FileInfo, err error) {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("[open snapshots] snapshot missed: from %d to %d", prevTo, f.From)
+			return nil, fmt.Errorf("%w: from %d to %d", ErrSnapshotMissed, prevTo, f.From)
 		}
 		prevTo = f.To
 		out = append(out, f)
@@ -785,6 +797,7 @@ func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	return noGaps(noOverlaps(res))
 }
 
+// nolint
 func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
 	files, err := IdxFiles(dir)
 	if err != nil {
@@ -884,6 +897,8 @@ type BlockRetire struct {
 	tmpDir    string
 	snapshots *RoSnapshots
 	db        kv.RoDB
+
+	snapshotDownloader proto_downloader.DownloaderClient
 }
 
 type BlockRetireResult struct {
@@ -891,8 +906,8 @@ type BlockRetireResult struct {
 	Err                error
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db}
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, snapshotDownloader proto_downloader.DownloaderClient) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, snapshotDownloader: snapshotDownloader}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
@@ -909,7 +924,16 @@ func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64,
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
-	jump := roundedTo1K - blockFrom
+	var maxJump uint64 = 1_000
+	if blockFrom%500_000 == 0 {
+		maxJump = 500_000
+	} else if blockFrom%100_000 == 0 {
+		maxJump = 100_000
+	} else if blockFrom%10_000 == 0 {
+		maxJump = 10_000
+	}
+	//roundedTo1K := (to / 1_000) * 1_000
+	jump := min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= 500_000:
 		blockTo = blockFrom + 500_000
@@ -940,7 +964,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		defer br.working.Store(false)
 		defer br.wg.Done()
 
-		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, lvl)
+		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.snapshotDownloader, lvl)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -949,7 +973,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 	}()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, lvl log.Lvl) error {
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, snapshotDownloader proto_downloader.DownloaderClient, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
@@ -967,13 +991,27 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return err
 	}
 	log.Log(lvl, "[snapshots] Merge done. Indexing new segments", "from", ranges[0].from)
-	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, ranges[0].from, lvl); err != nil {
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, min(ranges[0].from, snapshots.IndicesAvailable()), lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
 	}
 	if err := snapshots.ReopenIndices(); err != nil {
 		return fmt.Errorf("ReopenIndices: %w", err)
 	}
 
+	// start seed large .seg of large size
+	if blockTo-blockFrom == DEFAULT_SEGMENT_SIZE {
+		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
+		for _, t := range AllSnapshotTypes {
+			req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				Path: SegmentFileName(blockFrom, blockTo, t),
+			})
+		}
+		if snapshotDownloader != nil {
+			if _, err := snapshotDownloader.Download(ctx, req); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -1037,7 +1075,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 
 		valueBuf = valueBuf[:0]
-		valueBuf = append(valueBuf, slot.IdHash[:1]...)
+		valueBuf = append(valueBuf, slot.IDHash[:1]...)
 		valueBuf = append(valueBuf, sender[:]...)
 		valueBuf = append(valueBuf, v...)
 		return valueBuf, nil
@@ -1332,12 +1370,11 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, txsSegment *T
 	if err != nil {
 		return err
 	}
+	txnHashIdx.LogLvl(log.LvlDebug)
+	txnIdIdx.LogLvl(log.LvlDebug)
+	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 RETRY:
-	txnHashIdx.NoLogs(true)
-	txnIdIdx.NoLogs(true)
-	txnHash2BlockNumIdx.NoLogs(true)
-
 	ch := forEachAsync(ctx, d)
 	type txHashWithOffet struct {
 		txnHash   [32]byte
@@ -1371,8 +1408,8 @@ RETRY:
 				txsCh2 <- txHashWithOffet{err: it.err}
 				return
 			}
-			txsCh <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
-			txsCh2 <- txHashWithOffet{txnHash: slot.IdHash, i: it.i, offset: it.offset}
+			txsCh <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
+			txsCh2 <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
 		}
 	}()
 
@@ -1622,6 +1659,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
+	rs.LogLvl(log.LvlDebug)
 
 RETRY:
 	ch := forEachAsync(ctx, d)

@@ -64,7 +64,7 @@ var getTransactionCountCmd = &cobra.Command{
 			defer services.ClearDevDB()
 		}
 		address := common.HexToAddress(addr)
-		if err := requests.GetTransactionCountCmd(reqId, address, blockNum); err != nil {
+		if err := requests.GetTransactionCount(reqId, address, blockNum); err != nil {
 			fmt.Printf("could not get transaction count: %v\n", err)
 		}
 	},

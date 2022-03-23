@@ -397,20 +397,21 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 	}
 	if res := cfg.blockRetire.Result(); res != nil {
 		if res.Err != nil {
-			return fmt.Errorf("[%s] retire blocks last error: %w", s.LogPrefix(), res.Err)
+			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
 		}
 	}
 	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
+		// TODO: remove this check for the release
+		if err := cfg.blockRetire.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
+			return err
+		}
+
 		canDeleteTo := cfg.blockRetire.CanDeleteTo(s.ForwardProgress)
 		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
 			return nil
 		}
 	}
 
-	// TODO: remove this check for the release
-	if err := cfg.blockRetire.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
-		return err
-	}
 	blockFrom, blockTo, ok := cfg.blockRetire.CanRetire(s.ForwardProgress)
 	if !ok {
 		return nil

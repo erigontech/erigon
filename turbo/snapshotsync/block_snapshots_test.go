@@ -54,6 +54,20 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string)
 		err = idx.Build()
 		require.NoError(t, err)
 		defer idx.Close()
+
+		idx2, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   1,
+			BucketSize: 10,
+			TmpDir:     dir,
+			IndexFile:  filepath.Join(dir, IdxFileName(from, to, TransactionsId.String())),
+			LeafSize:   8,
+		})
+		require.NoError(t, err)
+		err = idx2.AddKey([]byte{1}, 0)
+		require.NoError(t, err)
+		err = idx2.Build()
+		require.NoError(t, err)
+		defer idx2.Close()
 	}
 }
 
@@ -117,6 +131,7 @@ func TestCanRetire(t *testing.T) {
 		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
 		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
+		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
 	for _, tc := range cases {
 		from, to, can := canRetire(tc.inFrom, tc.inTo)
@@ -173,6 +188,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 	defer s.Close()
 
 	err = s.ReopenSegments()
+	require.NoError(err)
+	err = s.ReopenIndices()
 	require.NoError(err)
 	s.indicesReady.Store(true)
 	require.Equal(2, len(s.Headers.segments))

@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -28,6 +31,7 @@ type (
 	PendingLogsSubID  SubscriptionID
 	PendingBlockSubID SubscriptionID
 	PendingTxsSubID   SubscriptionID
+	LogsSubID         SubscriptionID
 )
 
 type Filters struct {
@@ -39,9 +43,11 @@ type Filters struct {
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
+	logsSubs         map[LogsSubID]chan *types.Log
+	onNewSnapshot    func()
 }
 
-func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) *Filters {
+func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
 	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
@@ -49,6 +55,8 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
 		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
+		logsSubs:         make(map[LogsSubID]chan *types.Log),
+		onNewSnapshot:    onNewSnapshot,
 	}
 
 	go func() {
@@ -73,6 +81,31 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					continue
 				}
 				log.Warn("rpc filters: error subscribing to events", "err", err)
+			}
+		}
+	}()
+
+	go func() {
+		if ethBackend == nil {
+			return
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs); err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if grpcutil.IsEndOfStream(err) || grpcutil.IsRetryLater(err) {
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				log.Warn("rpc filters: error subscribing to logs", "err", err)
 			}
 		}
 	}()
@@ -316,6 +349,20 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
 	delete(ff.pendingTxsSubs, id)
 }
 
+func (ff *Filters) SubscribeLogs(out chan *types.Log) LogsSubID {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	id := LogsSubID(generateSubscriptionID())
+	ff.logsSubs[id] = out
+	return id
+}
+
+func (ff *Filters) UnsubscribeLogs(id LogsSubID) {
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	delete(ff.logsSubs, id)
+}
+
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
@@ -337,6 +384,8 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 				v <- &header
 			}
 		}
+	case remote.Event_NEW_SNAPSHOT:
+		ff.onNewSnapshot()
 	//case remote.Event_PENDING_LOGS:
 	//	payload := event.Data
 	//	var logs types.Logs
@@ -387,6 +436,29 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	}
 	for _, v := range ff.pendingTxsSubs {
 		v <- txs
+	}
+}
+
+func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
+	lg := &types.Log{
+		Address:     gointerfaces.ConvertH160toAddress(reply.Address),
+		Data:        reply.Data,
+		BlockNumber: reply.BlockNumber,
+		TxHash:      gointerfaces.ConvertH256ToHash(reply.TransactionHash),
+		TxIndex:     uint(reply.TransactionIndex),
+		BlockHash:   gointerfaces.ConvertH256ToHash(reply.BlockHash),
+		Index:       uint(reply.LogIndex),
+		Removed:     reply.Removed,
+	}
+	t := make([]common.Hash, 0)
+	for _, v := range reply.Topics {
+		t = append(t, gointerfaces.ConvertH256ToHash(v))
+	}
+	lg.Topics = t
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+	for _, v := range ff.logsSubs {
+		v <- lg
 	}
 }
 
