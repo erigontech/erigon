@@ -27,13 +27,17 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v4"
 )
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 5
 	contentType             = "application/json"
+	jwtTokenExpiry          = 5 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -279,4 +283,47 @@ func validateRequest(r *http.Request) (int, error) {
 	// Invalid content-type
 	err := fmt.Errorf("invalid content type, only %s is supported", contentType)
 	return http.StatusUnsupportedMediaType, err
+}
+
+func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {
+	var tokenStr string
+	// Check if JWT signature is correct
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		tokenStr = strings.TrimPrefix(auth, "Bearer ")
+	}
+
+	if len(tokenStr) == 0 {
+		http.Error(w, "missing token", http.StatusForbidden)
+		return false
+	}
+
+	keyFunc := func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	}
+	claims := jwt.RegisteredClaims{}
+	// We explicitly set only HS256 allowed, and also disables the
+	// claim-check: the RegisteredClaims internally requires 'iat' to
+	// be no later than 'now', but we allow for a bit of drift.
+	token, err := jwt.ParseWithClaims(tokenStr, &claims, keyFunc,
+		jwt.WithValidMethods([]string{"HS256"}),
+		jwt.WithoutClaimsValidation())
+
+	switch {
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case !token.Valid:
+		http.Error(w, "invalid token", http.StatusForbidden)
+	case !claims.VerifyExpiresAt(time.Now(), false): // optional
+		http.Error(w, "token is expired", http.StatusForbidden)
+	case claims.IssuedAt == nil:
+		http.Error(w, "missing issued-at", http.StatusForbidden)
+	case time.Since(claims.IssuedAt.Time) > jwtTokenExpiry:
+		http.Error(w, "stale token", http.StatusForbidden)
+	case time.Until(claims.IssuedAt.Time) > jwtTokenExpiry:
+		http.Error(w, "future token", http.StatusForbidden)
+	default:
+		return true
+	}
+
+	return false
 }
