@@ -190,6 +190,9 @@ func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapsho
 }
 func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
+		if segment.idxHeaderHash == nil {
+			fmt.Printf("why? %d\n", blockHeight)
+		}
 		h, err = back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
 			return err

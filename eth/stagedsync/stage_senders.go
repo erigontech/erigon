@@ -413,7 +413,6 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 	}
 
 	blockFrom, blockTo, ok := cfg.blockRetire.CanRetire(s.ForwardProgress)
-	fmt.Printf("alex: %d, %d, %t\n", blockFrom, blockTo, ok)
 	if !ok {
 		return nil
 	}
