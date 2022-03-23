@@ -20,6 +20,7 @@ require (
 	github.com/dop251/goja v0.0.0-20200721192441-a695b0cdd498
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.16.0
+	github.com/emirpasic/gods v1.12.0
 	github.com/fatih/color v1.13.0
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/fortytw2/leaktest v1.3.0 // indirect
