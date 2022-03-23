@@ -2,7 +2,6 @@ package snapshotsync
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -93,7 +92,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo)
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		_, err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
 		require.NoError(err)
 		require.NoError(s.ReopenSegments())
 	}
@@ -109,7 +108,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo)
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		_, err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
 		require.NoError(err)
 	}
 
@@ -245,10 +244,10 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v0-1-2-bodies.seg": &fstest.MapFile{},
 		"v1-1-2-bodies.seg": &fstest.MapFile{},
 	}
-	stat := func(name string) os.FileInfo {
+	stat := func(name string) string {
 		s, err := fs.Stat(name)
 		require.NoError(err)
-		return s
+		return s.Name()
 	}
 	_, err := ParseFileName("", stat("a"))
 	require.Error(err)

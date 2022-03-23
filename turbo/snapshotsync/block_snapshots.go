@@ -678,7 +678,7 @@ func latestSegment(dir string, ofType Type) (uint64, error) {
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	fs.FileInfo
+	_         fs.FileInfo
 	Version   uint8
 	From, To  uint64
 	Path, Ext string
@@ -730,7 +730,7 @@ func parseDir(dir string) (res []FileInfo, err error) {
 			continue
 		}
 
-		meta, err := ParseFileName(dir, f)
+		meta, err := ParseFileName(dir, f.Name())
 		if err != nil {
 			if errors.Is(err, ErrInvalidFileName) {
 				continue
@@ -834,8 +834,7 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
-func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
-	fileName := f.Name()
+func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
@@ -868,7 +867,7 @@ func ParseFileName(dir string, f os.FileInfo) (res FileInfo, err error) {
 	default:
 		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
 	}
-	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, FileInfo: f, Ext: ext}, nil
+	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
 }
 
 const MERGE_THRESHOLD = 2 // don't trigger merge if have too small amount of partial segments
@@ -898,7 +897,8 @@ type BlockRetire struct {
 	snapshots *RoSnapshots
 	db        kv.RoDB
 
-	snapshotDownloader proto_downloader.DownloaderClient
+	downloader proto_downloader.DownloaderClient
+	notifier   DBEventNotifier
 }
 
 type BlockRetireResult struct {
@@ -906,8 +906,8 @@ type BlockRetireResult struct {
 	Err                error
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, snapshotDownloader proto_downloader.DownloaderClient) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, snapshotDownloader: snapshotDownloader}
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
@@ -964,7 +964,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		defer br.working.Store(false)
 		defer br.wg.Done()
 
-		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.snapshotDownloader, lvl)
+		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -973,7 +973,11 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 	}()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, snapshotDownloader proto_downloader.DownloaderClient, lvl log.Lvl) error {
+type DBEventNotifier interface {
+	OnNewSnapshot()
+}
+
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
@@ -987,9 +991,12 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-	if err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()}); err != nil {
+	cleanup, err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()})
+	if err != nil {
 		return err
 	}
+	defer cleanup()
+
 	log.Log(lvl, "[snapshots] Merge done. Indexing new segments", "from", ranges[0].from)
 	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, min(ranges[0].from, snapshots.IndicesAvailable()), lvl); err != nil {
 		return fmt.Errorf("BuildIndices: %w", err)
@@ -997,17 +1004,22 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.ReopenIndices(); err != nil {
 		return fmt.Errorf("ReopenIndices: %w", err)
 	}
-
-	// start seed large .seg of large size
-	if blockTo-blockFrom == DEFAULT_SEGMENT_SIZE {
+	if notifier != nil { // notify about new snapshots of any size
+		notifier.OnNewSnapshot()
+	}
+	for _, r := range ranges {
+		// start seed large .seg of large size
+		if r.from-r.to != DEFAULT_SEGMENT_SIZE {
+			continue
+		}
 		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
 		for _, t := range AllSnapshotTypes {
 			req.Items = append(req.Items, &proto_downloader.DownloadItem{
 				Path: SegmentFileName(blockFrom, blockTo, t),
 			})
 		}
-		if snapshotDownloader != nil {
-			if _, err := snapshotDownloader.Download(ctx, req); err != nil {
+		if downloader != nil {
+			if _, err := downloader.Download(ctx, req); err != nil {
 				return err
 			}
 		}
@@ -1754,8 +1766,8 @@ func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []mergeRange) {
 	sort.Slice(res, func(i, j int) bool { return res[i].from < res[j].from })
 	return res
 }
-func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeHeaders, toMergeBodies, toMergeTxs []string) {
-	if err := snapshots.Headers.View(func(hSegments []*HeaderSegment) error {
+func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeHeaders, toMergeBodies, toMergeTxs []string, err error) {
+	err = snapshots.Headers.View(func(hSegments []*HeaderSegment) error {
 		return snapshots.Bodies.View(func(bSegments []*BodySegment) error {
 			return snapshots.Txs.View(func(tSegments []*TxnSegment) error {
 				for i, sn := range hSegments {
@@ -1774,34 +1786,45 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 				return nil
 			})
 		})
-	}); err != nil {
-		panic(err)
-	}
+	})
 	return
 }
 
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw) error {
+// Merge does merge segments in given ranges
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw) (cleanup func() error, err error) {
 	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
+	var toDelete []string
 	for _, r := range mergeRanges {
-		toMergeHeaders, toMergeBodies, toMergeTxs := m.filesByRange(snapshots, r.from, r.to)
+		toMergeHeaders, toMergeBodies, toMergeTxs, err := m.filesByRange(snapshots, r.from, r.to)
+		if err != nil {
+			return cleanup, err
+		}
 		if err := m.merge(ctx, toMergeBodies, filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Bodies))); err != nil {
-			return fmt.Errorf("mergeByAppendSegments: %w", err)
+			return cleanup, fmt.Errorf("mergeByAppendSegments: %w", err)
 		}
 		if err := m.merge(ctx, toMergeHeaders, filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Headers))); err != nil {
-			return fmt.Errorf("mergeByAppendSegments: %w", err)
+			return cleanup, fmt.Errorf("mergeByAppendSegments: %w", err)
 		}
 		if err := m.merge(ctx, toMergeTxs, filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Transactions))); err != nil {
-			return fmt.Errorf("mergeByAppendSegments: %w", err)
+			return cleanup, fmt.Errorf("mergeByAppendSegments: %w", err)
 		}
+		toDelete = append(toDelete, toMergeHeaders...)
+		toDelete = append(toDelete, toMergeBodies...)
+		toDelete = append(toDelete, toMergeTxs...)
+	}
+	return func() error {
 		snapshots.Close()
-		if err := m.RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs, &dir.Rw{Path: snapshots.Dir()}); err != nil {
+		if err := m.removeOldFiles(toDelete, &dir.Rw{Path: snapshots.Dir()}); err != nil {
 			return err
 		}
 		if err := snapshots.ReopenSegments(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
-	}
-	return nil
+		if err := snapshots.ReopenIndices(); err != nil {
+			return fmt.Errorf("ReopenSegments: %w", err)
+		}
+		return nil
+	}, nil
 }
 
 func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string) error {
@@ -1847,25 +1870,16 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 	return nil
 }
 
-func (m *Merger) RemoveOldFiles(toMergeHeaders, toMergeBodies, toMergeTxs []string, snapshotsDir *dir.Rw) error {
-	for _, f := range toMergeBodies {
+func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
+	for _, f := range toDel {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
-	}
-	for _, f := range toMergeHeaders {
-		_ = os.Remove(f)
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-	}
-	for _, f := range toMergeTxs {
-		_ = os.Remove(f)
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-		_ = os.Remove(withoutExt + "-to-block.idx")
+		if strings.HasSuffix(f, Transactions.String()) {
+			_ = os.Remove(withoutExt + "-to-block.idx")
+			_ = os.Remove(withoutExt + "-id.idx")
+		}
 	}
 	tmpFiles, err := TmpFiles(snapshotsDir.Path)
 	if err != nil {

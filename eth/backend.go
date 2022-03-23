@@ -484,7 +484,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
-		backend.sentryControlServer, tmpdir, backend.notifications.Accumulator,
+		backend.sentryControlServer, tmpdir, backend.notifications,
 		backend.downloaderClient, allSnapshots)
 	if err != nil {
 		return nil, err

@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -248,7 +247,7 @@ func NewStagedSync(
 	terminalTotalDifficulty *big.Int,
 	controlServer *sentry.ControlServerImpl,
 	tmpdir string,
-	accumulator *shards.Accumulator,
+	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	allSnapshots *snapshotsync.RoSnapshots,
 ) (*stagedsync.Sync, error) {
@@ -296,7 +295,7 @@ func NewStagedSync(
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, snapshotsync.NewBlockRetire(1, tmpdir, allSnapshots, db, snapshotDownloader)),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, snapshotsync.NewBlockRetire(1, tmpdir, allSnapshots, db, snapshotDownloader, notifications.Events)),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -305,7 +304,7 @@ func NewStagedSync(
 				controlServer.ChainConfig,
 				controlServer.Engine,
 				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
-				accumulator,
+				notifications.Accumulator,
 				cfg.StateStream,
 				tmpdir,
 				blockReader,
