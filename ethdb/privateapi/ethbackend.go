@@ -304,7 +304,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	log.Info("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
+	log.Trace("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
 	s.requestList.AddPayloadRequest(&engineapi.PayloadMessage{
 		Header: &header,
 		Body: &types.RawBody{
@@ -314,7 +314,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	})
 
 	payloadStatus := <-s.statusCh
-	log.Info("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	log.Trace("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -410,11 +410,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
 	}
 
-	log.Info("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
+	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
 	s.requestList.AddForkChoiceRequest(&forkChoiceMessage)
 
 	payloadStatus := <-s.statusCh
-	log.Info("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+	log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
