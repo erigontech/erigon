@@ -317,7 +317,7 @@ func NewStagedSync(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, allSnapshots, isBor),
-			stagedsync.StageFinishCfg(db, tmpdir, controlServer.ChainConfig, logger), runInTestMode),
+			stagedsync.StageFinishCfg(db, tmpdir, logger), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil
