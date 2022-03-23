@@ -974,21 +974,19 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if notifier != nil { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
+	// start seed large .seg of large size
 	for _, r := range ranges {
-		// start seed large .seg of large size
-		if r.from-r.to != DEFAULT_SEGMENT_SIZE {
+		if downloader == nil || r.from-r.to != DEFAULT_SEGMENT_SIZE {
 			continue
 		}
 		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
 		for _, t := range AllSnapshotTypes {
 			req.Items = append(req.Items, &proto_downloader.DownloadItem{
-				Path: SegmentFileName(blockFrom, blockTo, t),
+				Path: SegmentFileName(r.from, r.to, t),
 			})
 		}
-		if downloader != nil {
-			if _, err := downloader.Download(ctx, req); err != nil {
-				return err
-			}
+		if _, err := downloader.Download(ctx, req); err != nil {
+			return err
 		}
 	}
 	return nil
