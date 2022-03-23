@@ -141,6 +141,11 @@ func (opts MdbxOpts) MapSize(sz datasize.ByteSize) MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) WriteMap() MdbxOpts {
+	opts.flags |= mdbx.WriteMap
+	return opts
+}
+
 func (opts MdbxOpts) WithTablessCfg(f TableCfgFunc) MdbxOpts {
 	opts.bucketsCfg = f
 	return opts

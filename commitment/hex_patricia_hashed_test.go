@@ -46,14 +46,14 @@ func NewMockState(t *testing.T) *MockState {
 	}
 }
 
-func (ms MockState) branchFn(prefix []byte) []byte {
+func (ms MockState) branchFn(prefix []byte) ([]byte, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
-		return exBytes[2:] // Skip touchMap, but keep afterMap
+		return exBytes[2:], nil // Skip touchMap, but keep afterMap
 	}
-	return nil
+	return nil, nil
 }
 
-func (ms MockState) accountFn(plainKey []byte, cell *Cell) []byte {
+func (ms MockState) accountFn(plainKey []byte, cell *Cell) error {
 	exBytes, ok := ms.sm[string(plainKey)]
 	if !ok {
 		ms.t.Fatalf("accountFn not found key [%x]", plainKey)
@@ -91,10 +91,10 @@ func (ms MockState) accountFn(plainKey []byte, cell *Cell) []byte {
 	} else {
 		cell.CodeHash = [32]byte{}
 	}
-	return plainKey
+	return nil
 }
 
-func (ms MockState) storageFn(plainKey []byte, cell *Cell) []byte {
+func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
 	exBytes, ok := ms.sm[string(plainKey)]
 	if !ok {
 		ms.t.Fatalf("storageFn not found key [%x]", plainKey)
@@ -131,7 +131,7 @@ func (ms MockState) storageFn(plainKey []byte, cell *Cell) []byte {
 	} else {
 		cell.Storage = [32]byte{}
 	}
-	return plainKey
+	return nil
 }
 
 func (ms *MockState) applyPlainUpdates(plainKeys [][]byte, updates []Update) error {

@@ -18,10 +18,13 @@ package aggregator
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 )
 
 func int160(i uint64) []byte {
@@ -67,14 +70,22 @@ func accountWithBalance(i uint64) []byte {
 }
 
 func TestSimpleAggregator(t *testing.T) {
+	db := memdb.New()
+	defer db.Close()
+	var rwTx kv.RwTx
+	var err error
+	if rwTx, err = db.BeginRw(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	defer a.Close()
 	w := a.MakeStateWriter(true /* beforeOn */)
-	if err = w.Reset(0); err != nil {
+	if err = w.Reset(0, rwTx); err != nil {
 		t.Fatal(err)
 	}
 	defer w.Close()
@@ -86,17 +97,30 @@ func TestSimpleAggregator(t *testing.T) {
 	if err = w.Aggregate(false /* trace */); err != nil {
 		t.Fatal(err)
 	}
-	r := a.MakeStateReader(2)
-	acc := r.ReadAccountData(int160(1), false /* trace */)
+	r := a.MakeStateReader(2, rwTx)
+	acc, err := r.ReadAccountData(int160(1), false /* trace */)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !bytes.Equal(acc, account1) {
 		t.Errorf("read account %x, expected account %x", acc, account1)
 	}
-	a.Close()
+	if err = rwTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLoopAggregator(t *testing.T) {
+	db := memdb.New()
+	defer db.Close()
+	var rwTx kv.RwTx
+	var err error
+	if rwTx, err = db.BeginRw(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +131,7 @@ func TestLoopAggregator(t *testing.T) {
 	for blockNum := uint64(0); blockNum < 1000; blockNum++ {
 		accountKey := int160(blockNum/10 + 1)
 		//fmt.Printf("blockNum = %d\n", blockNum)
-		if err = w.Reset(blockNum); err != nil {
+		if err = w.Reset(blockNum, rwTx); err != nil {
 			t.Fatal(err)
 		}
 		w.UpdateAccountData(accountKey, account1, false /* trace */)
@@ -117,18 +141,32 @@ func TestLoopAggregator(t *testing.T) {
 		if err = w.Aggregate(false /* trace */); err != nil {
 			t.Fatal(err)
 		}
-		r := a.MakeStateReader(blockNum + 1)
-		acc := r.ReadAccountData(accountKey, false /* trace */)
+		r := a.MakeStateReader(blockNum+1, rwTx)
+		acc, err := r.ReadAccountData(accountKey, false /* trace */)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !bytes.Equal(acc, account1) {
 			t.Errorf("read account %x, expected account %x for block %d", acc, account1, blockNum)
 		}
 		account1 = accountWithBalance(blockNum + 2)
 	}
+	if err = rwTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRecreateAccountWithStorage(t *testing.T) {
+	db := memdb.New()
+	defer db.Close()
+	var rwTx kv.RwTx
+	var err error
+	if rwTx, err = db.BeginRw(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,21 +177,21 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 	w := a.MakeStateWriter(true /* beforeOn */)
 	defer w.Close()
 	for blockNum := uint64(0); blockNum < 100; blockNum++ {
-		if err = w.Reset(blockNum); err != nil {
+		if err = w.Reset(blockNum, rwTx); err != nil {
 			t.Fatal(err)
 		}
 		switch blockNum {
 		case 1:
 			w.UpdateAccountData(accountKey, account1, false /* trace */)
 			for s := uint64(0); s < 100; s++ {
-				w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(s+1), false /* trace */)
+				w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(s+1).Bytes(), false /* trace */)
 			}
 		case 22:
 			w.DeleteAccount(accountKey, false /* trace */)
 		case 45:
 			w.UpdateAccountData(accountKey, account2, false /* trace */)
 			for s := uint64(50); s < 150; s++ {
-				w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(2*s+1), false /* trace */)
+				w.WriteAccountStorage(accountKey, int256(s), uint256.NewInt(2*s+1).Bytes(), false /* trace */)
 			}
 		}
 		if err = w.FinishTx(blockNum, false /* trace */); err != nil {
@@ -162,52 +200,81 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 		if err = w.Aggregate(false /* trace */); err != nil {
 			t.Fatal(err)
 		}
-		r := a.MakeStateReader(blockNum + 1)
+		r := a.MakeStateReader(blockNum+1, rwTx)
 		switch blockNum {
 		case 1:
-			acc := r.ReadAccountData(accountKey, false /* trace */)
+			acc, err := r.ReadAccountData(accountKey, false /* trace */)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(account1, acc) {
 				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
 			}
 			for s := uint64(0); s < 100; s++ {
-				v := r.ReadAccountStorage(accountKey, int256(s), false /* trace */)
-				if !uint256.NewInt(s + 1).Eq(v) {
-					t.Errorf("wrong storage value after block %d, expected %d, got %s", blockNum, s+1, v)
+				v, err := r.ReadAccountStorage(accountKey, int256(s), false /* trace */)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !uint256.NewInt(s + 1).Eq(uint256.NewInt(0).SetBytes(v)) {
+					t.Errorf("wrong storage value after block %d, expected %d, got %d", blockNum, s+1, uint256.NewInt(0).SetBytes(v))
 				}
 			}
 		case 22, 44:
-			acc := r.ReadAccountData(accountKey, false /* trace */)
+			acc, err := r.ReadAccountData(accountKey, false /* trace */)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(acc) > 0 {
 				t.Errorf("wrong account after block %d, expected nil, got %x", blockNum, acc)
 			}
 			for s := uint64(0); s < 100; s++ {
-				v := r.ReadAccountStorage(accountKey, int256(s), false /* trace */)
+				v, err := r.ReadAccountStorage(accountKey, int256(s), false /* trace */)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if v != nil {
-					t.Errorf("wrong storage value after block %d, expected nil, got %s", blockNum, v)
+					t.Errorf("wrong storage value after block %d, expected nil, got %d", blockNum, uint256.NewInt(0).SetBytes(v))
 				}
 			}
 		case 66:
-			acc := r.ReadAccountData(accountKey, false /* trace */)
+			acc, err := r.ReadAccountData(accountKey, false /* trace */)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(account2, acc) {
 				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
 			}
 			for s := uint64(0); s < 150; s++ {
-				v := r.ReadAccountStorage(accountKey, int256(s), false /* trace */)
+				v, err := r.ReadAccountStorage(accountKey, int256(s), false /* trace */)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if s < 50 {
 					if v != nil {
-						t.Errorf("wrong storage value after block %d, expected nil, got %s", blockNum, v)
+						t.Errorf("wrong storage value after block %d, expected nil, got %d", blockNum, uint256.NewInt(0).SetBytes(v))
 					}
-				} else if v == nil || !uint256.NewInt(2*s+1).Eq(v) {
-					t.Errorf("wrong storage value after block %d, expected %d, got %s", blockNum, 2*s+1, v)
+				} else if v == nil || !uint256.NewInt(2*s+1).Eq(uint256.NewInt(0).SetBytes(v)) {
+					t.Errorf("wrong storage value after block %d, expected %d, got %d", blockNum, 2*s+1, uint256.NewInt(0).SetBytes(v))
 				}
 			}
 		}
 	}
+	if err = rwTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestChangeCode(t *testing.T) {
+	db := memdb.New()
+	defer db.Close()
+	var rwTx kv.RwTx
+	var err error
+	if rwTx, err = db.BeginRw(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +285,7 @@ func TestChangeCode(t *testing.T) {
 	w := a.MakeStateWriter(true /* beforeOn */)
 	defer w.Close()
 	for blockNum := uint64(0); blockNum < 100; blockNum++ {
-		if err = w.Reset(blockNum); err != nil {
+		if err = w.Reset(blockNum, rwTx); err != nil {
 			t.Fatal(err)
 		}
 		switch blockNum {
@@ -234,22 +301,34 @@ func TestChangeCode(t *testing.T) {
 		if err = w.Aggregate(false /* trace */); err != nil {
 			t.Fatal(err)
 		}
-		r := a.MakeStateReader(blockNum + 1)
+		r := a.MakeStateReader(blockNum+1, rwTx)
 		switch blockNum {
 		case 22:
-			acc := r.ReadAccountData(accountKey, false /* trace */)
+			acc, err := r.ReadAccountData(accountKey, false /* trace */)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(account1, acc) {
 				t.Errorf("wrong account after block %d, expected %x, got %x", blockNum, account1, acc)
 			}
-			code := r.ReadAccountCode(accountKey, false /* trace */)
+			code, err := r.ReadAccountCode(accountKey, false /* trace */)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !bytes.Equal(code1, code) {
 				t.Errorf("wrong code after block %d, expected %x, got %x", blockNum, code1, code)
 			}
 		case 47:
-			code := r.ReadAccountCode(accountKey, false /* trace */)
+			code, err := r.ReadAccountCode(accountKey, false /* trace */)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if code != nil {
 				t.Errorf("wrong code after block %d, expected nil, got %x", blockNum, code)
 			}
 		}
+	}
+	if err = rwTx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }

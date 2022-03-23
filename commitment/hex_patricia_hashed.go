@@ -78,11 +78,11 @@ type HexPatriciaHashed struct {
 	// Function used to load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	branchFn func(prefix []byte) []byte
+	branchFn func(prefix []byte) ([]byte, error)
 	// Function used to fetch account with given plain key
-	accountFn func(plainKey []byte, cell *Cell) []byte
+	accountFn func(plainKey []byte, cell *Cell) error
 	// Function used to fetch account with given plain key
-	storageFn       func(plainKey []byte, cell *Cell) []byte
+	storageFn       func(plainKey []byte, cell *Cell) error
 	keccak          keccakState
 	keccak2         keccakState
 	accountKeyLen   int
@@ -92,9 +92,9 @@ type HexPatriciaHashed struct {
 }
 
 func NewHexPatriciaHashed(accountKeyLen int,
-	branchFn func(prefix []byte) []byte,
-	accountFn func(plainKey []byte, cell *Cell) []byte,
-	storageFn func(plainKey []byte, cell *Cell) []byte,
+	branchFn func(prefix []byte) ([]byte, error),
+	accountFn func(plainKey []byte, cell *Cell) error,
+	storageFn func(plainKey []byte, cell *Cell) error,
 ) *HexPatriciaHashed {
 	return &HexPatriciaHashed{
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
@@ -826,9 +826,9 @@ func (hph *HexPatriciaHashed) Reset() {
 }
 
 func (hph *HexPatriciaHashed) ResetFns(
-	branchFn func(prefix []byte) []byte,
-	accountFn func(plainKey []byte, cell *Cell) []byte,
-	storageFn func(plainKey []byte, cell *Cell) []byte,
+	branchFn func(prefix []byte) ([]byte, error),
+	accountFn func(plainKey []byte, cell *Cell) error,
+	storageFn func(plainKey []byte, cell *Cell) error,
 ) {
 	hph.branchFn = branchFn
 	hph.accountFn = accountFn
@@ -883,7 +883,10 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int {
 }
 
 func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) error {
-	branchData := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+	branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+	if err != nil {
+		return err
+	}
 	if !hph.rootChecked && hph.currentKeyLen == 0 && len(branchData) == 0 {
 		// Special case - empty or deleted root
 		hph.rootChecked = true
@@ -916,17 +919,13 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 			fmt.Printf("cell (%d, %x) depth=%d, hash=[%x], a=[%x], s=[%x], ex=[%x]\n", row, nibble, depth, cell.h[:cell.hl], cell.apk[:cell.apl], cell.spk[:cell.spl], cell.extension[:cell.extLen])
 		}
 		if cell.apl > 0 {
-			k := hph.accountFn(cell.apk[:cell.apl], cell)
-			cell.apl = len(k)
-			copy(cell.apk[:], k)
+			hph.accountFn(cell.apk[:cell.apl], cell)
 			if hph.trace {
 				fmt.Printf("accountFn[%x] return balance=%d, nonce=%d\n", cell.apk[:cell.apl], &cell.Balance, cell.Nonce)
 			}
 		}
 		if cell.spl > 0 {
-			k := hph.storageFn(cell.spk[:cell.spl], cell)
-			cell.spl = len(k)
-			copy(cell.spk[:], k)
+			hph.storageFn(cell.spk[:cell.spl], cell)
 		}
 		if err = cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen); err != nil {
 			return err
