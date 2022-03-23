@@ -1323,7 +1323,7 @@ func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, blockFrom, bl
 		}
 		firstTxID = firstBody.BaseTxId
 
-		bodyIdxPath := filepath.Join(dir, IdxFileName(blockFrom, blockTo, Bodies))
+		bodyIdxPath := filepath.Join(dir, IdxFileName(blockFrom, blockTo, Bodies.String()))
 		idx, err := recsplit.OpenIndex(bodyIdxPath)
 		if err != nil {
 			return err
