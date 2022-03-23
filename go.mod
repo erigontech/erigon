@@ -48,7 +48,7 @@ require (
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/pelletier/go-toml v1.9.4
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.6
-	github.com/quasilyte/go-ruleguard/dsl v0.3.17
+	github.com/quasilyte/go-ruleguard/dsl v0.3.19
 	github.com/rs/cors v1.8.2
 	github.com/shirou/gopsutil/v3 v3.22.2
 	github.com/spf13/cobra v1.4.0
