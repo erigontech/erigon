@@ -6,6 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/holiman/uint256"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -89,10 +90,10 @@ func TestMergeSnapshots(t *testing.T) {
 	require.NoError(s.ReopenSegments())
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo)
+		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{})
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) > 0)
-		_, err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
 		require.NoError(err)
 		require.NoError(s.ReopenSegments())
 	}
@@ -105,10 +106,10 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo)
+		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{})
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) == 0)
-		_, err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
 		require.NoError(err)
 	}
 
