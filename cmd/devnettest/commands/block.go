@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
@@ -11,7 +12,6 @@ import (
 var (
 	sendAddr    string
 	sendValue   uint64
-	nonce       uint64
 	searchBlock bool
 	txType      string
 )
@@ -22,7 +22,6 @@ func init() {
 
 	sendTxCmd.Flags().StringVar(&sendAddr, "addr", "", "String address to send to")
 	sendTxCmd.Flags().Uint64Var(&sendValue, "value", 0, "Uint64 Value to send")
-	sendTxCmd.Flags().Uint64Var(&nonce, "nonce", 0, "Uint64 nonce")
 	sendTxCmd.Flags().BoolVar(&searchBlock, "search-block", false, "Boolean look for tx in mined blocks")
 
 	rootCmd.AddCommand(sendTxCmd)
@@ -50,12 +49,16 @@ var sendTxCmd = &cobra.Command{
 			defer services.ClearDevDB()
 		}
 
-		nonce = services.GetNonce(nonce)
+		nonce, err := services.GetNonce(reqId)
+		if err != nil {
+			fmt.Printf("failed to get latest nonce: %v\n", err)
+			return
+		}
 
 		// subscriptionContract is the handler to the contract for further operations
 		signedTx, address, subscriptionContract, transactOpts, err := services.CreateTransaction(txType, sendAddr, sendValue, nonce, searchBlock)
 		if err != nil {
-			fmt.Printf("failed to deploy subscription: %v\n", err)
+			fmt.Printf("failed to create transaction: %v\n", err)
 			return
 		}
 
@@ -76,6 +79,12 @@ var sendTxCmd = &cobra.Command{
 		if subscriptionContract != nil {
 			if err := services.EmitEventAndGetLogs(reqId, subscriptionContract, transactOpts, address); err != nil {
 				fmt.Printf("failed to emit events: %v\n", err)
+				return
+			}
+		} else {
+			err := services.ApplyTransaction(context.Background(), *signedTx)
+			if err != nil {
+				fmt.Printf("failed to apply transaction: %v\n", err)
 				return
 			}
 		}
