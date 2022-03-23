@@ -127,7 +127,7 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 	return nil
 }
 
-func GetTransactionCount(reqId int, address common.Address, blockNum string) error {
+func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
@@ -146,4 +146,19 @@ func GetTransactionCount(reqId int, address common.Address, blockNum string) err
 
 	fmt.Printf("Nonce: %v\n", s)
 	return nil
+}
+
+func GetTransactionCount(reqId int, address common.Address, blockNum string) (rpctest.EthGetTransactionCount, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.EthGetTransactionCount
+
+	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
+		return b, fmt.Errorf("error getting transaction count: %v\n", res.Err)
+	}
+
+	if b.Error != nil {
+		return b, fmt.Errorf("error populating response object: %v", b.Error)
+	}
+
+	return b, nil
 }

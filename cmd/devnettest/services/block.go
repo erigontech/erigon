@@ -28,6 +28,9 @@ const (
 var (
 	devnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 	signer                  = types.LatestSigner(params.AllCliqueProtocolChanges)
+	devAddress              = "67b1d87101671b127f5f8714789C7192f7ad340e"
+	gspec                   = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(devAddress))
+	contractBackend         = backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
 )
 
 type Block struct {
@@ -60,9 +63,6 @@ func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, 
 
 // createContractTx creates and signs a transaction using the developer address, returns the contract and the signed transaction
 func createContractTx(nonce uint64) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
-	gspec := core.DeveloperGenesisBlock(uint64(0), common.HexToAddress("67b1d87101671b127f5f8714789C7192f7ad340e"))
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
-
 	// initialize transactOpts
 	transactOpts, err := initializeTransactOps(nonce)
 	if err != nil {
@@ -209,6 +209,15 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
 
+	return nil
+}
+
+func ApplyTransaction(ctx context.Context, tx types.Transaction) error {
+	err := contractBackend.SendTransaction(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("failed to send transaction: %v", err)
+	}
+	contractBackend.Commit()
 	return nil
 }
 
