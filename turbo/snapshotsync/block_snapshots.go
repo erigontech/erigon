@@ -975,16 +975,18 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		notifier.OnNewSnapshot()
 	}
 	// start seed large .seg of large size
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(AllSnapshotTypes))}
 	for _, r := range ranges {
-		if downloader == nil || r.from-r.to != DEFAULT_SEGMENT_SIZE {
+		if r.to-r.from != DEFAULT_SEGMENT_SIZE {
 			continue
 		}
-		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(AllSnapshotTypes))}
 		for _, t := range AllSnapshotTypes {
 			req.Items = append(req.Items, &proto_downloader.DownloadItem{
 				Path: SegmentFileName(r.from, r.to, t),
 			})
 		}
+	}
+	if len(req.Items) > 0 && downloader != nil {
 		if _, err := downloader.Download(ctx, req); err != nil {
 			return err
 		}
