@@ -27,8 +27,8 @@ Use `--snapshot.keepblocks=true` to don't delete retired blocks from DB
 Any network/chain can start with snapshot sync:
 
 - node will download only snapshots registered in next repo https://github.com/ledgerwatch/erigon-snapshot
-- node will produce small snapshots, merge them to bigger range, until snapshots of 500K blocks, then node will start
-  seed new snapshot
+- node will move old blocks from DB to snapshots of 1K blocks size, then merge snapshots to bigger range, until
+  snapshots of 500K blocks, then node will start seed new snapshot
 
 Flag `--snapshot` is compatible with `--prune` flag
 
