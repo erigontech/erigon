@@ -87,6 +87,13 @@ func allSegmentFiles(dir string) ([]string, error) {
 
 // BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
 func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (err error) {
+	f, err := snapshotsync.ParseFileName(root.Path, originalFileName)
+	if err != nil {
+		return err
+	}
+	if f.To-f.From != snapshotsync.DEFAULT_SEGMENT_SIZE {
+		return nil
+	}
 	torrentFilePath := filepath.Join(root.Path, originalFileName+".torrent")
 	if _, err := os.Stat(torrentFilePath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
