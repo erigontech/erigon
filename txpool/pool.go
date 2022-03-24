@@ -184,6 +184,8 @@ func (r DiscardReason) String() string {
 		return "invalid sender"
 	case NegativeValue:
 		return "negative value"
+	case Spammer:
+		return "spammer"
 	case PendingPoolOverflow:
 		return "pending sub-pool is full"
 	case BaseFeePoolOverflow:
