@@ -978,7 +978,6 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 			continue
 		}
 		for _, t := range AllSnapshotTypes {
-			fmt.Printf("download: %s\n", SegmentFileName(r.from, r.to, t))
 			req.Items = append(req.Items, &proto_downloader.DownloadItem{
 				Path: SegmentFileName(r.from, r.to, t),
 			})
