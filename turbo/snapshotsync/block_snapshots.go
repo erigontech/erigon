@@ -230,8 +230,11 @@ func (s *headerSegments) closeLocked() {
 	}
 }
 func (s *headerSegments) reopen(dir string) error {
-	for i := range s.segments {
-		if err := s.segments[i].reopen(dir); err != nil {
+	for _, seg := range s.segments {
+		if err := seg.reopen(dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return err
 		}
 	}
@@ -265,8 +268,11 @@ func (s *bodySegments) closeLocked() {
 	}
 }
 func (s *bodySegments) reopen(dir string) error {
-	for i := range s.segments {
-		if err := s.segments[i].reopen(dir); err != nil {
+	for _, seg := range s.segments {
+		if err := seg.reopen(dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return err
 		}
 	}
@@ -300,8 +306,11 @@ func (s *txnSegments) closeLocked() {
 	}
 }
 func (s *txnSegments) reopen(dir string) error {
-	for i := range s.segments {
-		if err := s.segments[i].reopen(dir); err != nil {
+	for _, seg := range s.segments {
+		if err := seg.reopen(dir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			return err
 		}
 	}
@@ -364,18 +373,6 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Confi
 	return nil
 }
 
-func (s *RoSnapshots) SegmentsAvailability() (headers, bodies, txs uint64, err error) {
-	if headers, err = latestSegment(s.dir, Headers); err != nil {
-		return
-	}
-	if bodies, err = latestSegment(s.dir, Bodies); err != nil {
-		return
-	}
-	if txs, err = latestSegment(s.dir, Transactions); err != nil {
-		return
-	}
-	return
-}
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
 	for i := len(s.Headers.segments) - 1; i >= 0; i-- {
@@ -417,28 +414,19 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 	defer s.Bodies.lock.Unlock()
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
-Loop:
+
 	for _, t := range types {
 		switch t {
 		case Headers:
 			if err := s.Headers.reopen(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					break Loop
-				}
 				return err
 			}
 		case Bodies:
 			if err := s.Bodies.reopen(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					break Loop
-				}
 				return err
 			}
 		case Transactions:
 			if err := s.Txs.reopen(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					break Loop
-				}
 				return err
 			}
 		default:
@@ -478,7 +466,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 	s.Txs.lock.Lock()
 	defer s.Txs.lock.Unlock()
 	s.closeSegmentsLocked()
-	files, err := segmentsOfType(s.dir, Headers)
+	files, err := segments2(s.dir)
 	if err != nil {
 		return err
 	}
@@ -551,6 +539,27 @@ func (s *RoSnapshots) closeSegmentsLocked() {
 	if s.Txs != nil {
 		s.Txs.closeLocked()
 		s.Txs.segments = nil
+	}
+}
+func (s *RoSnapshots) PrintDebug() {
+	s.Headers.lock.Lock()
+	defer s.Headers.lock.Unlock()
+	s.Bodies.lock.Lock()
+	defer s.Bodies.lock.Unlock()
+	s.Txs.lock.Lock()
+	defer s.Txs.lock.Unlock()
+	fmt.Printf("sn: %d, %d\n", s.segmentsAvailable.Load(), s.idxAvailable.Load())
+	fmt.Println("    == Snapshots, Header")
+	for _, sn := range s.Headers.segments {
+		fmt.Printf("%d,  %t\n", sn.From, sn.idxHeaderHash == nil)
+	}
+	fmt.Println("    == Snapshots, Body")
+	for _, sn := range s.Bodies.segments {
+		fmt.Printf("%d,  %t\n", sn.From, sn.idxBodyNumber == nil)
+	}
+	fmt.Println("    == Snapshots, Txs")
+	for _, sn := range s.Txs.segments {
+		fmt.Printf("%d,  %t, %t, %t\n", sn.From, sn.IdxTxnId == nil, sn.IdxTxnHash == nil, sn.IdxTxnHash2BlockNum == nil)
 	}
 }
 func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
@@ -635,23 +644,6 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	return nil
 }
 
-func latestSegment(dir string, ofType Type) (uint64, error) {
-	files, err := segmentsOfType(dir, ofType)
-	if err != nil {
-		return 0, err
-	}
-	var maxBlock uint64
-	for _, f := range files {
-		if maxBlock < f.To {
-			maxBlock = f.To
-		}
-	}
-	if maxBlock == 0 {
-		return 0, nil
-	}
-	return maxBlock - 1, nil
-}
-
 // FileInfo - parsed file metadata
 type FileInfo struct {
 	_         fs.FileInfo
@@ -734,6 +726,26 @@ func parseDir(dir string) (res []FileInfo, err error) {
 	return res, nil
 }
 
+func allTypeOfSegmentsMustExist(dir string, in []FileInfo) (res []FileInfo) {
+MainLoop:
+	for _, f := range in {
+		if f.From == f.To {
+			continue
+		}
+		for _, t := range AllSnapshotTypes {
+			p := filepath.Join(dir, SegmentFileName(f.From, f.To, t))
+			if _, err := os.Stat(p); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					continue MainLoop
+				}
+				continue MainLoop
+			}
+		}
+		res = append(res, f)
+	}
+	return res
+}
+
 // noOverlaps - keep largest ranges and avoid overlap
 func noOverlaps(in []FileInfo) (res []FileInfo) {
 	for i := range in {
@@ -759,33 +771,18 @@ func noOverlaps(in []FileInfo) (res []FileInfo) {
 	return res
 }
 
-func segmentsOfType(dir string, ofType Type) (res []FileInfo, err error) {
+func segments2(dir string) (res []FileInfo, err error) {
 	list, err := Segments(dir)
 	if err != nil {
 		return nil, err
 	}
 	for _, f := range list {
-		if f.T != ofType {
+		if f.T != Headers {
 			continue
 		}
 		res = append(res, f)
 	}
-	return noGaps(noOverlaps(res))
-}
-
-// nolint
-func idxFilesOfType(dir string, ofType Type) (res []FileInfo, err error) {
-	files, err := IdxFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range files {
-		if f.T != ofType {
-			continue
-		}
-		res = append(res, f)
-	}
-	return noGaps(noOverlaps(res))
+	return noGaps(noOverlaps(allTypeOfSegmentsMustExist(dir, res)))
 }
 
 func filterExt(in []FileInfo, expectExt string) (out []FileInfo) {
