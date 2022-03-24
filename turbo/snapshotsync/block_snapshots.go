@@ -583,7 +583,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 				continue
 			}
 			f := filepath.Join(snapshotDir.Path, SegmentFileName(sn.From, sn.To, Headers))
-			if err := HeadersHashIdx(ctx, f, sn.From, tmpDir, logEvery, lvl); err != nil {
+			if err := HeadersIdx(ctx, f, sn.From, tmpDir, logEvery, lvl); err != nil {
 				return err
 			}
 		}
@@ -622,7 +622,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 					continue
 				}
 
-				if err := TransactionsHashIdx(ctx, chainID, sn.From, sn.To, snapshotDir, tmpDir, logEvery, lvl); err != nil {
+				if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, snapshotDir, tmpDir, logEvery, lvl); err != nil {
 					return err
 				}
 			}
@@ -967,7 +967,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()})
+	err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()}, true)
 	if err != nil {
 		return err
 	}
@@ -1302,7 +1302,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 
 var EmptyTxHash = common.Hash{}
 
-func TransactionsHashIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
 	var expectedCount, firstTxID uint64
 	firstBlockNum := blockFrom
 	dir := snapshotDir.Path //nolint
@@ -1524,7 +1524,7 @@ RETRY:
 				case <-logEvery.C:
 					var m runtime.MemStats
 					runtime.ReadMemStats(&m)
-					log.Log(lvl, "[Snapshots Indexing] TransactionsHashIdx", "blockNum", blockNum,
+					log.Log(lvl, "[Snapshots Indexing] TransactionsIdx", "blockNum", blockNum,
 						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
 				}
@@ -1560,8 +1560,8 @@ RETRY:
 	return nil
 }
 
-// HeadersHashIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
+// HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
+func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -1584,13 +1584,13 @@ func HeadersHashIdx(ctx context.Context, segmentFilePath string, firstBlockNumIn
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Log(lvl, "[Snapshots Indexing] HeadersHashIdx", "blockNum", h.Number.Uint64(),
+			log.Log(lvl, "[Snapshots Indexing] HeadersIdx", "blockNum", h.Number.Uint64(),
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		default:
 		}
 		return nil
 	}); err != nil {
-		return fmt.Errorf("HeadersHashIdx: %w", err)
+		return fmt.Errorf("HeadersIdx: %w", err)
 	}
 	return nil
 }
@@ -1798,7 +1798,10 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw) (err error) {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw, doIndex bool) error {
+	if len(mergeRanges) == 0 {
+		return nil
+	}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
@@ -1812,8 +1815,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			if err := m.merge(ctx, toMergeBodies, segFilePath); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
-			if err := BodiesIdx(ctx, segFilePath, r.from, m.tmpDir, logEvery, m.lvl); err != nil {
-				return err
+			if doIndex {
+				if err := BodiesIdx(ctx, segFilePath, r.from, m.tmpDir, logEvery, m.lvl); err != nil {
+					return fmt.Errorf("BodiesIdx: %w", err)
+				}
 			}
 		}
 
@@ -1822,8 +1827,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			if err := m.merge(ctx, toMergeHeaders, segFilePath); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
-			if err := HeadersHashIdx(ctx, segFilePath, r.from, m.tmpDir, logEvery, m.lvl); err != nil {
-				return err
+			if doIndex {
+				if err := HeadersIdx(ctx, segFilePath, r.from, m.tmpDir, logEvery, m.lvl); err != nil {
+					return fmt.Errorf("HeadersIdx: %w", err)
+				}
 			}
 		}
 
@@ -1832,8 +1839,10 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			if err := m.merge(ctx, toMergeTxs, segFilePath); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
-			if err := TransactionsHashIdx(ctx, m.chainID, r.from, r.to, snapshotDir, m.tmpDir, logEvery, m.lvl); err != nil {
-				return err
+			if doIndex {
+				if err := TransactionsIdx(ctx, m.chainID, r.from, r.to, snapshotDir, m.tmpDir, logEvery, m.lvl); err != nil {
+					return fmt.Errorf("TransactionsIdx: %w", err)
+				}
 			}
 		}
 

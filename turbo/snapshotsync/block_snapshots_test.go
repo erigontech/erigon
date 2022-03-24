@@ -93,9 +93,8 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{})
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()}, false)
 		require.NoError(err)
-		require.NoError(s.ReopenSegments())
 	}
 
 	expectedFileName := SegmentFileName(500_000, 1_000_000, Transactions)
@@ -109,7 +108,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{})
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()}, false)
 		require.NoError(err)
 	}
 
