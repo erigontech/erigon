@@ -28,7 +28,7 @@ Any network/chain can start with snapshot sync:
 
 - node will download only snapshots registered in next repo https://github.com/ledgerwatch/erigon-snapshot
 - node will move old blocks from DB to snapshots of 1K blocks size, then merge snapshots to bigger range, until
-  snapshots of 500K blocks, then node will start seed new snapshot
+  snapshots of 500K blocks, then automatically start seeding new snapshot
 
 Flag `--snapshot` is compatible with `--prune` flag
 
