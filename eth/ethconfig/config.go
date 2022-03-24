@@ -139,8 +139,8 @@ func (s Snapshot) String() string {
 }
 
 var (
-	FlagSnapshot           = "experimental.snapshot"
-	FlagSnapshotKeepBlocks = "experimental.snapshot.keepblocks"
+	FlagSnapshot           = "snapshot"
+	FlagSnapshotKeepBlocks = "snapshot.keepblocks"
 )
 
 func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {

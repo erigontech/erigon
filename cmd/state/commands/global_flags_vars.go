@@ -50,7 +50,7 @@ func withIndexBucket(cmd *cobra.Command) {
 }
 
 func withSnapshotBlocks(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&snapshotBlocks, "experimental.snapshot", false, "")
+	cmd.Flags().BoolVar(&snapshotBlocks, "snapshot", false, "")
 }
 
 func withChain(cmd *cobra.Command) {

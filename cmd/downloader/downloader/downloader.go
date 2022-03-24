@@ -81,7 +81,7 @@ func (cli *Protocols) PeerID() []byte {
 }
 
 func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
-	interval := time.Second * 5
+	interval := time.Second * 20
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
 	var m runtime.MemStats
