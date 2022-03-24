@@ -962,24 +962,24 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.snapshots.ReopenIndices(); err != nil {
 			return fmt.Errorf("ReopenIndices: %w", err)
 		}
-	}
 
-	// Create .idx files
-	if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
-		if !cfg.snapshots.SegmentsReady() {
-			return fmt.Errorf("not all snapshot segments are available")
-		}
-
-		// wait for Downloader service to download all expected snapshots
+		// Create .idx files
 		if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
-			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), log.LvlInfo); err != nil {
-				return err
+			if !cfg.snapshots.SegmentsReady() {
+				return fmt.Errorf("not all snapshot segments are available")
 			}
-		}
 
-		if err := cfg.snapshots.ReopenIndices(); err != nil {
-			return fmt.Errorf("ReopenIndices: %w", err)
+			// wait for Downloader service to download all expected snapshots
+			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
+				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), log.LvlInfo); err != nil {
+					return err
+				}
+			}
+
+			if err := cfg.snapshots.ReopenIndices(); err != nil {
+				return fmt.Errorf("ReopenIndices: %w", err)
+			}
 		}
 	}
 
