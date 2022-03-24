@@ -2709,6 +2709,7 @@ func (w *Writer) DeleteAccount(addr []byte, trace bool) error {
 	if c, err = w.tx.Cursor(kv.StateStorage); err != nil {
 		return err
 	}
+	defer c.Close()
 	var k, v []byte
 	if k, v, err = c.Seek(addr); err != nil {
 		return err
