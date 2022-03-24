@@ -32,6 +32,30 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
+const POSPandaBanner = `
+
+    ,,,         ,,,                                               ,,,         ,,,
+  ;"   ^;     ;'   ",                                           ;"   ^;     ;'   ",
+  ;    s$$$$$$$s     ;                                          ;    s$$$$$$$s     ;
+  ,  ss$$$$$$$$$$s  ,'  ooooooooo.    .oooooo.   .oooooo..o     ,  ss$$$$$$$$$$s  ,'
+  ;s$$$$$$$$$$$$$$$     '888   'Y88. d8P'  'Y8b d8P'    'Y8     ;s$$$$$$$$$$$$$$$
+  $$$$$$$$$$$$$$$$$$     888   .d88'888      888Y88bo.          $$$$$$$$$$$$$$$$$$
+ $$$$P""Y$$$Y""W$$$$$    888ooo88P' 888      888 '"Y8888o.     $$$$P""Y$$$Y""W$$$$$
+ $$$$  p"$$$"q  $$$$$    888        888      888     '"Y88b    $$$$  p"$$$"q  $$$$$
+ $$$$  .$$$$$.  $$$$     888        '88b    d88'oo     .d8P    $$$$  .$$$$$.  $$$$
+  $$DcaU$$$$$$$$$$      o888o        'Y8bood8P' 8""88888P'      $$DcaU$$$$$$$$$$
+    "Y$$$"*"$$$Y"                                                 "Y$$$"*"$$$Y"
+        "$b.$$"                                                       "$b.$$"
+       .o.                   .   o8o                         .                 .o8
+      .888.                .o8   '"'                       .o8                "888
+     .8"888.     .ooooo. .o888oooooo oooo    ooo .oooo.  .o888oo .ooooo.  .oooo888
+    .8' '888.   d88' '"Y8  888  '888  '88.  .8' 'P  )88b   888  d88' '88bd88' '888
+   .88ooo8888.  888        888   888   '88..8'   .oP"888   888  888ooo888888   888
+  .8'     '888. 888   .o8  888 . 888    '888'   d8(  888   888 .888    .o888   888
+ o88o     o8888o'Y8bod8P'  "888"o888o    '8'    'Y888""8o  "888"'Y8bod8P''Y8bod88P"
+
+`
+
 // Implements sort.Interface so we can sort the incoming header in the message by block height
 type HeadersByHeightAndHash []ChainSegmentHeader
 
@@ -780,6 +804,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 					// Check if transition to proof-of-stake happened and stop forward syncing
 					if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 						hd.highestInDb = link.blockHeight
+						log.Info(POSPandaBanner)
 						return true, nil
 					}
 				}
