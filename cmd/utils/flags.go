@@ -331,8 +331,8 @@ var (
 
 	JWTSecretPath = cli.StringFlag{
 		Name:  "authrpc.jwtsecret",
-		Usage: "Token to ensure safe connection between CL and EL",
-		Value: "jwt.hex",
+		Usage: "Path to the token that ensures safe connection between CL and EL",
+		Value: "",
 	}
 
 	HttpCompressionFlag = cli.BoolFlag{
