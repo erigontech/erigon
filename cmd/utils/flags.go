@@ -622,7 +622,7 @@ var (
 	}
 
 	SnapshotSyncFlag = cli.BoolFlag{
-		Name:  "experimental.snapshot",
+		Name:  "snapshot",
 		Usage: "Enabling experimental snapshot sync",
 	}
 	SnapshotKeepBlocksFlag = cli.BoolFlag{
