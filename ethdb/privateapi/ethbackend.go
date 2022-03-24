@@ -247,7 +247,7 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 	return !s.requestList.IsWaiting()
 }
 
-// EngineNewPayloadV1, validates and possibly executes payload
+// EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	log.Trace("[NewPayload] acquiring lock")
 	s.syncCond.L.Lock()
@@ -323,7 +323,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	return convertPayloadStatus(&payloadStatus), nil
 }
 
-// EngineGetPayloadV1, retrieves previously assembled payload (Validators only)
+// EngineGetPayloadV1 retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
 	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
 
@@ -381,7 +381,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	}, nil
 }
 
-// EngineForkChoiceUpdatedV1, either states new block head or request the assembling of a new block
+// EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	log.Trace("[ForkChoiceUpdated] acquiring lock")
 	s.syncCond.L.Lock()
