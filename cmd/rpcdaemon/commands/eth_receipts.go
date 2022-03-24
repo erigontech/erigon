@@ -118,11 +118,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return nil, err
 	}
 	if topicsBitmap != nil {
-		if blockNumbers == nil {
-			blockNumbers = topicsBitmap
-		} else {
-			blockNumbers.And(topicsBitmap)
-		}
+		blockNumbers.And(topicsBitmap)
 	}
 
 	var addrBitmap *roaring.Bitmap
@@ -139,11 +135,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 	}
 
 	if addrBitmap != nil {
-		if blockNumbers == nil {
-			blockNumbers = addrBitmap
-		} else {
-			blockNumbers.And(addrBitmap)
-		}
+		blockNumbers.And(addrBitmap)
 	}
 
 	if blockNumbers.GetCardinality() == 0 {
