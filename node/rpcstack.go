@@ -322,7 +322,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 	h.wsConfig = config
 	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, false),
+		Handler: srv.WebsocketHandler(config.Origins, nil, false),
 		server:  srv,
 	})
 	return nil

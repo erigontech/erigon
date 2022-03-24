@@ -291,9 +291,9 @@ func handleForkChoice(
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
+	log.Trace(fmt.Sprintf("[%s] Fork choice beginning unwind", s.LogPrefix()))
 	u.UnwindTo(forkingPoint, common.Hash{})
-	log.Info(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
+	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
 	cfg.hd.SetPendingHeader(headerHash, headerNumber)
 
@@ -314,7 +314,7 @@ func handleNewPayload(
 	headerNumber := header.Number.Uint64()
 	headerHash := header.Hash()
 
-	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	log.Trace(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
 
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
@@ -366,9 +366,9 @@ func handleNewPayload(
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
-	log.Info(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
+	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
 	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, headerInserter)
-	log.Info(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
+	log.Trace(fmt.Sprintf("[%s] New payload verification ended", s.LogPrefix()), "success", success, "err", err)
 	if err != nil || !success {
 		return err
 	}

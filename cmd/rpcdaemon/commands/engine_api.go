@@ -87,7 +87,7 @@ func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} 
 }
 
 func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
-	log.Info("Received ForkchoiceUpdated", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
+	log.Trace("Received ForkchoiceUpdated", "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
 		"build", payloadAttributes != nil)
 
 	var prepareParameters *remote.EnginePayloadAttributes
@@ -125,7 +125,7 @@ func (e *EngineImpl) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *F
 // NewPayloadV1 processes new payloads (blocks) from the beacon chain.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv1
 func (e *EngineImpl) NewPayloadV1(ctx context.Context, payload *ExecutionPayload) (map[string]interface{}, error) {
-	log.Info("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
+	log.Trace("Received NewPayload", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
 
 	var baseFee *uint256.Int
 	if payload.BaseFeePerGas != nil {
