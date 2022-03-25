@@ -9,6 +9,7 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -45,7 +46,7 @@ type Filters struct {
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 	logsSubs         *LogsFilterAggregator
-	logsRequestor    func(*remote.LogsFilterRequest) error
+	logsRequestor    atomic.Value
 	onNewSnapshot    func()
 }
 
@@ -97,7 +98,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				return
 			default:
 			}
-			if requestor, err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs); err != nil {
+			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, ff.logsRequestor); err != nil {
 				select {
 				case <-ctx.Done():
 					return
@@ -108,8 +109,6 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					continue
 				}
 				log.Warn("rpc filters: error subscribing to logs", "err", err)
-			} else {
-				ff.logsRequestor = requestor
 			}
 		}
 	}()
@@ -384,9 +383,14 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 	for topic := range ff.logsSubs.aggLogsFilter.topics {
 		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
 	}
-	if err := ff.logsRequestor(lfr); err != nil {
-		log.Warn("Could not update remote logs filter", "err", err)
-		ff.logsSubs.removeLogsFilter(id)
+	ff.mu.Lock()
+	defer ff.mu.Unlock()
+	requestor := ff.logsRequestor.Load().(func(*remote.LogsFilterRequest) error)
+	if requestor != nil {
+		if err := requestor(lfr); err != nil {
+			log.Warn("Could not update remote logs filter", "err", err)
+			ff.logsSubs.removeLogsFilter(id)
+		}
 	}
 	return id
 }

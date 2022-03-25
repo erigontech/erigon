@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -32,7 +33,7 @@ type ApiBackend interface {
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
-	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply)) (func(*remote.LogsFilterRequest) error, error)
+	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply), requestor atomic.Value) error
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
 	EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
 	EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)
@@ -158,14 +159,15 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remote.SubscribeLogsReply)) (func(*remote.LogsFilterRequest) error, error) {
+func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remote.SubscribeLogsReply), requestor atomic.Value) error {
 	subscription, err := back.remoteEthBackend.SubscribeLogs(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
-			return nil, errors.New(s.Message())
+			return errors.New(s.Message())
 		}
-		return nil, err
+		return err
 	}
+	requestor.Store(subscription.Send)
 	for {
 		logs, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
@@ -173,11 +175,11 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 			break
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		onNewLogs(logs)
 	}
-	return subscription.Send, nil
+	return nil
 }
 
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
