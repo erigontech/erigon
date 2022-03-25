@@ -128,7 +128,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		defer debug.LogPanic()
 		logs := make(chan *types.Log, 1)
 		defer close(logs)
-		id := api.filters.SubscribeLogs(logs)
+		id := api.filters.SubscribeLogs(logs, crit)
 		defer api.filters.UnsubscribeLogs(id)
 
 		for {

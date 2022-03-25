@@ -13,6 +13,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/filters"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -31,7 +32,7 @@ type (
 	PendingLogsSubID  SubscriptionID
 	PendingBlockSubID SubscriptionID
 	PendingTxsSubID   SubscriptionID
-	LogsSubID         SubscriptionID
+	LogsSubID         uint64
 )
 
 type Filters struct {
@@ -43,7 +44,7 @@ type Filters struct {
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
-	logsSubs         map[LogsSubID]chan *types.Log
+	logsSubs         *LogsFilterAggregator
 	onNewSnapshot    func()
 }
 
@@ -55,7 +56,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
 		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
-		logsSubs:         make(map[LogsSubID]chan *types.Log),
+		logsSubs:         NewLogsFilterAggregator(),
 		onNewSnapshot:    onNewSnapshot,
 	}
 
@@ -349,18 +350,31 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
 	delete(ff.pendingTxsSubs, id)
 }
 
-func (ff *Filters) SubscribeLogs(out chan *types.Log) LogsSubID {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	id := LogsSubID(generateSubscriptionID())
-	ff.logsSubs[id] = out
+func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteria) LogsSubID {
+	id, f := ff.logsSubs.insertLogsFilter(out)
+	f.addrs = map[common.Address]int{}
+	if len(crit.Addresses) == 0 {
+		f.allAddrs = 1
+	} else {
+		for _, addr := range crit.Addresses {
+			f.addrs[addr] = 1
+		}
+	}
+	f.topics = map[common.Hash]int{}
+	if len(crit.Topics) == 0 {
+		f.allTopics = 1
+	} else {
+		for _, topics := range crit.Topics {
+			for _, topic := range topics {
+				f.topics[topic] = 1
+			}
+		}
+	}
 	return id
 }
 
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	delete(ff.logsSubs, id)
+	ff.logsSubs.removeLogsFilter(id)
 }
 
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
@@ -455,11 +469,7 @@ func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
 		t = append(t, gointerfaces.ConvertH256ToHash(v))
 	}
 	lg.Topics = t
-	ff.mu.RLock()
-	defer ff.mu.RUnlock()
-	for _, v := range ff.logsSubs {
-		v <- lg
-	}
+	ff.logsSubs.distributeLogs([]*remote.SubscribeLogsReply{reply})
 }
 
 func generateSubscriptionID() SubscriptionID {

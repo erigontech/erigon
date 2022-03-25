@@ -1,0 +1,160 @@
+package filters
+
+import (
+	"sync"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/common"
+	types2 "github.com/ledgerwatch/erigon/core/types"
+)
+
+type LogsFilterAggregator struct {
+	aggLogsFilter  LogsFilter                // Aggregation of all current log filters
+	logsFilters    map[LogsSubID]*LogsFilter // Filter for each subscriber, keyed by filterID
+	logsFilterLock sync.Mutex
+	nextFilterId   LogsSubID
+}
+
+// LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
+// and "aggregated" log filter representing a union of all subscribers. Therefore, the values in
+// the mappings are counters (of type int) and they get deleted when counter goes back to 0
+// Also, addAddr and allTopic are int instead of bool because they are also counter, counting
+// how many subscribers have this set on
+type LogsFilter struct {
+	allAddrs  int
+	addrs     map[common.Address]int
+	allTopics int
+	topics    map[common.Hash]int
+	sender    chan *types2.Log // nil for aggregate subscriber, for appropriate stream server otherwise
+}
+
+func NewLogsFilterAggregator() *LogsFilterAggregator {
+	return &LogsFilterAggregator{
+		aggLogsFilter: LogsFilter{
+			addrs:  make(map[common.Address]int),
+			topics: make(map[common.Hash]int),
+		},
+		logsFilters:  make(map[LogsSubID]*LogsFilter),
+		nextFilterId: 0,
+	}
+}
+
+func (a *LogsFilterAggregator) insertLogsFilter(sender chan *types2.Log) (LogsSubID, *LogsFilter) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+	filterId := a.nextFilterId
+	a.nextFilterId++
+	filter := &LogsFilter{addrs: make(map[common.Address]int), topics: make(map[common.Hash]int), sender: sender}
+	a.logsFilters[filterId] = filter
+	return filterId, filter
+}
+
+func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+	a.subtractLogFilters(a.logsFilters[filterId])
+	delete(a.logsFilters, filterId)
+}
+
+func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+	a.subtractLogFilters(filter)
+	filter.addrs = map[common.Address]int{}
+	if filterReq.GetAllAddresses() {
+		filter.allAddrs = 1
+	} else {
+		filter.allAddrs = 0
+		for _, addr := range filterReq.GetAddresses() {
+			filter.addrs[gointerfaces.ConvertH160toAddress(addr)] = 1
+		}
+	}
+	filter.topics = make(map[common.Hash]int)
+	if filterReq.GetAllTopics() {
+		filter.allTopics = 1
+	} else {
+		filter.allTopics = 0
+		for _, topic := range filterReq.GetTopics() {
+			filter.topics[gointerfaces.ConvertH256ToHash(topic)] = 1
+		}
+	}
+	a.addLogsFilters(filter)
+}
+
+func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
+	a.aggLogsFilter.allAddrs -= f.allAddrs
+	for addr, count := range f.addrs {
+		a.aggLogsFilter.addrs[addr] -= count
+		if a.aggLogsFilter.addrs[addr] == 0 {
+			delete(a.aggLogsFilter.addrs, addr)
+		}
+	}
+	a.aggLogsFilter.allTopics -= f.allTopics
+	for topic, count := range f.topics {
+		a.aggLogsFilter.topics[topic] -= count
+		if a.aggLogsFilter.topics[topic] == 0 {
+			delete(a.aggLogsFilter.topics, topic)
+		}
+	}
+}
+
+func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
+	a.aggLogsFilter.allAddrs += f.allAddrs
+	for addr, count := range f.addrs {
+		a.aggLogsFilter.addrs[addr] += count
+	}
+	a.aggLogsFilter.allTopics += f.allTopics
+	for topic, count := range f.topics {
+		a.aggLogsFilter.topics[topic] += count
+	}
+}
+
+func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
+	a.logsFilterLock.Lock()
+	defer a.logsFilterLock.Unlock()
+	filtersToDelete := make(map[LogsSubID]*LogsFilter)
+	for _, filter := range a.logsFilters {
+		for _, log := range logs {
+			if filter.allAddrs == 0 {
+				_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
+				if !addrOk {
+					continue
+				}
+			}
+			if filter.allTopics == 0 {
+				if !a.chooseTopics(filter.topics, log.GetTopics()) {
+					continue
+				}
+			}
+			lg := &types2.Log{
+				Address:     gointerfaces.ConvertH160toAddress(log.Address),
+				Data:        log.Data,
+				BlockNumber: log.BlockNumber,
+				TxHash:      gointerfaces.ConvertH256ToHash(log.TransactionHash),
+				TxIndex:     uint(log.TransactionIndex),
+				BlockHash:   gointerfaces.ConvertH256ToHash(log.BlockHash),
+				Index:       uint(log.LogIndex),
+				Removed:     log.Removed,
+			}
+			filter.sender <- lg
+		}
+	}
+	// remove malfunctioned filters
+	for filterId, filter := range filtersToDelete {
+		a.subtractLogFilters(filter)
+		delete(a.logsFilters, filterId)
+	}
+
+	return nil
+}
+
+func (a *LogsFilterAggregator) chooseTopics(filterTopics map[common.Hash]int, logTopics []*types.H256) bool {
+	for _, logTopic := range logTopics {
+		if _, ok := filterTopics[gointerfaces.ConvertH256ToHash(logTopic)]; ok {
+			return true
+		}
+	}
+	return false
+}
