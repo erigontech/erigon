@@ -25,3 +25,9 @@ func parseResponse(resp interface{}) (string, error) {
 
 	return string(result), nil
 }
+
+// GetNamespaceFromMethod splits a parent method into namespace and the actual method
+func GetNamespaceFromMethod(method string) (string, string) {
+	parts := strings.SplitN(method, "_", 2)
+	return parts[0], parts[1]
+}

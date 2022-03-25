@@ -1,6 +1,7 @@
 package privateapi
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -130,6 +131,7 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 }
 
 func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
+	fmt.Printf("OnLogs()\n")
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for i, sub := range e.logsSubscriptions {

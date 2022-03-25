@@ -60,13 +60,16 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFil
 }
 
 func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
+	fmt.Println("updateLogsFilter()")
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
 	filter.addrs = make(map[common.Address]int)
 	if filterReq.GetAllAddresses() {
+		fmt.Println("filter.allAddrs = 1")
 		filter.allAddrs = 1
 	} else {
+		fmt.Println("filter.allAddrs = 0")
 		filter.allAddrs = 0
 		for _, addr := range filterReq.GetAddresses() {
 			filter.addrs[gointerfaces.ConvertH160toAddress(addr)] = 1
@@ -115,12 +118,14 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 // SubscribeLogs
 // Only one subscription is needed to serve all the users, LogsFilterRequest allows to dynamically modifying the subscription
 func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+	fmt.Println("subscribeLogs() the main one")
 	filterId, filter := a.insertLogsFilter(server)
 	defer a.removeLogsFilter(filterId, filter)
 	// Listen to filter updates and modify the filters, until terminated
 	var filterReq *remote.LogsFilterRequest
 	var recvErr error
-	for filterReq, recvErr = server.Recv(); recvErr != nil; filterReq, recvErr = server.Recv() {
+	fmt.Printf("filterReq: %+v, recvErr: %+v\n", filterReq, recvErr)
+	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
 	if recvErr != nil && recvErr != io.EOF { // termination
@@ -130,15 +135,20 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 }
 
 func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
+	fmt.Println("distributeLogs()")
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*LogsFilter)
 filterLoop:
 	for filterId, filter := range a.logsFilters {
-		for _, log := range logs {
-			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
-			if !addrOk {
-				continue
+		fmt.Printf("filter object: %+v\n", filter)
+		for i, log := range logs {
+			fmt.Printf("log index: %d, log: %+v\n", i, log)
+			if filter.allAddrs == 0 {
+				_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
+				if !addrOk {
+					continue
+				}
 			}
 			if filter.allTopics == 0 {
 				if !a.chooseTopics(filter.topics, log.GetTopics()) {

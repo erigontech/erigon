@@ -350,6 +350,7 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
 }
 
 func (ff *Filters) SubscribeLogs(out chan *types.Log) LogsSubID {
+	fmt.Println("Subbing logs")
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
 	id := LogsSubID(generateSubscriptionID())
