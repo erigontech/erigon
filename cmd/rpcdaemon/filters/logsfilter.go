@@ -60,31 +60,6 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) {
 	}
 }
 
-func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
-	a.subtractLogFilters(filter)
-	filter.addrs = map[common.Address]int{}
-	if filterReq.GetAllAddresses() {
-		filter.allAddrs = 1
-	} else {
-		filter.allAddrs = 0
-		for _, addr := range filterReq.GetAddresses() {
-			filter.addrs[gointerfaces.ConvertH160toAddress(addr)] = 1
-		}
-	}
-	filter.topics = make(map[common.Hash]int)
-	if filterReq.GetAllTopics() {
-		filter.allTopics = 1
-	} else {
-		filter.allTopics = 0
-		for _, topic := range filterReq.GetTopics() {
-			filter.topics[gointerfaces.ConvertH256ToHash(topic)] = 1
-		}
-	}
-	a.addLogsFilters(filter)
-}
-
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 	a.aggLogsFilter.allAddrs -= f.allAddrs
 	for addr, count := range f.addrs {

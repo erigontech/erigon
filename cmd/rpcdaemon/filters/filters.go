@@ -385,9 +385,9 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 	}
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	requestor := ff.logsRequestor.Load().(func(*remote.LogsFilterRequest) error)
-	if requestor != nil {
-		if err := requestor(lfr); err != nil {
+	loaded := ff.logsRequestor.Load()
+	if loaded != nil {
+		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
 			log.Warn("Could not update remote logs filter", "err", err)
 			ff.logsSubs.removeLogsFilter(id)
 		}
