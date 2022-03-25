@@ -45,6 +45,7 @@ type Filters struct {
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
 	logsSubs         *LogsFilterAggregator
+	logsRequestor    func(*remote.LogsFilterRequest) error
 	onNewSnapshot    func()
 }
 
@@ -96,7 +97,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs); err != nil {
+			if requestor, err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs); err != nil {
 				select {
 				case <-ctx.Done():
 					return
@@ -107,6 +108,8 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 					continue
 				}
 				log.Warn("rpc filters: error subscribing to logs", "err", err)
+			} else {
+				ff.logsRequestor = requestor
 			}
 		}
 	}()
@@ -369,6 +372,21 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 				f.topics[topic] = 1
 			}
 		}
+	}
+	ff.logsSubs.addLogsFilters(f)
+	lfr := &remote.LogsFilterRequest{
+		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
+		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
+	}
+	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
+	}
+	for topic := range ff.logsSubs.aggLogsFilter.topics {
+		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
+	}
+	if err := ff.logsRequestor(lfr); err != nil {
+		log.Warn("Could not update remote logs filter", "err", err)
+		ff.logsSubs.removeLogsFilter(id)
 	}
 	return id
 }

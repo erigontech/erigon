@@ -32,7 +32,7 @@ type ApiBackend interface {
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
-	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply)) error
+	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply)) (func(*remote.LogsFilterRequest) error, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
 	EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
 	EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)
@@ -158,13 +158,13 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 	return nil
 }
 
-func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remote.SubscribeLogsReply)) error {
+func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remote.SubscribeLogsReply)) (func(*remote.LogsFilterRequest) error, error) {
 	subscription, err := back.remoteEthBackend.SubscribeLogs(ctx, grpc.WaitForReady(true))
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
-			return errors.New(s.Message())
+			return nil, errors.New(s.Message())
 		}
-		return err
+		return nil, err
 	}
 	for {
 		logs, err := subscription.Recv()
@@ -173,11 +173,11 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 			break
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		onNewLogs(logs)
 	}
-	return nil
+	return subscription.Send, nil
 }
 
 func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {

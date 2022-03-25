@@ -54,8 +54,10 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender chan *types2.Log) (LogsSu
 func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
-	a.subtractLogFilters(a.logsFilters[filterId])
-	delete(a.logsFilters, filterId)
+	if filter, ok := a.logsFilters[filterId]; ok {
+		a.subtractLogFilters(filter)
+		delete(a.logsFilters, filterId)
+	}
 }
 
 func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
