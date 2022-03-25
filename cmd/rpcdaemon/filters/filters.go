@@ -469,7 +469,7 @@ func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
 		t = append(t, gointerfaces.ConvertH256ToHash(v))
 	}
 	lg.Topics = t
-	ff.logsSubs.distributeLogs([]*remote.SubscribeLogsReply{reply})
+	ff.logsSubs.distributeLog(reply)
 }
 
 func generateSubscriptionID() SubscriptionID {

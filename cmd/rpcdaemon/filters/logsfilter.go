@@ -111,35 +111,33 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 	}
 }
 
-func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filtersToDelete := make(map[LogsSubID]*LogsFilter)
 	for _, filter := range a.logsFilters {
-		for _, log := range logs {
-			if filter.allAddrs == 0 {
-				_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
-				if !addrOk {
-					continue
-				}
+		if filter.allAddrs == 0 {
+			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(eventLog.Address)]
+			if !addrOk {
+				continue
 			}
-			if filter.allTopics == 0 {
-				if !a.chooseTopics(filter.topics, log.GetTopics()) {
-					continue
-				}
-			}
-			lg := &types2.Log{
-				Address:     gointerfaces.ConvertH160toAddress(log.Address),
-				Data:        log.Data,
-				BlockNumber: log.BlockNumber,
-				TxHash:      gointerfaces.ConvertH256ToHash(log.TransactionHash),
-				TxIndex:     uint(log.TransactionIndex),
-				BlockHash:   gointerfaces.ConvertH256ToHash(log.BlockHash),
-				Index:       uint(log.LogIndex),
-				Removed:     log.Removed,
-			}
-			filter.sender <- lg
 		}
+		if filter.allTopics == 0 {
+			if !a.chooseTopics(filter.topics, eventLog.GetTopics()) {
+				continue
+			}
+		}
+		lg := &types2.Log{
+			Address:     gointerfaces.ConvertH160toAddress(eventLog.Address),
+			Data:        eventLog.Data,
+			BlockNumber: eventLog.BlockNumber,
+			TxHash:      gointerfaces.ConvertH256ToHash(eventLog.TransactionHash),
+			TxIndex:     uint(eventLog.TransactionIndex),
+			BlockHash:   gointerfaces.ConvertH256ToHash(eventLog.BlockHash),
+			Index:       uint(eventLog.LogIndex),
+			Removed:     eventLog.Removed,
+		}
+		filter.sender <- lg
 	}
 	// remove malfunctioned filters
 	for filterId, filter := range filtersToDelete {
