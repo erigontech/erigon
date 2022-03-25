@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/RoaringBitmap/roaring"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -68,11 +67,11 @@ func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig,
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([]*types.Log, error) {
 	var begin, end uint64
-	var logs []*types.Log //nolint:prealloc
+	logs := []*types.Log{}
 
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
-		return returnLogs(logs), beginErr
+		return logs, beginErr
 	}
 	defer tx.Rollback()
 
@@ -119,11 +118,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return nil, err
 	}
 	if topicsBitmap != nil {
-		if blockNumbers == nil {
-			blockNumbers = topicsBitmap
-		} else {
-			blockNumbers.And(topicsBitmap)
-		}
+		blockNumbers.And(topicsBitmap)
 	}
 
 	var addrBitmap *roaring.Bitmap
@@ -134,33 +129,29 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		if addrBitmap == nil {
 			addrBitmap = m
-		} else {
-			addrBitmap = roaring.Or(addrBitmap, m)
+			continue
 		}
+		addrBitmap = roaring.Or(addrBitmap, m)
 	}
 
 	if addrBitmap != nil {
-		if blockNumbers == nil {
-			blockNumbers = addrBitmap
-		} else {
-			blockNumbers.And(addrBitmap)
-		}
+		blockNumbers.And(addrBitmap)
 	}
 
 	if blockNumbers.GetCardinality() == 0 {
-		return returnLogs(logs), nil
+		return logs, nil
 	}
 
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = libcommon.Stopped(ctx.Done()); err != nil {
+		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
 
-		blockNToMatch := uint64(iter.Next())
+		block := uint64(iter.Next())
 		var logIndex uint
-		var blockLogs types.Logs
-		if err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNToMatch), func(k, v []byte) error {
+		var blockLogs []*types.Log
+		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
@@ -170,36 +161,41 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 				logIndex++
 			}
 			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
-			if len(filtered) > 0 {
-				txIndex := uint(binary.BigEndian.Uint32(k[8:]))
-				for _, log := range filtered {
-					log.TxIndex = txIndex
-				}
-				blockLogs = append(blockLogs, filtered...)
+			if len(filtered) == 0 {
+				return nil
 			}
+			txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+			for _, log := range filtered {
+				log.TxIndex = txIndex
+			}
+			blockLogs = append(blockLogs, filtered...)
+
 			return nil
-		}); err != nil {
-			return returnLogs(logs), err
+		})
+		if err != nil {
+			return logs, err
+		}
+		if len(blockLogs) == 0 {
+			continue
 		}
 
-		if len(blockLogs) > 0 {
-			b, err := api.blockByNumberWithSenders(tx, blockNToMatch)
-			if err != nil {
-				return nil, err
-			}
-			if b == nil {
-				return nil, fmt.Errorf("block not found %d", blockNToMatch)
-			}
-			blockHash := b.Hash()
-			for _, log := range blockLogs {
-				log.BlockNumber = blockNToMatch
-				log.BlockHash = blockHash
-				log.TxHash = b.Transactions()[log.TxIndex].Hash()
-			}
-			logs = append(logs, blockLogs...)
+		b, err := api.blockByNumberWithSenders(tx, block)
+		if err != nil {
+			return nil, err
 		}
+		if b == nil {
+			return nil, fmt.Errorf("block not found %d", block)
+		}
+		blockHash := b.Hash()
+		for _, log := range blockLogs {
+			log.BlockNumber = block
+			log.BlockHash = blockHash
+			log.TxHash = b.Transactions()[log.TxIndex].Hash()
+		}
+		logs = append(logs, blockLogs...)
 	}
-	return returnLogs(logs), nil
+
+	return logs, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -224,18 +220,19 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			}
 			if bitmapForORing == nil {
 				bitmapForORing = m
-			} else {
-				bitmapForORing.Or(m)
+				continue
 			}
+			bitmapForORing.Or(m)
 		}
 
-		if bitmapForORing != nil {
-			if result == nil {
-				result = bitmapForORing
-			} else {
-				result = roaring.And(bitmapForORing, result)
-			}
+		if bitmapForORing == nil {
+			continue
 		}
+		if result == nil {
+			result = bitmapForORing
+			continue
+		}
+		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil
 }
@@ -418,7 +415,7 @@ func includes(addresses []common.Address, a common.Address) bool {
 
 // filterLogs creates a slice of logs matching the given criteria.
 func filterLogs(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
-	var ret []*types.Log
+	result := make(types.Logs, 0, len(logs))
 Logs:
 	for _, log := range logs {
 
@@ -441,14 +438,7 @@ Logs:
 				continue Logs
 			}
 		}
-		ret = append(ret, log)
+		result = append(result, log)
 	}
-	return ret
-}
-
-func returnLogs(logs []*types.Log) []*types.Log {
-	if logs == nil {
-		return []*types.Log{}
-	}
-	return logs
+	return result
 }
