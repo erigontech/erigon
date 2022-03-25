@@ -112,7 +112,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 }
 
 // SubscribeLogs send a notification each time a new log appears.
-func (api *APIImpl) SubscribeLogs(ctx context.Context) (*rpc.Subscription, error) {
+func (api *APIImpl) Logs(ctx context.Context) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}

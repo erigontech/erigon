@@ -120,7 +120,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 	// Listen to filter updates and modify the filters, until terminated
 	var filterReq *remote.LogsFilterRequest
 	var recvErr error
-	for filterReq, recvErr = server.Recv(); recvErr != nil; filterReq, recvErr = server.Recv() {
+	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
 	if recvErr != nil && recvErr != io.EOF { // termination
@@ -136,9 +136,11 @@ func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply)
 filterLoop:
 	for filterId, filter := range a.logsFilters {
 		for _, log := range logs {
-			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
-			if !addrOk {
-				continue
+			if filter.allAddrs == 0 {
+				_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
+				if !addrOk {
+					continue
+				}
 			}
 			if filter.allTopics == 0 {
 				if !a.chooseTopics(filter.topics, log.GetTopics()) {
