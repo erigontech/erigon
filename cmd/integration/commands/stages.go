@@ -491,7 +491,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
 
 		if unwind > 0 {
@@ -499,7 +499,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 				return fmt.Errorf("cannot unwind past 0")
 			}
 
-			u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
+			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
 			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(chainConfig), getBlockReader(chainConfig)), ctx); err != nil {
 				return err
 			}
@@ -513,7 +513,10 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 		}
 		log.Info("This command only works with --unwind option")
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
