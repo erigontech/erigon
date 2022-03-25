@@ -476,6 +476,19 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 
 // ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	k, _, err := c.Last()
+	if err != nil {
+		return err
+	}
+	if binary.BigEndian.Uint64(k) >= newValue {
+		fmt.Printf("ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k))
+		panic("oohhhh!")
+	}
+
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, newValue)
 	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
@@ -554,10 +567,10 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		Uncles:   body.Uncles,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return fmt.Errorf("failed to write body: %w", err)
+		return fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
 	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
-		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
+		return fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return nil
 }
@@ -603,7 +616,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -720,6 +733,19 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 
 	// EthTx must have canonical id's - means need decrement it's sequence on unwind
 	if firstMovedTxnIDIsSet {
+		c, err := tx.Cursor(kv.EthTx)
+		if err != nil {
+			return err
+		}
+		k, _, err := c.Last()
+		if err != nil {
+			return err
+		}
+		if binary.BigEndian.Uint64(k) >= firstMovedTxnID {
+			fmt.Printf("ResetSequence: %d, lastInDB: %d\n", firstMovedTxnID, binary.BigEndian.Uint64(k))
+			panic("oohhhh!")
+		}
+
 		if err := ResetSequence(tx, kv.EthTx, firstMovedTxnID); err != nil {
 			return err
 		}
