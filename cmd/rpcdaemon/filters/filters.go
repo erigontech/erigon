@@ -98,7 +98,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, ff.logsRequestor); err != nil {
+			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor); err != nil {
 				select {
 				case <-ctx.Done():
 					return
