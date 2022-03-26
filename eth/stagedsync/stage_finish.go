@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -115,6 +116,7 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 }
 
 func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
+	t := time.Now()
 	if notifier == nil {
 		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
@@ -148,13 +150,15 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		return err
 	}
 	notifier.OnNewHeader(headersRlp)
-	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
+	headerTiming := time.Since(t)
+	t = time.Now()
 	logs, err := ReadLogs(tx, notifyFrom, isUnwind)
 	if err != nil {
 		return err
 	}
 	notifier.OnLogs(logs)
-
+	logTiming := time.Since(t)
+	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "header sending", headerTiming, "log sending", logTiming)
 	return nil
 }
 
@@ -182,7 +186,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 				return nil, err
 			}
 		}
-		txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+		txIndex := uint64(binary.BigEndian.Uint32(k[8:]))
 		txHash := block.Transactions()[txIndex].Hash()
 		var ll types.Logs
 		reader.Reset(v)
@@ -198,7 +202,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 				LogIndex:         logIndex,
 				Topics:           make([]*types2.H256, 0, len(l.Topics)),
 				TransactionHash:  gointerfaces.ConvertHashToH256(txHash),
-				TransactionIndex: uint64(l.TxIndex),
+				TransactionIndex: txIndex,
 				Removed:          isUnwind,
 			}
 			logIndex++
