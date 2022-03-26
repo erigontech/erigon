@@ -372,6 +372,7 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 			}
 		}
 	}
+	f.topicsOriginal = crit.Topics
 	ff.logsSubs.addLogsFilters(f)
 	lfr := &remote.LogsFilterRequest{
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,

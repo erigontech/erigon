@@ -185,7 +185,7 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 				BlockNumber:      l.BlockNumber,
 				Data:             l.Data,
 				LogIndex:         uint64(l.Index),
-				Topics:           make([]*types2.H256, 0),
+				Topics:           make([]*types2.H256, 0, len(l.Topics)),
 				TransactionHash:  gointerfaces.ConvertHashToH256(l.TxHash),
 				TransactionIndex: uint64(l.TxIndex),
 				Removed:          isUnwind,
