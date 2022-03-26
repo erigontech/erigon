@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -112,7 +113,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 }
 
 // SubscribeLogs send a notification each time a new log appears.
-func (api *APIImpl) SubscribeLogs(ctx context.Context) (*rpc.Subscription, error) {
+func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
@@ -127,7 +128,7 @@ func (api *APIImpl) SubscribeLogs(ctx context.Context) (*rpc.Subscription, error
 		defer debug.LogPanic()
 		logs := make(chan *types.Log, 1)
 		defer close(logs)
-		id := api.filters.SubscribeLogs(logs)
+		id := api.filters.SubscribeLogs(logs, crit)
 		defer api.filters.UnsubscribeLogs(id)
 
 		for {

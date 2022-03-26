@@ -2,6 +2,7 @@ package privateapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -36,8 +37,32 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, events *Events) *EthBackendServer {
-	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, logsFilter: NewLogsFilterAggregator()}
-	s.events.AddLogsSubscription(s.logsFilter.distributeLogs)
+	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, logsFilter: NewLogsFilterAggregator(events)}
+
+	ch, clean := s.events.AddLogsSubscription()
+	go func() {
+		var err error
+		defer clean()
+		log.Info("new subscription to logs established")
+		defer func() {
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("subscription to logs closed", "reason", err)
+				}
+			} else {
+				log.Warn("subscription to logs closed")
+			}
+		}()
+		for {
+			select {
+			case <-s.ctx.Done():
+				err = s.ctx.Err()
+				return
+			case logs := <-ch:
+				s.logsFilter.distributeLogs(logs)
+			}
+		}
+	}()
 	return s
 }
 
@@ -121,7 +146,7 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 	return nodesInfo, nil
 }
 
-func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
 	}

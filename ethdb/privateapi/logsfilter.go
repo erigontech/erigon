@@ -16,6 +16,7 @@ type LogsFilterAggregator struct {
 	logsFilters    map[uint64]*LogsFilter // Filter for each subscriber, keyed by filterID
 	logsFilterLock sync.Mutex
 	nextFilterId   uint64
+	events         *Events
 }
 
 // LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
@@ -31,7 +32,7 @@ type LogsFilter struct {
 	sender    remote.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
-func NewLogsFilterAggregator() *LogsFilterAggregator {
+func NewLogsFilterAggregator(events *Events) *LogsFilterAggregator {
 	return &LogsFilterAggregator{
 		aggLogsFilter: LogsFilter{
 			addrs:  make(map[common.Address]int),
@@ -39,6 +40,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 		},
 		logsFilters:  make(map[uint64]*LogsFilter),
 		nextFilterId: 0,
+		events:       events,
 	}
 }
 
@@ -52,11 +54,16 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender remote.ETHBACKEND_Subscri
 	return filterId, filter
 }
 
+func (a *LogsFilterAggregator) checkEmpty() {
+	a.events.EmptyLogSubsctiption(a.aggLogsFilter.allAddrs == 0 && len(a.aggLogsFilter.addrs) == 0 && a.aggLogsFilter.allTopics == 0 && len(a.aggLogsFilter.topics) == 0)
+}
+
 func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
 	delete(a.logsFilters, filterId)
+	a.checkEmpty()
 }
 
 func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
@@ -82,6 +89,7 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 		}
 	}
 	a.addLogsFilters(filter)
+	a.checkEmpty()
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
@@ -120,7 +128,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 	// Listen to filter updates and modify the filters, until terminated
 	var filterReq *remote.LogsFilterRequest
 	var recvErr error
-	for filterReq, recvErr = server.Recv(); recvErr != nil; filterReq, recvErr = server.Recv() {
+	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
 	if recvErr != nil && recvErr != io.EOF { // termination
@@ -132,13 +140,26 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
+
 	filtersToDelete := make(map[uint64]*LogsFilter)
-filterLoop:
-	for filterId, filter := range a.logsFilters {
-		for _, log := range logs {
-			_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
-			if !addrOk {
+outerLoop:
+	for _, log := range logs {
+		// Use aggregate filter first
+		if a.aggLogsFilter.allAddrs == 0 {
+			if _, addrOk := a.aggLogsFilter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]; !addrOk {
 				continue
+			}
+		}
+		if a.aggLogsFilter.allTopics == 0 {
+			if !a.chooseTopics(a.aggLogsFilter.topics, log.GetTopics()) {
+				continue
+			}
+		}
+		for filterId, filter := range a.logsFilters {
+			if filter.allAddrs == 0 {
+				if _, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]; !addrOk {
+					continue
+				}
 			}
 			if filter.allTopics == 0 {
 				if !a.chooseTopics(filter.topics, log.GetTopics()) {
@@ -147,7 +168,7 @@ filterLoop:
 			}
 			if err := filter.sender.Send(log); err != nil {
 				filtersToDelete[filterId] = filter
-				continue filterLoop
+				continue outerLoop
 			}
 		}
 	}
