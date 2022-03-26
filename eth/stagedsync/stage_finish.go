@@ -167,29 +167,41 @@ func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsRepl
 	reply := make([]*remote.SubscribeLogsReply, 0)
 	reader := bytes.NewReader(nil)
 
+	var prevBlockNum uint64
+	var block *types.Block
+	var logIndex uint64
 	for k, v, err := logs.Seek(dbutils.LogKey(from, 0)); k != nil; k, v, err = logs.Next() {
 		if err != nil {
 			return nil, err
 		}
 		blockNum := binary.BigEndian.Uint64(k[:8])
+		if block == nil || blockNum != prevBlockNum {
+			logIndex = 0
+			prevBlockNum = blockNum
+			if block, err = rawdb.ReadBlockByNumber(tx, blockNum); err != nil {
+				return nil, err
+			}
+		}
+		txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+		txHash := block.Transactions()[txIndex].Hash()
 		var ll types.Logs
 		reader.Reset(v)
 		if err := cbor.Unmarshal(&ll, reader); err != nil {
 			return nil, fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
 		}
-
 		for _, l := range ll {
 			r := &remote.SubscribeLogsReply{
 				Address:          gointerfaces.ConvertAddressToH160(l.Address),
-				BlockHash:        gointerfaces.ConvertHashToH256(l.BlockHash),
-				BlockNumber:      l.BlockNumber,
+				BlockHash:        gointerfaces.ConvertHashToH256(block.Hash()),
+				BlockNumber:      blockNum,
 				Data:             l.Data,
-				LogIndex:         uint64(l.Index),
+				LogIndex:         logIndex,
 				Topics:           make([]*types2.H256, 0, len(l.Topics)),
-				TransactionHash:  gointerfaces.ConvertHashToH256(l.TxHash),
+				TransactionHash:  gointerfaces.ConvertHashToH256(txHash),
 				TransactionIndex: uint64(l.TxIndex),
 				Removed:          isUnwind,
 			}
+			logIndex++
 			for _, topic := range l.Topics {
 				r.Topics = append(r.Topics, gointerfaces.ConvertHashToH256(topic))
 			}
