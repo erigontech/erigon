@@ -23,10 +23,10 @@ type PlainStateWriter struct {
 	accumulator *shards.Accumulator
 }
 
-func NewPlainStateWriter(db putDel, changeSetsDB kv.RwTx, blockNumber uint64) *PlainStateWriter {
+func NewPlainStateWriter(db putDel, memoryBuffer kv.StatelessWriteTx, changeSetsDB kv.RwTx, blockNumber uint64) *PlainStateWriter {
 	return &PlainStateWriter{
 		db:  db,
-		csw: NewChangeSetWriterPlain(changeSetsDB, blockNumber),
+		csw: NewChangeSetWriterPlain(changeSetsDB, memoryBuffer, blockNumber),
 	}
 }
 

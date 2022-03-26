@@ -895,7 +895,7 @@ func TestReproduceCrash(t *testing.T) {
 	value2 := uint256.NewInt(0x58c00a51)
 
 	_, tx := memdb.NewTestTx(t)
-	tsw := state.NewPlainStateWriter(tx, nil, 1)
+	tsw := state.NewPlainStateWriter(tx, tx, nil, 1)
 	intraBlockState := state.New(state.NewPlainState(tx, 1))
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1286,7 +1286,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	_, tx := memdb.NewTestTx(t)
-	r, tsw := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, nil, 0)
+	r, tsw := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1324,7 +1324,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx := memdb.NewTestTx(t)
-	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
+	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
@@ -1357,7 +1357,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
 	_, tx := memdb.NewTestTx(t)
-	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, nil, 0)
+	r, w := state.NewPlainState(tx, 0), state.NewPlainStateWriter(tx, tx, nil, 0)
 	intraBlockState := state.New(r)
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)

@@ -401,7 +401,7 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 
-	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
+	blockWriter := state.NewPlainStateWriter(tx, tx, tx, 0)
 
 	if err := statedb.CommitBlock(params.Rules{}, blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)

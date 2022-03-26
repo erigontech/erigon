@@ -90,7 +90,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 	if err4 != nil {
 		return err4
 	}
-	w := state.NewPlainStateWriter(rwTx, nil, 0)
+	w := state.NewPlainStateWriter(rwTx, rwTx, nil, 0)
 	if err = genesisIbs.CommitBlock(params.Rules{}, w); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
@@ -126,7 +126,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		if rwTx, err = db.BeginRw(ctx); err != nil {
 			return err
 		}
-		w = state.NewPlainStateWriter(rwTx, nil, block)
+		w = state.NewPlainStateWriter(rwTx, rwTx, nil, block)
 		r := state.NewPlainStateReader(tx)
 		intraBlockState := state.New(r)
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }

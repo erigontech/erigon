@@ -90,6 +90,7 @@ func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
 	batch ethdb.Database,
+	memoryBuffer core.MemoryBuffer,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
@@ -99,7 +100,7 @@ func executeBlock(
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, memoryBuffer, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
 	if err != nil {
 		return err
 	}
@@ -127,7 +128,7 @@ func executeBlock(
 	}
 
 	if writeReceipts {
-		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+		if err = rawdb.AppendReceipts(memoryBuffer, blockNum, receipts); err != nil {
 			return err
 		}
 
@@ -145,13 +146,14 @@ func executeBlock(
 		}
 	}
 	if writeCallTraces {
-		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
+		return callTracer.WriteToDb(memoryBuffer, block, *cfg.vmConfig)
 	}
 	return nil
 }
 
 func newStateReaderWriter(
 	batch ethdb.Database,
+	memoryBuffer core.MemoryBuffer,
 	tx kv.RwTx,
 	block *types.Block,
 	writeChangesets bool,
@@ -175,7 +177,7 @@ func newStateReaderWriter(
 		accumulator = nil
 	}
 	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
+		stateWriter = state.NewPlainStateWriter(batch, memoryBuffer, tx, block.NumberU64()).SetAccumulator(accumulator)
 	} else {
 		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
 	}
@@ -219,16 +221,23 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	startTime := time.Now()
 
 	var batch ethdb.DbWithPendingMutations
+	// state is stored through ethdb batches
 	batch = olddb.NewBatch(tx, quit)
 	defer batch.Rollback()
-
+	// changes are stored through memory buffer
+	memoryBuffer := core.NewMemoryBuffer()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
-	var gas uint64
+	var gas uint64               // used for logs
+	var currentStateGas uint64   // used for batch commits of state
+	var currentHistoryGas uint64 // used for batch commits of history
+	// Transform batch_size limit into Ggas
+	gasHistory := uint64(cfg.batchSize) * uint64(datasize.KB) / 2
+	gasState := gasHistory * 20
 
 	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
 	if err != nil {
@@ -271,15 +280,15 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, memoryBuffer, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
 		stageProgress = blockNum
 
-		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if updateProgress {
+		if currentStateGas >= gasState {
+			currentStateGas = 0
 			if err = batch.Commit(); err != nil {
 				return err
 			}
@@ -302,8 +311,17 @@ Loop:
 			defer batch.Rollback()
 		}
 
-		gas = gas + block.GasUsed()
+		if currentHistoryGas >= gasHistory {
+			currentHistoryGas = 0
+			if err = memoryBuffer.WriteToDb(tx); err != nil {
+				fmt.Println("lol2")
+				return err
+			}
+		}
 
+		gas = gas + block.GasUsed()
+		currentHistoryGas = currentHistoryGas + block.GasUsed()
+		currentStateGas = currentStateGas + block.GasUsed()
 		select {
 		default:
 		case <-logEvery.C:
@@ -330,6 +348,10 @@ Loop:
 	}
 	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("batch commit: %v", err)
+	}
+
+	if err = memoryBuffer.WriteToDb(tx); err != nil {
+		return err
 	}
 
 	if !useExternalTx {

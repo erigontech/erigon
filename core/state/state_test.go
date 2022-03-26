@@ -292,7 +292,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 
 func TestDump(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	w := NewPlainStateWriter(tx, tx, 0)
+	w := NewPlainStateWriter(tx, tx, tx, 0)
 	state := New(NewPlainStateReader(tx))
 
 	// generate a few entries
@@ -319,7 +319,7 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blockWriter := NewPlainStateWriter(tx, tx, 1)
+	blockWriter := NewPlainStateWriter(tx, tx, tx, 1)
 	err = state.CommitBlock(params.Rules{}, blockWriter)
 	if err != nil {
 		t.Fatal(err)

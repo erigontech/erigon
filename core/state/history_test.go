@@ -29,7 +29,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 
 	acc := make([]*accounts.Account, 10)
 	addr := make([]common.Address, 10)
-	blockWriter := NewPlainStateWriter(tx, tx, 1)
+	blockWriter := NewPlainStateWriter(tx, tx, tx, 1)
 	emptyAccount := accounts.NewAccount()
 	for i := range acc {
 		acc[i], addr[i] = randomAccount(t)
@@ -89,7 +89,7 @@ func TestMutationCommit(t *testing.T) {
 	numOfAccounts := 5
 	numOfStateKeys := 5
 
-	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, NewPlainStateWriter(tx, tx, 2), numOfAccounts, numOfStateKeys)
+	addrs, accState, accStateStorage, accHistory, accHistoryStateStorage := generateAccountsWithStorageAndHistory(t, NewPlainStateWriter(tx, tx, tx, 2), numOfAccounts, numOfStateKeys)
 
 	for i, addr := range addrs {
 		acc, err := NewPlainStateReader(tx).ReadAccountData(addr)
@@ -319,7 +319,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		return expectedKey
 	}
 
-	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 3), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, 3), []storageData{
 		{
 			addrs[0],
 			changeset.DefaultIncarnation,
@@ -343,7 +343,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		},
 	})
 
-	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 5), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, 5), []storageData{
 		{
 			addrs[0],
 			changeset.DefaultIncarnation,
@@ -480,7 +480,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		return expectedKey
 	}
 
-	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 3), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, 3), []storageData{
 		{
 			addr:   addr1,
 			inc:    changeset.DefaultIncarnation,
@@ -511,7 +511,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		},
 	})
 
-	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 5), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, 5), []storageData{
 		{
 			addr:   addr1,
 			inc:    changeset.DefaultIncarnation,
@@ -689,7 +689,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		Changes: make([]changeset.Change, 0),
 	}
 
-	writeBlockData(t, NewPlainStateWriter(tx, tx, 3), []accData{
+	writeBlockData(t, NewPlainStateWriter(tx, tx, tx, 3), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: &emptyValAcc,
@@ -707,7 +707,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	})
 
-	writeBlockData(t, NewPlainStateWriter(tx, tx, 5), []accData{
+	writeBlockData(t, NewPlainStateWriter(tx, tx, tx, 5), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: block3ValAcc,
@@ -841,7 +841,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 
 	var addr1New, addr2New, addr3New *accounts.Account
 
-	writeBlockData(t, NewPlainStateWriter(tx, tx, 1), []accData{
+	writeBlockData(t, NewPlainStateWriter(tx, tx, tx, 1), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: &emptyValAcc,
@@ -866,7 +866,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		addr2New.Nonce = uint64(i)
 		addr3New = addr3Old.SelfCopy()
 		addr3New.Nonce = uint64(i)
-		writeBlockData(t, NewPlainStateWriter(tx, tx, uint64(i)), []accData{
+		writeBlockData(t, NewPlainStateWriter(tx, tx, tx, uint64(i)), []accData{
 			{
 				addr:   addrs[0],
 				oldVal: addr1Old,
@@ -895,7 +895,7 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	addr3New = addr3Old.SelfCopy()
 	addr3New.Nonce = 1100
 
-	writeBlockData(t, NewPlainStateWriter(tx, tx, 1100), []accData{
+	writeBlockData(t, NewPlainStateWriter(tx, tx, tx, 1100), []accData{
 		{
 			addr:   addrs[0],
 			oldVal: addr1Old,
@@ -967,7 +967,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	emptyVal := uint256.NewInt(0)
 
 	val := uint256.NewInt(0).SetBytes([]byte("block 1"))
-	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 1), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, 1), []storageData{
 		{
 			addr:   addrs[0],
 			inc:    1,
@@ -994,7 +994,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	prev := val
 	for i := 2; i < 1100; i++ {
 		val = uint256.NewInt(0).SetBytes([]byte("block " + strconv.Itoa(i)))
-		writeStorageBlockData(t, NewPlainStateWriter(tx, tx, uint64(i)), []storageData{
+		writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, uint64(i)), []storageData{
 			{
 				addr:   addrs[0],
 				inc:    1,
@@ -1022,7 +1022,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 
 	val = uint256.NewInt(0).SetBytes([]byte("block 1100"))
 
-	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 1100), []storageData{
+	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, tx, 1100), []storageData{
 		{
 			addr:   addrs[0],
 			inc:    1,

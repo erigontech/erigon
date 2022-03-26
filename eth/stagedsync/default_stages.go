@@ -10,7 +10,7 @@ import (
 
 func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, trans TranspileCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
-		{
+		/*{
 			ID:          stages.Headers,
 			Description: "Download headers",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx) error {
@@ -64,7 +64,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, headers HeadersCfg, cumul
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneBodiesStage(p, tx, bodies, ctx)
 			},
-		},
+		},*/
 		{
 			ID:          stages.Senders,
 			Description: "Recover senders from tx signatures",

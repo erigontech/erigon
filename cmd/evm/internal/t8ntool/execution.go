@@ -255,7 +255,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 	// Commit block
 	var root common.Hash
-	if err = ibs.FinalizeTx(chainConfig.Rules(1), state.NewPlainStateWriter(tx, tx, 1)); err != nil {
+	if err = ibs.FinalizeTx(chainConfig.Rules(1), state.NewPlainStateWriter(tx, tx, tx, 1)); err != nil {
 		return nil, nil, err
 	}
 	root, err = trie.CalcRoot("", tx)
@@ -280,7 +280,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
-	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
+	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, tx, blockNr)
 	statedb := state.New(r)
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
@@ -298,10 +298,10 @@ func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAllo
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, tx, blockNr+1)); err != nil {
 		panic(err)
 	}
-	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(tx, tx, tx, blockNr+1)); err != nil {
 		panic(err)
 	}
 	return statedb

@@ -379,7 +379,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 
 	for i := 0; i < n; i++ {
 		stateReader := state.NewPlainStateReader(tx)
-		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
+		plainStateWriter := state.NewPlainStateWriter(tx, tx, nil, parent.NumberU64()+uint64(i)+1)
 		ibs := state.New(stateReader)
 		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
 		if err != nil {
