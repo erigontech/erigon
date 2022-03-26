@@ -190,18 +190,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	require.NoError(err)
 	require.Equal(2, len(s.Headers.segments))
 
-	//without indices can't .View segments
 	ok, err := s.ViewTxs(10, func(sn *TxnSegment) error {
-		require.True(false) // never call
-		return nil
-	})
-	require.NoError(err)
-	require.False(ok)
-
-	//with indices can
-	s.indicesReady.Store(true)
-	s.idxAvailable.Store(1_000_000)
-	ok, err = s.ViewTxs(10, func(sn *TxnSegment) error {
 		require.Equal(int(sn.To), 500_000)
 		return nil
 	})
