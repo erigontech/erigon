@@ -82,9 +82,9 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 			filter.topics[gointerfaces.ConvertH256ToHash(topic)] = 1
 		}
 	}
+	a.addLogsFilters(filter)
 	fmt.Printf("filter now: %+v\n", filter)
 	fmt.Printf("agg filter now: %+v\n", a.aggLogsFilter)
-	a.addLogsFilters(filter)
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
