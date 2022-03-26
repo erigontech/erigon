@@ -542,12 +542,12 @@ func (s *RoSnapshots) closeSegmentsLocked() {
 	}
 }
 func (s *RoSnapshots) PrintDebug() {
-	s.Headers.lock.Lock()
-	defer s.Headers.lock.Unlock()
-	s.Bodies.lock.Lock()
-	defer s.Bodies.lock.Unlock()
-	s.Txs.lock.Lock()
-	defer s.Txs.lock.Unlock()
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
 	fmt.Printf("sn: %d, %d\n", s.segmentsAvailable.Load(), s.idxAvailable.Load())
 	fmt.Println("    == Snapshots, Header")
 	for _, sn := range s.Headers.segments {
