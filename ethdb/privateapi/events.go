@@ -25,6 +25,7 @@ type Events struct {
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
 	logsSubscriptions         map[int]chan []*remote.SubscribeLogsReply
+	hasLogSubscriptions       bool
 	lock                      sync.RWMutex
 }
 
@@ -76,6 +77,18 @@ func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func(
 		delete(e.logsSubscriptions, id)
 		close(ch)
 	}
+}
+
+func (e *Events) EmptyLogSubsctiption(empty bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.hasLogSubscriptions = !empty
+}
+
+func (e *Events) HasLogSubsriptions() bool {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	return e.hasLogSubscriptions
 }
 
 func (e *Events) AddPendingLogsSubscription(s PendingLogsSubscription) {

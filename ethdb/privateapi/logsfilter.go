@@ -16,6 +16,7 @@ type LogsFilterAggregator struct {
 	logsFilters    map[uint64]*LogsFilter // Filter for each subscriber, keyed by filterID
 	logsFilterLock sync.Mutex
 	nextFilterId   uint64
+	events         *Events
 }
 
 // LogsFilter is used for both representing log filter for a specific subscriber (RPC daemon usually)
@@ -31,7 +32,7 @@ type LogsFilter struct {
 	sender    remote.ETHBACKEND_SubscribeLogsServer // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
-func NewLogsFilterAggregator() *LogsFilterAggregator {
+func NewLogsFilterAggregator(events *Events) *LogsFilterAggregator {
 	return &LogsFilterAggregator{
 		aggLogsFilter: LogsFilter{
 			addrs:  make(map[common.Address]int),
@@ -39,6 +40,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 		},
 		logsFilters:  make(map[uint64]*LogsFilter),
 		nextFilterId: 0,
+		events:       events,
 	}
 }
 
@@ -82,6 +84,7 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 		}
 	}
 	a.addLogsFilters(filter)
+	a.events.EmptyLogSubsctiption(a.aggLogsFilter.allAddrs == 0 && len(a.aggLogsFilter.addrs) == 0 && a.aggLogsFilter.allTopics == 0 && len(a.aggLogsFilter.topics) == 0)
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {

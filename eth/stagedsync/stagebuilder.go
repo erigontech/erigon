@@ -15,6 +15,7 @@ type ChainEventNotifier interface {
 	OnNewHeader(newHeadersRlp [][]byte)
 	OnNewPendingLogs(types.Logs)
 	OnLogs([]*remote.SubscribeLogsReply)
+	HasLogSubsriptions() bool
 }
 
 type Notifications struct {

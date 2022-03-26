@@ -94,7 +94,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
-		logsFilter: NewLogsFilterAggregator(),
+		logsFilter: NewLogsFilterAggregator(events),
 	}
 
 	ch, clean := s.events.AddLogsSubscription()
