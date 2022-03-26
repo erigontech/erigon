@@ -94,9 +94,33 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
 		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
-		logsFilter: NewLogsFilterAggregator(),
+		logsFilter: NewLogsFilterAggregator(events),
 	}
-	s.events.AddLogsSubscription(s.logsFilter.distributeLogs)
+
+	ch, clean := s.events.AddLogsSubscription()
+	go func() {
+		var err error
+		defer clean()
+		log.Info("new subscription to logs established")
+		defer func() {
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("subscription to logs closed", "reason", err)
+				}
+			} else {
+				log.Warn("subscription to logs closed")
+			}
+		}()
+		for {
+			select {
+			case <-s.ctx.Done():
+				err = s.ctx.Err()
+				return
+			case logs := <-ch:
+				s.logsFilter.distributeLogs(logs)
+			}
+		}
+	}()
 	return s
 }
 
@@ -562,7 +586,7 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 	return nodesInfo, nil
 }
 
-func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) error {
+func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {
 	if s.logsFilter != nil {
 		return s.logsFilter.subscribeLogs(server)
 	}

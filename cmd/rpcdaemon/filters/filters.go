@@ -9,10 +9,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/filters"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -31,7 +33,7 @@ type (
 	PendingLogsSubID  SubscriptionID
 	PendingBlockSubID SubscriptionID
 	PendingTxsSubID   SubscriptionID
-	LogsSubID         SubscriptionID
+	LogsSubID         uint64
 )
 
 type Filters struct {
@@ -43,7 +45,8 @@ type Filters struct {
 	pendingLogsSubs  map[PendingLogsSubID]chan types.Logs
 	pendingBlockSubs map[PendingBlockSubID]chan *types.Block
 	pendingTxsSubs   map[PendingTxsSubID]chan []types.Transaction
-	logsSubs         map[LogsSubID]chan *types.Log
+	logsSubs         *LogsFilterAggregator
+	logsRequestor    atomic.Value
 	onNewSnapshot    func()
 }
 
@@ -55,7 +58,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
 		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
 		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
-		logsSubs:         make(map[LogsSubID]chan *types.Log),
+		logsSubs:         NewLogsFilterAggregator(),
 		onNewSnapshot:    onNewSnapshot,
 	}
 
@@ -95,7 +98,7 @@ func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.Txpo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs); err != nil {
+			if err := ethBackend.SubscribeLogs(ctx, ff.OnNewLogs, &ff.logsRequestor); err != nil {
 				select {
 				case <-ctx.Done():
 					return
@@ -349,18 +352,71 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
 	delete(ff.pendingTxsSubs, id)
 }
 
-func (ff *Filters) SubscribeLogs(out chan *types.Log) LogsSubID {
+func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteria) LogsSubID {
+	id, f := ff.logsSubs.insertLogsFilter(out)
+	f.addrs = map[common.Address]int{}
+	if len(crit.Addresses) == 0 {
+		f.allAddrs = 1
+	} else {
+		for _, addr := range crit.Addresses {
+			f.addrs[addr] = 1
+		}
+	}
+	f.topics = map[common.Hash]int{}
+	if len(crit.Topics) == 0 {
+		f.allTopics = 1
+	} else {
+		for _, topics := range crit.Topics {
+			for _, topic := range topics {
+				f.topics[topic] = 1
+			}
+		}
+	}
+	f.topicsOriginal = crit.Topics
+	ff.logsSubs.addLogsFilters(f)
+	lfr := &remote.LogsFilterRequest{
+		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
+		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
+	}
+	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
+	}
+	for topic := range ff.logsSubs.aggLogsFilter.topics {
+		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
+	}
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	id := LogsSubID(generateSubscriptionID())
-	ff.logsSubs[id] = out
+	loaded := ff.logsRequestor.Load()
+	if loaded != nil {
+		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
+			log.Warn("Could not update remote logs filter", "err", err)
+			ff.logsSubs.removeLogsFilter(id)
+		}
+	}
 	return id
 }
 
 func (ff *Filters) UnsubscribeLogs(id LogsSubID) {
+	ff.logsSubs.removeLogsFilter(id)
+	lfr := &remote.LogsFilterRequest{
+		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
+		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
+	}
+	for addr := range ff.logsSubs.aggLogsFilter.addrs {
+		lfr.Addresses = append(lfr.Addresses, gointerfaces.ConvertAddressToH160(addr))
+	}
+	for topic := range ff.logsSubs.aggLogsFilter.topics {
+		lfr.Topics = append(lfr.Topics, gointerfaces.ConvertHashToH256(topic))
+	}
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	delete(ff.logsSubs, id)
+	loaded := ff.logsRequestor.Load()
+	if loaded != nil {
+		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
+			log.Warn("Could not update remote logs filter", "err", err)
+			ff.logsSubs.removeLogsFilter(id)
+		}
+	}
 }
 
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
@@ -455,11 +511,7 @@ func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
 		t = append(t, gointerfaces.ConvertH256ToHash(v))
 	}
 	lg.Topics = t
-	ff.mu.RLock()
-	defer ff.mu.RUnlock()
-	for _, v := range ff.logsSubs {
-		v <- lg
-	}
+	ff.logsSubs.distributeLog(reply)
 }
 
 func generateSubscriptionID() SubscriptionID {
