@@ -54,11 +54,16 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender remote.ETHBACKEND_Subscri
 	return filterId, filter
 }
 
+func (a *LogsFilterAggregator) checkEmpty() {
+	a.events.EmptyLogSubsctiption(a.aggLogsFilter.allAddrs == 0 && len(a.aggLogsFilter.addrs) == 0 && a.aggLogsFilter.allTopics == 0 && len(a.aggLogsFilter.topics) == 0)
+}
+
 func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
 	delete(a.logsFilters, filterId)
+	a.checkEmpty()
 }
 
 func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
@@ -84,7 +89,7 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 		}
 	}
 	a.addLogsFilters(filter)
-	a.events.EmptyLogSubsctiption(a.aggLogsFilter.allAddrs == 0 && len(a.aggLogsFilter.addrs) == 0 && a.aggLogsFilter.allTopics == 0 && len(a.aggLogsFilter.topics) == 0)
+	a.checkEmpty()
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
