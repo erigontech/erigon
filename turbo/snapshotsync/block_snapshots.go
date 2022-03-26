@@ -524,7 +524,6 @@ func (s *RoSnapshots) Reopen() error {
 			}
 			return err
 		}
-		return nil
 	}
 	for _, sn := range s.Bodies.segments {
 		sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Bodies.String())))
@@ -534,7 +533,6 @@ func (s *RoSnapshots) Reopen() error {
 			}
 			return err
 		}
-		return nil
 	}
 	for _, sn := range s.Txs.segments {
 		sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Transactions.String())))
