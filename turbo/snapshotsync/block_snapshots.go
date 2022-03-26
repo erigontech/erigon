@@ -518,42 +518,27 @@ func (s *RoSnapshots) Reopen() error {
 
 	for _, sn := range s.Headers.segments {
 		sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Headers.String())))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	for _, sn := range s.Bodies.segments {
 		sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Bodies.String())))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
 	for _, sn := range s.Txs.segments {
 		sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Transactions.String())))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		sn.IdxTxnId, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, TransactionsId.String())))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Transactions2Block.String())))
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
