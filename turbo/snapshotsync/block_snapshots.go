@@ -433,6 +433,11 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 			panic(fmt.Sprintf("unknown snapshot type: %s", t))
 		}
 	}
+	for _, sn := range s.Headers.segments {
+		if sn.idxHeaderHash == nil {
+			fmt.Printf("alex found nil idx: %d,%d\n", sn.From, sn.To)
+		}
+	}
 
 	s.idxAvailable.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
@@ -484,6 +489,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.Bodies.segments = append(s.Bodies.segments, seg)
 		}
 		{
+			fmt.Printf("reopen segment: %d-%d\n", f.From, f.To)
 			seg := &HeaderSegment{From: f.From, To: f.To}
 			fileName := SegmentFileName(f.From, f.To, Headers)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
