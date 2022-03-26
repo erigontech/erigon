@@ -135,13 +135,24 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 func (a *LogsFilterAggregator) distributeLogs(logs []*remote.SubscribeLogsReply) error {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
+
 	filtersToDelete := make(map[uint64]*LogsFilter)
-filterLoop:
-	for filterId, filter := range a.logsFilters {
-		for _, log := range logs {
+outerLoop:
+	for _, log := range logs {
+		// Use aggregate filter first
+		if a.aggLogsFilter.allAddrs == 0 {
+			if _, addrOk := a.aggLogsFilter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]; !addrOk {
+				continue
+			}
+		}
+		if a.aggLogsFilter.allTopics == 0 {
+			if !a.chooseTopics(a.aggLogsFilter.topics, log.GetTopics()) {
+				continue
+			}
+		}
+		for filterId, filter := range a.logsFilters {
 			if filter.allAddrs == 0 {
-				_, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]
-				if !addrOk {
+				if _, addrOk := filter.addrs[gointerfaces.ConvertH160toAddress(log.Address)]; !addrOk {
 					continue
 				}
 			}
@@ -152,7 +163,7 @@ filterLoop:
 			}
 			if err := filter.sender.Send(log); err != nil {
 				filtersToDelete[filterId] = filter
-				continue filterLoop
+				continue outerLoop
 			}
 		}
 	}

@@ -24,7 +24,7 @@ type Events struct {
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
-	logsSubscriptions         map[int]LogsSubscription
+	logsSubscriptions         map[int]chan []*remote.SubscribeLogsReply
 	lock                      sync.RWMutex
 }
 
@@ -34,7 +34,7 @@ func NewEvents() *Events {
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
-		logsSubscriptions:         map[int]LogsSubscription{},
+		logsSubscriptions:         map[int]chan []*remote.SubscribeLogsReply{},
 		newSnapshotSubscription:   map[int]chan struct{}{},
 	}
 }
@@ -65,6 +65,19 @@ func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
 	}
 }
 
+func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan []*remote.SubscribeLogsReply, 8)
+	e.id++
+	id := e.id
+	e.logsSubscriptions[id] = ch
+	return ch, func() {
+		delete(e.logsSubscriptions, id)
+		close(ch)
+	}
+}
+
 func (e *Events) AddPendingLogsSubscription(s PendingLogsSubscription) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
@@ -75,12 +88,6 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
-}
-
-func (e *Events) AddLogsSubscription(s LogsSubscription) {
-	e.lock.Lock()
-	defer e.lock.Unlock()
-	e.logsSubscriptions[len(e.logsSubscriptions)] = s
 }
 
 func (e *Events) OnNewSnapshot() {
@@ -132,9 +139,17 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	for i, sub := range e.logsSubscriptions {
-		if err := sub(logs); err != nil {
-			delete(e.logsSubscriptions, i)
+	for _, ch := range e.logsSubscriptions {
+		select {
+		case ch <- logs:
+		default: //if channel is full (slow consumer), drop old messages
+			for i := 0; i < cap(ch)/2; i++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+			ch <- logs
 		}
 	}
 }
