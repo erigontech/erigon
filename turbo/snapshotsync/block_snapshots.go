@@ -1799,7 +1799,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 	if len(mergeRanges) == 0 {
 		return nil
 	}
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
 	for _, r := range mergeRanges {
@@ -1809,7 +1809,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 		{
 			segFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Bodies))
-			if err := m.merge(ctx, toMergeBodies, segFilePath); err != nil {
+			if err := m.merge(ctx, toMergeBodies, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1821,7 +1821,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 
 		{
 			segFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Headers))
-			if err := m.merge(ctx, toMergeHeaders, segFilePath); err != nil {
+			if err := m.merge(ctx, toMergeHeaders, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1833,7 +1833,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 
 		{
 			segFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Transactions))
-			if err := m.merge(ctx, toMergeTxs, segFilePath); err != nil {
+			if err := m.merge(ctx, toMergeTxs, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1865,27 +1865,30 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 	return nil
 }
 
-func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string) error {
-	fileNames := make([]string, len(toMerge))
-	for i, f := range toMerge {
-		_, fName := filepath.Split(f)
-		fileNames[i] = fName
-	}
+func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
 	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	var word = make([]byte, 0, 4096)
-	for _, cFile := range toMerge {
+	var cnt, total int
+	cList := make([]*compress.Decompressor, len(toMerge))
+	for i, cFile := range toMerge {
 		d, err := compress.NewDecompressor(cFile)
 		if err != nil {
 			return err
 		}
 		defer d.Close()
+		cList[i] = d
+		total += d.Count()
+	}
+
+	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {
 			g := d.MakeGetter()
 			for g.HasNext() {
+				cnt++
 				word, _ = g.Next(word[:0])
 				if err := f.AddWord(word); err != nil {
 					return err
@@ -1893,6 +1896,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
+				case <-logEvery.C:
+					_, fName := filepath.Split(targetFile)
+					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(cnt)/float64(total)), "to", fName)
 				default:
 				}
 			}
