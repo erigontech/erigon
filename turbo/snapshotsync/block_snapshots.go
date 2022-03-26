@@ -433,9 +433,6 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...Type) (err error) {
 			panic(fmt.Sprintf("unknown snapshot type: %s", t))
 		}
 	}
-	for _, sn := range s.Headers.segments {
-		fmt.Printf("alex after reopin idx: %d,%d,%t\n", sn.From, sn.To, sn.idxHeaderHash == nil)
-	}
 
 	s.idxAvailable.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
