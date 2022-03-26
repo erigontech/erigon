@@ -57,7 +57,6 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFil
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
 	delete(a.logsFilters, filterId)
-	fmt.Printf("agg filter after remove: %+v\n", a.aggLogsFilter)
 }
 
 func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
@@ -83,8 +82,6 @@ func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *r
 		}
 	}
 	a.addLogsFilters(filter)
-	fmt.Printf("filter now: %+v\n", filter)
-	fmt.Printf("agg filter now: %+v\n", a.aggLogsFilter)
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
