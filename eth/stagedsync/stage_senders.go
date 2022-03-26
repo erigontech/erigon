@@ -392,10 +392,6 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 }
 
 func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
-	{
-		blockFrom, blockTo, ok := cfg.blockRetire.CanRetire(s.ForwardProgress)
-		fmt.Printf("alex: %t, %d-%d, %t\n", cfg.blockRetire.Working(), blockFrom, blockTo, ok)
-	}
 	if cfg.blockRetire.Working() {
 		return nil
 	}
