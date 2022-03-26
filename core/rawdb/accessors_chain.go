@@ -487,7 +487,7 @@ func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
 	if err != nil {
 		return err
 	}
-	if binary.BigEndian.Uint64(k) >= newValue {
+	if k != nil && binary.BigEndian.Uint64(k) >= newValue {
 		panic(fmt.Sprintf("must not happen. ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k)))
 	}
 
