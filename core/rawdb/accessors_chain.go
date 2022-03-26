@@ -365,10 +365,13 @@ func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
-			c, _ := db.Cursor(kv.EthTx)
-			kk, _, _ := c.Last()
-
-			return fmt.Errorf("txId=%d, baseTxId=%d, lastInDb=%d, %w", txId, baseTxId, binary.BigEndian.Uint64(kk), err)
+			c, err := db.Cursor(kv.EthTx)
+			if err != nil {
+				kk, _, _ := c.Last()
+				c.Close()
+				return fmt.Errorf("txId=%d, baseTxId=%d, lastInDb=%d, %w", txId, baseTxId, binary.BigEndian.Uint64(kk), err)
+			}
+			return err
 		}
 		txId++
 	}
@@ -485,8 +488,7 @@ func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
 		return err
 	}
 	if binary.BigEndian.Uint64(k) >= newValue {
-		fmt.Printf("ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k))
-		panic("oohhhh!")
+		panic(fmt.Sprintf("must not happen. ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k)))
 	}
 
 	newVBytes := make([]byte, 8)
