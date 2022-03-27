@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -28,6 +29,7 @@ type ApiBackend interface {
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
+	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply), requestor *atomic.Value) error
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 }
 
@@ -141,6 +143,29 @@ func (back *RemoteBackend) Subscribe(ctx context.Context, onNewEvent func(*remot
 		}
 
 		onNewEvent(event)
+	}
+	return nil
+}
+
+func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(reply *remote.SubscribeLogsReply), requestor *atomic.Value) error {
+	subscription, err := back.remoteEthBackend.SubscribeLogs(ctx, grpc.WaitForReady(true))
+	if err != nil {
+		if s, ok := status.FromError(err); ok {
+			return errors.New(s.Message())
+		}
+		return err
+	}
+	requestor.Store(subscription.Send)
+	for {
+		logs, err := subscription.Recv()
+		if errors.Is(err, io.EOF) {
+			log.Info("rpcdaemon: the logs subscription channel was closed")
+			break
+		}
+		if err != nil {
+			return err
+		}
+		onNewLogs(logs)
 	}
 	return nil
 }

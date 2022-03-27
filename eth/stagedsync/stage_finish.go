@@ -1,14 +1,22 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -108,14 +116,17 @@ func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) 
 }
 
 func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishStageAfterSync uint64, unwindTo *uint64, notifier ChainEventNotifier, tx kv.Tx) error {
+	t := time.Now()
 	if notifier == nil {
 		log.Trace("RPC Daemon notification channel not set. No headers notifications will be sent")
 		return nil
 	}
 	// Notify all headers we have (either canonical or not) in a maximum range span of 1024
 	var notifyFrom uint64
+	var isUnwind bool
 	if unwindTo != nil && *unwindTo != 0 && (*unwindTo) < finishStageBeforeSync {
 		notifyFrom = *unwindTo
+		isUnwind = true
 	} else {
 		heightSpan := finishStageAfterSync - finishStageBeforeSync
 		if heightSpan > 1024 {
@@ -139,7 +150,70 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		return err
 	}
 	notifier.OnNewHeader(headersRlp)
-
-	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo)
+	headerTiming := time.Since(t)
+	t = time.Now()
+	if notifier.HasLogSubsriptions() {
+		logs, err := ReadLogs(tx, notifyFrom, isUnwind)
+		if err != nil {
+			return err
+		}
+		notifier.OnLogs(logs)
+	}
+	logTiming := time.Since(t)
+	log.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "header sending", headerTiming, "log sending", logTiming)
 	return nil
+}
+
+func ReadLogs(tx kv.Tx, from uint64, isUnwind bool) ([]*remote.SubscribeLogsReply, error) {
+	logs, err := tx.Cursor(kv.Log)
+	if err != nil {
+		return nil, err
+	}
+	defer logs.Close()
+	reply := make([]*remote.SubscribeLogsReply, 0)
+	reader := bytes.NewReader(nil)
+
+	var prevBlockNum uint64
+	var block *types.Block
+	var logIndex uint64
+	for k, v, err := logs.Seek(dbutils.LogKey(from, 0)); k != nil; k, v, err = logs.Next() {
+		if err != nil {
+			return nil, err
+		}
+		blockNum := binary.BigEndian.Uint64(k[:8])
+		if block == nil || blockNum != prevBlockNum {
+			logIndex = 0
+			prevBlockNum = blockNum
+			if block, err = rawdb.ReadBlockByNumber(tx, blockNum); err != nil {
+				return nil, err
+			}
+		}
+		txIndex := uint64(binary.BigEndian.Uint32(k[8:]))
+		txHash := block.Transactions()[txIndex].Hash()
+		var ll types.Logs
+		reader.Reset(v)
+		if err := cbor.Unmarshal(&ll, reader); err != nil {
+			return nil, fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+		}
+		for _, l := range ll {
+			r := &remote.SubscribeLogsReply{
+				Address:          gointerfaces.ConvertAddressToH160(l.Address),
+				BlockHash:        gointerfaces.ConvertHashToH256(block.Hash()),
+				BlockNumber:      blockNum,
+				Data:             l.Data,
+				LogIndex:         logIndex,
+				Topics:           make([]*types2.H256, 0, len(l.Topics)),
+				TransactionHash:  gointerfaces.ConvertHashToH256(txHash),
+				TransactionIndex: txIndex,
+				Removed:          isUnwind,
+			}
+			logIndex++
+			for _, topic := range l.Topics {
+				r.Topics = append(r.Topics, gointerfaces.ConvertHashToH256(topic))
+			}
+			reply = append(reply, r)
+		}
+	}
+
+	return reply, nil
 }

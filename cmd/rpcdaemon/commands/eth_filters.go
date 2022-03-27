@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -101,6 +102,41 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 							log.Warn("error while notifying subscription", "err", err)
 						}
 					}
+				}
+			case <-rpcSub.Err():
+				return
+			}
+		}
+	}()
+
+	return rpcSub, nil
+}
+
+// SubscribeLogs send a notification each time a new log appears.
+func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error) {
+	if api.filters == nil {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	go func() {
+		defer debug.LogPanic()
+		logs := make(chan *types.Log, 1)
+		defer close(logs)
+		id := api.filters.SubscribeLogs(logs, crit)
+		defer api.filters.UnsubscribeLogs(id)
+
+		for {
+			select {
+			case h := <-logs:
+				err := notifier.Notify(rpcSub.ID, h)
+				if err != nil {
+					log.Warn("error while notifying subscription", "err", err)
 				}
 			case <-rpcSub.Err():
 				return
