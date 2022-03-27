@@ -236,9 +236,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		log.Warn("error at db.open likely because of https://github.com/erthink/libmdbx/issues/269#issuecomment-1068214834 (our advise: use linux > 5.4), now we adding WriteMap option and retry", "err", err)
-		opts.flags |= mdbx.WriteMap
-		err = env.Open(opts.path, opts.flags, 0664)
 		if err != nil {
 			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
 		}

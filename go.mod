@@ -18,7 +18,7 @@ require (
 	github.com/matryer/moq v0.2.6
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.7.1
-	github.com/torquem-ch/mdbx-go v0.23.0
+	github.com/torquem-ch/mdbx-go v0.23.1
 	github.com/ugorji/go/codec v1.1.13
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20220131195533-30dcbda58838
