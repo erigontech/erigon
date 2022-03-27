@@ -447,10 +447,7 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.ReopenSegments(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
-				log.Error("AsyncOpenAll", "err", err)
-			}
-			if err := s.ReopenIndices(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
+			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -458,6 +455,96 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 	}()
 }
 
+func (s *RoSnapshots) Reopen() error {
+	s.Headers.lock.Lock()
+	defer s.Headers.lock.Unlock()
+	s.Bodies.lock.Lock()
+	defer s.Bodies.lock.Unlock()
+	s.Txs.lock.Lock()
+	defer s.Txs.lock.Unlock()
+	s.closeSegmentsLocked()
+	files, err := segments2(s.dir)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		{
+			seg := &BodySegment{From: f.From, To: f.To}
+			fileName := SegmentFileName(f.From, f.To, Bodies)
+			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break
+				}
+				return err
+			}
+			s.Bodies.segments = append(s.Bodies.segments, seg)
+		}
+		{
+			seg := &HeaderSegment{From: f.From, To: f.To}
+			fileName := SegmentFileName(f.From, f.To, Headers)
+			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break
+				}
+				return err
+			}
+			s.Headers.segments = append(s.Headers.segments, seg)
+		}
+		{
+			seg := &TxnSegment{From: f.From, To: f.To}
+			fileName := SegmentFileName(f.From, f.To, Transactions)
+			seg.Seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					break
+				}
+				return err
+			}
+			s.Txs.segments = append(s.Txs.segments, seg)
+		}
+
+		if f.To > 0 {
+			s.segmentsAvailable.Store(f.To - 1)
+		} else {
+			s.segmentsAvailable.Store(0)
+		}
+	}
+	s.segmentsReady.Store(true)
+
+	for _, sn := range s.Headers.segments {
+		sn.idxHeaderHash, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Headers.String())))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	for _, sn := range s.Bodies.segments {
+		sn.idxBodyNumber, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Bodies.String())))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	for _, sn := range s.Txs.segments {
+		sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Transactions.String())))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		sn.IdxTxnId, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, TransactionsId.String())))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Transactions2Block.String())))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	s.idxAvailable.Store(s.idxAvailability())
+	s.indicesReady.Store(true)
+
+	return nil
+}
 func (s *RoSnapshots) ReopenSegments() error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
@@ -484,6 +571,7 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.Bodies.segments = append(s.Bodies.segments, seg)
 		}
 		{
+			fmt.Printf("reopen segment: %d-%d\n", f.From, f.To)
 			seg := &HeaderSegment{From: f.From, To: f.To}
 			fileName := SegmentFileName(f.From, f.To, Headers)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
@@ -542,12 +630,12 @@ func (s *RoSnapshots) closeSegmentsLocked() {
 	}
 }
 func (s *RoSnapshots) PrintDebug() {
-	s.Headers.lock.Lock()
-	defer s.Headers.lock.Unlock()
-	s.Bodies.lock.Lock()
-	defer s.Bodies.lock.Unlock()
-	s.Txs.lock.Lock()
-	defer s.Txs.lock.Unlock()
+	s.Headers.lock.RLock()
+	defer s.Headers.lock.RUnlock()
+	s.Bodies.lock.RLock()
+	defer s.Bodies.lock.RUnlock()
+	s.Txs.lock.RLock()
+	defer s.Txs.lock.RUnlock()
 	fmt.Printf("sn: %d, %d\n", s.segmentsAvailable.Load(), s.idxAvailable.Load())
 	fmt.Println("    == Snapshots, Header")
 	for _, sn := range s.Headers.segments {
@@ -956,7 +1044,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := DumpBlocks(ctx, blockFrom, blockTo, DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
-	if err := snapshots.ReopenSegments(); err != nil {
+	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID)
@@ -1799,7 +1887,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 	if len(mergeRanges) == 0 {
 		return nil
 	}
-	logEvery := time.NewTicker(20 * time.Second)
+	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
 	for _, r := range mergeRanges {
@@ -1809,7 +1897,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 		{
 			segFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Bodies))
-			if err := m.merge(ctx, toMergeBodies, segFilePath); err != nil {
+			if err := m.merge(ctx, toMergeBodies, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1821,7 +1909,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 
 		{
 			segFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Headers))
-			if err := m.merge(ctx, toMergeHeaders, segFilePath); err != nil {
+			if err := m.merge(ctx, toMergeHeaders, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1833,7 +1921,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 
 		{
 			segFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(r.from, r.to, Transactions))
-			if err := m.merge(ctx, toMergeTxs, segFilePath); err != nil {
+			if err := m.merge(ctx, toMergeTxs, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1843,10 +1931,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			}
 		}
 
-		if err := snapshots.ReopenSegments(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
-		}
-		if err := snapshots.ReopenIndices(); err != nil {
+		if err := snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
 		if err := m.removeOldFiles(toMergeHeaders, snapshotDir); err != nil {
@@ -1865,27 +1950,30 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 	return nil
 }
 
-func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string) error {
-	fileNames := make([]string, len(toMerge))
-	for i, f := range toMerge {
-		_, fName := filepath.Split(f)
-		fileNames[i] = fName
-	}
+func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
 	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	var word = make([]byte, 0, 4096)
-	for _, cFile := range toMerge {
+	var cnt, total int
+	cList := make([]*compress.Decompressor, len(toMerge))
+	for i, cFile := range toMerge {
 		d, err := compress.NewDecompressor(cFile)
 		if err != nil {
 			return err
 		}
 		defer d.Close()
+		cList[i] = d
+		total += d.Count()
+	}
+
+	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {
 			g := d.MakeGetter()
 			for g.HasNext() {
+				cnt++
 				word, _ = g.Next(word[:0])
 				if err := f.AddWord(word); err != nil {
 					return err
@@ -1893,6 +1981,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string)
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
+				case <-logEvery.C:
+					_, fName := filepath.Split(targetFile)
+					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(cnt)/float64(total)), "to", fName)
 				default:
 				}
 			}

@@ -1063,10 +1063,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 			snapshotCfg := ethconfig.NewSnapshotCfg(enableSnapshot, true)
 			dir.MustExist(filepath.Join(datadir, "snapshots"))
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
-			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
-				panic(err)
-			}
-			if err := _allSnapshotsSingleton.ReopenSomeIndices(snapshotsync.AllSnapshotTypes...); err != nil {
+			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}
 		}

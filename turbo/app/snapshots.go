@@ -155,7 +155,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
-	snapshots.ReopenSegments()
+	snapshots.Reopen()
 
 	br := snapshotsync.NewBlockRetire(runtime.NumCPU()/2, tmpDir, snapshots, chainDB, nil, nil)
 
@@ -215,7 +215,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir.Path)
-	if err := allSnapshots.ReopenSegments(); err != nil {
+	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
 	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, log.LvlInfo); err != nil {
@@ -281,8 +281,7 @@ func checkBlockSnapshot(chaindata string) error {
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, filepath.Join(datadir, "snapshots"))
-	snapshots.ReopenSegments()
-	snapshots.ReopenIndices()
+	snapshots.Reopen()
 	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
 	//	panic(err)
 	//}

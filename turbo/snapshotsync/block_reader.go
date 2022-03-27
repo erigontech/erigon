@@ -192,6 +192,13 @@ func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
 		if segment.idxHeaderHash == nil {
 			fmt.Printf("why? %d, %d, %d, %d, %d\n", blockHeight, segment.From, segment.To, back.sn.segmentsAvailable.Load(), back.sn.idxAvailable.Load())
+			back.sn.PrintDebug()
+			for _, sn := range back.sn.Headers.segments {
+				if sn.idxHeaderHash == nil {
+					fmt.Printf("seg with nil idx: %d,%d\n", segment.From, segment.To)
+				}
+			}
+			fmt.Printf("==== end debug print ====\n")
 		}
 		h, err = back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
