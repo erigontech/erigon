@@ -2,6 +2,7 @@ package gsa
 
 /*
 #include "gsacak.h"
+#cgo CFLAGS: -DTERMINATOR=0 -DM64=1 -Dm64=1
 */
 import "C"
 import (
@@ -12,66 +13,47 @@ import (
 // Implementation from https://github.com/felipelouza/gsufsort
 // see also: https://almob.biomedcentral.com/track/pdf/10.1186/s13015-020-00177-y.pdf
 // see also: https://almob.biomedcentral.com/track/pdf/10.1186/s13015-017-0117-9.pdf
-
-func SaSize(l int) int {
-	var a uint
-	return l * int(unsafe.Sizeof(a))
-}
-func LcpSize(l int) int {
-	var a uint
-	return l * int(unsafe.Sizeof(a))
-}
-func DaSize(l int) int {
-	var a C.int_da
-	return l * int(unsafe.Sizeof(a))
-}
 func PrintArrays(str []byte, sa []uint, lcp []int, da []int32, n int) {
+	// remove terminator
+	sa = sa[1:]
+	lcp = lcp[1:]
+	terminatorDa := da[0]
+	da = da[1:]
+	n = n - 1
+
 	fmt.Printf("i\t")
-	if da != nil {
-		fmt.Printf("da\t")
-	}
+	fmt.Printf("sa\t")
 	if lcp != nil {
 		fmt.Printf("lcp\t")
 	}
-	fmt.Printf("gsa\t")
+	if da != nil {
+		fmt.Printf("gsa\t")
+	}
 	fmt.Printf("suffixes\t")
 	fmt.Printf("\n")
 	for i := 0; i < n; i++ {
 		fmt.Printf("%d\t", i)
+		fmt.Printf("%d\t", sa[i])
 		if lcp != nil {
 			fmt.Printf("%d\t", lcp[i])
 		}
 
-		if da != nil {
-			pos := sa[da[i]]
+		if da != nil { // gsa
+			pos := uint(terminatorDa)
+			if da[i] > 0 {
+				pos = sa[da[i]-1]
+			}
 			value := sa[i]
 			if da[i] != 0 {
 				value = sa[i] - pos - 1
 			}
 			fmt.Printf("(%d %d)\t", da[i], value)
-		} else {
-			fmt.Printf("%d\t", sa[i])
 		}
-		/*
-			if(gsa){
-			      da_value = (light)?rankbv_rank1(rbv,SA[i]):DA[i];
-			      printf("(%" PRIdA ", ", da_value);
+		//bwt
+		//	char c = (SA[i])? T[SA[i]-1]-1:terminal;
+		//	if(c==0) c = '$';
+		//	printf("%c\t",c);
 
-			      int_t pos;
-			      if(last_end) pos=SA[da_value];
-			      else pos=SA[da_value-1];
-
-			      int_t value = (da_value==0)?SA[i]:SA[i]-pos-1;
-			      printf("%" PRIdN ")   \t", value);
-			    }
-		*/
-		/*
-		  if(bwt){
-		      char c = (SA[i])? T[SA[i]-1]-1:terminal;
-		      if(c==0) c = '$';
-		      printf("%c\t",c);
-		    }
-		*/
 		for j := sa[i]; int(j) < n; j++ {
 			if str[j] == 1 {
 				fmt.Printf("$")

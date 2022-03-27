@@ -8,11 +8,15 @@ import (
 )
 
 func TestExampleGSA(t *testing.T) {
-	R := [][]byte{[]byte("hihihi")}
+	R := [][]byte{
+		[]byte("hihihi"),
+		[]byte("hihihi"),
+		[]byte("hihihi"),
+	}
 	str, n := ConcatAll(R)
-	sa := make([]uint, SaSize(n))
-	lcp := make([]int, LcpSize(n))
-	da := make([]int32, DaSize(n))
+	sa := make([]uint, n)
+	lcp := make([]int, n)
+	da := make([]int32, n)
 	_ = GSA(str, sa, lcp, da)
 	PrintArrays(str, sa, lcp, da, n)
 }
@@ -20,9 +24,10 @@ func TestExampleGSA(t *testing.T) {
 func TestGSA(t *testing.T) {
 	R := [][]byte{{4, 5, 6, 4, 5, 6, 4, 5, 6}}
 	str, n := ConcatAll(R)
-	sa := make([]uint, SaSize(n))
+	sa := make([]uint, n)
 	lcp := make([]int, n)
-	_ = GSA(str, sa, lcp, nil)
+	da := make([]int32, n)
+	_ = GSA(str, sa, lcp, da)
 	assert.Equal(t, []uint{10, 9, 6, 3, 0, 7, 4, 1, 8, 5, 2}, sa[:n])
 }
 
@@ -57,9 +62,9 @@ func BenchmarkName2(b *testing.B) {
 		R = append(R, []byte("hihihi"))
 	}
 	str, n := ConcatAll(R)
-	sa := make([]uint, SaSize(n))
-	lcp := make([]int, LcpSize(n))
-	da := make([]int32, DaSize(n))
+	sa := make([]uint, n)
+	lcp := make([]int, n)
+	da := make([]int32, n)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = GSA(str, sa, lcp, da)
