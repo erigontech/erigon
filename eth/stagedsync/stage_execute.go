@@ -292,7 +292,7 @@ Loop:
 			if err = batch.Commit(); err != nil {
 				return err
 			}
-			/*if !useExternalTx {
+			if !useExternalTx {
 				if err = s.Update(tx, stageProgress); err != nil {
 					return err
 				}
@@ -305,7 +305,7 @@ Loop:
 				}
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
-			}*/
+			}
 			batch = olddb.NewBatch(tx, quit)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
