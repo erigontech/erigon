@@ -11,11 +11,13 @@ import (
 const numberOfIterations = 128
 
 // subscribe connects to a websocket and returns the subscription handler and a channel buffer
-func subscribe(client *rpc.Client, method string) (*rpc.ClientSubscription, chan interface{}, error) {
+func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.ClientSubscription, chan interface{}, error) {
 	var namespace string
 	namespace, method = requests.GetNamespaceFromMethod(method)
 	ch := make(chan interface{})
-	sub, err := client.Subscribe(context.Background(), namespace, ch, []interface{}{method}...)
+	var arr = []interface{}{method}
+	arr = append(arr, args...)
+	sub, err := client.Subscribe(context.Background(), namespace, ch, arr...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("client failed to subscribe: %v", err)
 	}
@@ -55,12 +57,10 @@ ForLoop:
 	}
 
 	return blockN, nil
-
 }
 
-// Logs dials a websocket connection and listens for log events by calling subscribeToSubscribeLogs
-func Logs() error {
-	fmt.Println("Logs()")
+// Logs dials a websocket connection and listens for log events by calling subscribeToLogs
+func Logs(addresses, topics []string) error {
 	client, clientErr := rpc.DialWebsocket(context.Background(), "ws://127.0.0.1:8545", "")
 	if clientErr != nil {
 		return fmt.Errorf("failed to dial websocket: %v", clientErr)
@@ -68,64 +68,39 @@ func Logs() error {
 	fmt.Println()
 	fmt.Println("Connected to web socket successfully")
 
-	if err := subscribeToLogs(client, "eth_logs"); err != nil {
+	if err := subscribeToLogs(client, "eth_logs", addresses, topics); err != nil {
 		return fmt.Errorf("failed to subscribe to logs: %v", err)
 	}
-	//if err := subscribeToHeads(client, "eth_newHeads"); err != nil {
-	//	return fmt.Errorf("failed to subscribe to logs: %v", err)
-	//}
+
 	return nil
 }
 
-// subscribeToNewHeads makes a ws subscription for eth_subscribeLogs
-func subscribeToLogs(client *rpc.Client, method string) error {
-	fmt.Println("subscribeToLogs()")
-	sub, ch, err := subscribe(client, method)
+// subscribeToLogs makes a ws subscription for eth_subscribeLogs
+func subscribeToLogs(client *rpc.Client, method string, addresses []string, topics []string) error {
+	params := map[string][]string{
+		"address": addresses,
+		"topics": topics,
+	}
+
+	sub, ch, err := subscribe(client, method, params)
 	if err != nil {
-		return fmt.Errorf("error subscribing to subscribeLogs: %v", err)
+		return fmt.Errorf("error subscribing to logs: %v", err)
 	}
 	defer sub.Unsubscribe()
 
 	var count int
-
-	fmt.Println("About to start for loop!")
 
 ForLoop:
 	for {
 		select {
 		case v := <-ch:
 			count++
-			fmt.Printf("Value in channel is: %+v\n", v)
-			if count == numberOfIterations {
-				break ForLoop
+			_map := v.(map[string]interface{})
+			for k, val := range _map {
+				fmt.Printf("%s: %+v, ", k, val)
 			}
-		case err := <-sub.Err():
-			return fmt.Errorf("subscription error from client: %v", err)
-		}
-	}
-
-	return nil
-}
-
-// subscribeToHeads makes a ws subscription for eth_subscribeLogs
-func subscribeToHeads(client *rpc.Client, method string) error {
-	fmt.Println("subToHeads()")
-	sub, ch, err := subscribe(client, method)
-	if err != nil {
-		return fmt.Errorf("error subscribing to subscribeLogs: %v", err)
-	}
-	defer sub.Unsubscribe()
-
-	var count int
-
-	fmt.Println("About to start for loop!")
-
-ForLoop:
-	for {
-		select {
-		case v := <-ch:
-			count++
-			fmt.Printf("%+v\n\n", v)
+			fmt.Println()
+			fmt.Println()
 			if count == numberOfIterations {
 				break ForLoop
 			}

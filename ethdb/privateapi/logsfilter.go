@@ -67,16 +67,13 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId uint64, filter *LogsFil
 }
 
 func (a *LogsFilterAggregator) updateLogsFilter(filter *LogsFilter, filterReq *remote.LogsFilterRequest) {
-	fmt.Println("updateLogsFilter()")
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	a.subtractLogFilters(filter)
 	filter.addrs = make(map[common.Address]int)
 	if filterReq.GetAllAddresses() {
-		fmt.Println("filter.allAddrs = 1")
 		filter.allAddrs = 1
 	} else {
-		fmt.Println("filter.allAddrs = 0")
 		filter.allAddrs = 0
 		for _, addr := range filterReq.GetAddresses() {
 			filter.addrs[gointerfaces.ConvertH160toAddress(addr)] = 1

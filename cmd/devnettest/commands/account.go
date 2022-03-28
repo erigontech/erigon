@@ -10,17 +10,17 @@ import (
 )
 
 var (
-	addr     string
+	accountAddr     string
 	blockNum string
 )
 
 func init() {
-	getBalanceCmd.Flags().StringVar(&addr, "addr", "", "String address to check")
+	getBalanceCmd.Flags().StringVar(&accountAddr, "addr", "", "String address to check")
 	getBalanceCmd.MarkFlagRequired("addr")
 	getBalanceCmd.Flags().StringVar(&blockNum, "block-num", "latest", "String denoting block number")
 	rootCmd.AddCommand(getBalanceCmd)
 
-	getTransactionCountCmd.Flags().StringVar(&addr, "addr", "", "String address to check")
+	getTransactionCountCmd.Flags().StringVar(&accountAddr, "addr", "", "String address to check")
 	getTransactionCountCmd.MarkFlagRequired("addr")
 	getTransactionCountCmd.Flags().StringVar(&blockNum, "block-num", "latest", "String denoting block number")
 	rootCmd.AddCommand(getTransactionCountCmd)
@@ -41,7 +41,7 @@ var getBalanceCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		address := common.HexToAddress(addr)
+		address := common.HexToAddress(accountAddr)
 		if err := requests.GetBalance(reqId, address, blockNum); err != nil {
 			fmt.Printf("could not get balance: %v\n", err)
 		}
@@ -63,7 +63,7 @@ var getTransactionCountCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		address := common.HexToAddress(addr)
+		address := common.HexToAddress(accountAddr)
 		if err := requests.GetTransactionCountCmd(reqId, address, blockNum); err != nil {
 			fmt.Printf("could not get transaction count: %v\n", err)
 		}

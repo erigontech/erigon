@@ -151,7 +151,6 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 }
 
 func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
-	fmt.Printf("OnLogs()\n")
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	for _, ch := range e.logsSubscriptions {
