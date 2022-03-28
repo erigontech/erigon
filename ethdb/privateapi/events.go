@@ -1,7 +1,6 @@
 package privateapi
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
