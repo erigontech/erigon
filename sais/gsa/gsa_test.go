@@ -9,16 +9,19 @@ import (
 
 func TestExampleGSA(t *testing.T) {
 	R := [][]byte{
-		[]byte("hihihi"),
-		[]byte("hihihi"),
-		[]byte("hihihi"),
+		[]byte("hihi"),
+		[]byte("alexhihialex"),
+		[]byte("alex"),
 	}
 	str, n := ConcatAll(R)
 	sa := make([]uint, n)
 	lcp := make([]int, n)
 	da := make([]int32, n)
 	_ = GSA(str, sa, lcp, da)
-	PrintArrays(str, sa, lcp, da, n)
+
+	PrintArrays(str, sa, lcp, da)
+	gsa := SA2GSA(sa, da)
+	_ = gsa
 }
 
 func TestGSA(t *testing.T) {
