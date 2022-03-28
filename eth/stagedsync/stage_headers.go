@@ -412,8 +412,8 @@ func verifyAndSaveNewPoSHeader(
 		return
 	}
 
-	headBlockHash := rawdb.ReadHeadBlockHash(tx)
-	if headBlockHash == header.ParentHash {
+	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
+	if currentHeadHash == header.ParentHash {
 		// OK, we're on the canonical chain
 		if requestStatus == engineapi.New {
 			cfg.hd.SetPendingPayloadStatus(headerHash)
