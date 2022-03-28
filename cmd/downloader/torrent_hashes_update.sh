@@ -28,4 +28,5 @@ then
 fi
 
 # /dev/null to avoid logging of insecure git output
-git push https://${GH_TOKEN}@github.com/ledgerwatch/erigon-snapshot.git main > /dev/null 2>&1
+SSH_CMD='echo ${GH_TOKEN} | ssh -i /dev/stdin -o IdentitiesOnly=yes'
+GIT_SSH_COMMAND=${SSH_CMD} git push git@github.com:ledgerwatch/erigon-snapshot.git main > /dev/null 2>&1
