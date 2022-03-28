@@ -189,7 +189,7 @@ Loop:
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 			if err = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody); err != nil {
-				return fmt.Errorf("writing block body: %w", err)
+				return fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 
 			if blockHeight > bodyProgress {

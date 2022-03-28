@@ -2,11 +2,11 @@ package snapshotsync
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
 
+	"github.com/holiman/uint256"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -87,15 +87,14 @@ func TestMergeSnapshots(t *testing.T) {
 	cfg := ethconfig.Snapshot{Enabled: true}
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	require.NoError(s.ReopenSegments())
+	require.NoError(s.Reopen())
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo)
+		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{})
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()}, false)
 		require.NoError(err)
-		require.NoError(s.ReopenSegments())
 	}
 
 	expectedFileName := SegmentFileName(500_000, 1_000_000, Transactions)
@@ -106,10 +105,10 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(5, a)
 
 	{
-		merger := NewMerger(dir, 1, log.LvlInfo)
+		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{})
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()})
+		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()}, false)
 		require.NoError(err)
 	}
 
@@ -162,7 +161,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile := func(from, to uint64, name Type) { createTestSegmentFile(t, from, to, name, dir) }
 	s := NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	err := s.ReopenSegments()
+	err := s.Reopen()
 	require.NoError(err)
 	require.Equal(0, len(s.Headers.segments))
 	s.Close()
@@ -176,7 +175,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 1_000_000, Headers)
 	createFile(500_000, 1_000_000, Transactions)
 	s = NewRoSnapshots(cfg, dir)
-	err = s.ReopenSegments()
+	err = s.Reopen()
 	require.Error(err)
 	require.Equal(0, len(s.Headers.segments)) //because, no gaps are allowed (expect snapshots from block 0)
 	s.Close()
@@ -187,11 +186,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
 
-	err = s.ReopenSegments()
+	err = s.Reopen()
 	require.NoError(err)
-	err = s.ReopenIndices()
-	require.NoError(err)
-	s.indicesReady.Store(true)
 	require.Equal(2, len(s.Headers.segments))
 
 	ok, err := s.ViewTxs(10, func(sn *TxnSegment) error {
@@ -218,7 +214,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	// ExpectedBlocks - says only how much block must come from Torrent
 	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
 	s = NewRoSnapshots(cfg, dir)
-	err = s.ReopenSegments()
+	err = s.Reopen()
 	require.NoError(err)
 	defer s.Close()
 	require.Equal(2, len(s.Headers.segments))
@@ -229,7 +225,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	s = NewRoSnapshots(cfg, dir)
 	defer s.Close()
-	err = s.ReopenSegments()
+	err = s.Reopen()
 	require.NoError(err)
 }
 
@@ -245,10 +241,10 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v0-1-2-bodies.seg": &fstest.MapFile{},
 		"v1-1-2-bodies.seg": &fstest.MapFile{},
 	}
-	stat := func(name string) os.FileInfo {
+	stat := func(name string) string {
 		s, err := fs.Stat(name)
 		require.NoError(err)
-		return s
+		return s.Name()
 	}
 	_, err := ParseFileName("", stat("a"))
 	require.Error(err)

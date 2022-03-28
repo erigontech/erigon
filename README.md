@@ -157,6 +157,14 @@ Once the JSON-RPC daemon is running, all you need to do is point your beacon cha
 where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC daemon.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
+
+### Authentication API
+
+In order to establish a secure connection beetwen the Consensus Layer and the Execution Layer, a JWT secret key is automatically generated.
+
+The JWT secret key will be present in the datadir by default under the name of `jwt.hex` and its path can be specified with the flag `--authrpc.jwtsecret`.
+
+This piece of info needs to be specified in the Consensus Layer as well in order to establish connection successfully. More information can be found [here](https://github.com/ethereum/execution-apis/blob/main/src/engine/authentication.md)
     
 ### Multiple Instances / One Machine
 

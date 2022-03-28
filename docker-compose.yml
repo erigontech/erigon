@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.33.3
+    image: prom/prometheus:v2.33.5
     user: 1000:1000 # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
@@ -33,7 +33,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:8.4.0
+    image: grafana/grafana:8.4.4
     user: 1000:1000 # Uses erigon user from Dockerfile
     ports:
       - "3000:3000"
@@ -56,7 +56,7 @@ services:
       - "8551:8551"
     restart: unless-stopped
 
-  downloader: # Service to download/seed historical data (need only if you use --experimental.snapshot)
+  downloader: # Service to download/seed historical data (need only if you use --snapshot)
     image: thorax/erigon:${TAG:-latest}
     command: downloader ${DOWNLOADER_FLAGS-} --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)

@@ -491,7 +491,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
 	_, _, chainConfig, _, sync, _, _ := newSync(ctx, db, nil)
-	return db.Update(ctx, func(tx kv.RwTx) error {
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
 
 		if unwind > 0 {
@@ -499,7 +499,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 				return fmt.Errorf("cannot unwind past 0")
 			}
 
-			u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
+			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
 			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, allSnapshots(chainConfig), getBlockReader(chainConfig)), ctx); err != nil {
 				return err
 			}
@@ -513,7 +513,10 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 		}
 		log.Info("This command only works with --unwind option")
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
@@ -579,7 +582,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig), db, nil))
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig), db, nil, nil))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1060,10 +1063,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 			snapshotCfg := ethconfig.NewSnapshotCfg(enableSnapshot, true)
 			dir.MustExist(filepath.Join(datadir, "snapshots"))
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
-			if err := _allSnapshotsSingleton.ReopenSegments(); err != nil {
-				panic(err)
-			}
-			if err := _allSnapshotsSingleton.ReopenSomeIndices(snapshotsync.AllSnapshotTypes...); err != nil {
+			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}
 		}
@@ -1168,7 +1168,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
 		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
-		nil, nil, allSn,
+		&stagedsync.Notifications{}, nil, allSn,
 	)
 	if err != nil {
 		panic(err)

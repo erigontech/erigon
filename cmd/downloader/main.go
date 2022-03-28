@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -35,13 +35,13 @@ import (
 
 var (
 	datadir                        string
-	asJson                         bool
 	forceRebuild                   bool
 	forceVerify                    bool
 	downloaderApiAddr              string
 	torrentVerbosity               string
 	downloadRateStr, uploadRateStr string
 	torrentPort                    int
+	targetFile                     string
 )
 
 func init() {
@@ -57,9 +57,12 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 
 	withDataDir(printTorrentHashes)
-	printTorrentHashes.PersistentFlags().BoolVar(&asJson, "json", false, "Print in json format (default: toml)")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Force verify data files if have .torrent files")
+	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
+	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
+		panic(err)
+	}
 
 	rootCmd.AddCommand(printTorrentHashes)
 }
@@ -205,19 +208,31 @@ var printTorrentHashes = &cobra.Command{
 			}
 			res[info.Name] = mi.HashInfoBytes().String()
 		}
-		var serialized []byte
-		if asJson {
-			serialized, err = json.Marshal(res)
-			if err != nil {
-				return err
-			}
-		} else {
-			serialized, err = toml.Marshal(res)
-			if err != nil {
-				return err
-			}
+		serialized, err := toml.Marshal(res)
+		if err != nil {
+			return err
 		}
-		fmt.Printf("%s\n", serialized)
+
+		if targetFile == "" {
+			fmt.Printf("%s\n", serialized)
+			return nil
+		}
+
+		oldContent, err := ioutil.ReadFile(targetFile)
+		if err != nil {
+			return err
+		}
+		oldLines := map[string]string{}
+		if err := toml.Unmarshal(oldContent, &oldLines); err != nil {
+			return fmt.Errorf("unmarshal: %w", err)
+		}
+		if len(oldLines) >= len(res) {
+			log.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
+			return nil
+		}
+		if err := ioutil.WriteFile(targetFile, serialized, 0644); err != nil {
+			return err
+		}
 		return nil
 	},
 }

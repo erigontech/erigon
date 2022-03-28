@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -53,7 +52,6 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-const JwtTokenExpiry = 5 * time.Second
 const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
@@ -347,8 +345,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
 			allSnapshots.AsyncOpenAll(ctx)
 			onNewSnapshot = func() {
-				allSnapshots.ReopenSegments()
-				allSnapshots.ReopenIndices()
+				allSnapshots.Reopen()
 			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
@@ -475,10 +472,10 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
-		wsHandler = srv.WebsocketHandler([]string{"*"}, cfg.WebsocketCompression)
+		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
 	}
 
-	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, false)
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, nil)
 	if err != nil {
 		return err
 	}
@@ -584,13 +581,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	return jwtSecret, nil
 }
 
-func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, isAuth bool) (http.Handler, error) {
-	// Finds jwt secret
-	jwtVerificationKey, err := obtainJWTSecret(cfg)
-	if err != nil {
-		return nil, err
-	}
-
+func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
@@ -601,43 +592,8 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 			return
 		}
 
-		if isAuth {
-			var tokenStr string
-			// Check if JWT signature is correct
-			if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-				tokenStr = strings.TrimPrefix(auth, "Bearer ")
-			}
-
-			if len(tokenStr) == 0 {
-				http.Error(w, "missing token", http.StatusForbidden)
-				return
-			}
-
-			keyFunc := func(token *jwt.Token) (interface{}, error) {
-				return jwtVerificationKey, nil
-			}
-			claims := jwt.RegisteredClaims{}
-			// We explicitly set only HS256 allowed, and also disables the
-			// claim-check: the RegisteredClaims internally requires 'iat' to
-			// be no later than 'now', but we allow for a bit of drift.
-			token, err := jwt.ParseWithClaims(tokenStr, &claims, keyFunc,
-				jwt.WithValidMethods([]string{"HS256"}),
-				jwt.WithoutClaimsValidation())
-
-			switch {
-			case err != nil:
-				http.Error(w, err.Error(), http.StatusForbidden)
-			case !token.Valid:
-				http.Error(w, "invalid token", http.StatusForbidden)
-			case !claims.VerifyExpiresAt(time.Now(), false): // optional
-				http.Error(w, "token is expired", http.StatusForbidden)
-			case claims.IssuedAt == nil:
-				http.Error(w, "missing issued-at", http.StatusForbidden)
-			case time.Since(claims.IssuedAt.Time) > JwtTokenExpiry:
-				http.Error(w, "stale token", http.StatusForbidden)
-			case time.Until(claims.IssuedAt.Time) > JwtTokenExpiry:
-				http.Error(w, "future token", http.StatusForbidden)
-			}
+		if jwtSecret != nil && !rpc.CheckJwtSecret(w, r, jwtSecret) {
+			return
 		}
 
 		httpHandler.ServeHTTP(w, r)
@@ -662,13 +618,26 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 		return nil, nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, nil, false)
+	jwtSecret, err := obtainJWTSecret(cfg)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
 
-	engineApiHandlerAuth, err := createHandler(cfg, engineApi, engineHttpHandler, nil, true)
+	var wsHandlerNonAuth http.Handler
+	var wsHandlerAuth http.Handler
+
+	if cfg.WebsocketEnabled {
+		wsHandlerNonAuth = engineSrv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
+		wsHandlerAuth = engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
+	}
+
+	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandlerNonAuth, nil)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
+
+	engineApiHandlerAuth, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandlerAuth, jwtSecret)
 	if err != nil {
 		return nil, nil, nil, "", err
 	}
@@ -683,9 +652,9 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineHttpEndpoint}
+	engineInfo := []interface{}{"url", engineHttpEndpoint, "ws", cfg.WebsocketEnabled}
 	log.Info("HTTP endpoint opened for engine", engineInfo...)
-	engineInfoAuth := []interface{}{"url", engineHttpEndpointAuth}
+	engineInfoAuth := []interface{}{"url", engineHttpEndpointAuth, "ws", cfg.WebsocketEnabled}
 	log.Info("HTTP endpoint opened for auth engine", engineInfoAuth...)
 
 	return engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, nil

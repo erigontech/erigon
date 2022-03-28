@@ -331,8 +331,8 @@ var (
 
 	JWTSecretPath = cli.StringFlag{
 		Name:  "authrpc.jwtsecret",
-		Usage: "Token to ensure safe connection between CL and EL",
-		Value: "jwt.hex",
+		Usage: "Path to the token that ensures safe connection between CL and EL",
+		Value: "",
 	}
 
 	HttpCompressionFlag = cli.BoolFlag{
@@ -622,7 +622,7 @@ var (
 	}
 
 	SnapshotSyncFlag = cli.BoolFlag{
-		Name:  "experimental.snapshot",
+		Name:  "snapshot",
 		Usage: "Enabling experimental snapshot sync",
 	}
 	SnapshotKeepBlocksFlag = cli.BoolFlag{

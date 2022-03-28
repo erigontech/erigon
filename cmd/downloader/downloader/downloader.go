@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 const ASSERT = false
@@ -24,7 +25,14 @@ type Protocols struct {
 }
 
 func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw) (*Protocols, error) {
-	db := mdbx.MustOpen(filepath.Join(snapshotDir.Path, "db"))
+	db, err := mdbx.NewMDBX(log.New()).
+		Flags(func(f uint) uint { return f | mdbx2.WriteMap | mdbx2.SafeNoSync }).
+		SyncPeriod(15 * time.Second).
+		Path(filepath.Join(snapshotDir.Path, "db")).
+		Open()
+	if err != nil {
+		return nil, err
+	}
 
 	peerID, err := readPeerID(db)
 	if err != nil {
@@ -81,7 +89,7 @@ func (cli *Protocols) PeerID() []byte {
 }
 
 func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
-	interval := time.Second * 5
+	interval := time.Second * 20
 	logEvery := time.NewTicker(interval)
 	defer logEvery.Stop()
 	var m runtime.MemStats

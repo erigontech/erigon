@@ -229,7 +229,7 @@ func resetFinish(tx kv.RwTx) error {
 	return nil
 }
 
-func printStages(db kv.Getter) error {
+func printStages(db kv.Tx) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -253,5 +253,16 @@ func printStages(db kv.Getter) error {
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
+
+	s1, err := db.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	s2, err := db.ReadSequence(kv.NonCanonicalTxs)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
+
 	return nil
 }

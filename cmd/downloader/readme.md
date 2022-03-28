@@ -4,15 +4,13 @@ Service to seed/download historical data (immutable .seg files)
 
 ## How to Start Erigon in snapshot sync mode
 
-Only Mainnet, Goerli and BSC networks are supported now.
-
 ```shell
-# 1. Downloader by default run inside Erigon, by `--experimental.snapshot` flag:
-erigon --experimental.snapshot --datadir=<your_datadir> 
+# 1. Downloader by default run inside Erigon, by `--snapshot` flag:
+erigon --snapshot --datadir=<your_datadir> 
 ```
 
 ```shell
-# 2. It's possible to start Downloader as independent process, by `--experimental.snapshot --downloader.api.addr=127.0.0.1:9093` flags:
+# 2. It's possible to start Downloader as independent process, by `--snapshot --downloader.api.addr=127.0.0.1:9093` flags:
 make erigon downloader 
 
 # Start downloader (can limit network usage by 512mb/sec: --download.rate=512mb --upload.rate=512mb)
@@ -21,10 +19,18 @@ downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<
 # --torrent.port=42068  - is for public BitTorrent protocol listen 
 
 # Erigon on startup does send list of .torrent files to Downloader and wait for 100% download accomplishment
-erigon --experimental.snapshot --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
+erigon --snapshot --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir> 
 ```
 
-Use `--experimental.snapshot.keepblocks=true` to don't delete retired blocks from DB
+Use `--snapshot.keepblocks=true` to don't delete retired blocks from DB
+
+Any network/chain can start with snapshot sync:
+
+- node will download only snapshots registered in next repo https://github.com/ledgerwatch/erigon-snapshot
+- node will move old blocks from DB to snapshots of 1K blocks size, then merge snapshots to bigger range, until
+  snapshots of 500K blocks, then automatically start seeding new snapshot
+
+Flag `--snapshot` is compatible with `--prune` flag
 
 ## How to create new network or bootnode
 

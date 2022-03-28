@@ -358,13 +358,19 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 	return nil
 }
 
-func WriteRawTransactions(db kv.StatelessWriteTx, txs [][]byte, baseTxId uint64) error {
+func WriteRawTransactions(db kv.RwTx, txs [][]byte, baseTxId uint64) error {
 	txId := baseTxId
 	for _, tx := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
 		if err := db.Append(kv.EthTx, txIdKey, tx); err != nil {
+			c, err := db.Cursor(kv.EthTx)
+			if err != nil {
+				kk, _, _ := c.Last()
+				c.Close()
+				return fmt.Errorf("txId=%d, baseTxId=%d, lastInDb=%d, %w", txId, baseTxId, binary.BigEndian.Uint64(kk), err)
+			}
 			return err
 		}
 		txId++
@@ -473,6 +479,18 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 
 // ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	k, _, err := c.Last()
+	if err != nil {
+		return err
+	}
+	if k != nil && binary.BigEndian.Uint64(k) >= newValue {
+		panic(fmt.Sprintf("must not happen. ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k)))
+	}
+
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, newValue)
 	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
@@ -529,7 +547,7 @@ func ReadSenders(db kv.Getter, hash common.Hash, number uint64) ([]common.Addres
 	return senders, nil
 }
 
-func WriteRawBodyIfNotExists(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	exists, err := db.Has(kv.BlockBody, dbutils.BlockBodyKey(number, hash))
 	if err != nil {
 		return err
@@ -540,7 +558,7 @@ func WriteRawBodyIfNotExists(db kv.StatelessRwTx, hash common.Hash, number uint6
 	return WriteRawBody(db, hash, number, body)
 }
 
-func WriteRawBody(db kv.StatelessRwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
 		return err
@@ -551,10 +569,10 @@ func WriteRawBody(db kv.StatelessRwTx, hash common.Hash, number uint64, body *ty
 		Uncles:   body.Uncles,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
-		return fmt.Errorf("failed to write body: %w", err)
+		return fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
 	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
-		return fmt.Errorf("failed to WriteRawTransactions: %w", err)
+		return fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return nil
 }
@@ -600,7 +618,7 @@ func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.StatelessRwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -717,6 +735,18 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 
 	// EthTx must have canonical id's - means need decrement it's sequence on unwind
 	if firstMovedTxnIDIsSet {
+		c, err := tx.Cursor(kv.EthTx)
+		if err != nil {
+			return err
+		}
+		k, _, err := c.Last()
+		if err != nil {
+			return err
+		}
+		if k != nil && binary.BigEndian.Uint64(k) >= firstMovedTxnID {
+			panic(fmt.Sprintf("must not happen, ResetSequence: %d, lastInDB: %d\n", firstMovedTxnID, binary.BigEndian.Uint64(k)))
+		}
+
 		if err := ResetSequence(tx, kv.EthTx, firstMovedTxnID); err != nil {
 			return err
 		}

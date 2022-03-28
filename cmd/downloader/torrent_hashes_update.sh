@@ -14,7 +14,7 @@ git pull
 cd ../erigon
 
 # it will return only .seg of 500K (because Erigon send to Downloader only such files)
-go run -trimpath ./cmd/downloader torrent_hashes --datadir="$datadir" >./../erigon-snapshot/"$network".toml
+go run -trimpath ./cmd/downloader torrent_hashes --datadir="$datadir" --targetfile=./../erigon-snapshot/"$network".toml
 cd ./../erigon-snapshot
 git add "$network".toml
 git commit -m "ci: $network"
