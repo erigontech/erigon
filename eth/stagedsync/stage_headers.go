@@ -340,22 +340,7 @@ func handleNewPayload(
 		return nil
 	}
 
-	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
-	if err != nil {
-		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
-		cfg.hd.BeaconRequestList.Remove(requestId)
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: header.ParentHash, // TODO(yperbasis): potentially wrong when parent is nil
-				ValidationError: err,
-			}
-		}
-		return nil
-	}
-
 	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
-
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
@@ -365,6 +350,19 @@ func handleNewPayload(
 	}
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
+
+	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
+	if err != nil {
+		log.Warn("Error during Beacon transaction decoding", "err", err.Error())
+		if requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: header.ParentHash,
+				ValidationError: err,
+			}
+		}
+		return nil
+	}
 
 	log.Trace(fmt.Sprintf("[%s] New payload begin verification", s.LogPrefix()))
 	success, err := verifyAndSaveNewPoSHeader(requestStatus, s, tx, cfg, header, headerInserter)
