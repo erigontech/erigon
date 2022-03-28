@@ -21,12 +21,15 @@ git add "$network".toml
 git commit -m "ci: $network"
 
 GH_TOKEN=""
+GH_TOKEN_FILE=""
 if ! gcloud -v <the_command> &> /dev/null
 then
     GH_TOKEN=$(gcloud secrets versions access 1 --secret="github-snapshot-push")
+    GH_TOKEN_FILE="~/.ssh/gh_rsa"
     exit
 fi
 
 # /dev/null to avoid logging of insecure git output
-SSH_CMD='echo ${GH_TOKEN} | ssh -i /dev/stdin -o IdentitiesOnly=yes'
+#SSH_CMD='echo ${GH_TOKEN} | ssh -i /dev/stdin -o IdentitiesOnly=yes'
+SSH_CMD="ssh -i ${GH_TOKEN_FILE} -o IdentitiesOnly=yes"
 GIT_SSH_COMMAND=${SSH_CMD} git push git@github.com:ledgerwatch/erigon-snapshot.git main > /dev/null 2>&1
