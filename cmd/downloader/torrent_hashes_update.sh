@@ -23,7 +23,7 @@ git commit -m "ci: $network"
 GH_TOKEN=""
 if ! gcloud -v <the_command> &> /dev/null
 then
-    GH_TOKEN=$(gcloud secrets versions access 1 --secret="githug-snapshots-push")
+    GH_TOKEN=$(gcloud secrets versions access 1 --secret="github-snapshot-push")
     exit
 fi
 
