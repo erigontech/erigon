@@ -66,13 +66,13 @@ func PrintArrays(str []byte, sa []uint, lcp []int, da []int32) {
 //nolint
 // SA2GSA - example func to convert SA+DA to GSA
 func SA2GSA(sa []uint, da []int32) []uint {
-	gsa := make([]uint, len(sa))
-	copy(gsa, sa)
-
 	// remove terminator
 	sa = sa[1:]
 	da = da[1:]
 	n := len(sa) - 1
+
+	gsa := make([]uint, n)
+	copy(gsa, sa)
 
 	for i := 0; i < n; i++ {
 		if da[i] != 0 {
@@ -80,6 +80,35 @@ func SA2GSA(sa []uint, da []int32) []uint {
 		}
 	}
 	return gsa
+}
+
+func PrintRepeats(str []byte, sa []uint, da []int32) {
+	sa = sa[1:]
+	da = da[1:]
+	n := len(sa) - 1
+	var repeats int
+	for i := 0; i < len(da)-1; i++ {
+		repeats++
+		if da[i] < da[i+1] { // same suffix
+			continue
+		}
+
+		// new suffix
+		fmt.Printf(" repeats: %d\t", repeats)
+		for j := sa[i]; int(j) < n; j++ {
+			if str[j] == 1 {
+				//fmt.Printf("$")
+				break
+			} else if str[j] == 0 {
+				fmt.Printf("#")
+			} else {
+				fmt.Printf("%c", str[j]-1)
+			}
+		}
+		fmt.Printf("\n")
+
+		repeats = 0
+	}
 }
 
 func GSA(data []byte, sa []uint, lcp []int, da []int32) error {

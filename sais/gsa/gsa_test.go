@@ -1,6 +1,7 @@
 package gsa
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/sais"
@@ -19,9 +20,11 @@ func TestExampleGSA(t *testing.T) {
 	da := make([]int32, n)
 	_ = GSA(str, sa, lcp, da)
 
+	fmt.Printf("sa: %d, lcp: %d\n", sa, lcp)
 	PrintArrays(str, sa, lcp, da)
+	PrintRepeats(str, sa, da)
 	gsa := SA2GSA(sa, da)
-	_ = gsa
+	fmt.Printf("gsa: %d, da: %d\n", gsa, da)
 }
 
 func TestGSA(t *testing.T) {
