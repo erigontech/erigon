@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	eventAddr    []string
-	eventTopics   []string
+	eventAddr   []string
+	eventTopics []string
 )
 
 func init() {
@@ -19,7 +19,7 @@ func init() {
 }
 
 var LogsCmd = &cobra.Command{
-	Use: "logs",
+	Use:   "logs",
 	Short: "Subscribes to log event sends a notification each time a new log appears",
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := services.Logs(eventAddr, eventTopics); err != nil {

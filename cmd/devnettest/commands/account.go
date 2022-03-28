@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	accountAddr     string
-	blockNum string
+	accountAddr string
+	blockNum    string
 )
 
 func init() {

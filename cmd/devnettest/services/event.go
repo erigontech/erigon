@@ -79,7 +79,7 @@ func Logs(addresses, topics []string) error {
 func subscribeToLogs(client *rpc.Client, method string, addresses []string, topics []string) error {
 	params := map[string][]string{
 		"address": addresses,
-		"topics": topics,
+		"topics":  topics,
 	}
 
 	sub, ch, err := subscribe(client, method, params)
