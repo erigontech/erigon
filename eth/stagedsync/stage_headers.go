@@ -539,8 +539,8 @@ func HeadersPOW(
 		return err
 	}
 	cfg.hd.SetPOSSync(false)
-	cfg.hd.SetFetching(true)
-	defer cfg.hd.SetFetching(false)
+	cfg.hd.SetFetchingNew(true)
+	defer cfg.hd.SetFetchingNew(false)
 	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
