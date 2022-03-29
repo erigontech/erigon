@@ -383,7 +383,7 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 }
 
 func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if !cs.Hd.RequestChaining() && !cs.Hd.Fetching() {
+	if !cs.Hd.RequestChaining() && !cs.Hd.FetchingNew() {
 		return nil
 	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))

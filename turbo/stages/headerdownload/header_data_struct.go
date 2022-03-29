@@ -277,7 +277,7 @@ type HeaderDownload struct {
 	anchorLimit        int    // Maximum allowed number of anchors
 	highestInDb        uint64 // Height of the highest block header in the database
 	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
-	fetching           bool   // Set when the stage that is actively fetching the headers is in progress
+	fetchingNew        bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
 
 	consensusHeaderReader consensus.ChainHeaderReader
