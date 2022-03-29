@@ -128,7 +128,6 @@ func (a *LogsFilterAggregator) subscribeLogs(server remote.ETHBACKEND_SubscribeL
 	// Listen to filter updates and modify the filters, until terminated
 	var filterReq *remote.LogsFilterRequest
 	var recvErr error
-	fmt.Printf("filterReq: %+v, recvErr: %+v\n", filterReq, recvErr)
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
