@@ -9,20 +9,29 @@ type bufferEntry struct {
 	value []byte
 }
 
+const defaultSize = 8388608 // This is the maximum size before doubling down
+
 type MemoryBuffer map[string][]bufferEntry
 
 func NewMemoryBuffer() MemoryBuffer {
 	return MemoryBuffer{
-		kv.AccountChangeSet: make([]bufferEntry, 0, 256),
-		kv.StorageChangeSet: make([]bufferEntry, 0, 256),
-		kv.Receipts:         make([]bufferEntry, 0, 256),
-		kv.CallTraceSet:     make([]bufferEntry, 0, 256),
-		kv.Log:              make([]bufferEntry, 0, 256),
+		kv.AccountChangeSet: make([]bufferEntry, 0, defaultSize),
+		kv.StorageChangeSet: make([]bufferEntry, 0, defaultSize),
+		kv.Receipts:         make([]bufferEntry, 0, defaultSize),
+		kv.CallTraceSet:     make([]bufferEntry, 0, defaultSize),
+		kv.Log:              make([]bufferEntry, 0, defaultSize),
 	}
 }
 
 // Put add a new entry to the memory buffer for a specific bucket
 func (cb MemoryBuffer) Put(bucket string, key []byte, value []byte) error {
+	// If we run out of capacity, we can just double it.
+	if len(cb[bucket]) == cap(cb[bucket]) {
+		tmp := make([]bufferEntry, len(cb[bucket]))
+		copy(tmp, cb[bucket])
+		cb[bucket] = make([]bufferEntry, len(cb[bucket]), cap(cb[bucket])*2)
+		copy(cb[bucket], tmp)
+	}
 	cb[bucket] = append(cb[bucket], bufferEntry{
 		key:   make([]byte, len(key)),
 		value: make([]byte, len(value)),
