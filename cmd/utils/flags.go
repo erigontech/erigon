@@ -123,6 +123,12 @@ var (
 		Usage: "Name of the testnet to join",
 		Value: networkname.MainnetChainName,
 	}
+	// General settings
+	GasHistoryRateFlag = cli.Float64Flag{
+		Name:  "gas-history-rate",
+		Usage: "The rate of commitment of history batches relative to state batches (default 0.1)",
+		Value: 0.1,
+	}
 	IdentityFlag = cli.StringFlag{
 		Name:  "identity",
 		Usage: "Custom node name",

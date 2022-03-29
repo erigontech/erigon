@@ -45,17 +45,18 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db            kv.RwDB
-	batchSize     datasize.ByteSize
-	prune         prune.Mode
-	changeSetHook ChangeSetHook
-	chainConfig   *params.ChainConfig
-	engine        consensus.Engine
-	vmConfig      *vm.Config
-	tmpdir        string
-	stateStream   bool
-	accumulator   *shards.Accumulator
-	blockReader   interfaces.FullBlockReader
+	db             kv.RwDB
+	batchSize      datasize.ByteSize
+	prune          prune.Mode
+	changeSetHook  ChangeSetHook
+	chainConfig    *params.ChainConfig
+	engine         consensus.Engine
+	vmConfig       *vm.Config
+	tmpdir         string
+	stateStream    bool
+	gasRateHistory float64
+	accumulator    *shards.Accumulator
+	blockReader    interfaces.FullBlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -69,20 +70,22 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
+	gasRateHistory float64,
 	blockReader interfaces.FullBlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:            kv,
-		prune:         prune,
-		batchSize:     batchSize,
-		changeSetHook: changeSetHook,
-		chainConfig:   chainConfig,
-		engine:        engine,
-		vmConfig:      vmConfig,
-		tmpdir:        tmpdir,
-		accumulator:   accumulator,
-		stateStream:   stateStream,
-		blockReader:   blockReader,
+		db:             kv,
+		prune:          prune,
+		batchSize:      batchSize,
+		changeSetHook:  changeSetHook,
+		chainConfig:    chainConfig,
+		engine:         engine,
+		vmConfig:       vmConfig,
+		tmpdir:         tmpdir,
+		accumulator:    accumulator,
+		stateStream:    stateStream,
+		blockReader:    blockReader,
+		gasRateHistory: gasRateHistory,
 	}
 }
 
@@ -237,8 +240,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	var currentHistoryGas uint64 // used for batch commits of history
 	// Transform batch_size limit into Ggas
 	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 10
-	gasHistory := gasState / 5.0
+	gasHistory := uint64(float64(gasState) * cfg.gasRateHistory)
 
+	log.Info("Committing Info", "StateGas", gasState, "HistoryGas", gasHistory)
 	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
 	if err != nil {
 		return err
@@ -288,6 +292,7 @@ Loop:
 		stageProgress = blockNum
 
 		if currentStateGas >= gasState {
+			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
 			currentStateGas = 0
 			if err = batch.Commit(); err != nil {
 				return err
@@ -312,6 +317,7 @@ Loop:
 		}
 
 		if currentHistoryGas >= gasHistory {
+			log.Info("Committed History", "gas reached", currentHistoryGas, "gasTarget", gasHistory)
 			currentHistoryGas = 0
 			if err = memoryBuffer.WriteToDb(tx); err != nil {
 				return err
@@ -335,7 +341,7 @@ Loop:
 			if estimateRatio != 0 {
 				estimatedTime = common.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
 			}
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, estimatedTime, batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), float64(currentHistoryGas)/float64(gasHistory), estimatedTime, batch)
 			gas = 0
 			tx.CollectMetrics()
 			syncMetrics[stages.Execution].Set(blockNum)
@@ -363,7 +369,7 @@ Loop:
 	return stoppedErr
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, gasHistory float64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
@@ -377,6 +383,8 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"blk/s", speed,
 		"tx/s", speedTx,
 		"Mgas/s", speedMgas,
+		"gasState", gasState,
+		"gasHistory", gasHistory,
 	}
 	if estimatedTime > 0 {
 		logpairs = append(logpairs, "estimated duration", estimatedTime)

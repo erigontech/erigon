@@ -307,6 +307,7 @@ func NewStagedSync(
 				notifications.Accumulator,
 				cfg.StateStream,
 				tmpdir,
+				cfg.GasHistoryRate,
 				blockReader,
 			),
 			stagedsync.StageTranspileCfg(db, cfg.BatchSize, controlServer.ChainConfig),

@@ -176,7 +176,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.Prune = mode
-
+	cfg.GasHistoryRate = ctx.GlobalFloat64(utils.GasHistoryRateFlag.Name)
 	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
 		if err != nil {
