@@ -1,6 +1,8 @@
 package core
 
 import (
+	"bytes"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -44,14 +46,26 @@ func (cb MemoryBuffer) Put(bucket string, key []byte, value []byte) error {
 
 // Put add a new entry to the memory buffer for a specific bucket
 func (cb MemoryBuffer) writeBucketToDb(tx kv.RwTx, bucket string, dup bool) error {
+	c, err := tx.RwCursor(bucket)
+	if err != nil {
+		return err
+	}
+	lastK, lastV, err := c.Last()
+	if err != nil {
+		return err
+	}
 	for _, entry := range cb[bucket] {
 		if dup {
-			if err := tx.AppendDup(bucket, entry.key, entry.value); err != nil {
-				return err
+			if bytes.Compare(append(entry.key, entry.value...), append(lastK, lastV...)) > 0 {
+				if err := tx.AppendDup(bucket, entry.key, entry.value); err != nil {
+					return err
+				}
 			}
 		} else {
-			if err := tx.Append(bucket, entry.key, entry.value); err != nil {
-				return err
+			if bytes.Compare(entry.key, lastK) > 0 {
+				if err := tx.Append(bucket, entry.key, entry.value); err != nil {
+					return err
+				}
 			}
 		}
 	}
