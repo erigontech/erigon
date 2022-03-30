@@ -10,8 +10,6 @@ import (
 	"math"
 	"math/rand"
 	"net"
-	"os"
-	"os/signal"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -480,25 +478,6 @@ func runPeer(
 	}
 }
 
-func rootContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		defer debug.LogPanic()
-		ch := make(chan os.Signal, 1)
-		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(ch)
-
-		select {
-		case <-ch:
-			log.Info("Got interrupt, shutting down...")
-		case <-ctx.Done():
-		}
-
-		cancel()
-	}()
-	return ctx
-}
-
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *SentryServerImpl, healthCheck bool) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry gRPC server", "on", sentryAddr)
@@ -598,9 +577,8 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
+func Sentry(ctx context.Context, datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
 	dir.MustExist(datadir)
-	ctx := rootContext()
 	sentryServer := NewSentryServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 
@@ -878,7 +856,7 @@ func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sen
 		}
 
 		// Add protocol
-		if err = srv.Start(ctx); err != nil {
+		if err = srv.Start(ss.ctx); err != nil {
 			srv.Stop()
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}

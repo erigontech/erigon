@@ -35,7 +35,6 @@ if ! gcloud -v <the_command> &> /dev/null
 then
     GH_TOKEN=$(gcloud secrets versions access 1 --secret="github-snapshot-push")
     GH_TOKEN_FILE="~/.ssh/gh_rsa"
-    exit
 fi
 
 # /dev/null to avoid logging of insecure git output
