@@ -877,7 +877,7 @@ func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sen
 		}
 
 		// Add protocol
-		if err = srv.Start(ctx); err != nil {
+		if err = srv.Start(ss.ctx); err != nil {
 			srv.Stop()
 			return reply, fmt.Errorf("could not start server: %w", err)
 		}
