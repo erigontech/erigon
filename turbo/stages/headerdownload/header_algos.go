@@ -1217,10 +1217,10 @@ func (hd *HeaderDownload) EnableRequestChaining() {
 	hd.requestChaining = true
 }
 
-func (hd *HeaderDownload) SetFetching(fetching bool) {
+func (hd *HeaderDownload) SetFetchingNew(fetching bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.fetching = fetching
+	hd.fetchingNew = fetching
 }
 
 func (hd *HeaderDownload) SetPosStatus(status SyncStatus) {
@@ -1265,10 +1265,10 @@ func (hd *HeaderDownload) RequestChaining() bool {
 	return hd.requestChaining
 }
 
-func (hd *HeaderDownload) Fetching() bool {
+func (hd *HeaderDownload) FetchingNew() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.fetching
+	return hd.fetchingNew
 }
 
 func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
