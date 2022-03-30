@@ -58,7 +58,7 @@ func (c *testTransport) doEncHandshake(prv *ecdsa.PrivateKey) (*ecdsa.PublicKey,
 }
 
 func (c *testTransport) doProtoHandshake(our *protoHandshake) (*protoHandshake, error) {
-	pubkey := crypto.FromECDSAPub(c.rpub)[1:]
+	pubkey := crypto.MarshalPubkey(c.rpub)
 	return &protoHandshake{Pubkey: pubkey, Name: "test"}, nil
 }
 
@@ -317,7 +317,7 @@ func TestServerPeerLimits(t *testing.T) {
 	var tp = &setupTransport{
 		pubkey: &clientkey.PublicKey,
 		phs: protoHandshake{
-			Pubkey: crypto.FromECDSAPub(&clientkey.PublicKey)[1:],
+			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),
 			// Force "DiscUselessPeer" due to unmatching caps
 			// Caps: []Cap{discard.cap()},
 		},
@@ -416,13 +416,13 @@ func TestServerSetupConn(t *testing.T) {
 			wantCloseErr: errors.New("foo"),
 		},
 		{
-			tt:           &setupTransport{pubkey: srvpub, phs: protoHandshake{Pubkey: crypto.FromECDSAPub(srvpub)[1:]}},
+			tt:           &setupTransport{pubkey: srvpub, phs: protoHandshake{Pubkey: crypto.MarshalPubkey(srvpub)}},
 			flags:        inboundConn,
 			wantCalls:    "doEncHandshake,close,",
 			wantCloseErr: DiscSelf,
 		},
 		{
-			tt:           &setupTransport{pubkey: clientpub, phs: protoHandshake{Pubkey: crypto.FromECDSAPub(clientpub)[1:]}},
+			tt:           &setupTransport{pubkey: clientpub, phs: protoHandshake{Pubkey: crypto.MarshalPubkey(clientpub)}},
 			flags:        inboundConn,
 			wantCalls:    "doEncHandshake,doProtoHandshake,close,",
 			wantCloseErr: DiscUselessPeer,

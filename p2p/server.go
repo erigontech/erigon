@@ -511,8 +511,8 @@ func (srv *Server) Start(ctx context.Context) error {
 
 func (srv *Server) setupLocalNode() error {
 	// Create the devp2p handshake.
-	pubkey := crypto.FromECDSAPub(&srv.PrivateKey.PublicKey)
-	srv.ourHandshake = &protoHandshake{Version: baseProtocolVersion, Name: srv.Name, Pubkey: pubkey[1:]}
+	pubkey := crypto.MarshalPubkey(&srv.PrivateKey.PublicKey)
+	srv.ourHandshake = &protoHandshake{Version: baseProtocolVersion, Name: srv.Name, Pubkey: pubkey}
 	for _, p := range srv.Protocols {
 		srv.ourHandshake.Caps = append(srv.ourHandshake.Caps, p.cap())
 	}
