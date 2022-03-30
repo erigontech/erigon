@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -228,7 +229,6 @@ func (m *mapmutation) Delete(table string, k, v []byte) error {
 }
 
 func (m *mapmutation) doCommit(tx kv.RwTx) error {
-	var innerErr error
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	count := 0
@@ -237,28 +237,25 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		for key, value := range bucket {
-			collector.Collect([]byte(key), value)
+			collector.Collect(common.CopyBytes([]byte(key)), common.CopyBytes(value))
+			count++
+			select {
+			default:
+			case <-logEvery.C:
+				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+				log.Info("Write to db", "progress", progress, "current table", table)
+				tx.CollectMetrics()
+			case <-m.quit:
+				return nil
+			}
 		}
-
 		if err := collector.Load(m.db, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
-		count++
-
-		select {
-		default:
-		case <-logEvery.C:
-			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
-			log.Info("Write to db", "progress", progress, "current table", table)
-			tx.CollectMetrics()
-		case <-m.quit:
-			return nil
-		}
-		return nil
 	}
 
 	tx.CollectMetrics()
-	return innerErr
+	return nil
 }
 
 func (m *mapmutation) Commit() error {
