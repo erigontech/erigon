@@ -18,7 +18,7 @@ cd ../erigon
 go run -trimpath ./cmd/downloader torrent_hashes --datadir="$datadir" --targetfile=./../erigon-snapshot/"$network".toml
 cd ./../erigon-snapshot
 git add "$network".toml
-git commit -m "ci: $network"
+git commit -m "[ci]: $network, [from]: $HOSTNAME"
 
 GH_TOKEN=""
 GH_TOKEN_FILE=""
