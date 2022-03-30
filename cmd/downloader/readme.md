@@ -100,5 +100,4 @@ crontab -e
 @hourly        cd <erigon_source_dir> && ./cmd/downloader/torrent_hashes_update.sh <your_datadir> <network_name> > ~/erigon_cron.log
 ```
 
-It will commit new hashes to branch `auto` - then before release need to merge `auto` to `devel` (`auto_stable`
-to `stable`)
+It does push to branch `auto`, before release - merge `auto` to `main` manually
