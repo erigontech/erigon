@@ -97,7 +97,7 @@ Start automatic commit of new hashes to branch `master`
 
 ```
 crontab -e
-@hourly        cd <erigon_source_dir> && ./cmd/downloader/torrent_hashes_update.sh <your_datadir> <network_name> 2>&1 >> ~/erigon_cron.log
+@hourly        cd <erigon_source_dir> && ./cmd/downloader/torrent_hashes_update.sh <your_datadir> <network_name> 1>&2 2>> ~/erigon_cron.log
 ```
 
 It does push to branch `auto`, before release - merge `auto` to `main` manually
