@@ -135,6 +135,63 @@ func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 	}
 }
 
+// ReadForkchoiceHead retrieves headBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceHead(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("headBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceHead failed", "err", err)
+	}
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceHead stores headBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceHead(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("headBlockHash"), hash.Bytes()); err != nil {
+		log.Crit("Failed to store last headBlockHash", "err", err)
+	}
+}
+
+// ReadForkchoiceSafe retrieves safeBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceSafe(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("safeBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceSafe failed", "err", err)
+	}
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceSafe stores safeBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceSafe(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("safeBlockHash"), hash.Bytes()); err != nil {
+		log.Crit("Failed to store last safeBlockHash", "err", err)
+	}
+}
+
+// ReadForkchoiceFinalized retrieves finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceFinalized(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceFinalized failed", "err", err)
+	}
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("finalizedBlockHash"), hash.Bytes()); err != nil {
+		log.Crit("Failed to store last finalizedBlockHash", "err", err)
+	}
+}
+
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
