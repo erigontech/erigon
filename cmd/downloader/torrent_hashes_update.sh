@@ -11,7 +11,7 @@ network=$2
 cd ./../erigon-snapshot
 git reset --hard
 git checkout main
-git pull origin main
+git pull --ff-only origin main
 cd ../erigon
 
 # it will return only .seg of 500K (because Erigon send to Downloader only such files)
