@@ -1009,9 +1009,9 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
-func (br *BlockRetire) CanDeleteTo(curBlockNum uint64) (blockTo uint64) {
+func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
-	return min(hardLimit, br.snapshots.BlocksAvailable()+1)
+	return min(hardLimit, snapshots.BlocksAvailable()+1)
 }
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil
