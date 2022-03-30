@@ -3,6 +3,15 @@
 datadir=$1
 network=$2
 
+if [ -z "$datadir" ]; then
+  cat "arguments: <your_datadir> <network_name>"
+  exit 1
+fi
+if [ -z "$network" ]; then
+  cat "arguments: <your_datadir> <network_name>"
+  exit 1
+fi
+
 #git reset --hard
 #git checkout devel
 #git pull
@@ -10,8 +19,8 @@ network=$2
 # clean
 cd ./../erigon-snapshot
 git reset --hard
-git checkout main
-git pull --ff-only origin main
+git checkout auto
+git pull --ff-only origin auto
 cd ../erigon
 
 # it will return only .seg of 500K (because Erigon send to Downloader only such files)
@@ -32,4 +41,5 @@ fi
 # /dev/null to avoid logging of insecure git output
 #SSH_CMD='echo ${GH_TOKEN} | ssh -i /dev/stdin -o IdentitiesOnly=yes'
 SSH_CMD="ssh -i ${GH_TOKEN_FILE} -o IdentitiesOnly=yes"
-GIT_SSH_COMMAND=${SSH_CMD} git push git@github.com:ledgerwatch/erigon-snapshot.git main > /dev/null 2>&1
+GIT_SSH_COMMAND=${SSH_CMD} git push git@github.com:ledgerwatch/erigon-snapshot.git auto > /dev/null 2>&1
+echo "Done"
