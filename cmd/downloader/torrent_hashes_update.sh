@@ -4,11 +4,11 @@ datadir=$1
 network=$2
 
 if [ -z "$datadir" ]; then
-  cat "arguments: <your_datadir> <network_name>"
+  echo "arguments: <your_datadir> <network_name>"
   exit 1
 fi
 if [ -z "$network" ]; then
-  cat "arguments: <your_datadir> <network_name>"
+  echo "arguments: <your_datadir> <network_name>"
   exit 1
 fi
 
