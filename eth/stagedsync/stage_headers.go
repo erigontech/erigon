@@ -120,9 +120,9 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
-	unsettledForchoice, headHeight := cfg.hd.GetUnsettledForchoice()
-	if unsettledForchoice != nil { // some work left to do after unwind
-		return handleUnsettledForkChoice(unsettledForchoice, headHeight, s, tx, cfg, useExternalTx)
+	unsettledForkChoice, headHeight := cfg.hd.GetUnsettledForkChoice()
+	if unsettledForkChoice != nil { // some work left to do after unwind
+		return handleUnsettledForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
@@ -172,7 +172,7 @@ func handleUnsettledForkChoice(
 		}
 	}
 
-	cfg.hd.ClearUnsettledForchoice()
+	cfg.hd.ClearUnsettledForkChoice()
 	return nil
 }
 
@@ -309,7 +309,7 @@ func handleForkChoice(
 	u.UnwindTo(forkingPoint, common.Hash{})
 	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
-	cfg.hd.SetUnsettledForchoice(forkChoiceMessage, headerNumber)
+	cfg.hd.SetUnsettledForkChoice(forkChoiceMessage, headerNumber)
 
 	return nil
 }

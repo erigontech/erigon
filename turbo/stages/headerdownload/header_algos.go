@@ -1289,20 +1289,20 @@ func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.pendingPayloadStatus = common.Hash{}
 }
 
-func (hd *HeaderDownload) GetUnsettledForchoice() (*engineapi.ForkChoiceMessage, uint64) {
+func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.unsettledForkChoice, hd.unsettledHeadHeight
 }
 
-func (hd *HeaderDownload) SetUnsettledForchoice(forkChoice *engineapi.ForkChoiceMessage, headHeight uint64) {
+func (hd *HeaderDownload) SetUnsettledForkChoice(forkChoice *engineapi.ForkChoiceMessage, headHeight uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.unsettledForkChoice = forkChoice
 	hd.unsettledHeadHeight = headHeight
 }
 
-func (hd *HeaderDownload) ClearUnsettledForchoice() {
+func (hd *HeaderDownload) ClearUnsettledForkChoice() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.unsettledForkChoice = nil
