@@ -1550,7 +1550,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		addr, txRlp := v[:20], v[20:]
 		txn := &TxSlot{}
 
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */)
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */, nil)
 		if err != nil {
 			return fmt.Errorf("err: %w, rlp: %x", err, txRlp)
 		}

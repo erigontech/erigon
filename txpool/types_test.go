@@ -111,7 +111,7 @@ func TestParseTransactionRLP(t *testing.T) {
 			for i, tt := range testSet.tests {
 				t.Run(strconv.Itoa(i), func(t *testing.T) {
 					payload := decodeHex(tt.payloadStr)
-					parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:], false /* hasEnvelope */)
+					parseEnd, err := ctx.ParseTransaction(payload, 0, tx, txSender[:], false /* hasEnvelope */, nil)
 					require.NoError(err)
 					require.Equal(len(payload), parseEnd)
 					if tt.signHashStr != "" {

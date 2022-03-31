@@ -52,7 +52,6 @@ type TxParseContext struct {
 	sig              [65]byte
 	withSender       bool
 	isProtected      bool
-	validateHash     func([]byte) error
 	validateRlp      func([]byte) error
 
 	cfg TxParsseConfig
@@ -112,13 +111,12 @@ var ErrRejected = errors.New("rejected")
 var ErrAlreadyKnown = errors.New("already known")
 var ErrRlpTooBig = errors.New("txn rlp too big")
 
-func (ctx *TxParseContext) ValidateHash(f func(hash []byte) error)  { ctx.validateHash = f }
-func (ctx *TxParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateHash = f }
+func (ctx *TxParseContext) ValidateRLP(f func(txnRlp []byte) error) { ctx.validateRlp = f }
 func (ctx *TxParseContext) WithSender(v bool)                       { ctx.withSender = v }
 
 // ParseTransaction extracts all the information from the transactions's payload (RLP) necessary to build TxSlot
 // it also performs syntactic validation of the transactions
-func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope bool) (p int, err error) {
+func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlot, sender []byte, hasEnvelope bool, validateHash func([]byte) error) (p int, err error) {
 	if len(payload) == 0 {
 		return 0, fmt.Errorf("%w: empty rlp", ErrParseTxn)
 	}
@@ -380,8 +378,8 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !ctx.withSender {
 		return p, nil
 	}
-	if ctx.validateHash != nil {
-		if err := ctx.validateHash(slot.IDHash[:32]); err != nil {
+	if validateHash != nil {
+		if err := validateHash(slot.IDHash[:32]); err != nil {
 			return p, err
 		}
 	}

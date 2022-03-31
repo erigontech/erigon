@@ -294,16 +294,6 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 	case sentry.MessageId_POOLED_TRANSACTIONS_66, sentry.MessageId_TRANSACTIONS_66:
 		txs := TxSlots{}
 		if err := f.threadSafeParsePooledTxn(func(parseContext *TxParseContext) error {
-			parseContext.ValidateHash(func(hash []byte) error {
-				known, err := f.pool.IdHashKnown(tx, hash)
-				if err != nil {
-					return err
-				}
-				if known {
-					return ErrRejected
-				}
-				return nil
-			})
 			return nil
 		}); err != nil {
 			return err
@@ -312,7 +302,16 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 		switch req.Id {
 		case sentry.MessageId_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxParseContext) error {
-				if _, err := ParseTransactions(req.Data, 0, parseContext, &txs); err != nil {
+				if _, err := ParseTransactions(req.Data, 0, parseContext, &txs, func(hash []byte) error {
+					known, err := f.pool.IdHashKnown(tx, hash)
+					if err != nil {
+						return err
+					}
+					if known {
+						return ErrRejected
+					}
+					return nil
+				}); err != nil {
 					return err
 				}
 				return nil
@@ -321,7 +320,16 @@ func (f *Fetch) handleInboundMessage(ctx context.Context, req *sentry.InboundMes
 			}
 		case sentry.MessageId_POOLED_TRANSACTIONS_66:
 			if err := f.threadSafeParsePooledTxn(func(parseContext *TxParseContext) error {
-				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txs); err != nil {
+				if _, _, err := ParsePooledTransactions66(req.Data, 0, parseContext, &txs, func(hash []byte) error {
+					known, err := f.pool.IdHashKnown(tx, hash)
+					if err != nil {
+						return err
+					}
+					if known {
+						return ErrRejected
+					}
+					return nil
+				}); err != nil {
 					return err
 				}
 				return nil
@@ -435,7 +443,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 				for i := range change.Txs {
 					minedTxs.txs[i] = &TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *TxParseContext) error {
-						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.txs[i], minedTxs.senders.At(i), true /* hasEnvelope */)
+						_, err := parseContext.ParseTransaction(change.Txs[i], 0, minedTxs.txs[i], minedTxs.senders.At(i), true /* hasEnvelope */, nil)
 						return err
 					}); err != nil {
 						log.Warn("stream.Recv", "err", err)
@@ -448,7 +456,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 				for i := range change.Txs {
 					unwindTxs.txs[i] = &TxSlot{}
 					if err = f.threadSafeParseStateChangeTxn(func(parseContext *TxParseContext) error {
-						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.txs[i], unwindTxs.senders.At(i), true /* hasEnvelope */)
+						_, err = parseContext.ParseTransaction(change.Txs[i], 0, unwindTxs.txs[i], unwindTxs.senders.At(i), true /* hasEnvelope */, nil)
 						return err
 					}); err != nil {
 						log.Warn("stream.Recv", "err", err)
