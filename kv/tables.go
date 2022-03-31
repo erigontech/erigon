@@ -295,15 +295,21 @@ const (
 
 	// headBlockKey tracks the latest know full block's hash.
 	HeadBlockKey = "LastBlock"
+
+	HeadHeaderKey = "LastHeader"
+
+	// headBlockHash, safeBlockHash, finalizedBlockHash of the latest Engine API forkchoice
+	LastForkchoice = "LastForkchoice"
+
 	// TransitionBlockKey tracks the last proof-of-work block
 	TransitionBlockKey = "TransitionBlock"
+
 	// migrationName -> serialized SyncStageProgress and SyncStageUnwind buckets
 	// it stores stages progress to understand in which context was executed migration
 	// in case of bug-report developer can ask content of this bucket
 	Migrations = "Migration"
 
-	Sequence      = "Sequence" // tbl_name -> seq_u64
-	HeadHeaderKey = "LastHeader"
+	Sequence = "Sequence" // tbl_name -> seq_u64
 
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
@@ -377,6 +383,7 @@ var ChaindataTables = []string{
 	Senders,
 	HeadBlockKey,
 	HeadHeaderKey,
+	LastForkchoice,
 	Migrations,
 	LogTopicIndex,
 	LogAddressIndex,
@@ -390,7 +397,6 @@ var ChaindataTables = []string{
 	Sequence,
 	EthTx,
 	NonCanonicalTxs,
-	TransitionBlockKey,
 	TrieOfAccounts,
 	TrieOfStorage,
 	HashedAccounts,
@@ -427,6 +433,7 @@ var SentryTables = []string{}
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{
 	Clique,
+	TransitionBlockKey,
 }
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
