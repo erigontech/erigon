@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -11,6 +13,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -66,7 +69,25 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "retire",
 			Action: doRetireCommand,
-			Usage:  "Build snapshots for some recent blocks",
+			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags: append([]cli.Flag{
+				utils.DataDirFlag,
+				SnapshotFromFlag,
+				SnapshotToFlag,
+				SnapshotEveryFlag,
+			}, debug.Flags...),
+		},
+		{
+			Name:   "uncompress",
+			Action: doUncompress,
+			Usage:  "erigon snapshots uncompress a.seg | erigon snapshots compress b.seg",
+			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
+			Flags:  append([]cli.Flag{}, debug.Flags...),
+		},
+		{
+			Name:   "compress",
+			Action: doCompress,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
 			Flags: append([]cli.Flag{
 				utils.DataDirFlag,
@@ -132,6 +153,68 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
+func doUncompress(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+	decompressor, err := compress.NewDecompressor(f)
+	if err != nil {
+		return err
+	}
+	wr := bufio.NewWriterSize(os.Stdout, etl.BufIOSize)
+	g := decompressor.MakeGetter()
+	var buf []byte
+	var EOL = []byte("\n")
+	for g.HasNext() {
+		buf, _ := g.Next(buf)
+		if _, err := wr.Write(buf); err != nil {
+			return err
+		}
+		if _, err := wr.Write(EOL); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	_ = ctx
+	return nil
+}
+func doCompress(cliCtx *cli.Context) error {
+	ctx, cancel := common.RootContext()
+	defer cancel()
+	args := cliCtx.Args()
+	if len(args) != 1 {
+		return fmt.Errorf("expecting .seg file path")
+	}
+	f := args[0]
+	c, err := compress.NewCompressor(ctx, "", f, "", compress.MinPatternScore, runtime.NumCPU()/2)
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		if err := c.AddWord(scanner.Bytes()); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
+}
 func doRetireCommand(cliCtx *cli.Context) error {
 	ctx, cancel := common.RootContext()
 	defer cancel()
