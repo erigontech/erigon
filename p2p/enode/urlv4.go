@@ -161,7 +161,6 @@ func parsePubkey(in string) (*ecdsa.PublicKey, error) {
 	} else if len(b) != 64 {
 		return nil, fmt.Errorf("wrong length, want %d hex chars", 128)
 	}
-	b = append([]byte{0x4}, b...)
 	return crypto.UnmarshalPubkey(b)
 }
 
@@ -175,7 +174,7 @@ func (n *Node) URLv4() string {
 	n.Load((*Secp256k1)(&key))
 	switch {
 	case scheme == "v4" || key != ecdsa.PublicKey{}:
-		nodeid = fmt.Sprintf("%x", crypto.FromECDSAPub(&key)[1:])
+		nodeid = fmt.Sprintf("%x", crypto.MarshalPubkey(&key))
 	default:
 		nodeid = fmt.Sprintf("%s.%x", scheme, n.id[:])
 	}

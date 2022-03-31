@@ -90,7 +90,7 @@ func TestDecompressPubkey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if uncompressed := FromECDSAPub(key); !bytes.Equal(uncompressed, testpubkey) {
+	if uncompressed := MarshalPubkeyStd(key); !bytes.Equal(uncompressed, testpubkey) {
 		t.Errorf("wrong public key result: got %x, want %x", uncompressed, testpubkey)
 	}
 	if _, err := DecompressPubkey(nil); err == nil {

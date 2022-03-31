@@ -1491,7 +1491,7 @@ func (s *EmptyStep) author() (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
-	ecdsa, err := crypto.UnmarshalPubkey(public)
+	ecdsa, err := crypto.UnmarshalPubkeyStd(public)
 	if err != nil {
 		return common.Address{}, err
 	}
