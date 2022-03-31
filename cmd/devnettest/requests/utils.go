@@ -25,3 +25,12 @@ func parseResponse(resp interface{}) (string, error) {
 
 	return string(result), nil
 }
+
+// NamespaceAndSubMethodFromMethod splits a parent method into namespace and the actual method
+func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
+	parts := strings.SplitN(method, "_", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid string to split")
+	}
+	return parts[0], parts[1], nil
+}

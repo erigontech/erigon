@@ -16,7 +16,7 @@ var (
 )
 
 func init() {
-	listStorageKeysCmd.Flags().StringVar(&addr, "addr", "", "String address to list keys")
+	listStorageKeysCmd.Flags().StringVar(&accountAddr, "addr", "", "String address to list keys")
 	listStorageKeysCmd.MarkFlagRequired("addr")
 	listStorageKeysCmd.Flags().StringVar(&offsetAddr, "offset", "", "Offset storage key from which the batch should start")
 	listStorageKeysCmd.Flags().IntVar(&quantity, "quantity", 10, "Integer number of addresses to display in a batch")
@@ -32,7 +32,10 @@ var listStorageKeysCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		toAddress := common.HexToAddress(addr)
+		if !common.IsHexAddress(accountAddr) {
+			return fmt.Errorf("address: %v, is not a valid hex address\n", accountAddr)
+		}
+		toAddress := common.HexToAddress(accountAddr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
 		if err := requests.ParityList(reqId, toAddress, quantity, offset, blockNum); err != nil {
 			fmt.Printf("error getting parity list: %v\n", err)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -110,52 +109,12 @@ func SearchBlockForTx(txnHash common.Hash) (uint64, error) {
 	fmt.Println()
 	fmt.Println("Connected to web socket successfully")
 
-	blockN, err := subscribe(client, "eth_newHeads", txnHash)
+	blockN, err := subscribeToNewHeads(client, "eth_newHeads", txnHash)
 	if err != nil {
 		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
 	}
 
 	return blockN, nil
-}
-
-// subscribe makes a ws subscription using eth_newHeads
-func subscribe(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
-	parts := strings.SplitN(method, "_", 2)
-	namespace := parts[0]
-	method = parts[1]
-	ch := make(chan interface{})
-	sub, err := client.Subscribe(context.Background(), namespace, ch, []interface{}{method}...)
-	if err != nil {
-		return uint64(0), fmt.Errorf("client failed to subscribe: %v", err)
-	}
-	defer sub.Unsubscribe()
-
-	var (
-		blockCount int
-		blockN     uint64
-	)
-ForLoop:
-	for {
-		select {
-		case v := <-ch:
-			blockCount++
-			blockNumber := v.(map[string]interface{})["number"]
-			fmt.Printf("Searching for the transaction in block with number: %+v, type: %[1]T\n", blockNumber.(string))
-			num, foundTx, err := blockHasHash(client, hash, blockNumber.(string))
-			if err != nil {
-				return uint64(0), fmt.Errorf("could not verify if current block contains the tx hash: %v", err)
-			}
-			if foundTx || blockCount == 128 {
-				blockN = num
-				break ForLoop
-			}
-		case err := <-sub.Err():
-			return uint64(0), fmt.Errorf("subscription error from client: %v", err)
-		}
-	}
-
-	return blockN, nil
-
 }
 
 // blockHasHash checks if the current block has the transaction hash in its list of transactions
