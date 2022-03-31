@@ -12,15 +12,26 @@ const numberOfIterations = 128
 
 // subscribe connects to a websocket and returns the subscription handler and a channel buffer
 func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.ClientSubscription, chan interface{}, error) {
-	var namespace string
-	namespace, method = requests.GetNamespaceFromMethod(method)
+	var (
+		namespace string
+		subMethod string
+		splitErr  error
+	)
+
+	namespace, subMethod, splitErr = requests.NamespaceAndSubMethodFromMethod(method)
+	if splitErr != nil {
+		return nil, nil, fmt.Errorf("cannot get namespace and method from method: %v", splitErr)
+	}
+
 	ch := make(chan interface{})
-	var arr = []interface{}{method}
+	var arr = []interface{}{subMethod}
 	arr = append(arr, args...)
+
 	sub, err := client.Subscribe(context.Background(), namespace, ch, arr...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("client failed to subscribe: %v", err)
 	}
+
 	return sub, ch, nil
 }
 
