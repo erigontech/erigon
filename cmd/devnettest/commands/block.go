@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
@@ -40,6 +41,9 @@ var sendTxCmd = &cobra.Command{
 			}
 			if sendAddr == "" {
 				return fmt.Errorf("string address to send to must be present")
+			}
+			if !common.IsHexAddress(sendAddr) {
+				return fmt.Errorf("address: %v, is not a valid hex address\n", sendAddr)
 			}
 		}
 		return nil

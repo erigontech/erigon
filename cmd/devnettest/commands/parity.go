@@ -32,6 +32,9 @@ var listStorageKeysCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
+		if !common.IsHexAddress(accountAddr) {
+			return fmt.Errorf("address: %v, is not a valid hex address\n", accountAddr)
+		}
 		toAddress := common.HexToAddress(accountAddr)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
 		if err := requests.ParityList(reqId, toAddress, quantity, offset, blockNum); err != nil {

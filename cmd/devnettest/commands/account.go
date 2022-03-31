@@ -41,6 +41,10 @@ var getBalanceCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
+		if !common.IsHexAddress(accountAddr) {
+			fmt.Printf("address: %v, is not a valid hex address\n", accountAddr)
+			return
+		}
 		address := common.HexToAddress(accountAddr)
 		if err := requests.GetBalance(reqId, address, blockNum); err != nil {
 			fmt.Printf("could not get balance: %v\n", err)
@@ -62,6 +66,10 @@ var getTransactionCountCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if clearDev {
 			defer services.ClearDevDB()
+		}
+		if !common.IsHexAddress(accountAddr) {
+			fmt.Printf("address: %v, is not a valid hex address\n", accountAddr)
+			return
 		}
 		address := common.HexToAddress(accountAddr)
 		if err := requests.GetTransactionCountCmd(reqId, address, blockNum); err != nil {
