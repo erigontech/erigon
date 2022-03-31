@@ -1009,9 +1009,9 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	}
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
-func (br *BlockRetire) CanDeleteTo(curBlockNum uint64) (blockTo uint64) {
+func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
-	return min(hardLimit, br.snapshots.BlocksAvailable()+1)
+	return min(hardLimit, snapshots.BlocksAvailable()+1)
 }
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil
@@ -1131,7 +1131,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	slot := txpool.TxSlot{}
 	var sender [20]byte
 	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
-		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */); err != nil {
+		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
 			return valueBuf, err
 		}
 		if len(senders) > 0 {
@@ -1506,7 +1506,7 @@ RETRY:
 				continue
 			}
 
-			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */); err != nil {
+			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */, nil); err != nil {
 				txsCh <- txHashWithOffet{err: it.err}
 				txsCh2 <- txHashWithOffet{err: it.err}
 				return

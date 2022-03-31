@@ -247,7 +247,7 @@ func (e *rootEntry) sigHash() []byte {
 
 func (e *rootEntry) verifySignature(pubkey *ecdsa.PublicKey) bool {
 	sig := e.sig[:crypto.RecoveryIDOffset] // remove recovery id
-	enckey := crypto.FromECDSAPub(pubkey)
+	enckey := crypto.MarshalPubkeyStd(pubkey)
 	return crypto.VerifySignature(enckey, e.sigHash(), sig)
 }
 

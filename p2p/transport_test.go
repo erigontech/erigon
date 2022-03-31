@@ -30,11 +30,11 @@ import (
 func TestProtocolHandshake(t *testing.T) {
 	var (
 		prv0, _ = crypto.GenerateKey()
-		pub0    = crypto.FromECDSAPub(&prv0.PublicKey)[1:]
+		pub0    = crypto.MarshalPubkey(&prv0.PublicKey)
 		hs0     = &protoHandshake{Version: 3, Pubkey: pub0, Caps: []Cap{{"a", 0}, {"b", 2}}}
 
 		prv1, _ = crypto.GenerateKey()
-		pub1    = crypto.FromECDSAPub(&prv1.PublicKey)[1:]
+		pub1    = crypto.MarshalPubkey(&prv1.PublicKey)
 		hs1     = &protoHandshake{Version: 3, Pubkey: pub1, Caps: []Cap{{"c", 1}, {"d", 3}}}
 
 		wg sync.WaitGroup

@@ -88,7 +88,7 @@ func main() {
 	}
 
 	if *writeAddr {
-		fmt.Printf("%x\n", crypto.FromECDSAPub(&nodeKey.PublicKey)[1:])
+		fmt.Printf("%x\n", crypto.MarshalPubkey(&nodeKey.PublicKey))
 		os.Exit(0)
 	}
 

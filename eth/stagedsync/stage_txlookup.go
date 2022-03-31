@@ -63,15 +63,24 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
-	if startBlock < pruneTo {
-		startBlock = pruneTo
+	if cfg.prune.TxIndex.Enabled() {
+		pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
+		if startBlock < pruneTo {
+			startBlock = pruneTo
+			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+				return err
+			}
+		}
+	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+		if cfg.snapshots.BlocksAvailable() > startBlock {
+			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
+			startBlock = cfg.snapshots.BlocksAvailable()
+			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+				return err
+			}
+		}
 	}
 
-	// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
-	if cfg.snapshots != nil && cfg.snapshots.BlocksAvailable() > startBlock {
-		startBlock = cfg.snapshots.BlocksAvailable()
-	}
 	if startBlock > 0 {
 		startBlock++
 	}
@@ -193,9 +202,6 @@ func unwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 }
 
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
-	if !cfg.prune.TxIndex.Enabled() {
-		return nil
-	}
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -205,17 +211,29 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 		defer tx.Rollback()
 	}
+	blockFrom := s.PruneProgress
 
-	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 	// Forward stage doesn't write anything before PruneTo point
-	// TODO: maybe need do binary search of values in db in this case
-	if s.PruneProgress != 0 {
-		if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, s, to, ctx, cfg); err != nil {
+	if cfg.prune.TxIndex.Enabled() {
+		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+		if blockFrom < to {
+			if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, blockFrom, to, ctx, cfg); err != nil {
+				return err
+			}
+		}
+		if err = s.DoneAt(tx, to); err != nil {
 			return err
 		}
-	}
-	if err = s.Done(tx); err != nil {
-		return err
+	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+		to := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
+		if blockFrom < to {
+			if err = pruneTxLookup(tx, logPrefix, cfg.tmpdir, blockFrom, to, ctx, cfg); err != nil {
+				return err
+			}
+		}
+		if err = s.DoneAt(tx, to); err != nil {
+			return err
+		}
 	}
 
 	if !useExternalTx {
@@ -226,7 +244,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	return nil
 }
 
-func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo uint64, ctx context.Context, cfg TxLookupCfg) error {
+func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, pruneFrom, pruneTo uint64, ctx context.Context, cfg TxLookupCfg) error {
 	reader := bytes.NewReader(nil)
 	return etl.Transform(logPrefix, tx, kv.BlockBody, kv.TxLookup, tmpDir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		body := new(types.BodyForStorage)
@@ -254,7 +272,7 @@ func pruneTxLookup(tx kv.RwTx, logPrefix, tmpDir string, s *PruneState, pruneTo 
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: dbutils.EncodeBlockNumber(s.ForwardProgress),
+		ExtractStartKey: dbutils.EncodeBlockNumber(pruneFrom),
 		ExtractEndKey:   dbutils.EncodeBlockNumber(pruneTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}

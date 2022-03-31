@@ -76,7 +76,7 @@ type EthAPI interface {
 
 	// Sending related (see ./eth_call.go)
 	Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error)
-	EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
+	EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error)
 	SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error)
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)

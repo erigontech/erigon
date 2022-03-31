@@ -567,7 +567,7 @@ func (h *handshakeState) makeAuthMsg(prv *ecdsa.PrivateKey) (*authMsgV4, error) 
 
 	msg := new(authMsgV4)
 	copy(msg.Signature[:], signature)
-	copy(msg.InitiatorPubkey[:], crypto.FromECDSAPub(&prv.PublicKey)[1:])
+	copy(msg.InitiatorPubkey[:], crypto.MarshalPubkey(&prv.PublicKey))
 	copy(msg.Nonce[:], h.initNonce)
 	msg.Version = 4
 	return msg, nil
@@ -640,20 +640,18 @@ func (h *handshakeState) sealEIP8(msg interface{}) ([]byte, error) {
 	return append(prefix, enc...), err
 }
 
-// importPublicKey unmarshals 512 bit public keys.
+// importPublicKey unmarshals 64 or 65 bytes long public keys.
 func importPublicKey(pubKey []byte) (*ecies.PublicKey, error) {
-	var pubKey65 []byte
+	var pub *ecdsa.PublicKey
+	var err error
 	switch len(pubKey) {
 	case 64:
-		// add 'uncompressed key' flag
-		pubKey65 = append([]byte{0x04}, pubKey...)
+		pub, err = crypto.UnmarshalPubkey(pubKey)
 	case 65:
-		pubKey65 = pubKey
+		pub, err = crypto.UnmarshalPubkeyStd(pubKey)
 	default:
 		return nil, fmt.Errorf("invalid public key length %v (expect 64/65)", len(pubKey))
 	}
-	// TODO: fewer pointless conversions
-	pub, err := crypto.UnmarshalPubkey(pubKey65)
 	if err != nil {
 		return nil, err
 	}

@@ -82,7 +82,7 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return sentry.Sentry(datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
+		return sentry.Sentry(cmd.Context(), datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
 	},
 }
 
