@@ -978,8 +978,8 @@ func (br *BlockRetire) Result() *BlockRetireResult {
 	br.result = nil
 	return r
 }
-func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64, can bool) {
-	blockFrom = br.snapshots.BlocksAvailable() + 1
+func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
+	blockFrom = snapshots.BlocksAvailable() + 1
 	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
@@ -1118,7 +1118,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := compress.NewCompressor(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers)
+	f, err := compress.NewCompressor(ctx, "Transactions", segmentFile, tmpDir, compress.MinPatternScore, workers, lvl)
 	if err != nil {
 		return 0, fmt.Errorf("NewCompressor: %w, %s", err, segmentFile)
 	}
@@ -1274,7 +1274,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor(ctx, "Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
+	f, err := compress.NewCompressor(ctx, "Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers, lvl)
 	if err != nil {
 		return err
 	}
@@ -1335,7 +1335,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor(ctx, "Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers)
+	f, err := compress.NewCompressor(ctx, "Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers, lvl)
 	if err != nil {
 		return err
 	}
@@ -1951,7 +1951,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 }
 
 func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
-	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers)
+	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
 	if err != nil {
 		return err
 	}
@@ -2054,7 +2054,7 @@ func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
 		return err
 	}
 	defer d.Close()
-	out, err := compress.NewCompressor(ctx, "", dstF, tmpDir, compress.MinPatternScore, workers)
+	out, err := compress.NewCompressor(ctx, "", dstF, tmpDir, compress.MinPatternScore, workers, log.LvlDebug)
 	if err != nil {
 		return err
 	}
