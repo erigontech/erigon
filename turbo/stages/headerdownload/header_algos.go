@@ -1289,24 +1289,24 @@ func (hd *HeaderDownload) ClearPendingPayloadStatus() {
 	hd.pendingPayloadStatus = common.Hash{}
 }
 
-func (hd *HeaderDownload) GetPendingHeader() (common.Hash, uint64) {
+func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.pendingHeaderHash, hd.pendingHeaderHeight
+	return hd.unsettledForkChoice, hd.unsettledHeadHeight
 }
 
-func (hd *HeaderDownload) SetPendingHeader(blockHash common.Hash, blockHeight uint64) {
+func (hd *HeaderDownload) SetUnsettledForkChoice(forkChoice *engineapi.ForkChoiceMessage, headHeight uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingHeaderHash = blockHash
-	hd.pendingHeaderHeight = blockHeight
+	hd.unsettledForkChoice = forkChoice
+	hd.unsettledHeadHeight = headHeight
 }
 
-func (hd *HeaderDownload) ClearPendingHeader() {
+func (hd *HeaderDownload) ClearUnsettledForkChoice() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingHeaderHash = common.Hash{}
-	hd.pendingHeaderHeight = 0
+	hd.unsettledForkChoice = nil
+	hd.unsettledHeadHeight = 0
 }
 
 func (hd *HeaderDownload) RequestId() int {

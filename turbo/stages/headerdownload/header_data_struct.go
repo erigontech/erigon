@@ -293,8 +293,8 @@ type HeaderDownload struct {
 	BeaconRequestList    *engineapi.RequestList        // Requests from ethbackend to staged sync
 	PayloadStatusCh      chan privateapi.PayloadStatus // Responses (validation/execution status)
 	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
-	pendingHeaderHeight  uint64                        // Header to process after unwind (height)
-	pendingHeaderHash    common.Hash                   // Header to process after unwind (hash)
+	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
+	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header

@@ -120,34 +120,9 @@ func SpawnStageHeaders(
 		blockNumber = s.BlockNumber
 	}
 
-	pendingHeaderHash, pendingHeaderHeight := cfg.hd.GetPendingHeader()
-	if pendingHeaderHash != (common.Hash{}) { // some work left to do after unwind
-		log.Info(fmt.Sprintf("[%s] Pending header after unwind", s.LogPrefix()), "height", pendingHeaderHeight, "hash", pendingHeaderHash)
-
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
-
-		if err := fixCanonicalChain(s.LogPrefix(), logEvery, pendingHeaderHeight, pendingHeaderHash, tx, cfg.blockReader); err != nil {
-			return err
-		}
-
-		if err := rawdb.WriteHeadHeaderHash(tx, pendingHeaderHash); err != nil {
-			return err
-		}
-
-		if err := s.Update(tx, pendingHeaderHeight); err != nil {
-			return err
-		}
-
-		if !useExternalTx {
-			if err := tx.Commit(); err != nil {
-				return err
-			}
-		}
-
-		cfg.hd.ClearPendingHeader()
-
-		return nil
+	unsettledForkChoice, headHeight := cfg.hd.GetUnsettledForkChoice()
+	if unsettledForkChoice != nil { // some work left to do after unwind
+		return handleUnsettledForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
@@ -160,6 +135,45 @@ func SpawnStageHeaders(
 	} else {
 		return HeadersPOW(s, u, ctx, tx, cfg, initialCycle, test, useExternalTx)
 	}
+}
+
+func handleUnsettledForkChoice(
+	forkChoice *engineapi.ForkChoiceMessage,
+	headHeight uint64,
+	s *StageState,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	useExternalTx bool,
+) error {
+	log.Info(fmt.Sprintf("[%s] Unsettled forkchoice after unwind", s.LogPrefix()), "height", headHeight, "forkchoice", forkChoice)
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if err := fixCanonicalChain(s.LogPrefix(), logEvery, headHeight, forkChoice.HeadBlockHash, tx, cfg.blockReader); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
+		return err
+	}
+
+	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
+	rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+	rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+
+	if err := s.Update(tx, headHeight); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	cfg.hd.ClearUnsettledForkChoice()
+	return nil
 }
 
 // HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated)
@@ -295,7 +309,7 @@ func handleForkChoice(
 	u.UnwindTo(forkingPoint, common.Hash{})
 	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
-	cfg.hd.SetPendingHeader(headerHash, headerNumber)
+	cfg.hd.SetUnsettledForkChoice(forkChoiceMessage, headerNumber)
 
 	return nil
 }
