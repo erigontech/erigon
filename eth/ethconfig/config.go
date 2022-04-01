@@ -131,7 +131,7 @@ type Snapshot struct {
 func (s Snapshot) String() string {
 	var out []string
 	if s.Enabled {
-		out = append(out, "--"+FlagSnapshot+"=true")
+		out = append(out, "--syncmode=snap")
 	}
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
@@ -141,7 +141,7 @@ func (s Snapshot) String() string {
 
 var (
 	FlagSnapshot           = "snapshot"
-	FlagSnapshotKeepBlocks = "snapshot.keepblocks"
+	FlagSnapshotKeepBlocks = "snap.keepblocks"
 )
 
 func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {

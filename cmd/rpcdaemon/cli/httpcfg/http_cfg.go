@@ -34,6 +34,7 @@ type HttpCfg struct {
 	TevmEnabled             bool
 	StateCache              kvcache.CoherentConfig
 	Snapshot                ethconfig.Snapshot
+	SyncMode                string
 	GRPCServerEnabled       bool
 	GRPCListenAddress       string
 	GRPCPort                int
