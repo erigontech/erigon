@@ -56,7 +56,7 @@ services:
       - "8551:8551"
     restart: unless-stopped
 
-  downloader: # Service to download/seed historical data (need only if you use --snapshot)
+  downloader: # Service to download/seed historical data (need only if you use --syncmode=snap)
     image: thorax/erigon:${TAG:-latest}
     command: downloader ${DOWNLOADER_FLAGS-} --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)

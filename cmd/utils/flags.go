@@ -150,6 +150,11 @@ var (
 		Name:  "ethash.dagslockmmap",
 		Usage: "Lock memory maps for recent ethash mining DAGs",
 	}
+	SyncModeFlag = cli.StringFlag{
+		Name:  "syncmode",
+		Usage: `Blockchain sync mode ("snap", "fast")`,
+		Value: string(ethconfig.Defaults.SyncMode),
+	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
@@ -621,10 +626,6 @@ var (
 		Value: "",
 	}
 
-	SnapshotSyncFlag = cli.BoolFlag{
-		Name:  "snapshot",
-		Usage: "Enabling experimental snapshot sync",
-	}
 	SnapshotKeepBlocksFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapshotKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
@@ -1341,7 +1342,17 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	cfg.Snapshot.Enabled = ctx.GlobalBool(SnapshotSyncFlag.Name)
+	if ctx.GlobalIsSet(SyncModeFlag.Name) {
+		syncMode := ctx.GlobalString(SyncModeFlag.Name)
+		if syncMode == string(ethconfig.FastSync) {
+			cfg.SyncMode = ethconfig.FastSync
+		} else if syncMode == ethconfig.SnapSync {
+			cfg.SyncMode = ethconfig.SnapSync
+			cfg.Snapshot.Enabled = true
+		} else {
+			panic(fmt.Errorf("invalid sync mode: %s", cfg.SyncMode))
+		}
+	}
 	if cfg.Snapshot.Enabled {
 		snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
 		if err != nil {

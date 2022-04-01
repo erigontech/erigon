@@ -2,7 +2,9 @@ package commands
 
 import (
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/spf13/cobra"
 )
@@ -14,7 +16,7 @@ var (
 	block           uint64
 	changeSetBucket string
 	indexBucket     string
-	snapshotBlocks  bool
+	syncmode        string
 	chain           string
 )
 
@@ -50,7 +52,7 @@ func withIndexBucket(cmd *cobra.Command) {
 }
 
 func withSnapshotBlocks(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&snapshotBlocks, "snapshot", false, "")
+	cmd.Flags().StringVar(&syncmode, "syncmode", string(ethconfig.Defaults.SyncMode), utils.SyncModeFlag.Usage)
 }
 
 func withChain(cmd *cobra.Command) {

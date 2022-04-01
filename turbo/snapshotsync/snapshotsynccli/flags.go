@@ -17,7 +17,11 @@ func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("node was started with --%s=%v, can't change it", ethconfig.FlagSnapshot, v)
+		if v {
+			return fmt.Errorf("node was started with --syncmode=snap, can't change it")
+		} else {
+			return fmt.Errorf("node was started with --syncmode=fast, can't change it")
+		}
 	}
 	return nil
 }

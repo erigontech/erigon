@@ -72,6 +72,7 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
+	SyncMode: FastSync,
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
@@ -130,7 +131,7 @@ type Snapshot struct {
 func (s Snapshot) String() string {
 	var out []string
 	if s.Enabled {
-		out = append(out, "--"+FlagSnapshot+"=true")
+		out = append(out, "--syncmode=snap")
 	}
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
@@ -140,7 +141,7 @@ func (s Snapshot) String() string {
 
 var (
 	FlagSnapshot           = "snapshot"
-	FlagSnapshotKeepBlocks = "snapshot.keepblocks"
+	FlagSnapshotKeepBlocks = "snap.keepblocks"
 )
 
 func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
@@ -149,6 +150,8 @@ func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
+	SyncMode SyncMode
+
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
 	Genesis *core.Genesis `toml:",omitempty"`
@@ -282,3 +285,10 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		return serenity.New(eng) // the Merge
 	}
 }
+
+type SyncMode string
+
+const (
+	FastSync SyncMode = "fast"
+	SnapSync          = "snap"
+)
