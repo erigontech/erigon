@@ -1346,7 +1346,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		syncMode := ctx.GlobalString(SyncModeFlag.Name)
 		if syncMode == string(ethconfig.FastSync) {
 			cfg.SyncMode = ethconfig.FastSync
-		} else if syncMode == ethconfig.SnapSync {
+		} else if syncMode == string(ethconfig.SnapSync) {
 			cfg.SyncMode = ethconfig.SnapSync
 			cfg.Snapshot.Enabled = true
 		} else {

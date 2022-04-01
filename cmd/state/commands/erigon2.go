@@ -206,7 +206,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 
 	engine := initConsensusEngine(chainConfig, logger)
 	var blockReader interfaces.FullBlockReader
-	if syncmode == ethconfig.SnapSync {
+	if syncmode == string(ethconfig.SnapSync) {
 		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
