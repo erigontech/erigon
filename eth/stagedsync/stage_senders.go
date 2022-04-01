@@ -412,7 +412,7 @@ func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context
 		}
 	}
 
-	blockFrom, blockTo, ok := cfg.blockRetire.CanRetire(s.ForwardProgress)
+	blockFrom, blockTo, ok := snapshotsync.CanRetire(s.ForwardProgress, cfg.blockRetire.Snapshots())
 	if !ok {
 		return nil
 	}

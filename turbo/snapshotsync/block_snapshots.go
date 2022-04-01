@@ -978,8 +978,8 @@ func (br *BlockRetire) Result() *BlockRetireResult {
 	br.result = nil
 	return r
 }
-func (br *BlockRetire) CanRetire(curBlockNum uint64) (blockFrom, blockTo uint64, can bool) {
-	blockFrom = br.snapshots.BlocksAvailable() + 1
+func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
+	blockFrom = snapshots.BlocksAvailable() + 1
 	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
 }
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
