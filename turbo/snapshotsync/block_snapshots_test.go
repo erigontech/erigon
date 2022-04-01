@@ -20,7 +20,7 @@ import (
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string) {
-	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1)
+	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, SegmentFileName(from, to, name)), dir, 100, 1, log.LvlDebug)
 	require.NoError(t, err)
 	defer c.Close()
 	err = c.AddWord([]byte{1})

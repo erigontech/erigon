@@ -194,7 +194,7 @@ func doCompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
-	c, err := compress.NewCompressor(ctx, "", f, "", compress.MinPatternScore, runtime.NumCPU()/2)
+	c, err := compress.NewCompressor(ctx, "", f, "", compress.MinPatternScore, runtime.NumCPU()/2, log.LvlInfo)
 	if err != nil {
 		return err
 	}

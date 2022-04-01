@@ -1422,7 +1422,7 @@ func genstate() error {
 }
 
 func compress1(fileName, segmentFileName string) error {
-	compressor, err := compress.NewCompressor(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1))
+	compressor, err := compress.NewCompressor(context.Background(), "", segmentFileName, "", compress.MinPatternScore, runtime.GOMAXPROCS(-1), log.LvlDebug)
 	if err != nil {
 		return err
 	}
