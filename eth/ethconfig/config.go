@@ -290,5 +290,5 @@ type SyncMode string
 
 const (
 	FastSync SyncMode = "fast"
-	SnapSync          = "snap"
+	SnapSync SyncMode = "snap"
 )
