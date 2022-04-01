@@ -37,6 +37,7 @@ import (
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/patricia"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const ASSERT = false
@@ -69,9 +70,10 @@ type Compressor struct {
 	logPrefix string
 	Ratio     CompressionRatio
 	trace     bool
+	lvl       log.Lvl
 }
 
-func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int) (*Compressor, error) {
+func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl) (*Compressor, error) {
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
 	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
@@ -108,6 +110,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		ctx:              ctx,
 		superstrings:     superstrings,
 		suffixCollectors: suffixCollectors,
+		lvl:              lvl,
 		wg:               wg,
 	}, nil
 }
@@ -167,7 +170,7 @@ func (c *Compressor) Compress() error {
 	}
 
 	defer os.Remove(c.tmpOutFilePath)
-	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db); err != nil {
+	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, c.uncompressedFile, c.workers, db, c.lvl); err != nil {
 		return err
 	}
 

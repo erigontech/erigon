@@ -709,7 +709,7 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 	var blockSuffix [8]byte
 	binary.BigEndian.PutUint64(blockSuffix[:], blockTo)
 	bitmaps := map[string]*roaring64.Bitmap{}
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, chsetDatPath, c.dir, compress.MinPatternScore, 1)
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, chsetDatPath, c.dir, compress.MinPatternScore, 1, log.LvlDebug)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets NewCompressor: %w", err)
 	}
@@ -771,7 +771,7 @@ func (c *Changes) produceChangeSets(blockFrom, blockTo uint64, historyType, bitm
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets changeset buildIndex: %w", err)
 	}
 	// Create bitmap files
-	bitmapC, err := compress.NewCompressor(context.Background(), AggregatorPrefix, bitmapDatPath, c.dir, compress.MinPatternScore, 1)
+	bitmapC, err := compress.NewCompressor(context.Background(), AggregatorPrefix, bitmapDatPath, c.dir, compress.MinPatternScore, 1, log.LvlDebug)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("produceChangeSets bitmap NewCompressor: %w", err)
 	}
@@ -875,7 +875,7 @@ func (c *Changes) aggregateToBtree(bt *btree.BTree, prefixLen int, commitments b
 const AggregatorPrefix = "aggregator"
 
 func btreeToFile(bt *btree.BTree, datPath, tmpdir string, trace bool, workers int) (int, error) {
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, workers)
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, tmpdir, compress.MinPatternScore, workers, log.LvlDebug)
 	if err != nil {
 		return 0, err
 	}
@@ -1561,7 +1561,7 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 	datTmpPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat.tmp", fType.String(), item.startBlock, item.endBlock))
 	datPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), item.startBlock, item.endBlock))
 	idxPath := filepath.Join(a.diffDir, fmt.Sprintf("%s.%d-%d.idx", fType.String(), item.startBlock, item.endBlock))
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datTmpPath, a.diffDir, compress.MinPatternScore, 1)
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datTmpPath, a.diffDir, compress.MinPatternScore, 1, log.LvlDebug)
 	if err != nil {
 		return fmt.Errorf("reduceHistoryFiles create compressor %s: %w", datPath, err)
 	}
@@ -3046,7 +3046,7 @@ func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 	valCompressed bool,
 ) (*compress.Decompressor, int, error) {
 	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), startBlock, endBlock))
-	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1)
+	comp, err := compress.NewCompressor(context.Background(), AggregatorPrefix, datPath, dir, compress.MinPatternScore, 1, log.LvlDebug)
 	if err != nil {
 		return nil, 0, fmt.Errorf("compressor %s: %w", datPath, err)
 	}

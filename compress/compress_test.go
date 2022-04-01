@@ -24,12 +24,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 100, 1)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 100, 1, log.LvlDebug)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +80,7 @@ func prepareDict(t *testing.T) *Decompressor {
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed")
 	t.Name()
-	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2)
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug)
 	if err != nil {
 		t.Fatal(err)
 	}

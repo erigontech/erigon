@@ -238,7 +238,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder) error {
+func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -400,7 +400,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		case <-logEvery.C:
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
-			log.Debug(fmt.Sprintf("[%s] Replacement preprocessing", logPrefix),
+			log.Log(lvl, fmt.Sprintf("[%s] Replacement preprocessing", logPrefix),
 				"processed", fmt.Sprintf("%.2f%%", 100*float64(outCount)/float64(datFile.count)),
 				//"input", common.ByteCount(inputSize.Load()), "output", common.ByteCount(outputSize.Load()),
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
