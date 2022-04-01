@@ -1059,8 +1059,8 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
 func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
-		if enableSnapshot {
-			snapshotCfg := ethconfig.NewSnapshotCfg(enableSnapshot, true)
+		if core.SyncMode(syncmode) == core.FastSync {
+			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
 			dir.MustExist(filepath.Join(datadir, "snapshots"))
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {

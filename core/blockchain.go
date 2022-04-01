@@ -45,6 +45,8 @@ var (
 	blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
 )
 
+type SyncMode string
+
 const (
 	TriesInMemory = 128
 )
