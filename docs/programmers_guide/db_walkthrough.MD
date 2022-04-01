@@ -68,7 +68,7 @@ This table stores information about block headers. For each block there are thre
     - _key_ : 8-byte big-endian block number + 32-byte block hash + `0x74` suffix (ASCII code for `t` character)
     - _value_ : variable-length RLP-encoded total difficulty value: the cumulative difficulty value from first block to this one
 * __CANONICAL HEADER__: contains the block hash
-    - key: 8-byte big-endian block number + `0x6E` suffix (ASCII code for `n` character)
+    - key: 8-byte big-endian block number
     - value: 32-byte block hash
 
 as shown in the following picture for the block 0 (from top to bottom the three types of records, key on the left and value on the right):
