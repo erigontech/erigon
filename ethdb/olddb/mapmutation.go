@@ -15,15 +15,14 @@ import (
 )
 
 type mapmutation struct {
-	puts       map[string]map[string][]byte
-	db         kv.RwTx
-	quit       <-chan struct{}
-	clean      func()
-	searchItem MutationItem
-	mu         sync.RWMutex
-	size       int
-	count      uint64
-	tmpdir     string
+	puts   map[string]map[string][]byte
+	db     kv.RwTx
+	quit   <-chan struct{}
+	clean  func()
+	mu     sync.RWMutex
+	size   int
+	count  uint64
+	tmpdir string
 }
 
 // NewBatch - starts in-mem batch
@@ -236,6 +235,7 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer collector.Close()
 		for key, value := range bucket {
 			collector.Collect(common.CopyBytes([]byte(key)), common.CopyBytes(value))
 			count++
