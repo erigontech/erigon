@@ -458,14 +458,12 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("re-read Bodies progress: %w", err)
 			}
+			if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
+				return err
+			}
 			// remove all canonical markers from this point
 			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
 				return tx.Delete(kv.HeaderCanonical, k, nil)
-			}); err != nil {
-				return err
-			}
-			if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-				return tx.Delete(kv.Headers, k, nil)
 			}); err != nil {
 				return err
 			}

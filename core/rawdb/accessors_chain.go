@@ -1201,6 +1201,54 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	return nil
 }
 
+func DeleteNewBlocks(db kv.RwTx, blockFrom uint64) error {
+	c, err := db.Cursor(kv.Headers)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, _, err := c.Seek(dbutils.EncodeBlockNumber(blockFrom)); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		n := binary.BigEndian.Uint64(k)
+
+		canonicalHash, err := ReadCanonicalHash(db, n)
+		if err != nil {
+			return err
+		}
+		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
+
+		b, err := ReadBodyForStorageByKey(db, k)
+		if err != nil {
+			return err
+		}
+		txIDBytes := make([]byte, 8)
+		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+			binary.BigEndian.PutUint64(txIDBytes, txID)
+			bucket := kv.EthTx
+			if !isCanonical {
+				bucket = kv.NonCanonicalTxs
+			}
+			if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+				return err
+			}
+		}
+		if err := db.Delete(kv.Headers, k, nil); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.BlockBody, k, nil); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.Senders, k, nil); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // DeleteBlock removes all block data associated with a hash.
 func DeleteBlock(db kv.RwTx, hash common.Hash, number uint64) error {
 	if err := DeleteReceipts(db, number); err != nil {
