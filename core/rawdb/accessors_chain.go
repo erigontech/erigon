@@ -1083,7 +1083,7 @@ func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64)
 	if header == nil {
 		return nil, nil, fmt.Errorf("header not found for block %d, %x", number, hash)
 	}
-	body := ReadCanonicalBodyWithTransactions(tx, hash, number)
+	body := NonCanonicalBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil, nil, fmt.Errorf("body not found for block %d, %x", number, hash)
 	}
