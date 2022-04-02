@@ -969,7 +969,22 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		expect := cfg.snapshotHashesCfg.ExpectBlocks
 		if cfg.snapshots.SegmentsAvailable() < expect {
-			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them if DB has enough blocks", cfg.snapshots.SegmentsAvailable(), expect))
+			c, err := tx.Cursor(kv.Headers)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			firstK, _, err := c.First()
+			if err != nil {
+				return err
+			}
+			c.Close()
+			hasInDB := binary.BigEndian.Uint64(firstK)
+			if cfg.snapshots.SegmentsAvailable() < hasInDB {
+				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsAvailable(), hasInDB, expect)
+			} else {
+				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsAvailable(), expect, hasInDB))
+			}
 		}
 		if err := cfg.snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenIndices: %w", err)
