@@ -11,17 +11,15 @@ type bufferEntry struct {
 	value []byte
 }
 
-const defaultSize = 8388608 // This is the maximum size before doubling down
-
 type MemoryBuffer map[string][]bufferEntry
 
 func NewMemoryBuffer() MemoryBuffer {
 	return MemoryBuffer{
-		kv.AccountChangeSet: make([]bufferEntry, 0, defaultSize),
-		kv.StorageChangeSet: make([]bufferEntry, 0, defaultSize),
-		kv.Receipts:         make([]bufferEntry, 0, defaultSize),
-		kv.CallTraceSet:     make([]bufferEntry, 0, defaultSize),
-		kv.Log:              make([]bufferEntry, 0, defaultSize),
+		kv.AccountChangeSet: make([]bufferEntry, 0),
+		kv.StorageChangeSet: make([]bufferEntry, 0),
+		kv.Receipts:         make([]bufferEntry, 0),
+		kv.CallTraceSet:     make([]bufferEntry, 0),
+		kv.Log:              make([]bufferEntry, 0),
 	}
 }
 
