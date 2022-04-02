@@ -2005,7 +2005,7 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
-		if strings.HasSuffix(f, Transactions.String()) {
+		if strings.HasSuffix(withoutExt, Transactions.String()) {
 			_ = os.Remove(withoutExt + "-to-block.idx")
 			_ = os.Remove(withoutExt + "-id.idx")
 		}
