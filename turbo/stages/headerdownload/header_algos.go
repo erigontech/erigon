@@ -801,6 +801,9 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 					return false, err
 				}
 				if td != nil {
+					if hd.seenAnnounces.Pop(link.hash) {
+						hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+					}
 					// Check if transition to proof-of-stake happened and stop forward syncing
 					if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 						hd.highestInDb = link.blockHeight
