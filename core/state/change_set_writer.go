@@ -16,7 +16,6 @@ import (
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
 	db             kv.RwTx
-	memoryBuffer   kv.StatelessWriteTx
 	accountChanges map[common.Address][]byte
 	storageChanged map[common.Address]bool
 	storageChanges map[string][]byte
@@ -30,10 +29,9 @@ func NewChangeSetWriter() *ChangeSetWriter {
 		storageChanges: make(map[string][]byte),
 	}
 }
-func NewChangeSetWriterPlain(db kv.RwTx, memoryBuffer kv.StatelessWriteTx, blockNumber uint64) *ChangeSetWriter {
+func NewChangeSetWriterPlain(db kv.RwTx, blockNumber uint64) *ChangeSetWriter {
 	return &ChangeSetWriter{
 		db:             db,
-		memoryBuffer:   memoryBuffer,
 		accountChanges: make(map[common.Address][]byte),
 		storageChanged: make(map[common.Address]bool),
 		storageChanges: make(map[string][]byte),
@@ -124,7 +122,7 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 		return err
 	}
 	if err = changeset.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
-		if err = w.memoryBuffer.AppendDup(kv.AccountChangeSet, k, v); err != nil {
+		if err = w.db.AppendDup(kv.AccountChangeSet, k, v); err != nil {
 			return err
 		}
 		return nil
@@ -140,7 +138,7 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 		return nil
 	}
 	if err = changeset.Mapper[kv.StorageChangeSet].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
-		if err = w.memoryBuffer.AppendDup(kv.StorageChangeSet, k, v); err != nil {
+		if err = w.db.AppendDup(kv.StorageChangeSet, k, v); err != nil {
 			return err
 		}
 		return nil

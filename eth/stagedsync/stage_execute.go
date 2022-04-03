@@ -45,18 +45,17 @@ type HasChangeSetWriter interface {
 type ChangeSetHook func(blockNum uint64, wr *state.ChangeSetWriter)
 
 type ExecuteBlockCfg struct {
-	db             kv.RwDB
-	batchSize      datasize.ByteSize
-	prune          prune.Mode
-	changeSetHook  ChangeSetHook
-	chainConfig    *params.ChainConfig
-	engine         consensus.Engine
-	vmConfig       *vm.Config
-	tmpdir         string
-	stateStream    bool
-	gasRateHistory float64
-	accumulator    *shards.Accumulator
-	blockReader    interfaces.FullBlockReader
+	db            kv.RwDB
+	batchSize     datasize.ByteSize
+	prune         prune.Mode
+	changeSetHook ChangeSetHook
+	chainConfig   *params.ChainConfig
+	engine        consensus.Engine
+	vmConfig      *vm.Config
+	tmpdir        string
+	stateStream   bool
+	accumulator   *shards.Accumulator
+	blockReader   interfaces.FullBlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -70,22 +69,20 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
-	gasRateHistory float64,
 	blockReader interfaces.FullBlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
-		db:             kv,
-		prune:          prune,
-		batchSize:      batchSize,
-		changeSetHook:  changeSetHook,
-		chainConfig:    chainConfig,
-		engine:         engine,
-		vmConfig:       vmConfig,
-		tmpdir:         tmpdir,
-		accumulator:    accumulator,
-		stateStream:    stateStream,
-		blockReader:    blockReader,
-		gasRateHistory: gasRateHistory,
+		db:            kv,
+		prune:         prune,
+		batchSize:     batchSize,
+		changeSetHook: changeSetHook,
+		chainConfig:   chainConfig,
+		engine:        engine,
+		vmConfig:      vmConfig,
+		tmpdir:        tmpdir,
+		accumulator:   accumulator,
+		stateStream:   stateStream,
+		blockReader:   blockReader,
 	}
 }
 
@@ -93,7 +90,6 @@ func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
 	batch ethdb.Database,
-	memoryBuffer core.MemoryBuffer,
 	cfg ExecuteBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
@@ -103,7 +99,7 @@ func executeBlock(
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, memoryBuffer, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
 	if err != nil {
 		return err
 	}
@@ -131,7 +127,7 @@ func executeBlock(
 	}
 
 	if writeReceipts {
-		if err = rawdb.AppendReceipts(memoryBuffer, blockNum, receipts); err != nil {
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
 
@@ -149,14 +145,13 @@ func executeBlock(
 		}
 	}
 	if writeCallTraces {
-		return callTracer.WriteToDb(memoryBuffer, block, *cfg.vmConfig)
+		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
 	return nil
 }
 
 func newStateReaderWriter(
 	batch ethdb.Database,
-	memoryBuffer core.MemoryBuffer,
 	tx kv.RwTx,
 	block *types.Block,
 	writeChangesets bool,
@@ -180,7 +175,7 @@ func newStateReaderWriter(
 		accumulator = nil
 	}
 	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, memoryBuffer, tx, block.NumberU64()).SetAccumulator(accumulator)
+		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
 	} else {
 		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
 	}
@@ -228,21 +223,17 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 	defer batch.Rollback()
 	// changes are stored through memory buffer
-	memoryBuffer := core.NewMemoryBuffer()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
-	var gas uint64               // used for logs
-	var currentStateGas uint64   // used for batch commits of state
-	var currentHistoryGas uint64 // used for batch commits of history
+	var gas uint64             // used for logs
+	var currentStateGas uint64 // used for batch commits of state
 	// Transform batch_size limit into Ggas
-	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 10
-	gasHistory := uint64(float64(gasState) * cfg.gasRateHistory)
+	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 3
 
-	log.Info("Committing Info", "StateGas", gasState, "HistoryGas", gasHistory)
 	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
 	if err != nil {
 		return err
@@ -284,7 +275,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, memoryBuffer, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
 			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
@@ -316,16 +307,7 @@ Loop:
 			defer batch.Rollback()
 		}
 
-		if currentHistoryGas >= gasHistory {
-			log.Info("Committed History", "gas reached", currentHistoryGas, "gasTarget", gasHistory)
-			currentHistoryGas = 0
-			if err = memoryBuffer.WriteToDb(tx); err != nil {
-				return err
-			}
-		}
-
 		gas = gas + block.GasUsed()
-		currentHistoryGas = currentHistoryGas + block.GasUsed()
 		currentStateGas = currentStateGas + block.GasUsed()
 		select {
 		default:
@@ -341,7 +323,7 @@ Loop:
 			if estimateRatio != 0 {
 				estimatedTime = common.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
 			}
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), float64(currentHistoryGas)/float64(gasHistory), estimatedTime, batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), estimatedTime, batch)
 			gas = 0
 			tx.CollectMetrics()
 			syncMetrics[stages.Execution].Set(blockNum)
@@ -355,10 +337,6 @@ Loop:
 		return fmt.Errorf("batch commit: %v", err)
 	}
 
-	if err = memoryBuffer.WriteToDb(tx); err != nil {
-		return err
-	}
-
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -369,7 +347,7 @@ Loop:
 	return stoppedErr
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, gasHistory float64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
@@ -384,7 +362,6 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"tx/s", speedTx,
 		"Mgas/s", speedMgas,
 		"gasState", gasState,
-		"gasHistory", gasHistory,
 	}
 	if estimatedTime > 0 {
 		logpairs = append(logpairs, "estimated duration", estimatedTime)

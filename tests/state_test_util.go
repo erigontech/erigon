@@ -164,7 +164,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	statedb := state.New(state.NewPlainStateReader(tx))
-	w := state.NewPlainStateWriter(tx, tx, nil, writeBlockNr)
+	w := state.NewPlainStateWriter(tx, nil, writeBlockNr)
 
 	var baseFee *big.Int
 	if config.IsLondon(0) {
@@ -277,10 +277,10 @@ func MakePreState(rules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, bl
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, tx, nil, blockNr+1)); err != nil {
+	if err := statedb.FinalizeTx(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
-	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(tx, tx, nil, blockNr+1)); err != nil {
+	if err := statedb.CommitBlock(rules, state.NewPlainStateWriter(tx, nil, blockNr+1)); err != nil {
 		return nil, err
 	}
 	return statedb, nil

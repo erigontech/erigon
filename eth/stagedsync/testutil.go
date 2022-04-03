@@ -60,7 +60,7 @@ func hashedWriterGen(tx kv.RwTx) stateWriterGen {
 
 func plainWriterGen(tx kv.RwTx) stateWriterGen {
 	return func(blockNum uint64) state.WriterWithChangeSets {
-		return state.NewPlainStateWriter(tx, tx, tx, blockNum)
+		return state.NewPlainStateWriter(tx, tx, blockNum)
 	}
 }
 func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWriterGen stateWriterGen, difficulty int) {
