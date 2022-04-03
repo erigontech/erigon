@@ -44,6 +44,7 @@ System Requirements
 
 For a full archive node we recommend >=3TB storage space on a single partition: 1.8TB state (as of March 2022),
 200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk).
+SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
 Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
