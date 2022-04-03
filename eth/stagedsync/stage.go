@@ -109,7 +109,7 @@ func (s *PruneState) DoneAt(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }
 
-func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
+func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context, limit int) error {
 	c, err := tx.RwCursor(table)
 
 	if err != nil {
@@ -117,9 +117,14 @@ func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logE
 	}
 	defer c.Close()
 
+	i := 0
 	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
+		}
+		i++
+		if i > limit {
+			break
 		}
 
 		blockNum := binary.BigEndian.Uint64(k)
