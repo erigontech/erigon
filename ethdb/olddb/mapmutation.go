@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -64,7 +64,7 @@ func (m *mapmutation) getMem(table string, key []byte) ([]byte, bool) {
 	}
 	var value []byte
 	var ok bool
-	if value, ok = m.puts[table][string(key)]; !ok {
+	if value, ok = m.puts[table][*(*string)(unsafe.Pointer(&key))]; !ok {
 		return nil, false
 	}
 	return value, ok
@@ -158,7 +158,7 @@ func (m *mapmutation) hasMem(table string, key []byte) bool {
 		return false
 	}
 
-	_, ok := m.puts[table][string(key)]
+	_, ok := m.puts[table][*(*string)(unsafe.Pointer(&key))]
 	return ok
 }
 
@@ -180,12 +180,12 @@ func (m *mapmutation) Put(table string, key []byte, value []byte) error {
 		m.puts[table] = make(map[string][]byte)
 	}
 	var ok bool
-	if _, ok = m.puts[table][string(key)]; !ok {
-		m.size += len(value) - len(m.puts[table][string(key)])
-		m.puts[table][string(key)] = value
+	if _, ok = m.puts[table][*(*string)(unsafe.Pointer(&key))]; !ok {
+		m.size += len(value) - len(m.puts[table][*(*string)(unsafe.Pointer(&key))])
+		m.puts[table][*(*string)(unsafe.Pointer(&key))] = value
 		return nil
 	}
-	m.puts[table][string(key)] = value
+	m.puts[table][*(*string)(unsafe.Pointer(&key))] = value
 	m.size += len(key) + len(value)
 	m.count++
 	return nil
@@ -237,7 +237,7 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 		for key, value := range bucket {
-			collector.Collect(common.CopyBytes([]byte(key)), common.CopyBytes(value))
+			collector.Collect([]byte(key), value)
 			count++
 			select {
 			default:
