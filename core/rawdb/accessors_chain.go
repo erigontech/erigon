@@ -979,7 +979,7 @@ func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
 }
 
 // AppendReceipts stores all the transaction receipts belonging to a block.
-func AppendReceipts(tx kv.RwTx, blockNumber uint64, receipts types.Receipts) error {
+func AppendReceipts(tx kv.StatelessWriteTx, blockNumber uint64, receipts types.Receipts) error {
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 
 	for txId, r := range receipts {

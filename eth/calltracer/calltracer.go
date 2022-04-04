@@ -67,7 +67,7 @@ func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func (ct *CallTracer) WriteToDb(tx kv.RwTx, block *types.Block, vmConfig vm.Config) error {
+func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {
 	ct.tos[block.Coinbase()] = false
 	for _, uncle := range block.Uncles() {
 		ct.tos[uncle.Coinbase] = false

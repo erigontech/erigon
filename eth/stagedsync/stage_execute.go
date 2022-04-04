@@ -219,16 +219,20 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	startTime := time.Now()
 
 	var batch ethdb.DbWithPendingMutations
-	batch = olddb.NewBatch(tx, quit)
+	// state is stored through ethdb batches
+	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 	defer batch.Rollback()
-
+	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
-	var gas uint64
+	var gas uint64             // used for logs
+	var currentStateGas uint64 // used for batch commits of state
+	// Transform batch_size limit into Ggas
+	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 3
 
 	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
 	if err != nil {
@@ -278,8 +282,9 @@ Loop:
 		}
 		stageProgress = blockNum
 
-		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if updateProgress {
+		if currentStateGas >= gasState {
+			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			currentStateGas = 0
 			if err = batch.Commit(); err != nil {
 				return err
 			}
@@ -297,13 +302,13 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewBatch(tx, quit)
+			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
 
 		gas = gas + block.GasUsed()
-
+		currentStateGas = currentStateGas + block.GasUsed()
 		select {
 		default:
 		case <-logEvery.C:
@@ -318,7 +323,7 @@ Loop:
 			if estimateRatio != 0 {
 				estimatedTime = common.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
 			}
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, estimatedTime, batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), estimatedTime, batch)
 			gas = 0
 			tx.CollectMetrics()
 			syncMetrics[stages.Execution].Set(blockNum)
@@ -342,7 +347,7 @@ Loop:
 	return stoppedErr
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
@@ -356,6 +361,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"blk/s", speed,
 		"tx/s", speedTx,
 		"Mgas/s", speedMgas,
+		"gasState", gasState,
 	}
 	if estimatedTime > 0 {
 		logpairs = append(logpairs, "estimated duration", estimatedTime)
