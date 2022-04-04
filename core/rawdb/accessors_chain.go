@@ -1083,7 +1083,7 @@ func NonCanonicalBlockWithSenders(tx kv.Getter, hash common.Hash, number uint64)
 	if header == nil {
 		return nil, nil, fmt.Errorf("header not found for block %d, %x", number, hash)
 	}
-	body := ReadCanonicalBodyWithTransactions(tx, hash, number)
+	body := NonCanonicalBodyWithTransactions(tx, hash, number)
 	if body == nil {
 		return nil, nil, fmt.Errorf("body not found for block %d, %x", number, hash)
 	}
@@ -1165,6 +1165,54 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		if n >= stopAtBlock {
 			break
 		}
+
+		canonicalHash, err := ReadCanonicalHash(db, n)
+		if err != nil {
+			return err
+		}
+		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
+
+		b, err := ReadBodyForStorageByKey(db, k)
+		if err != nil {
+			return err
+		}
+		txIDBytes := make([]byte, 8)
+		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+			binary.BigEndian.PutUint64(txIDBytes, txID)
+			bucket := kv.EthTx
+			if !isCanonical {
+				bucket = kv.NonCanonicalTxs
+			}
+			if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+				return err
+			}
+		}
+		if err := db.Delete(kv.Headers, k, nil); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.BlockBody, k, nil); err != nil {
+			return err
+		}
+		if err := db.Delete(kv.Senders, k, nil); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func DeleteNewBlocks(db kv.RwTx, blockFrom uint64) error {
+	c, err := db.Cursor(kv.Headers)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, _, err := c.Seek(dbutils.EncodeBlockNumber(blockFrom)); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		n := binary.BigEndian.Uint64(k)
 
 		canonicalHash, err := ReadCanonicalHash(db, n)
 		if err != nil {
