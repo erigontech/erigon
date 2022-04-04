@@ -375,13 +375,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 	//ctx.keccak1.Sum(slot.IdHash[:0])
 	_, _ = ctx.keccak1.(io.Reader).Read(slot.IDHash[:32])
-	if !ctx.withSender {
-		return p, nil
-	}
 	if validateHash != nil {
 		if err := validateHash(slot.IDHash[:32]); err != nil {
 			return p, err
 		}
+	}
+
+	if !ctx.withSender {
+		return p, nil
 	}
 
 	// Computing sigHash (hash used to recover sender from the signature)
