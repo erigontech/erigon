@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
+	"go.uber.org/atomic"
 )
 
 type SendersCfg struct {
@@ -93,6 +94,9 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
+	appendEvery := time.NewTicker(100 * time.Millisecond)
+	defer logEvery.Stop()
+
 	canonical := make([]common.Hash, to-s.BlockNumber)
 	currentHeaderIdx := uint64(0)
 
@@ -106,7 +110,20 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if cfg.blockRetire.Snapshots() != nil && startFrom < cfg.blockRetire.Snapshots().BlocksAvailable() {
 		startFrom = cfg.blockRetire.Snapshots().BlocksAvailable()
 	}
+	accumulatedSender := map[uint64][]byte{}
+	accumulatedSenderWaitlist := map[uint64][]byte{}
+	lastInserted := s.BlockNumber
 
+	sendersC, err := tx.RwCursor(kv.Senders)
+	if err != nil {
+		return err
+	}
+	defer sendersC.Close()
+
+	lastK, _, err := sendersC.Last()
+	if err != nil {
+		return err
+	}
 	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
 			return err
@@ -135,6 +152,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	wg := new(sync.WaitGroup)
 	wg.Add(cfg.numOfGoroutines)
 	ctx, cancelWorkers := context.WithCancel(context.Background())
+
 	defer cancelWorkers()
 	for i := 0; i < cfg.numOfGoroutines; i++ {
 		go func(threadNo int) {
@@ -144,11 +162,9 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 			recoverSenders(ctx, logPrefix, secp256k1.ContextForThread(threadNo), cfg.chainConfig, jobs, out, quitCh)
 		}(i)
 	}
-
-	collectorSenders := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer collectorSenders.Close()
-
+	isInserting := atomic.NewBool(false)
 	errCh := make(chan senderRecoveryError)
+	blockToBeInserted := atomic.NewInt32(0)
 	go func() {
 		defer debug.LogPanic()
 		defer close(errCh)
@@ -177,9 +193,15 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 				k := make([]byte, 4)
 				binary.BigEndian.PutUint32(k, uint32(j.index))
 				index := int(binary.BigEndian.Uint32(k))
-				if err := collectorSenders.Collect(dbutils.BlockBodyKey(s.BlockNumber+uint64(index)+1, canonical[index]), j.senders); err != nil {
-					errCh <- senderRecoveryError{err: j.err}
-					return
+				blockToBeInserted.Store(blockToBeInserted.Load() + 1)
+				if !isInserting.Load() {
+					for block_number, senders := range accumulatedSenderWaitlist {
+						accumulatedSender[block_number] = senders
+					}
+					accumulatedSenderWaitlist = map[uint64][]byte{}
+					accumulatedSender[s.BlockNumber+uint64(index)+1] = j.senders
+				} else {
+					accumulatedSenderWaitlist[s.BlockNumber+uint64(index)+1] = j.senders
 				}
 			}
 		}
@@ -206,7 +228,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 		return err
 	}
 	defer bodiesC.Close()
-
 Loop:
 	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, _, err = bodiesC.Next() {
 		if err != nil {
@@ -239,6 +260,21 @@ Loop:
 			}
 		case jobs <- &senderRecoveryJob{body: body, key: k, blockNumber: blockNumber, blockHash: blockHash, index: int(blockNumber - s.BlockNumber - 1)}:
 		}
+		select {
+		case <-appendEvery.C:
+			if err := insertSenders(sendersC, s, logPrefix, lastK, canonical, &accumulatedSender, &lastInserted, isInserting); err != nil {
+				return err
+			}
+		default:
+		}
+	}
+	// Wait for processing to finish
+	for lastInserted != prevStageProgress {
+		<-appendEvery.C
+		if err := insertSenders(sendersC, s, logPrefix, lastK, canonical, &accumulatedSender, &lastInserted, isInserting); err != nil {
+			return err
+		}
+
 	}
 
 	close(jobs)
@@ -258,14 +294,6 @@ Loop:
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
 	} else {
-		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
-			Quit: quitCh,
-			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
-				return []interface{}{"block", binary.BigEndian.Uint64(k)}
-			},
-		}); err != nil {
-			return err
-		}
 		if err = s.Update(tx, to); err != nil {
 			return err
 		}
@@ -293,6 +321,32 @@ type senderRecoveryJob struct {
 	blockNumber uint64
 	index       int
 	err         error
+}
+
+func insertSenders(c kv.RwCursor, s *StageState, logPrefix string, lastKey []byte, canonical []common.Hash, accumulatedSender *map[uint64][]byte, lastInserted *uint64, isInserting *atomic.Bool) error {
+	isInserting.Store(true)
+	time.Sleep(1 * time.Millisecond)
+	senders, ok := (*accumulatedSender)[*lastInserted+1]
+	// Try to append as much as possible
+	for ok {
+		key := dbutils.BlockBodyKey(*lastInserted+1, canonical[*lastInserted-s.BlockNumber])
+		if bytes.Compare(lastKey, key) >= 0 {
+			if err := c.Put(key, senders); err != nil {
+				return err
+			}
+		} else {
+			if err := c.Append(dbutils.BlockBodyKey(*lastInserted+1, canonical[*lastInserted-s.BlockNumber]), senders); err != nil {
+				return err
+			}
+		}
+
+		delete((*accumulatedSender), *lastInserted)
+		*lastInserted++
+		senders, ok = (*accumulatedSender)[*lastInserted+1]
+	}
+
+	isInserting.Store(false)
+	return nil
 }
 
 func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
