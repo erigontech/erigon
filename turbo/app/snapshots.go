@@ -165,23 +165,28 @@ func doUncompress(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	wr := bufio.NewWriterSize(os.Stdout, etl.BufIOSize)
-	g := decompressor.MakeGetter()
-	var buf []byte
-	var EOL = []byte("\n")
-	for g.HasNext() {
-		buf, _ := g.Next(buf)
-		if _, err := wr.Write(buf); err != nil {
-			return err
+	if err := decompressor.WithReadAhead(func() error {
+		wr := bufio.NewWriterSize(os.Stdout, etl.BufIOSize)
+		g := decompressor.MakeGetter()
+		var buf []byte
+		var EOL = []byte("\n")
+		for g.HasNext() {
+			buf, _ := g.Next(buf)
+			if _, err := wr.Write(buf); err != nil {
+				return err
+			}
+			if _, err := wr.Write(EOL); err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
-		if _, err := wr.Write(EOL); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	_ = ctx
 	return nil
