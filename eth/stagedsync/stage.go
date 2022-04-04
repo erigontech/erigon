@@ -109,6 +109,7 @@ func (s *PruneState) DoneAt(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }
 
+// PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
 func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context, limit int) error {
 	c, err := tx.RwCursor(table)
 
