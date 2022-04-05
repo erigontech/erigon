@@ -576,11 +576,18 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
+	snapshots := allSnapshots(chainConfig)
+	d, err := dir.OpenRw(snapshots.Dir())
+	if err != nil {
+		return err
+	}
+
 	pm, err := prune.Get(tx)
 	if err != nil {
 		return err
 	}
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, allSnapshots(chainConfig), db, nil, nil))
+
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, snapshots, d, db, nil, nil))
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1166,7 +1173,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
 		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
-		&stagedsync.Notifications{}, nil, allSn,
+		&stagedsync.Notifications{}, nil, allSn, cfg.SnapshotDir,
 	)
 	if err != nil {
 		panic(err)

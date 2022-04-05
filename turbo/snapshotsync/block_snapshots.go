@@ -953,10 +953,11 @@ type BlockRetire struct {
 	wg      *sync.WaitGroup
 	result  *BlockRetireResult
 
-	workers   int
-	tmpDir    string
-	snapshots *RoSnapshots
-	db        kv.RoDB
+	workers     int
+	tmpDir      string
+	snapshots   *RoSnapshots
+	snapshotDir *dir.Rw
+	db          kv.RoDB
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
@@ -967,8 +968,8 @@ type BlockRetireResult struct {
 	Err                error
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, snapshotDir *dir.Rw, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, snapshotDir: snapshotDir, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
