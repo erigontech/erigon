@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -249,14 +250,16 @@ func NewStagedSync(
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	allSnapshots *snapshotsync.RoSnapshots,
+	snapshots *snapshotsync.RoSnapshots,
+	snapshotDir *dir.Rw,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
 	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
+	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, snapshotDir, db, snapshotDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -274,7 +277,7 @@ func NewStagedSync(
 				controlServer.Penalize,
 				cfg.BatchSize,
 				p2pCfg.NoDiscovery,
-				allSnapshots,
+				snapshots,
 				snapshotDownloader,
 				blockReader,
 				tmpdir,
@@ -291,11 +294,11 @@ func NewStagedSync(
 				cfg.BodyDownloadTimeoutSeconds,
 				*controlServer.ChainConfig,
 				cfg.BatchSize,
-				allSnapshots,
+				snapshots,
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(db, controlServer.ChainConfig, blockReader, cfg.EnabledIssuance),
-			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, snapshotsync.NewBlockRetire(1, tmpdir, allSnapshots, db, snapshotDownloader, notifications.Events)),
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, blockRetire),
 			stagedsync.StageExecuteBlocksCfg(
 				db,
 				cfg.Prune,
@@ -315,7 +318,7 @@ func NewStagedSync(
 			stagedsync.StageHistoryCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
-			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, allSnapshots, isBor),
+			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, snapshots, isBor),
 			stagedsync.StageFinishCfg(db, tmpdir, logger), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
