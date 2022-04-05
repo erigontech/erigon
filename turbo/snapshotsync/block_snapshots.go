@@ -1047,6 +1047,9 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
+	if err := BuildIndices(ctx, snapshots, &dir.Rw{Path: snapshots.Dir()}, chainID, tmpDir, snapshots.IndicesAvailable(), log.LvlInfo); err != nil {
+		return err
+	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID)
 	ranges := merger.FindMergeRanges(snapshots)
 	if len(ranges) == 0 {
@@ -1055,9 +1058,6 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	err := merger.Merge(ctx, snapshots, ranges, &dir.Rw{Path: snapshots.Dir()}, true)
 	if err != nil {
 		return err
-	}
-	if err := snapshots.Reopen(); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 	if notifier != nil { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
