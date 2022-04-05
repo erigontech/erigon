@@ -326,7 +326,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return nil, err
 	}
 	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn("[NewPayload] TTD not reached yet", "forkChoice", "height", header.Number, "hash", common.Hash(blockHash))
+		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK}, nil
 	}
 	tx.Rollback()
