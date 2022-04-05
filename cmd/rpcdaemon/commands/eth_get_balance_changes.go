@@ -16,35 +16,23 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 type oldNewBalance struct {
 	oldBalance *hexutil.Big
 	newBalance *hexutil.Big
 }
 
-func (api *APIImpl) GetChangeSet(blockNum uint64) map[common.Address]oldNewBalance {
+func (api *APIImpl) GetChangeSet(blockNum uint64) (map[common.Address]oldNewBalance, error) {
 
 	ctx, _ := common2.RootContext()
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
-		fmt.Println(beginErr)
+		return nil, beginErr
 	}
 	defer tx.Rollback()
 
 	c, err := tx.Cursor("AccountChangeSet")
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
 	defer c.Close()
 	startkey := dbutils.EncodeBlockNumber(blockNum)
@@ -58,17 +46,20 @@ func (api *APIImpl) GetChangeSet(blockNum uint64) map[common.Address]oldNewBalan
 
 		_, address, v, err := decode(dbKey, dbValue)
 		if err != nil {
-			fmt.Println(err)
+			return nil, err
 		}
 		var acc accounts.Account
 		if err = acc.DecodeForStorage(v); err != nil {
-			fmt.Println(err)
+			return nil, err
 		}
 		old_balance := (*hexutil.Big)(acc.Balance.ToBig())
 		var commonAddress common.Address
 		copy(commonAddress[:], address[:20])
 		n := rpc.BlockNumber(blockNum)
-		new_balance_slice := api.GetAccountNewBalance(commonAddress, rpc.BlockNumberOrHash{BlockNumber: &n})
+		new_balance_slice, newBalanceErr := api.GetAccountNewBalance(commonAddress, rpc.BlockNumberOrHash{BlockNumber: &n})
+		if newBalanceErr != nil {
+			return nil, newBalanceErr
+		}
 		new_balance := (*hexutil.Big)(new_balance_slice.ToBig())
 
 		if !reflect.DeepEqual(old_balance, new_balance) {
@@ -79,7 +70,7 @@ func (api *APIImpl) GetChangeSet(blockNum uint64) map[common.Address]oldNewBalan
 
 	}
 
-	return balancesMapping
+	return balancesMapping, nil
 
 }
 
@@ -94,21 +85,21 @@ func PrintChangedBalances(mapping map[common.Address]oldNewBalance) error {
 	return nil
 }
 
-func (api *APIImpl) GetAccountNewBalance(address common.Address, blockNrOrHash rpc.BlockNumberOrHash) uint256.Int {
+func (api *APIImpl) GetAccountNewBalance(address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (uint256.Int, error) {
 
 	ctx, _ := common2.RootContext()
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
-		fmt.Println(beginErr)
+		return uint256.Int{}, beginErr
 	}
 	defer tx.Rollback()
 
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
 	if err != nil {
-		fmt.Println(err)
+		return uint256.Int{}, err
 	}
 	acc, err := reader.ReadAccountData(address)
 
-	return acc.Balance
+	return acc.Balance, nil
 
 }

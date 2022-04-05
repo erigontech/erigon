@@ -22,7 +22,10 @@ func TestMyAccountChangesetAccess(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false), db, nil, nil, nil, 5000000)
-	balances := api.GetChangeSet(myBlockNum)
+	balances, err := api.GetChangeSet(myBlockNum)
+	if err != nil {
+		t.Errorf("calling GetChangeSet resulted in an error: %v", err)
+	}
 	PrintChangedBalances(balances)
 
 }
