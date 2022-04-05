@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"reflect"
 	"testing"
@@ -32,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 // The values in those tests are from the Transaction Tests
@@ -96,6 +98,14 @@ var (
 	)
 )
 
+func TestDecodeEmptyInput(t *testing.T) {
+	input := []byte{}
+	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	if !errors.Is(err, io.EOF) {
+		t.Fatal("wrong error:", err)
+	}
+}
+
 func TestDecodeEmptyTypedTx(t *testing.T) {
 	input := []byte{0x80}
 	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
@@ -122,6 +132,7 @@ func TestTransactionEncode(t *testing.T) {
 	if !bytes.Equal(txb, should) {
 		t.Errorf("encoded RLP mismatch, got %x", txb)
 	}
+	assert.False(t, TypedTransactionMarshalledAsRlpString(txb))
 }
 
 func TestEIP2718TransactionSigHash(t *testing.T) {
@@ -226,6 +237,7 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 		if !bytes.Equal(have, want) {
 			t.Errorf("encoded RLP mismatch, got %x", have)
 		}
+		assert.True(t, TypedTransactionMarshalledAsRlpString(have))
 	}
 	// Binary representation
 	{
@@ -238,6 +250,7 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 		if !bytes.Equal(have, want) {
 			t.Errorf("encoded RLP mismatch, got %x", have)
 		}
+		assert.False(t, TypedTransactionMarshalledAsRlpString(have))
 	}
 }
 func TestEIP1559TransactionEncode(t *testing.T) {
@@ -255,6 +268,7 @@ func TestEIP1559TransactionEncode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode error: %v", err)
 		}
+		assert.False(t, TypedTransactionMarshalledAsRlpString(have))
 	}
 }
 
