@@ -1,10 +1,10 @@
 package commands
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 
-	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 type oldNewBalance struct {
@@ -21,7 +20,7 @@ type oldNewBalance struct {
 	newBalance *hexutil.Big
 }
 
-func (api *APIImpl) GetChangeSet(blockNum uint64) (map[common.Address]oldNewBalance, error) {
+func (api *APIImpl) GetBalanceChangesInBlock(blockNum uint64) (map[common.Address]oldNewBalance, error) {
 
 	ctx, _ := common2.RootContext()
 	tx, beginErr := api.db.BeginRo(ctx)
@@ -38,11 +37,10 @@ func (api *APIImpl) GetChangeSet(blockNum uint64) (map[common.Address]oldNewBala
 	startkey := dbutils.EncodeBlockNumber(blockNum)
 
 	decode := changeset.Mapper["AccountChangeSet"].Decode
-	fmt.Println("block number: ", startkey)
 
 	balancesMapping := make(map[common.Address]oldNewBalance)
 
-	for dbKey, dbValue, _ := c.Seek(startkey); reflect.DeepEqual(dbKey, startkey) && dbKey != nil; dbKey, dbValue, _ = c.Next() {
+	for dbKey, dbValue, _ := c.Seek(startkey); bytes.Equal(dbKey, startkey) && dbKey != nil; dbKey, dbValue, _ = c.Next() {
 
 		_, address, v, err := decode(dbKey, dbValue)
 		if err != nil {
@@ -56,11 +54,10 @@ func (api *APIImpl) GetChangeSet(blockNum uint64) (map[common.Address]oldNewBala
 		var commonAddress common.Address
 		copy(commonAddress[:], address[:20])
 		n := rpc.BlockNumber(blockNum)
-		new_balance_slice, newBalanceErr := api.GetAccountNewBalance(commonAddress, rpc.BlockNumberOrHash{BlockNumber: &n})
+		new_balance, newBalanceErr := api.GetBalance(ctx, commonAddress, rpc.BlockNumberOrHash{BlockNumber: &n})
 		if newBalanceErr != nil {
 			return nil, newBalanceErr
 		}
-		new_balance := (*hexutil.Big)(new_balance_slice.ToBig())
 
 		if !reflect.DeepEqual(old_balance, new_balance) {
 			balancesMapping[commonAddress] = oldNewBalance{
@@ -83,23 +80,4 @@ func PrintChangedBalances(mapping map[common.Address]oldNewBalance) error {
 	}
 
 	return nil
-}
-
-func (api *APIImpl) GetAccountNewBalance(address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (uint256.Int, error) {
-
-	ctx, _ := common2.RootContext()
-	tx, beginErr := api.db.BeginRo(ctx)
-	if beginErr != nil {
-		return uint256.Int{}, beginErr
-	}
-	defer tx.Rollback()
-
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, api.filters, api.stateCache)
-	if err != nil {
-		return uint256.Int{}, err
-	}
-	acc, err := reader.ReadAccountData(address)
-
-	return acc.Balance, nil
-
 }
