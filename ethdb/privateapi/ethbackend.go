@@ -430,7 +430,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	forkChoiceMessage := engineapi.ForkChoiceMessage{
+	forkChoice := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
 		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
@@ -440,12 +440,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if err != nil {
 		return nil, err
 	}
-	td, err := rawdb.ReadTdByHash(tx1, forkChoiceMessage.HeadBlockHash)
+	td, err := rawdb.ReadTdByHash(tx1, forkChoice.HeadBlockHash)
 	if err != nil {
 		return nil, err
 	}
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoiceMessage)
+		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK},
 		}, nil
@@ -464,8 +464,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
-	s.requestList.AddForkChoiceRequest(&forkChoiceMessage)
+	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
+	s.requestList.AddForkChoiceRequest(&forkChoice)
 
 	payloadStatus := <-s.statusCh
 	log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
@@ -497,8 +497,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
 	tx2.Rollback()
 
-	if headHeader.Hash() != forkChoiceMessage.HeadBlockHash {
-		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoiceMessage.HeadBlockHash)
+	if headHeader.Hash() != forkChoice.HeadBlockHash {
+		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
 	}
 
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
