@@ -482,9 +482,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
 	}
-	d, err := dir.OpenRw(allSnapshots.Dir())
-	if err != nil {
-		return nil, err
+	var d *dir.Rw
+	if config.Snapshot.Enabled {
+		if d, err = dir.OpenRw(allSnapshots.Dir()); err != nil {
+			return nil, err
+		}
 	}
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
