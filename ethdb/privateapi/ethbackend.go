@@ -317,6 +317,20 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	parentTd, err := rawdb.ReadTd(tx, header.ParentHash, req.BlockNumber-1)
+	if err != nil {
+		return nil, err
+	}
+	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK}, nil
+	}
+	tx.Rollback()
+
 	// If another payload is already commissioned then we just reply with syncing
 	if s.stageLoopIsBusy() {
 		// We are still syncing a commissioned payload
@@ -416,6 +430,28 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
+	forkChoice := engineapi.ForkChoiceMessage{
+		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
+		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
+		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
+	}
+
+	tx1, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	td, err := rawdb.ReadTdByHash(tx1, forkChoice.HeadBlockHash)
+	if err != nil {
+		return nil, err
+	}
+	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
+		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
+		return &remote.EngineForkChoiceUpdatedReply{
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK},
+		}, nil
+	}
+	tx1.Rollback()
+
 	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
 	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
 	// (i.e. it references an old block).
@@ -428,14 +464,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	forkChoiceMessage := engineapi.ForkChoiceMessage{
-		HeadBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.HeadBlockHash),
-		SafeBlockHash:      gointerfaces.ConvertH256ToHash(req.ForkchoiceState.SafeBlockHash),
-		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(req.ForkchoiceState.FinalizedBlockHash),
-	}
-
-	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoiceMessage.HeadBlockHash)
-	s.requestList.AddForkChoiceRequest(&forkChoiceMessage)
+	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
+	s.requestList.AddForkChoiceRequest(&forkChoice)
 
 	payloadStatus := <-s.statusCh
 	log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
@@ -458,17 +488,17 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 
-	tx, err := s.db.BeginRo(ctx)
+	tx2, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
-	headHeader := rawdb.ReadHeader(tx, headHash, *headNumber)
-	tx.Rollback()
+	headHash := rawdb.ReadHeadBlockHash(tx2)
+	headNumber := rawdb.ReadHeaderNumber(tx2, headHash)
+	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
+	tx2.Rollback()
 
-	if headHeader.Hash() != forkChoiceMessage.HeadBlockHash {
-		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoiceMessage.HeadBlockHash)
+	if headHeader.Hash() != forkChoice.HeadBlockHash {
+		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
 	}
 
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
