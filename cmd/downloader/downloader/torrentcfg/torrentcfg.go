@@ -49,17 +49,25 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	torrentConfig.DataDir = snapshotsDir.Path
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
-	if natif != nil {
-		var err error
-		torrentConfig.PublicIp4, err = natif.ExternalIP()
-		if err != nil {
-			return nil, nil, err
-		}
+	switch natif.(type) {
+	case nil:
+		// No NAT interface, do nothing.
+	case nat.ExtIP:
+		// ExtIP doesn't block, set the IP right away.
+		ip, _ := natif.ExternalIP()
+		torrentConfig.PublicIp4 = ip
 		log.Info("[torrent] Public IP", "ip", torrentConfig.PublicIp4)
 		// how to set ipv6?
 		//torrentConfig.PublicIp6 = net.ParseIP(ip)
-	}
 
+	default:
+		// Ask the router about the IP. This takes a while and blocks startup,
+		// do it in the background.
+		if ip, err := natif.ExternalIP(); err == nil {
+			torrentConfig.PublicIp4 = ip
+			log.Info("[torrent] Public IP", "ip", torrentConfig.PublicIp4)
+		}
+	}
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
 	//torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*16384) // default: unlimited
 	//torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
