@@ -122,7 +122,7 @@ func SpawnStageHeaders(
 
 	unsettledForkChoice, headHeight := cfg.hd.GetUnsettledForkChoice()
 	if unsettledForkChoice != nil { // some work left to do after unwind
-		return handleUnsettledForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
+		return finishHandlingForkChoice(unsettledForkChoice, headHeight, s, tx, cfg, useExternalTx)
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, blockNumber, cfg.chainConfig.TerminalTotalDifficulty)
@@ -137,7 +137,7 @@ func SpawnStageHeaders(
 	}
 }
 
-func handleUnsettledForkChoice(
+func finishHandlingForkChoice(
 	forkChoice *engineapi.ForkChoiceMessage,
 	headHeight uint64,
 	s *StageState,
@@ -157,10 +157,36 @@ func handleUnsettledForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
-
 	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-	rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-	rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+
+	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
+
+	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+	if err != nil {
+		return err
+	}
+	if safeIsCanonical {
+		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+	} else if sendErrResponse {
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			CriticalError: errors.New("safe block is not an ancestor of head block"),
+		}
+		cfg.hd.ClearPendingPayloadStatus()
+		sendErrResponse = false
+	}
+
+	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+	if err != nil {
+		return err
+	}
+	if finalizedIsCanonical {
+		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+	} else if sendErrResponse {
+		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+			CriticalError: errors.New("finalized block is not an ancestor of head block"),
+		}
+		cfg.hd.ClearPendingPayloadStatus()
+	}
 
 	if err := s.Update(tx, headHeight); err != nil {
 		return err
@@ -219,7 +245,7 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		handleForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter)
+		startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter)
 	} else {
 		if err := handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
@@ -232,7 +258,7 @@ func HeadersPOS(
 	return nil
 }
 
-func handleForkChoice(
+func startHandlingForkChoice(
 	forkChoiceMessage *engineapi.ForkChoiceMessage,
 	requestStatus engineapi.RequestStatus,
 	requestId int,
