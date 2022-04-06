@@ -167,12 +167,15 @@ func finishHandlingForkChoice(
 	}
 	if safeIsCanonical {
 		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-	} else if sendErrResponse {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-			CriticalError: errors.New("safe block is not an ancestor of head block"),
+	} else {
+		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+		if sendErrResponse {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: errors.New("safe block is not an ancestor of head block"),
+			}
+			cfg.hd.ClearPendingPayloadStatus()
+			sendErrResponse = false
 		}
-		cfg.hd.ClearPendingPayloadStatus()
-		sendErrResponse = false
 	}
 
 	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
@@ -181,11 +184,14 @@ func finishHandlingForkChoice(
 	}
 	if finalizedIsCanonical {
 		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
-	} else if sendErrResponse {
-		cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-			CriticalError: errors.New("finalized block is not an ancestor of head block"),
+	} else {
+		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+		if sendErrResponse {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: errors.New("finalized block is not an ancestor of head block"),
+			}
+			cfg.hd.ClearPendingPayloadStatus()
 		}
-		cfg.hd.ClearPendingPayloadStatus()
 	}
 
 	if err := s.Update(tx, headHeight); err != nil {
