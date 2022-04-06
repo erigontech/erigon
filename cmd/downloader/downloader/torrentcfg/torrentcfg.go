@@ -3,8 +3,6 @@ package torrentcfg
 import (
 	"fmt"
 	"io"
-	"net"
-	"os"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -12,7 +10,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/p2p/nat"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -43,19 +41,21 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir *dir.Rw, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, io.Closer, error) {
+func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, torrentPort int) (*torrent.ClientConfig, io.Closer, error) {
 	torrentConfig := Default()
 	torrentConfig.ListenPort = torrentPort
 	torrentConfig.Seed = true
 	torrentConfig.DataDir = snapshotsDir.Path
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
-	if ip := os.Getenv("EXTIP"); ip != "" {
-		log.Info("torrent extip ", "ip", ip)
-		torrentConfig.PublicIp4 = net.ParseIP(ip)
-	}
-	if ip := os.Getenv("EXTIP6"); ip != "" {
-		torrentConfig.PublicIp6 = net.ParseIP(ip)
+	if natif != nil {
+		var err error
+		torrentConfig.PublicIp4, err = natif.ExternalIP()
+		if err != nil {
+			return nil, nil, err
+		}
+		// how to set ipv6?
+		//torrentConfig.PublicIp6 = net.ParseIP(ip)
 	}
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting

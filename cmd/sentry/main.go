@@ -36,14 +36,7 @@ var (
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
-	rootCmd.Flags().StringVar(&natSetting, "nat", "", `NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)
-	     "" or "none"         default - do not nat
-	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
-	     "any"                uses the first auto-detected mechanism
-	     "upnp"               uses the Universal Plug and Play protocol
-	     "pmp"                uses NAT-PMP with an auto-detected gateway address
-	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
-`)
+	rootCmd.Flags().StringVar(&natSetting, "nat", "", utils.NATFlag.Usage)
 	rootCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
 	rootCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth66")
