@@ -12,6 +12,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -50,6 +51,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, downloadRate, uploadRate data
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	if ip := os.Getenv("EXTIP"); ip != "" {
+		log.Info("torrent extip ", "ip", ip)
 		torrentConfig.PublicIp4 = net.ParseIP(ip)
 	}
 	if ip := os.Getenv("EXTIP6"); ip != "" {
