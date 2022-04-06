@@ -1078,14 +1078,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
-	const readyKey = "snapshots_ready"
-	v, err := tx.GetOne(kv.DatabaseInfo, []byte(readyKey))
-	if err != nil {
-		return err
-	}
-	if len(v) == 1 && v[0] == 1 {
-		return nil
-	}
 	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
 
 	// send all hashes to the Downloader service
@@ -1141,10 +1133,6 @@ Loop:
 				prevBytesCompleted = reply.BytesCompleted
 			}
 		}
-	}
-
-	if err := tx.Put(kv.DatabaseInfo, []byte(readyKey), []byte{1}); err != nil {
-		return err
 	}
 	return nil
 }
