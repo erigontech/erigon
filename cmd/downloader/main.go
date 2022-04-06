@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
@@ -38,6 +39,7 @@ var (
 	forceRebuild                   bool
 	forceVerify                    bool
 	downloaderApiAddr              string
+	natSetting                     string
 	torrentVerbosity               string
 	downloadRateStr, uploadRateStr string
 	torrentPort                    int
@@ -50,6 +52,7 @@ func init() {
 
 	withDataDir(rootCmd)
 
+	rootCmd.Flags().StringVar(&natSetting, "nat", "", utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", "8mb", "bytes per second, example: 32mb")
@@ -125,8 +128,12 @@ func Downloader(ctx context.Context) error {
 	}
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	natif, err := nat.Parse(natSetting)
+	if err != nil {
+		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
+	}
 
-	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, downloadRate, uploadRate, torrentPort)
+	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort)
 	if err != nil {
 		return err
 	}

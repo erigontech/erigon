@@ -1386,7 +1386,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	}
 
 	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, downloadRate, uploadRate, torrentPort)
+		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, nodeConfig.P2P.NAT, downloadRate, uploadRate, torrentPort)
 		if err != nil {
 			panic(err)
 		}
