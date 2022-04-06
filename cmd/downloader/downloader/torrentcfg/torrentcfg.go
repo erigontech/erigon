@@ -3,6 +3,8 @@ package torrentcfg
 import (
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"time"
 
 	lg "github.com/anacrolix/log"
@@ -46,6 +48,13 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, downloadRate, uploadRate data
 	torrentConfig.Seed = true
 	torrentConfig.DataDir = snapshotsDir.Path
 	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+
+	if ip := os.Getenv("EXTIP"); ip != "" {
+		torrentConfig.PublicIp4 = net.ParseIP(ip)
+	}
+	if ip := os.Getenv("EXTIP6"); ip != "" {
+		torrentConfig.PublicIp6 = net.ParseIP(ip)
+	}
 
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
 	//torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*16384) // default: unlimited
