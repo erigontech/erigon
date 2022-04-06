@@ -43,6 +43,8 @@ var (
 	torrentVerbosity               string
 	downloadRateStr, uploadRateStr string
 	torrentPort                    int
+	torrentMaxPeers                int
+	torrentConnsPerFile            int
 	targetFile                     string
 )
 
@@ -58,6 +60,8 @@ func init() {
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", "8mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "8mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
+	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", 10, "")
+	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", 5, "connections per file")
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -133,7 +137,7 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort)
+	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile)
 	if err != nil {
 		return err
 	}

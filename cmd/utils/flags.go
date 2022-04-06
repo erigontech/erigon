@@ -650,6 +650,16 @@ var (
 		Value: 42069,
 		Usage: "port to listen and serve BitTorrent protocol",
 	}
+	TorrentMaxPeersFlag = cli.IntFlag{
+		Name:  "torrent.maxpeers",
+		Value: 10,
+		Usage: "limit amount of torrent peers",
+	}
+	TorrentConnsPerFileFlag = cli.IntFlag{
+		Name:  "torrent.conns.perfile",
+		Value: 5,
+		Usage: "connections per file",
+	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
 		Usage: "set mdbx pagesize on db creation: must be power of 2 and '256b <= pagesize <= 64kb' ",
@@ -1361,32 +1371,30 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		cfg.SnapshotDir = snDir
 	}
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
-	torrentVerbosity := lg.Warning
-	if ctx.GlobalIsSet(TorrentVerbosityFlag.Name) {
-		torrentVerbosity = torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)]
-	}
-
-	var downloadRateStr, uploadRateStr string
-	if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
-		downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
-	}
-	if ctx.GlobalIsSet(TorrentUploadRateFlag.Name) {
-		uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
-	}
-	var downloadRate, uploadRate datasize.ByteSize
-	if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
-		panic(err)
-	}
-	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
-		panic(err)
-	}
-	torrentPort := TorrentPortFlag.Value
-	if ctx.GlobalIsSet(TorrentPortFlag.Name) {
-		torrentPort = ctx.GlobalInt(TorrentPortFlag.Name)
-	}
-
 	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir, torrentVerbosity, nodeConfig.P2P.NAT, downloadRate, uploadRate, torrentPort)
+		var downloadRateStr, uploadRateStr string
+		if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
+			downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
+		}
+		if ctx.GlobalIsSet(TorrentUploadRateFlag.Name) {
+			uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
+		}
+		var downloadRate, uploadRate datasize.ByteSize
+		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
+			panic(err)
+		}
+		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
+			panic(err)
+		}
+
+		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir,
+			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
+			nodeConfig.P2P.NAT,
+			downloadRate, uploadRate,
+			ctx.GlobalInt(TorrentPortFlag.Name),
+			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
+			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
+		)
 		if err != nil {
 			panic(err)
 		}
