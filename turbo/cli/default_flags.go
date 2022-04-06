@@ -74,6 +74,8 @@ var DefaultFlags = []cli.Flag{
 	utils.SnapshotKeepBlocksFlag,
 	utils.DbPageSizeFlag,
 	utils.TorrentPortFlag,
+	utils.TorrentMaxPeersFlag,
+	utils.TorrentConnsPerFileFlag,
 	utils.TorrentUploadRateFlag,
 	utils.TorrentDownloadRateFlag,
 	utils.TorrentVerbosityFlag,

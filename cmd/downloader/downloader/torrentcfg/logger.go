@@ -47,7 +47,10 @@ func (b adapterHandler) Handle(r lg.Record) {
 		if strings.Contains(str, "could not find offer for id") { // suppress useless errors
 			break
 		}
-		if strings.Contains(str, "got webrtc conn for unloaded torrent") { // suppress useless errors
+		if strings.Contains(str, "webrtc conn for unloaded torrent") { // suppress useless errors
+			break
+		}
+		if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
 			break
 		}
 
