@@ -57,9 +57,6 @@ func (b adapterHandler) Handle(r lg.Record) {
 		if strings.Contains(str, "EOF") { // suppress useless errors
 			break
 		}
-		if strings.Contains(str, "running handshook webrtc") { // suppress useless errors
-			break
-		}
 
 		log.Error(str)
 	case lg.Critical:
@@ -68,6 +65,9 @@ func (b adapterHandler) Handle(r lg.Record) {
 			break
 		}
 		if strings.Contains(str, "don't want conns") { // suppress useless errors
+			break
+		}
+		if strings.Contains(str, "running handshook webrtc") { // suppress useless errors
 			break
 		}
 
