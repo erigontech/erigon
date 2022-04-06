@@ -569,6 +569,10 @@ func isWebsocket(r *http.Request) bool {
 func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	// try reading from file
 	log.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
+	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
+	if len(cfg.JWTSecretPath) == 0 {
+		cfg.JWTSecretPath = "jwt.hex"
+	}
 	if data, err := os.ReadFile(cfg.JWTSecretPath); err == nil {
 		jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
 		if len(jwtSecret) == 32 {
