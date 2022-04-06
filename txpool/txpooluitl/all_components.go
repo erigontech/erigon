@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB, force bool) (cc *chain.Config, blockNum uint64, err error) {
@@ -96,7 +97,11 @@ func SaveChainConfigIfNeed(ctx context.Context, coreDB kv.RoDB, txPoolDB kv.RwDB
 }
 
 func AllComponents(ctx context.Context, cfg txpool.Config, cache kvcache.Cache, newTxs chan txpool.Hashes, chainDB kv.RoDB, sentryClients []direct.SentryClient, stateChangesClient txpool.StateChangesClient) (kv.RwDB, *txpool.TxPool, *txpool.Fetch, *txpool.Send, *txpool.GrpcServer, error) {
-	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).Open()
+	txPoolDB, err := mdbx.NewMDBX(log.New()).Label(kv.TxPoolDB).Path(cfg.DBDir).
+		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).
+		Flags(func(f uint) uint { return f ^ mdbx2.Durable | mdbx2.SafeNoSync }).
+		SyncPeriod(30 * time.Second).
+		Open()
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
