@@ -47,11 +47,17 @@ func (b adapterHandler) Handle(r lg.Record) {
 		if strings.Contains(str, "could not find offer for id") { // suppress useless errors
 			break
 		}
+		if strings.Contains(str, "got webrtc conn for unloaded torrent") { // suppress useless errors
+			break
+		}
 
 		log.Warn(str)
 	case lg.Error:
 		str := r.String()
 		if strings.Contains(str, "EOF") { // suppress useless errors
+			break
+		}
+		if strings.Contains(str, "running handshook webrtc") { // suppress useless errors
 			break
 		}
 
@@ -67,6 +73,6 @@ func (b adapterHandler) Handle(r lg.Record) {
 
 		log.Error(str)
 	default:
-		log.Debug(r.String(), "log_type", "unknown")
+		log.Debug(r.String(), "torrent_log_type", "unknown")
 	}
 }
