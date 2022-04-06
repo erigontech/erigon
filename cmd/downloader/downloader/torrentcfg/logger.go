@@ -67,7 +67,7 @@ func (b adapterHandler) Handle(r lg.Record) {
 		if strings.Contains(str, "don't want conns") { // suppress useless errors
 			break
 		}
-		if strings.Contains(str, "running handshook webrtc") { // suppress useless errors
+		if strings.Contains(str, "torrent closed") { // suppress useless errors
 			break
 		}
 
