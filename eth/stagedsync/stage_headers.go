@@ -365,6 +365,19 @@ func handleNewPayload(
 
 	cfg.hd.BeaconRequestList.Remove(requestId)
 
+	for _, tx := range payloadMessage.Body.Transactions {
+		if types.TypedTransactionMarshalledAsRlpString(tx) {
+			if requestStatus == engineapi.New {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					Status:          remote.EngineStatus_INVALID,
+					LatestValidHash: header.ParentHash,
+					ValidationError: errors.New("typed txn marshalled as RLP string"),
+				}
+			}
+			return nil
+		}
+	}
+
 	transactions, err := types.DecodeTransactions(payloadMessage.Body.Transactions)
 	if err != nil {
 		log.Warn("Error during Beacon transaction decoding", "err", err.Error())

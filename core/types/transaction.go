@@ -205,6 +205,11 @@ func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 	return result, nil
 }
 
+func TypedTransactionMarshalledAsRlpString(data []byte) bool {
+	// Unless it's a single byte, serialized RLP strings have their first byte in the [0x80, 0xc0) range
+	return len(data) > 0 && 0x80 <= data[0] && data[0] < 0xc0
+}
+
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {
 	if isProtectedV(v) && !maybeProtected {
 		return ErrUnexpectedProtection
