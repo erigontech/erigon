@@ -11,6 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -54,6 +55,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 		if err != nil {
 			return nil, nil, err
 		}
+		log.Info("[torrent] Public IP", "ip", torrentConfig.PublicIp4)
 		// how to set ipv6?
 		//torrentConfig.PublicIp6 = net.ParseIP(ip)
 	}
