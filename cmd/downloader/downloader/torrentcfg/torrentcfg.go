@@ -77,6 +77,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 		torrentConfig.Debug = true
 	}
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
+	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
 	c, err := storage.NewBoltPieceCompletion(snapshotsDir.Path)
 	if err != nil {
