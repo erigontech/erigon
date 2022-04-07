@@ -1606,7 +1606,7 @@ RETRY:
 
 	wg.Wait()
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < cap(errCh); i++ {
 		err = <-errCh
 		if err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
