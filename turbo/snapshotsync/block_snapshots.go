@@ -1509,7 +1509,6 @@ RETRY:
 				errCh <- it.err
 				return
 			}
-			bm.Add(it.offset)
 			j++
 			if it.empty { // system-txs hash: pad32(txnID)
 				binary.BigEndian.PutUint64(hash, firstTxID+it.i)
@@ -1517,11 +1516,11 @@ RETRY:
 					errCh <- err
 					return
 				}
-				continue
-			}
-			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
-				errCh <- err
-				return
+			} else {
+				if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
+					errCh <- err
+					return
+				}
 			}
 
 			select {
@@ -1576,11 +1575,10 @@ RETRY:
 					if err := txnHash2BlockNumIdx.AddKey(hash, blockNum); err != nil {
 						return err
 					}
-					continue
-				}
-
-				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
-					return err
+				} else {
+					if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-ctx.Done():
