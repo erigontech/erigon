@@ -547,7 +547,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			}
 			log.Trace(fmt.Sprintf("[%s] Received status message OK", peerID), "name", peer.Name())
 
-			if err := runPeer(
+			err = runPeer(
 				ctx,
 				peerID,
 				protocol,
@@ -555,9 +555,8 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 				peerInfo,
 				ss.send,
 				ss.hasSubscribers,
-			); err != nil {
-				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
-			}
+			) // runPeer never returns a nil error
+			log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", peerID, err))
 			ss.sendGonePeerToClients(gointerfaces.ConvertHashToH256(peerID))
 			return nil
 		},
