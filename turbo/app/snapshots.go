@@ -89,12 +89,7 @@ var snapshotCommand = cli.Command{
 			Name:   "compress",
 			Action: doCompress,
 			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
-				utils.DataDirFlag,
-				SnapshotFromFlag,
-				SnapshotToFlag,
-				SnapshotEveryFlag,
-			}, debug.Flags...),
+			Flags:  append([]cli.Flag{utils.DataDirFlag}, debug.Flags...),
 		},
 	},
 }
@@ -199,11 +194,15 @@ func doCompress(cliCtx *cli.Context) error {
 		return fmt.Errorf("expecting .seg file path")
 	}
 	f := args[0]
-	c, err := compress.NewCompressor(ctx, "", f, "", compress.MinPatternScore, runtime.NumCPU()/2, log.LvlInfo)
+	datadir := cliCtx.String(utils.DataDirFlag.Name)
+	tmpDir := filepath.Join(datadir, etl.TmpDirName)
+	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, runtime.NumCPU()/2, log.LvlInfo)
 	if err != nil {
 		return err
 	}
 	scanner := bufio.NewScanner(os.Stdin)
+	buf := make([]byte, 0, 16*1024*1024)
+	scanner.Buffer(buf, cap(buf))
 	for scanner.Scan() {
 		if err := c.AddWord(scanner.Bytes()); err != nil {
 			return err
@@ -218,6 +217,10 @@ func doCompress(cliCtx *cli.Context) error {
 	if err := scanner.Err(); err != nil {
 		return err
 	}
+	if err := c.Compress(); err != nil {
+		return err
+	}
+
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context) error {
