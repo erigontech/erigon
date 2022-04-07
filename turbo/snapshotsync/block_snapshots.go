@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -1495,11 +1496,12 @@ RETRY:
 	wg := sync.WaitGroup{}
 	errCh := make(chan error, 2)
 	defer close(errCh)
-	hash := make([]byte, 32)
+	bm := roaring64.New()
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		hash := make([]byte, 32)
 
 		var j uint64
 		for it := range txsCh {
@@ -1507,6 +1509,7 @@ RETRY:
 				errCh <- it.err
 				return
 			}
+			bm.Add(it.offset)
 			j++
 			if it.empty { // system-txs hash: pad32(txnID)
 				binary.BigEndian.PutUint64(hash, firstTxID+it.i)
@@ -1542,6 +1545,7 @@ RETRY:
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		hash := make([]byte, 32)
 		blockNum := firstBlockNum
 		body := &types.BodyForStorage{}
 		if err := bodiesSegment.WithReadAhead(func() error {
@@ -1570,13 +1574,13 @@ RETRY:
 				if it.empty { // system-txs hash: pad32(txnID)
 					binary.BigEndian.PutUint64(hash, firstTxID+it.i)
 					if err := txnHash2BlockNumIdx.AddKey(hash, blockNum); err != nil {
-						return fmt.Errorf("1: %w", err)
+						return err
 					}
 					continue
 				}
 
 				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
-					return fmt.Errorf("2: %w", err)
+					return err
 				}
 				select {
 				case <-ctx.Done():
@@ -1616,6 +1620,8 @@ RETRY:
 		}
 	}
 
+	bm.RunOptimize()
+	fmt.Printf("bm: %d,%d, %dMb\n", blockFrom/1000, blockTo/1000, bm.GetSerializedSizeInBytes()/1024/1024)
 	return nil
 }
 
