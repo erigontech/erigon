@@ -1,6 +1,6 @@
 
 
-dir=/Users/alex.sharov/data/goerli_retire
+dir=$1
 files=$(ls $dir/snapshots | grep tr | grep -v tor | grep seg |  sort -n -t$'-' -k1)
 for file in $files
 do
