@@ -1510,7 +1510,7 @@ RETRY:
 				return
 			}
 			j++
-			bm.Add(it.i)
+			bm.Add(it.offset)
 			if it.empty { // system-txs hash: pad32(txnID)
 				binary.BigEndian.PutUint64(hash, firstTxID+it.i)
 				if err := txnHashIdx.AddKey(hash, it.offset); err != nil {
