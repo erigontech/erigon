@@ -54,20 +54,6 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name Type, dir string)
 		err = idx.Build()
 		require.NoError(t, err)
 		defer idx.Close()
-
-		idx2, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:   1,
-			BucketSize: 10,
-			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, IdxFileName(from, to, TransactionsId.String())),
-			LeafSize:   8,
-		})
-		require.NoError(t, err)
-		err = idx2.AddKey([]byte{1}, 0)
-		require.NoError(t, err)
-		err = idx2.Build()
-		require.NoError(t, err)
-		defer idx2.Close()
 	}
 }
 

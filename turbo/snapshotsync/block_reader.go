@@ -3,7 +3,6 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -419,9 +418,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 				if b.BaseTxId < seg.IdxTxnHash.BaseDataID() {
 					return fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, seg.IdxTxnHash.BaseDataID(), seg.Seg.FilePath())
 				}
-				r := recsplit.NewIndexReader(seg.IdxTxnId)
-				binary.BigEndian.PutUint64(buf[:8], b.BaseTxId-seg.IdxTxnId.BaseDataID())
-				txnOffset := r.Lookup(buf[:8])
+
+				txnOffset := seg.IdxTxnHash.Lookup2(b.BaseTxId - seg.IdxTxnHash.BaseDataID())
 				gg := seg.Seg.MakeGetter()
 				gg.Reset(txnOffset)
 				stream := rlp.NewStream(reader, 0)
@@ -533,9 +531,7 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	senders := make([]common.Address, txsAmount)
 	reader := bytes.NewReader(buf)
 	if txsAmount > 0 {
-		r := recsplit.NewIndexReader(txsSeg.IdxTxnId)
-		binary.BigEndian.PutUint64(buf[:8], baseTxnID-txsSeg.IdxTxnId.BaseDataID())
-		txnOffset := r.Lookup(buf[:8])
+		txnOffset := txsSeg.IdxTxnHash.Lookup2(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
 		gg := txsSeg.Seg.MakeGetter()
 		gg.Reset(txnOffset)
 		stream := rlp.NewStream(reader, 0)
@@ -559,12 +555,13 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.IdxTxnId == nil || sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
+		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
 			continue
 		}
 
 		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
-		offset := reader.Lookup(txnHash[:])
+		txnId := reader.Lookup(txnHash[:])
+		offset := sn.IdxTxnHash.Lookup2(txnId)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		buf, _ = gg.Next(buf[:0])

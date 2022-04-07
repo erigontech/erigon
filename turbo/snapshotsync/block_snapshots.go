@@ -91,7 +91,6 @@ type IdxType string
 
 const (
 	Transactions2Block IdxType = "transactions-to-block"
-	TransactionsId     IdxType = "transactions-id"
 )
 
 func (it IdxType) String() string { return string(it) }
@@ -174,7 +173,6 @@ func (sn *BodySegment) reopen(dir string) (err error) {
 type TxnSegment struct {
 	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
 	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	IdxTxnId            *recsplit.Index        // transaction_id    -> transactions_segment_offset
 	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
 	From, To            uint64
 }
@@ -187,10 +185,6 @@ func (sn *TxnSegment) close() {
 	if sn.IdxTxnHash != nil {
 		sn.IdxTxnHash.Close()
 		sn.IdxTxnHash = nil
-	}
-	if sn.IdxTxnId != nil {
-		sn.IdxTxnId.Close()
-		sn.IdxTxnId = nil
 	}
 	if sn.IdxTxnHash2BlockNum != nil {
 		sn.IdxTxnHash2BlockNum.Close()
@@ -205,10 +199,6 @@ func (sn *TxnSegment) reopen(dir string) (err error) {
 		return err
 	}
 	sn.IdxTxnHash, err = recsplit.OpenIndex(path.Join(dir, IdxFileName(sn.From, sn.To, Transactions.String())))
-	if err != nil {
-		return err
-	}
-	sn.IdxTxnId, err = recsplit.OpenIndex(path.Join(dir, IdxFileName(sn.From, sn.To, TransactionsId.String())))
 	if err != nil {
 		return err
 	}
@@ -394,7 +384,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 
 	for i := len(s.Txs.segments) - 1; i >= 0; i-- {
 		seg := s.Txs.segments[i]
-		if seg.IdxTxnId == nil || seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
+		if seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
 			continue
 		}
 		txs = seg.To - 1
@@ -530,10 +520,6 @@ func (s *RoSnapshots) Reopen() error {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		sn.IdxTxnId, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, TransactionsId.String())))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
 		sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(path.Join(s.dir, IdxFileName(sn.From, sn.To, Transactions2Block.String())))
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -647,7 +633,7 @@ func (s *RoSnapshots) PrintDebug() {
 	}
 	fmt.Println("    == Snapshots, Txs")
 	for _, sn := range s.Txs.segments {
-		fmt.Printf("%d,  %t, %t, %t\n", sn.From, sn.IdxTxnId == nil, sn.IdxTxnHash == nil, sn.IdxTxnHash2BlockNum == nil)
+		fmt.Printf("%d,  %t, %t\n", sn.From, sn.IdxTxnHash == nil, sn.IdxTxnHash2BlockNum == nil)
 	}
 }
 func (s *RoSnapshots) ViewHeaders(blockNum uint64, f func(sn *HeaderSegment) error) (found bool, err error) {
@@ -686,7 +672,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 		}
 		return nil
 	}); err != nil {
-		return nil
+		return err
 	}
 
 	if err := s.Bodies.View(func(segments []*BodySegment) error {
@@ -701,7 +687,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 		}
 		return nil
 	}); err != nil {
-		return nil
+		return err
 	}
 	// hack to read first block body - to get baseTxId from there
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
@@ -726,7 +712,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 			return nil
 		})
 	}); err != nil {
-		return nil
+		return err
 	}
 
 	return nil
@@ -1394,9 +1380,8 @@ var EmptyTxHash = common.Hash{}
 func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
 	var expectedCount, firstTxID uint64
 	firstBlockNum := blockFrom
-	dir := snapshotDir.Path //nolint
 
-	bodySegmentPath := filepath.Join(dir, SegmentFileName(blockFrom, blockTo, Bodies))
+	bodySegmentPath := filepath.Join(snapshotDir.Path, SegmentFileName(blockFrom, blockTo, Bodies))
 	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
 	if err != nil {
 		return err
@@ -1412,7 +1397,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		}
 		firstTxID = firstBody.BaseTxId
 
-		bodyIdxPath := filepath.Join(dir, IdxFileName(blockFrom, blockTo, Bodies.String()))
+		bodyIdxPath := filepath.Join(snapshotDir.Path, IdxFileName(blockFrom, blockTo, Bodies.String()))
 		idx, err := recsplit.OpenIndex(bodyIdxPath)
 		if err != nil {
 			return err
@@ -1432,7 +1417,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		idx.Close()
 	}
 
-	segmentFilePath := filepath.Join(dir, SegmentFileName(blockFrom, blockTo, Transactions))
+	segmentFilePath := filepath.Join(snapshotDir.Path, SegmentFileName(blockFrom, blockTo, Transactions))
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -1442,43 +1427,30 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	buf := make([]byte, 1024)
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count() - d.EmptyWordsCount(),
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(dir, IdxFileName(blockFrom, blockTo, Transactions.String())),
-		BaseDataID: firstTxID,
-	})
-	if err != nil {
-		return err
-	}
-	txnIdIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
-		Enums:      false,
+		Enums:      true,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(dir, IdxFileName(blockFrom, blockTo, TransactionsId.String())),
+		IndexFile:  filepath.Join(snapshotDir.Path, IdxFileName(blockFrom, blockTo, Transactions.String())),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
 		return err
 	}
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count() - d.EmptyWordsCount(),
+		KeyCount:   d.Count(),
 		Enums:      false,
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(dir, IdxFileName(blockFrom, blockTo, Transactions2Block.String())),
+		IndexFile:  filepath.Join(snapshotDir.Path, IdxFileName(blockFrom, blockTo, Transactions2Block.String())),
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
 		return err
 	}
 	txnHashIdx.LogLvl(log.LvlDebug)
-	txnIdIdx.LogLvl(log.LvlDebug)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 RETRY:
@@ -1521,13 +1493,13 @@ RETRY:
 	}()
 
 	wg := sync.WaitGroup{}
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 2)
 	defer close(errCh)
-	num := make([]byte, 8)
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		hash := make([]byte, 32)
 
 		var j uint64
 		for it := range txsCh {
@@ -1536,17 +1508,17 @@ RETRY:
 				return
 			}
 			j++
-			binary.BigEndian.PutUint64(num, it.i)
-			if err := txnIdIdx.AddKey(num, it.offset); err != nil {
-				errCh <- it.err
-				return
-			}
-			if it.empty {
-				continue
-			}
-			if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
-				errCh <- it.err
-				return
+			if it.empty { // system-txs hash: pad32(txnID)
+				binary.BigEndian.PutUint64(hash, firstTxID+it.i)
+				if err := txnHashIdx.AddKey(hash, it.offset); err != nil {
+					errCh <- err
+					return
+				}
+			} else {
+				if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
+					errCh <- err
+					return
+				}
 			}
 
 			select {
@@ -1566,15 +1538,11 @@ RETRY:
 		} else {
 			errCh <- nil
 		}
-		if err := txnIdIdx.Build(); err != nil {
-			errCh <- fmt.Errorf("txnIdIdx: %w", err)
-		} else {
-			errCh <- nil
-		}
 	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		hash := make([]byte, 32)
 		blockNum := firstBlockNum
 		body := &types.BodyForStorage{}
 		if err := bodiesSegment.WithReadAhead(func() error {
@@ -1600,12 +1568,15 @@ RETRY:
 					blockNum++
 				}
 
-				if it.empty {
-					continue
-				}
-
-				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
-					return err
+				if it.empty { // system-txs hash: pad32(txnID)
+					binary.BigEndian.PutUint64(hash, firstTxID+it.i)
+					if err := txnHash2BlockNumIdx.AddKey(hash, blockNum); err != nil {
+						return err
+					}
+				} else {
+					if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -1632,13 +1603,12 @@ RETRY:
 
 	wg.Wait()
 
-	for i := 0; i < 3; i++ {
+	for i := 0; i < cap(errCh); i++ {
 		err = <-errCh
 		if err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 				txnHashIdx.ResetNextSalt()
-				txnIdIdx.ResetNextSalt()
 				txnHash2BlockNumIdx.ResetNextSalt()
 				goto RETRY
 			}
