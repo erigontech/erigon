@@ -560,7 +560,8 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		}
 
 		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
-		offset := reader.Lookup(txnHash[:])
+		txnId := reader.Lookup(txnHash[:])
+		offset := sn.IdxTxnHash.Lookup2(txnId)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		buf, _ = gg.Next(buf[:0])
