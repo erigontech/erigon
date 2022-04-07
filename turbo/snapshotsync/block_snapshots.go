@@ -689,7 +689,6 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	}); err != nil {
 		return err
 	}
-	log.Info("alex")
 	// hack to read first block body - to get baseTxId from there
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
@@ -1570,14 +1569,14 @@ RETRY:
 
 				if it.empty { // system-txs hash: pad32(txnID)
 					binary.BigEndian.PutUint64(hash, firstTxID+it.i)
-					if err := txnHash2BlockNumIdx.AddKey(hash, it.offset); err != nil {
-						return err
+					if err := txnHash2BlockNumIdx.AddKey(hash, blockNum); err != nil {
+						return fmt.Errorf("1: %w", err)
 					}
 					continue
 				}
 
 				if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
-					return err
+					return fmt.Errorf("2: %w", err)
 				}
 				select {
 				case <-ctx.Done():
