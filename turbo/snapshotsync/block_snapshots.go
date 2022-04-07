@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -1496,7 +1495,6 @@ RETRY:
 	wg := sync.WaitGroup{}
 	errCh := make(chan error, 2)
 	defer close(errCh)
-	bm := roaring64.New()
 
 	wg.Add(1)
 	go func() {
@@ -1510,7 +1508,6 @@ RETRY:
 				return
 			}
 			j++
-			bm.Add(it.offset)
 			if it.empty { // system-txs hash: pad32(txnID)
 				binary.BigEndian.PutUint64(hash, firstTxID+it.i)
 				if err := txnHashIdx.AddKey(hash, it.offset); err != nil {
@@ -1619,9 +1616,6 @@ RETRY:
 		}
 	}
 
-	bm.RunOptimize()
-	gr, ef := txnHashIdx.Stats()
-	fmt.Printf("bm: %d,%d, roaring=%dMb, gr=%dMb, ef=%dMb\n", blockFrom/1000, blockTo/1000, bm.GetSerializedSizeInBytes()/1024/1024, gr/1024/1024, ef/1024/1024)
 	return nil
 }
 
