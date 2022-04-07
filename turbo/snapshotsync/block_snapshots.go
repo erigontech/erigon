@@ -1620,7 +1620,8 @@ RETRY:
 	}
 
 	bm.RunOptimize()
-	fmt.Printf("bm: %d,%d, %dMb\n", blockFrom/1000, blockTo/1000, bm.GetSerializedSizeInBytes()/1024/1024)
+	gr, ef := txnHashIdx.Stats()
+	fmt.Printf("bm: %d,%d, roaring=%dMb, gr=%dMb, ef=%dMb\n", blockFrom/1000, blockTo/1000, bm.GetSerializedSizeInBytes()/1024/1024, gr/1024/1024, ef/1024/1024)
 	return nil
 }
 
