@@ -64,6 +64,19 @@ func DeleteCanonicalHash(db kv.Deleter, number uint64) error {
 	return nil
 }
 
+// IsCanonicalHash determines whether a header with the given hash is on the canonical chain.
+func IsCanonicalHash(db kv.Getter, hash common.Hash) (bool, error) {
+	number := ReadHeaderNumber(db, hash)
+	if number == nil {
+		return false, nil
+	}
+	canonicalHash, err := ReadCanonicalHash(db, *number)
+	if err != nil {
+		return false, err
+	}
+	return canonicalHash != (common.Hash{}) && canonicalHash == hash, nil
+}
+
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	data, err := db.GetOne(kv.HeaderNumber, hash.Bytes())
