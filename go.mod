@@ -15,7 +15,7 @@ require (
 	github.com/holiman/uint256 v1.2.0
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
-	github.com/matryer/moq v0.2.6
+	github.com/matryer/moq v0.2.7
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.7.1
 	github.com/torquem-ch/mdbx-go v0.23.1
@@ -23,7 +23,7 @@ require (
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20220131195533-30dcbda58838
 	golang.org/x/sys v0.0.0-20220204135822-1c1b9b1eba6a
-	google.golang.org/grpc v1.41.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.1.0
-	google.golang.org/protobuf v1.27.1
+	google.golang.org/grpc v1.45.0
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
+	google.golang.org/protobuf v1.28.0
 )
