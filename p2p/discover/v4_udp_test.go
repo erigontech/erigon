@@ -172,6 +172,10 @@ func (req testPacket) Kind() byte   { return byte(req) }
 func (req testPacket) Name() string { return "" }
 
 func TestUDPv4_responseTimeouts(t *testing.T) {
+	if runtime.GOOS == `darwin` {
+		t.Skip("unstable test on darwin")
+	}
+
 	t.Parallel()
 	test := newUDPTest(t)
 	defer test.close()
