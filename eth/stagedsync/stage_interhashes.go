@@ -186,16 +186,19 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 			return err
 		}
 		if !storage && len(v) > 0 {
-			newValue, err := p.db.GetOne(kv.PlainState, k)
-			if err != nil {
-				return err
-			}
 
 			var oldAccount accounts.Account
 			if err := oldAccount.DecodeForStorage(v); err != nil {
 				return err
 			}
+
 			if oldAccount.Incarnation > 0 {
+
+				newValue, err := p.db.GetOne(kv.PlainState, k)
+				if err != nil {
+					return err
+				}
+
 				if len(newValue) == 0 { // self-destructed
 					deletedAccounts = append(deletedAccounts, newK)
 				} else { // turns incarnation to zero
