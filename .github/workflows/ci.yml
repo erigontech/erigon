@@ -37,8 +37,10 @@ jobs:
           shasum -a256 ./build/bin/erigon > erigon1.sha256
           make erigon
           shasum -a256 ./build/bin/erigon > erigon2.sha256
-          make erigon
+          rm ./build/bin/erigon && make erigon
           shasum -a256 ./build/bin/erigon > erigon3.sha256
+          rm ./build/bin/erigon && make all
+          shasum -a256 ./build/bin/erigon > erigon4.sha256
           if ! cmp -s erigon1.sha256 erigon2.sha256; then
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; cat erigon3.sha256; exit 1
           fi
