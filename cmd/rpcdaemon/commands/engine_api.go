@@ -215,10 +215,6 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	}
 
 	defer tx.Rollback()
-	// terminal block number must always be zero
-	if beaconConfig.TerminalBlockNumber.ToInt().Cmp(common.Big0) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("received the wrong terminal block number. expected zero, but instead got: %d", beaconConfig.TerminalBlockNumber.ToInt())
-	}
 
 	chainConfig, err := e.BaseAPI.chainConfig(tx)
 
@@ -229,30 +225,30 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	terminalTotalDifficulty := chainConfig.TerminalTotalDifficulty
 
 	if terminalTotalDifficulty == nil {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have the terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer doesn't have a terminal total difficulty. expected: %v", beaconConfig.TerminalTotalDifficulty)
 	}
 
 	if terminalTotalDifficulty.Cmp((*big.Int)(beaconConfig.TerminalTotalDifficulty)) != 0 {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong total terminal difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal total difficulty. expected %v, but instead got: %d", beaconConfig.TerminalTotalDifficulty, terminalTotalDifficulty)
 	}
 
-	if chainConfig.TerminalBlockHash != (common.Hash{}) && beaconConfig.TerminalBlockHash != (common.Hash{}) &&
-		chainConfig.TerminalBlockHash != beaconConfig.TerminalBlockHash {
-		return TransitionConfiguration{}, fmt.Errorf("the execution layer has the wrong block hash. expected %s, but instead got: %s", beaconConfig.TerminalBlockHash, chainConfig.TerminalBlockHash)
+	if chainConfig.TerminalBlockHash != beaconConfig.TerminalBlockHash {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal block hash. expected %s, but instead got: %s", beaconConfig.TerminalBlockHash, chainConfig.TerminalBlockHash)
 	}
 
-	if chainConfig.TerminalBlockNumber == nil {
-		return TransitionConfiguration{
-			TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-			TerminalBlockHash:       chainConfig.TerminalBlockHash,
-			TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
-		}, nil
+	terminalBlockNumber := chainConfig.TerminalBlockNumber
+	if terminalBlockNumber == nil {
+		terminalBlockNumber = common.Big0
+	}
+
+	if terminalBlockNumber.Cmp((*big.Int)(beaconConfig.TerminalBlockNumber)) != 0 {
+		return TransitionConfiguration{}, fmt.Errorf("the execution layer has a wrong terminal block number. expected %v, but instead got: %d", beaconConfig.TerminalBlockNumber, terminalBlockNumber)
 	}
 
 	return TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       chainConfig.TerminalBlockHash,
-		TerminalBlockNumber:     (*hexutil.Big)(chainConfig.TerminalBlockNumber),
+		TerminalBlockNumber:     (*hexutil.Big)(terminalBlockNumber),
 	}, nil
 }
 
