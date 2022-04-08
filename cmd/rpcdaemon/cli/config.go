@@ -571,7 +571,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	log.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
 	if len(cfg.JWTSecretPath) == 0 {
-		cfg.JWTSecretPath = "jwt.hex"
+		cfg.JWTSecretPath = JwtDefaultFile
 	}
 	if data, err := os.ReadFile(cfg.JWTSecretPath); err == nil {
 		jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
