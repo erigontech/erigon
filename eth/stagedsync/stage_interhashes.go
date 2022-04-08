@@ -185,30 +185,30 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 		if err != nil {
 			return err
 		}
-		if !storage {
+		if !storage && len(v) > 0 {
 			newValue, err := p.db.GetOne(kv.PlainState, k)
 			if err != nil {
 				return err
 			}
-			if len(v) > 0 {
-				var oldAccount accounts.Account
-				if err := oldAccount.DecodeForStorage(v); err != nil {
-					return err
-				}
-				if oldAccount.Incarnation > 0 {
-					if len(newValue) == 0 { // self-destructed
+
+			var oldAccount accounts.Account
+			if err := oldAccount.DecodeForStorage(v); err != nil {
+				return err
+			}
+			if oldAccount.Incarnation > 0 {
+				if len(newValue) == 0 { // self-destructed
+					deletedAccounts = append(deletedAccounts, newK)
+				} else { // turns incarnation to zero
+					var newAccount accounts.Account
+					if err := newAccount.DecodeForStorage(newValue); err != nil {
+						return err
+					}
+					if newAccount.Incarnation < oldAccount.Incarnation {
 						deletedAccounts = append(deletedAccounts, newK)
-					} else { // turns incarnation to zero
-						var newAccount accounts.Account
-						if err := newAccount.DecodeForStorage(newValue); err != nil {
-							return err
-						}
-						if newAccount.Incarnation < oldAccount.Incarnation {
-							deletedAccounts = append(deletedAccounts, newK)
-						}
 					}
 				}
 			}
+
 		}
 
 		return next(dbKey, newK, v)
