@@ -392,23 +392,21 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 }
 
 func retireBlocks(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
+	// delete portion of old blocks in any case
+	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
+		canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
+		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
+			return nil
+		}
+	}
+
+	// if something already happens in background - noop
 	if cfg.blockRetire.Working() {
 		return nil
 	}
 	if res := cfg.blockRetire.Result(); res != nil {
 		if res.Err != nil {
 			return fmt.Errorf("[%s] retire blocks last error: %w, fromBlock=%d, toBlock=%d", s.LogPrefix(), res.Err, res.BlockFrom, res.BlockTo)
-		}
-	}
-	if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
-		// TODO: remove this check for the release
-		if err := cfg.blockRetire.Snapshots().EnsureExpectedBlocksAreAvailable(cfg.snapshotHashesCfg); err != nil {
-			return err
-		}
-
-		canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
-		if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
-			return nil
 		}
 	}
 
