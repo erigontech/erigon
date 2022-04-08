@@ -8,7 +8,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -246,8 +245,6 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
 				log.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
-			case <-m.quit:
-				return common.ErrStopped
 			}
 		}
 		if err := collector.Load(m.db, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
