@@ -462,6 +462,9 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 			if api.Namespace == "eth" {
 				engineAPI = append(engineAPI, api)
 			}
+			if api.Namespace == "net" {
+				engineAPI = append(engineAPI, api)
+			}
 		}
 	}
 
