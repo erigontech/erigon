@@ -126,8 +126,7 @@ func NewPeer(id enode.ID, pubkey [64]byte, name string, caps []Cap) *Peer {
 	pipe, _ := net.Pipe()
 	node := enode.SignNull(new(enr.Record), id)
 	conn := &conn{fd: pipe, transport: nil, node: node, caps: caps, name: name}
-	peer := newPeer(log.Root(), conn, nil)
-	peer.pubkey = pubkey
+	peer := newPeer(log.Root(), conn, nil, pubkey)
 	close(peer.closed) // ensures Disconnect doesn't block
 	return peer
 }
@@ -210,7 +209,7 @@ func (p *Peer) Inbound() bool {
 	return p.rw.is(inboundConn)
 }
 
-func newPeer(logger log.Logger, conn *conn, protocols []Protocol) *Peer {
+func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byte) *Peer {
 	protomap := matchProtocols(protocols, conn.caps, conn)
 	p := &Peer{
 		rw:       conn,
@@ -220,6 +219,7 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol) *Peer {
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
 		log:      logger.New("id", conn.node.ID(), "conn", conn.flags),
+		pubkey:   pubkey,
 	}
 	return p
 }
