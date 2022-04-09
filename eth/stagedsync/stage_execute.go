@@ -578,11 +578,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = PruneTable(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxUint64); err != nil {
+		if err = PruneTable(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxInt32); err != nil {
 			return err
 		}
 		// LogIndex.Prune will read everything what not pruned here
-		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxUint64); err != nil {
+		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxInt32); err != nil {
 			return err
 		}
 	}
