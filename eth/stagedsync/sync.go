@@ -262,7 +262,7 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 	var logCtx []interface{}
 	count := 0
 	for i := range timings {
-		if timings[i].took < 10*time.Millisecond {
+		if timings[i].took < 50*time.Millisecond {
 			continue
 		}
 		count++
@@ -278,7 +278,7 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 		}
 	}
 	if len(logCtx) > 0 {
-		log.Info("Timings (slower than 10ms)", logCtx...)
+		log.Info("Timings (slower than 50ms)", logCtx...)
 	}
 
 	if tx == nil {
