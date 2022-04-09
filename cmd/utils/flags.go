@@ -152,8 +152,7 @@ var (
 	}
 	SyncModeFlag = cli.StringFlag{
 		Name:  "syncmode",
-		Usage: `Blockchain sync mode ("snap", "fast")`,
-		Value: string(ethconfig.Defaults.SyncMode),
+		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "fast" in all other cases`,
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
@@ -1352,26 +1351,14 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
-	if ctx.GlobalIsSet(SyncModeFlag.Name) {
-		syncMode := ctx.GlobalString(SyncModeFlag.Name)
-		if syncMode == string(ethconfig.FastSync) {
-			cfg.SyncMode = ethconfig.FastSync
-		} else if syncMode == string(ethconfig.SnapSync) {
-			cfg.SyncMode = ethconfig.SnapSync
-			cfg.Snapshot.Enabled = true
-		} else {
-			panic(fmt.Errorf("invalid sync mode: %s", cfg.SyncMode))
-		}
+	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
+	snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
+	if err != nil {
+		panic(err)
 	}
-	if cfg.Snapshot.Enabled {
-		snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
-		if err != nil {
-			panic(err)
-		}
-		cfg.SnapshotDir = snDir
-	}
+	cfg.SnapshotDir = snDir
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
-	if cfg.Snapshot.Enabled && !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
+	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
 		var downloadRateStr, uploadRateStr string
 		if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
 			downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
