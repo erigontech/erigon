@@ -73,7 +73,7 @@ func (cs *ControlServerImpl) SendBodyRequest(ctx context.Context, req *bodydownl
 			if sentPeers == nil || len(sentPeers.Peers) == 0 {
 				continue
 			}
-			return ConvertH256ToPeerID(sentPeers.Peers[0]), true
+			return ConvertH512ToPeerID(sentPeers.Peers[0]), true
 		}
 	}
 	return enode.ID{}, false
@@ -125,7 +125,7 @@ func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerd
 			if sentPeers == nil || len(sentPeers.Peers) == 0 {
 				continue
 			}
-			return ConvertH256ToPeerID(sentPeers.Peers[0]), true
+			return ConvertH512ToPeerID(sentPeers.Peers[0]), true
 		}
 	}
 	return enode.ID{}, false
@@ -147,7 +147,7 @@ func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
 func (cs *ControlServerImpl) Penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
 	for i := range penalties {
 		outreq := proto_sentry.PenalizePeerRequest{
-			PeerId:  gointerfaces.ConvertHashToH256(penalties[i].PeerID),
+			PeerId:  gointerfaces.ConvertHashToH512(penalties[i].PeerID),
 			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 		}
 		for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
