@@ -72,7 +72,7 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode: FastSync,
+	SyncMode: SnapSync,
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
