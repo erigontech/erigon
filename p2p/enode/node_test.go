@@ -44,7 +44,7 @@ func TestPythonInterop(t *testing.T) {
 	}
 
 	var (
-		wantID  = HexID("ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f")
+		wantID  = HexID("a448f24c6d18e575453db13171562b71999873db5b286df957af199ec94617f7")
 		wantSeq = uint64(1)
 		wantIP  = enr.IPv4{127, 0, 0, 1}
 		wantUDP = enr.UDP(30303)
@@ -53,7 +53,7 @@ func TestPythonInterop(t *testing.T) {
 		t.Errorf("wrong seq: got %d, want %d", n.Seq(), wantSeq)
 	}
 	if n.ID() != wantID {
-		t.Errorf("wrong id: got %s, want %s", n.ID(), wantID)
+		t.Errorf("wrong id: got %x, want %x", n.ID(), wantID)
 	}
 	want := map[enr.Entry]interface{}{new(enr.IPv4): &wantIP, new(enr.UDP): &wantUDP}
 	for k, v := range want {
@@ -65,9 +65,9 @@ func TestPythonInterop(t *testing.T) {
 }
 
 func TestHexID(t *testing.T) {
-	ref := ID{0, 0, 0, 0, 0, 0, 0, 128, 106, 217, 182, 31, 165, 174, 1, 67, 7, 235, 220, 150, 66, 83, 173, 205, 159, 44, 10, 57, 42, 161, 26, 188, 0, 0, 0, 0, 0, 0, 0, 128, 106, 217, 182, 31, 165, 174, 1, 67, 7, 235, 220, 150, 66, 83, 173, 205, 159, 44, 10, 57, 42, 161, 26, 188}
-	id1 := HexID("0x00000000000000806ad9b61fa5ae014307ebdc964253adcd9f2c0a392aa11abc00000000000000806ad9b61fa5ae014307ebdc964253adcd9f2c0a392aa11abc")
-	id2 := HexID("00000000000000806ad9b61fa5ae014307ebdc964253adcd9f2c0a392aa11abc00000000000000806ad9b61fa5ae014307ebdc964253adcd9f2c0a392aa11abc")
+	ref := ID{0, 0, 0, 0, 0, 0, 0, 128, 106, 217, 182, 31, 165, 174, 1, 67, 7, 235, 220, 150, 66, 83, 173, 205, 159, 44, 10, 57, 42, 161, 26, 188}
+	id1 := HexID("0x00000000000000806ad9b61fa5ae014307ebdc964253adcd9f2c0a392aa11abc")
+	id2 := HexID("00000000000000806ad9b61fa5ae014307ebdc964253adcd9f2c0a392aa11abc")
 
 	if id1 != ref {
 		t.Errorf("wrong id1\ngot  %v\nwant %v", id1[:], ref[:])
@@ -83,12 +83,8 @@ func TestID_textEncoding(t *testing.T) {
 		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x20,
 		0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x30,
 		0x31, 0x32,
-		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x10,
-		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x20,
-		0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x30,
-		0x31, 0x32,
 	}
-	hex := "01020304050607080910111213141516171819202122232425262728293031320102030405060708091011121314151617181920212223242526272829303132"
+	hex := "0102030405060708091011121314151617181920212223242526272829303132"
 
 	text, err := ref.MarshalText()
 	if err != nil {

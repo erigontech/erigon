@@ -42,7 +42,7 @@ func TestEmptyNodeID(t *testing.T) {
 	}
 
 	require.NoError(t, SignV4(&r, privkey))
-	expected := "ca634cae0d49acb401d8a4c6b6fe8c55b70d115bf400769cc1400f3258cd31387574077f301b421bc84df7266c44e9e6d569fc56be00812904767bf5ccd1fc7f"
+	expected := "a448f24c6d18e575453db13171562b71999873db5b286df957af199ec94617f7"
 	assert.Equal(t, expected, hex.EncodeToString(ValidSchemes.NodeAddr(&r)))
 }
 

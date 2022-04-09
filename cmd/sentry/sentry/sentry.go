@@ -77,8 +77,8 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	return p
 }
 
-func (pi *PeerInfo) ID() enode.ID {
-	return pi.peer.ID()
+func (pi *PeerInfo) ID() [64]byte {
+	return pi.peer.Pubkey()
 }
 
 // AddDeadline adds given deadline to the list of deadlines
@@ -164,10 +164,10 @@ func (pi *PeerInfo) Removed() bool {
 	}
 }
 
-// ConvertH512ToPeerID() ensures the return type is enode.ID rather than [64]byte
+// ConvertH512ToPeerID() ensures the return type is [64]byte
 // so that short variable declarations will still be formatted as hex in logs
-func ConvertH512ToPeerID(h512 *proto_types.H512) enode.ID {
-	return enode.ID(gointerfaces.ConvertH512ToHash(h512))
+func ConvertH512ToPeerID(h512 *proto_types.H512) [64]byte {
+	return gointerfaces.ConvertH512ToHash(h512)
 }
 
 func makeP2PServer(
@@ -195,7 +195,7 @@ func makeP2PServer(
 func handShake(
 	ctx context.Context,
 	status *proto_sentry.StatusData,
-	peerID enode.ID,
+	peerID [64]byte,
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
@@ -297,11 +297,11 @@ func handShake(
 
 func runPeer(
 	ctx context.Context,
-	peerID enode.ID,
+	peerID [64]byte,
 	protocol uint,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
-	send func(msgId proto_sentry.MessageId, peerID enode.ID, b []byte),
+	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 ) error {
 	printTime := time.Now().Add(time.Minute)
@@ -527,7 +527,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 		Length:         17,
 		DialCandidates: dialCandidates,
 		Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-			peerID := peer.ID()
+			peerID := peer.Pubkey()
 			if ss.getPeer(peerID) != nil {
 				log.Trace(fmt.Sprintf("[%s] Peer already has connection", peerID))
 				return nil
@@ -563,7 +563,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 		NodeInfo: func() interface{} {
 			return readNodeInfo()
 		},
-		PeerInfo: func(peerID enode.ID) interface{} {
+		PeerInfo: func(peerID [64]byte) interface{} {
 			if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 				return peerInfo.peer.Info()
 			}
@@ -619,7 +619,7 @@ func (ss *SentryServerImpl) rangePeers(f func(peerInfo *PeerInfo) bool) {
 	})
 }
 
-func (ss *SentryServerImpl) getPeer(peerID enode.ID) (peerInfo *PeerInfo) {
+func (ss *SentryServerImpl) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	if value, ok := ss.GoodPeers.Load(peerID); ok {
 		peerInfo := value.(*PeerInfo)
 		if peerInfo != nil {
@@ -630,7 +630,7 @@ func (ss *SentryServerImpl) getPeer(peerID enode.ID) (peerInfo *PeerInfo) {
 	return nil
 }
 
-func (ss *SentryServerImpl) removePeer(peerID enode.ID) {
+func (ss *SentryServerImpl) removePeer(peerID [64]byte) {
 	if value, ok := ss.GoodPeers.LoadAndDelete(peerID); ok {
 		peerInfo := value.(*PeerInfo)
 		if peerInfo != nil {
@@ -654,7 +654,7 @@ func (ss *SentryServerImpl) writePeer(logPrefix string, peerInfo *PeerInfo, msgc
 	})
 }
 
-func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID enode.ID) error {
+func (ss *SentryServerImpl) startSync(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
 	switch ss.Protocol.Version {
 	case eth.ETH66:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
@@ -899,7 +899,7 @@ func (ss *SentryServerImpl) GetStatus() *proto_sentry.StatusData {
 	return ss.statusData
 }
 
-func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID enode.ID, b []byte) {
+func (ss *SentryServerImpl) send(msgID proto_sentry.MessageId, peerID [64]byte, b []byte) {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
 	req := &proto_sentry.InboundMessage{

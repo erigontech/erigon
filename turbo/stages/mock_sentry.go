@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -209,7 +208,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) (enode.ID, bool) { return enode.ID{}, false }
+	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) ([64]byte, bool) { return [64]byte{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
@@ -223,7 +222,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
-	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool) { return enode.ID{}, false }
+	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
 	if !cfg.TxPool.Disable {
