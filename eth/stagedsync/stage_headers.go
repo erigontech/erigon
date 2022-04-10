@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -45,7 +44,7 @@ type HeadersCfg struct {
 	hd                *headerdownload.HeaderDownload
 	bodyDownload      *bodydownload.BodyDownload
 	chainConfig       params.ChainConfig
-	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool)
+	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
 	batchSize         datasize.ByteSize
@@ -64,7 +63,7 @@ func StageHeadersCfg(
 	headerDownload *headerdownload.HeaderDownload,
 	bodyDownload *bodydownload.BodyDownload,
 	chainConfig params.ChainConfig,
-	headerReqSend func(context.Context, *headerdownload.HeaderRequest) (enode.ID, bool),
+	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
 	batchSize datasize.ByteSize,
