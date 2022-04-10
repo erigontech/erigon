@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -36,7 +37,8 @@ import (
 )
 
 const (
-	logInterval = 30 * time.Second
+	logInterval    = 30 * time.Second
+	lruDefaultSize = 1_000_000
 )
 
 type HasChangeSetWriter interface {
@@ -219,12 +221,16 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	startTime := time.Now()
 
+	whitelistedTables := []string{kv.Code, kv.ContractCode}
 	var batch ethdb.DbWithPendingMutations
-	// state is stored through ethdb batches
-	batch, err = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+	// Contract code is unlikely to change too much, so let's keep it cached
+	contractCodeCache, err := lru.New(lruDefaultSize)
 	if err != nil {
 		return err
 	}
+	// state is stored through ethdb batches
+	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+
 	defer batch.Rollback()
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
@@ -306,10 +312,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch, err = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
-			if err != nil {
-				return err
-			}
+			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
