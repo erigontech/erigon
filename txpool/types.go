@@ -457,7 +457,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	return p, nil
 }
 
-type PeerID *types.H256
+type PeerID *types.H512
 
 type Hashes []byte // flatten list of 32-byte hashes
 

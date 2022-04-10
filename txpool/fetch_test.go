@@ -111,7 +111,7 @@ func TestSendTxPropagate(t *testing.T) {
 	t.Run("few local byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
-			return &sentry.SentPeers{Peers: make([]*types.H256, 5)}, nil
+			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		send.BroadcastPooledTxs(testRlps(2))
@@ -127,7 +127,7 @@ func TestSendTxPropagate(t *testing.T) {
 		m := NewMockSentry(ctx)
 
 		m.SendMessageToAllFunc = func(contextMoqParam context.Context, outboundMessageData *sentry.OutboundMessageData) (*sentry.SentPeers, error) {
-			return &sentry.SentPeers{Peers: make([]*types.H256, 5)}, nil
+			return &sentry.SentPeers{Peers: make([]*types.H512, 5)}, nil
 		}
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
 		expectPeers := toPeerIDs(1, 2, 42)

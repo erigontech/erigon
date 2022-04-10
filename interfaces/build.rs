@@ -7,7 +7,6 @@ fn config() -> prost_build::Config {
 
 fn make_protos(protos: &[&str]) {
     tonic_build::configure()
-        .format(false)
         .compile_with_config(config(), protos, &["."])
         .unwrap();
 }
