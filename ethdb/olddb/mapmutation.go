@@ -71,8 +71,6 @@ func (m *mapmutation) RwKV() kv.RwDB {
 }
 
 func (m *mapmutation) isWhitelisted(table string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	_, ok := m.whitelistedTables[table]
 	return ok
 }
@@ -251,7 +249,6 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 	defer logEvery.Stop()
 	count := 0
 	total := float64(m.count)
-
 	for table, bucket := range m.puts {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
