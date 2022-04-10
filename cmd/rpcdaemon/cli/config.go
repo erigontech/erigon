@@ -82,7 +82,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
-	rootCmd.PersistentFlags().StringVar(&cfg.SyncMode, "syncmode", string(ethconfig.Defaults.SyncMode), utils.SyncModeFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.SyncModeCli, "syncmode", "", utils.SyncModeFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, ethconfig.FlagSnapshot, false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
@@ -106,12 +106,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		if cfg.SyncMode == string(ethconfig.FastSync) {
-		} else if cfg.SyncMode == string(ethconfig.SnapSync) {
-			cfg.Snapshot.Enabled = true
-		} else {
-			return fmt.Errorf("invalid sync mode: %s", cfg.SyncMode)
-		}
 		cfg.SingleNodeMode = cfg.DataDir != "" || cfg.Chaindata != ""
 		if cfg.SingleNodeMode {
 			if cfg.DataDir == "" {
@@ -120,7 +114,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 			if cfg.Chaindata == "" {
 				cfg.Chaindata = filepath.Join(cfg.DataDir, "chaindata")
 			}
-			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
@@ -312,6 +305,12 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
+		}
+
+		cfg.SyncMode = ethconfig.SyncModeByChainName(cc.ChainName, cfg.SyncModeCli)
+		cfg.Snapshot.Enabled = cfg.SyncMode == ethconfig.SnapSync
+		if cfg.SingleNodeMode {
+			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
 		}
 
 		// if chain config has terminal total difficulty then rpc has to have these API's to function

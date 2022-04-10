@@ -32,6 +32,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/params/networkname"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -150,7 +151,8 @@ func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	SyncMode SyncMode
+	SyncModeCli string
+	SyncMode    SyncMode
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -292,3 +294,17 @@ const (
 	FastSync SyncMode = "fast"
 	SnapSync SyncMode = "snap"
 )
+
+func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
+	if syncCliFlag == "fast" {
+		return FastSync
+	} else if syncCliFlag == "snap" {
+		return SnapSync
+	}
+	switch chain {
+	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName:
+		return SnapSync
+	default:
+		return FastSync
+	}
+}
