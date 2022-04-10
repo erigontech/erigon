@@ -221,7 +221,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+	batch, err = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+	if err != nil {
+		return err
+	}
 	defer batch.Rollback()
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
@@ -303,7 +306,10 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+			batch, err = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+			if err != nil {
+				return err
+			}
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}

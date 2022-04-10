@@ -8,14 +8,18 @@ import (
 	"time"
 	"unsafe"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/log/v3"
 )
 
+const lruDefaultSize = 5_000_000
+
 type mapmutation struct {
 	puts   map[string]map[string][]byte
+	gets   *lru.Cache
 	db     kv.RwTx
 	quit   <-chan struct{}
 	clean  func()
@@ -33,20 +37,29 @@ type mapmutation struct {
 // defer batch.Rollback()
 // ... some calculations on `batch`
 // batch.Commit()
-func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string) *mapmutation {
+func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string) (*mapmutation, error) {
 	clean := func() {}
 	if quit == nil {
 		ch := make(chan struct{})
 		clean = func() { close(ch) }
 		quit = ch
 	}
+	gets, err := lru.New(lruDefaultSize)
+	if err != nil {
+		return nil, err
+	}
 	return &mapmutation{
 		db:     tx,
 		puts:   make(map[string]map[string][]byte),
+		gets:   gets,
 		quit:   quit,
 		clean:  clean,
 		tmpdir: tmpdir,
-	}
+	}, nil
+}
+
+func makeCacheKey(table string, key []byte) string {
+	return string(append(key, table...))
 }
 
 func (m *mapmutation) RwKV() kv.RwDB {
@@ -62,12 +75,16 @@ func (m *mapmutation) getMem(table string, key []byte) ([]byte, bool) {
 	if _, ok := m.puts[table]; !ok {
 		return nil, false
 	}
-	var value []byte
-	var ok bool
-	if value, ok = m.puts[table][*(*string)(unsafe.Pointer(&key))]; !ok {
-		return nil, false
+	if value, ok := m.puts[table][*(*string)(unsafe.Pointer(&key))]; ok {
+		return value, ok
 	}
-	return value, ok
+
+	if m.gets != nil {
+		if value, ok := m.gets.Get(makeCacheKey(table, key)); ok {
+			return value.([]byte), ok
+		}
+	}
+	return nil, false
 }
 
 func (m *mapmutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
@@ -121,6 +138,9 @@ func (m *mapmutation) GetOne(table string, key []byte) ([]byte, error) {
 		value, err := m.db.GetOne(table, key)
 		if err != nil {
 			return nil, err
+		}
+		if m.gets != nil {
+			m.gets.Add(makeCacheKey(table, key), value)
 		}
 
 		return value, nil
@@ -269,6 +289,11 @@ func (m *mapmutation) Commit() error {
 	m.puts = map[string]map[string][]byte{}
 	m.size = 0
 	m.count = 0
+	var err error
+
+	if m.gets, err = lru.New(lruDefaultSize); err != nil {
+		log.Warn("Could not create cache for batch", "err", err)
+	}
 	m.clean()
 	return nil
 }
@@ -280,6 +305,11 @@ func (m *mapmutation) Rollback() {
 	m.size = 0
 	m.count = 0
 	m.size = 0
+	var err error
+
+	if m.gets, err = lru.New(lruDefaultSize); err != nil {
+		log.Warn("Could not create cache for batch", "err", err)
+	}
 	m.clean()
 }
 
