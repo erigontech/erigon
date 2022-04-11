@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +41,7 @@ func BenchmarkName(b *testing.B) {
 	txs := make([]*metaTx, 10_000)
 	p := NewSubPool(BaseFeeSubPool, 1024)
 	for i := 0; i < len(txs); i++ {
-		txs[i] = &metaTx{Tx: &TxSlot{}}
+		txs[i] = &metaTx{Tx: &types.TxSlot{}}
 	}
 	for i := 0; i < len(txs); i++ {
 		p.Add(txs[i])
@@ -87,7 +88,7 @@ func BenchmarkName2(b *testing.B) {
 
 func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Hashes, 100)
+	ch := make(chan types.Hashes, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -114,8 +115,8 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
-	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -124,16 +125,16 @@ func TestNonceFromAddress(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
 	{
-		var txSlots TxSlots
-		txSlot1 := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  3,
+		var txSlots types.TxSlots
+		txSlot1 := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot1.IDHash[0] = 1
 		txSlots.Append(txSlot1, addr[:], true)
@@ -146,19 +147,19 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 
 	{
-		txSlots := TxSlots{}
-		txSlot2 := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  4,
+		txSlots := types.TxSlots{}
+		txSlot2 := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  4,
 		}
 		txSlot2.IDHash[0] = 2
-		txSlot3 := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  6,
+		txSlot3 := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  6,
 		}
 		txSlot3.IDHash[0] = 3
 		txSlots.Append(txSlot2, addr[:], true)
@@ -174,12 +175,12 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	// test too expencive tx
 	{
-		var txSlots TxSlots
-		txSlot1 := &TxSlot{
-			tip:    300000,
-			feeCap: 9 * common.Ether,
-			gas:    100000,
-			nonce:  3,
+		var txSlots types.TxSlots
+		txSlot1 := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 9 * common.Ether,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot1.IDHash[0] = 4
 		txSlots.Append(txSlot1, addr[:], true)
@@ -192,12 +193,12 @@ func TestNonceFromAddress(t *testing.T) {
 
 	// test too low nonce
 	{
-		var txSlots TxSlots
-		txSlot1 := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  1,
+		var txSlots types.TxSlots
+		txSlot1 := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  1,
 		}
 		txSlot1.IDHash[0] = 5
 		txSlots.Append(txSlot1, addr[:], true)
@@ -211,7 +212,7 @@ func TestNonceFromAddress(t *testing.T) {
 
 func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Hashes, 100)
+	ch := make(chan types.Hashes, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -238,8 +239,8 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
-	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -248,16 +249,16 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  3,
+		var txSlots types.TxSlots
+		txSlot := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
@@ -270,12 +271,12 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped only feeCap, transaction not accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    300000,
-			feeCap: 3000000,
-			gas:    100000,
-			nonce:  3,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 3000000,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
@@ -290,12 +291,12 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped only tip, transaction not accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    3000000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  3,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    3000000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot.IDHash[0] = 3
 		txSlots.Append(txSlot, addr[:], true)
@@ -310,12 +311,12 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	// Bumped both tip and feeCap by 10%, tx accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    330000,
-			feeCap: 330000,
-			gas:    100000,
-			nonce:  3,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    330000,
+			FeeCap: 330000,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot.IDHash[0] = 4
 		txSlots.Append(txSlot, addr[:], true)
@@ -332,7 +333,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 
 func TestReverseNonces(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Hashes, 100)
+	ch := make(chan types.Hashes, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -359,8 +360,8 @@ func TestReverseNonces(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
-	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -369,16 +370,16 @@ func TestReverseNonces(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 	// 1. Send high fee transaction with nonce gap
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
-			tip:    500_000,
-			feeCap: 3_000_000,
-			gas:    100000,
-			nonce:  3,
+		var txSlots types.TxSlots
+		txSlot := &types.TxSlot{
+			Tip:    500_000,
+			FeeCap: 3_000_000,
+			Gas:    100000,
+			Nonce:  3,
 		}
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
@@ -400,12 +401,12 @@ func TestReverseNonces(t *testing.T) {
 	}
 	// 2. Send low fee (below base fee) transaction without nonce gap
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
-			tip:    500_000,
-			feeCap: 500_000,
-			gas:    100000,
-			nonce:  2,
+		var txSlots types.TxSlots
+		txSlot := &types.TxSlot{
+			Tip:    500_000,
+			FeeCap: 500_000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
@@ -427,12 +428,12 @@ func TestReverseNonces(t *testing.T) {
 	}
 
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
-			tip:    600_000,
-			feeCap: 3_000_000,
-			gas:    100000,
-			nonce:  2,
+		var txSlots types.TxSlots
+		txSlot := &types.TxSlot{
+			Tip:    600_000,
+			FeeCap: 3_000_000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 3
 		txSlots.Append(txSlot, addr[:], true)
@@ -460,7 +461,7 @@ func TestReverseNonces(t *testing.T) {
 // even though logs show they are broadcast
 func TestTxPoke(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan Hashes, 100)
+	ch := make(chan types.Hashes, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -487,8 +488,8 @@ func TestTxPoke(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	v := make([]byte, EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
-	EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 		Action:  remote.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -497,17 +498,17 @@ func TestTxPoke(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, TxSlots{}, TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
-	var idHash Hashes
+	var idHash types.Hashes
 	{
-		var txSlots TxSlots
-		txSlot := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  2,
+		var txSlots types.TxSlots
+		txSlot := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 1
 		idHash = append(idHash, txSlot.IDHash[:]...)
@@ -519,7 +520,7 @@ func TestTxPoke(t *testing.T) {
 			assert.Equal(Success, reason, reason.String())
 		}
 	}
-	var promoted Hashes
+	var promoted types.Hashes
 	select {
 	case promoted = <-ch:
 		if !bytes.Equal(idHash, promoted.DedupCopy()) {
@@ -530,12 +531,12 @@ func TestTxPoke(t *testing.T) {
 	}
 	// Send the same transaction, not accepted
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  2,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
@@ -559,12 +560,12 @@ func TestTxPoke(t *testing.T) {
 	}
 	// Send different transaction, but only with tip bumped
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    3000000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  2,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    3000000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)
@@ -589,12 +590,12 @@ func TestTxPoke(t *testing.T) {
 
 	// Send the same transaction, but as remote
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    300000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  2,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    300000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 1
 		txSlots.Append(txSlot, addr[:], true)
@@ -611,12 +612,12 @@ func TestTxPoke(t *testing.T) {
 	}
 	// Send different transaction, but only with tip bumped, as a remote
 	{
-		txSlots := TxSlots{}
-		txSlot := &TxSlot{
-			tip:    3000000,
-			feeCap: 300000,
-			gas:    100000,
-			nonce:  2,
+		txSlots := types.TxSlots{}
+		txSlot := &types.TxSlot{
+			Tip:    3000000,
+			FeeCap: 300000,
+			Gas:    100000,
+			Nonce:  2,
 		}
 		txSlot.IDHash[0] = 2
 		txSlots.Append(txSlot, addr[:], true)

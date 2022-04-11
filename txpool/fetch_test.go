@@ -18,6 +18,7 @@ package txpool
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	types3 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -88,7 +90,7 @@ func TestSendTxPropagate(t *testing.T) {
 	t.Run("much remote byHash", func(t *testing.T) {
 		m := NewMockSentry(ctx)
 		send := NewSend(ctx, []direct.SentryClient{direct.NewSentryClientDirect(direct.ETH66, m)}, nil)
-		list := make(Hashes, p2pTxPacketLimit*3)
+		list := make(types3.Hashes, p2pTxPacketLimit*3)
 		for i := 0; i < len(list); i += 32 {
 			b := []byte(fmt.Sprintf("%x", i))
 			copy(list[i:i+32], b)
@@ -137,13 +139,20 @@ func TestSendTxPropagate(t *testing.T) {
 		require.Equal(t, 3, len(calls))
 		for i, call := range calls {
 			req := call.SendMessageByIdRequest
-			assert.Equal(t, expectPeers[i], PeerID(req.PeerId))
+			assert.Equal(t, expectPeers[i], types3.PeerID(req.PeerId))
 			assert.Equal(t, sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66, req.Data.Id)
 			assert.True(t, len(req.Data.Data) > 0)
 		}
 	})
 }
 
+func decodeHex(in string) []byte {
+	payload, err := hex.DecodeString(in)
+	if err != nil {
+		panic(err)
+	}
+	return payload
+}
 func TestOnNewBlock(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -159,7 +168,7 @@ func TestOnNewBlock(t *testing.T) {
 			return &remote.StateChangeBatch{
 				DatabaseViewID: 1,
 				ChangeBatch: []*remote.StateChange{
-					{Txs: [][]byte{decodeHex(txParseMainnetTests[0].payloadStr), decodeHex(txParseMainnetTests[1].payloadStr), decodeHex(txParseMainnetTests[2].payloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})},
+					{Txs: [][]byte{decodeHex(types3.TxParseMainnetTests[0].PayloadStr), decodeHex(types3.TxParseMainnetTests[1].PayloadStr), decodeHex(types3.TxParseMainnetTests[2].PayloadStr)}, BlockHeight: 1, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})},
 				},
 			}, nil
 		},
@@ -174,5 +183,5 @@ func TestOnNewBlock(t *testing.T) {
 	err := fetch.handleStateChanges(ctx, stateChanges)
 	assert.ErrorIs(t, io.EOF, err)
 	assert.Equal(t, 1, len(pool.OnNewBlockCalls()))
-	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.txs))
+	assert.Equal(t, 3, len(pool.OnNewBlockCalls()[0].MinedTxs.Txs))
 }

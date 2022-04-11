@@ -33,6 +33,7 @@ import (
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -49,9 +50,9 @@ var TxPoolAPIVersion = &types2.VersionReply{Major: 1, Minor: 0, Patch: 0}
 type txPool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
-	Best(n uint16, txs *TxsRlp, tx kv.Tx) error
+	Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
+	AddLocalTxs(ctx context.Context, newTxs types.TxSlots) ([]DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -150,7 +151,7 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	defer tx.Rollback()
 	reply := &txpool_proto.PendingReply{}
 	reply.Txs = make([]*txpool_proto.PendingReply_Tx, 0, 32)
-	txSlots := TxsRlp{}
+	txSlots := types.TxsRlp{}
 	if err := s.txPool.Best(math.MaxInt16, &txSlots, tx); err != nil {
 		return nil, err
 	}
@@ -175,8 +176,8 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	}
 	defer tx.Rollback()
 
-	var slots TxSlots
-	parseCtx := NewTxParseContext(s.chainID)
+	var slots types.TxSlots
+	parseCtx := types.NewTxParseContext(s.chainID)
 	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
 
 	reply := &txpool_proto.AddReply{Imported: make([]txpool_proto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
@@ -184,18 +185,18 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 	j := 0
 	for i := 0; i < len(in.RlpTxs); i++ { // some incoming txs may be rejected, so - need secnod index
 		slots.Resize(uint(j + 1))
-		slots.txs[j] = &TxSlot{}
-		slots.isLocal[j] = true
-		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.txs[j], slots.senders.At(j), false /* hasEnvelope */, func(hash []byte) error {
+		slots.Txs[j] = &types.TxSlot{}
+		slots.IsLocal[j] = true
+		if _, err := parseCtx.ParseTransaction(in.RlpTxs[i], 0, slots.Txs[j], slots.Senders.At(j), false /* hasEnvelope */, func(hash []byte) error {
 			if known, _ := s.txPool.IdHashKnown(tx, hash); known {
-				return ErrAlreadyKnown
+				return types.ErrAlreadyKnown
 			}
 			return nil
 		}); err != nil {
-			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
+			if errors.Is(err, types.ErrAlreadyKnown) { // Noop, but need to handle to not count these
 				reply.Errors[i] = AlreadyKnown.String()
 				reply.Imported[i] = txpool_proto.ImportResult_ALREADY_EXISTS
-			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
+			} else if errors.Is(err, types.ErrRlpTooBig) { // Noop, but need to handle to not count these
 				reply.Errors[i] = RLPTooLong.String()
 				reply.Imported[i] = txpool_proto.ImportResult_INVALID
 			} else {

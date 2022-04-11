@@ -1,7 +1,7 @@
 //go:build gofuzzbeta
 // +build gofuzzbeta
 
-package txpool
+package types
 
 import (
 	"testing"
@@ -18,14 +18,14 @@ func FuzzPooledTransactions66(f *testing.F) {
 		t.Parallel()
 		ctx := NewTxParseContext(*u256.N1)
 		slots := TxSlots{}
-		reqId, _, err := ParsePooledTransactions66(in, 0, ctx, &slots)
+		reqId, _, err := ParsePooledTransactions66(in, 0, ctx, &slots, nil)
 		if err != nil {
 			t.Skip()
 		}
 
 		var rlpTxs [][]byte
-		for i := range slots.txs {
-			rlpTxs = append(rlpTxs, slots.txs[i].rlp)
+		for i := range slots.Txs {
+			rlpTxs = append(rlpTxs, slots.Txs[i].Rlp)
 		}
 		_ = EncodePooledTransactions66(rlpTxs, reqId, nil)
 		if err != nil {

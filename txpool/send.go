@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 )
@@ -75,7 +76,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 	for i, l := 0, len(rlps); i < len(rlps); i++ {
 		size += len(rlps[i])
 		if i == l-1 || size >= p2pTxPacketLimit {
-			txsData := EncodeTransactions(rlps[prev:i+1], nil)
+			txsData := types2.EncodeTransactions(rlps[prev:i+1], nil)
 			var txs66 *sentry.SendMessageToRandomPeersRequest
 			for _, sentryClient := range f.sentryClients {
 				if !sentryClient.Ready() {
@@ -110,12 +111,12 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 	return
 }
 
-func (f *Send) AnnouncePooledTxs(hashes Hashes) (hashSentTo []int) {
+func (f *Send) AnnouncePooledTxs(hashes types2.Hashes) (hashSentTo []int) {
 	defer f.notifyTests()
 	hashSentTo = make([]int, len(hashes)/32)
 	prev := 0
 	for len(hashes) > 0 {
-		var pending Hashes
+		var pending types2.Hashes
 		if len(hashes) > p2pTxPacketLimit {
 			pending = hashes[:p2pTxPacketLimit]
 			hashes = hashes[p2pTxPacketLimit:]
@@ -124,7 +125,7 @@ func (f *Send) AnnouncePooledTxs(hashes Hashes) (hashSentTo []int) {
 			hashes = hashes[:0]
 		}
 
-		hashesData := EncodeHashes(pending, nil)
+		hashesData := types2.EncodeHashes(pending, nil)
 		var hashes66 *sentry.OutboundMessageData
 		for _, sentryClient := range f.sentryClients {
 			if !sentryClient.Ready() {
@@ -154,7 +155,7 @@ func (f *Send) AnnouncePooledTxs(hashes Hashes) (hashSentTo []int) {
 	return
 }
 
-func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
+func (f *Send) PropagatePooledTxsToPeersList(peers []types2.PeerID, txs []byte) {
 	defer f.notifyTests()
 
 	if len(txs) == 0 {
@@ -162,7 +163,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 	}
 
 	for len(txs) > 0 {
-		var pending Hashes
+		var pending types2.Hashes
 		if len(txs) > p2pTxPacketLimit {
 			pending = txs[:p2pTxPacketLimit]
 			txs = txs[p2pTxPacketLimit:]
@@ -171,7 +172,7 @@ func (f *Send) PropagatePooledTxsToPeersList(peers []PeerID, txs []byte) {
 			txs = txs[:0]
 		}
 
-		data := EncodeHashes(pending, nil)
+		data := types2.EncodeHashes(pending, nil)
 		for _, sentryClient := range f.sentryClients {
 			if !sentryClient.Ready() {
 				continue

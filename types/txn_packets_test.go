@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package txpool
+package types
 
 import (
 	"encoding/hex"
@@ -156,9 +156,9 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(len(tt.txs), len(slots.txs))
+			require.Equal(len(tt.txs), len(slots.Txs))
 			for i, txn := range tt.txs {
-				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.txs[i].rlp))
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txs[i].Rlp))
 			}
 		})
 	}
@@ -174,9 +174,9 @@ func TestPooledTransactionsPacket66(t *testing.T) {
 			requestID, _, err := ParsePooledTransactions66(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(0, len(slots.txs))
-			require.Equal(0, slots.senders.Len())
-			require.Equal(0, len(slots.isLocal))
+			require.Equal(0, len(slots.Txs))
+			require.Equal(0, slots.Senders.Len())
+			require.Equal(0, len(slots.IsLocal))
 		})
 	}
 }
@@ -214,9 +214,9 @@ func TestTransactionsPacket(t *testing.T) {
 			slots := &TxSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, nil)
 			require.NoError(err)
-			require.Equal(len(tt.txs), len(slots.txs))
+			require.Equal(len(tt.txs), len(slots.Txs))
 			for i, txn := range tt.txs {
-				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.txs[i].rlp))
+				require.Equal(fmt.Sprintf("%x", txn), fmt.Sprintf("%x", slots.Txs[i].Rlp))
 			}
 		})
 	}
@@ -231,9 +231,9 @@ func TestTransactionsPacket(t *testing.T) {
 			slots := &TxSlots{}
 			_, err := ParseTransactions(encodeBuf, 0, ctx, slots, func(bytes []byte) error { return ErrRejected })
 			require.NoError(err)
-			require.Equal(0, len(slots.txs))
-			require.Equal(0, slots.senders.Len())
-			require.Equal(0, len(slots.isLocal))
+			require.Equal(0, len(slots.Txs))
+			require.Equal(0, slots.Senders.Len())
+			require.Equal(0, len(slots.IsLocal))
 		})
 	}
 }

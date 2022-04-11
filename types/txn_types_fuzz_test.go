@@ -1,7 +1,7 @@
 //go:build gofuzzbeta
 // +build gofuzzbeta
 
-package txpool
+package types
 
 import (
 	"testing"

@@ -22,6 +22,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -40,7 +41,7 @@ func NewMockSentry(ctx context.Context) *MockSentry {
 	return &MockSentry{ctx: ctx, SentryServerMock: &sentry.SentryServerMock{}}
 }
 
-var peerID PeerID = gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}) // "12345"
+var peerID types.PeerID = gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}) // "12345"
 
 func (ms *MockSentry) Send(req *sentry.InboundMessage) (errs []error) {
 	ms.lock.RLock()
@@ -90,7 +91,7 @@ func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_Peers
 	}
 }
 
-func toHashes(h ...byte) (out Hashes) {
+func toHashes(h ...byte) (out types.Hashes) {
 	for i := range h {
 		hash := [32]byte{h[i]}
 		out = append(out, hash[:]...)
@@ -106,7 +107,7 @@ func testRlps(num int) [][]byte {
 	return rlps
 }
 
-func toPeerIDs(h ...byte) (out []PeerID) {
+func toPeerIDs(h ...byte) (out []types.PeerID) {
 	for i := range h {
 		hash := [64]byte{h[i]}
 		out = append(out, gointerfaces.ConvertHashToH512(hash))

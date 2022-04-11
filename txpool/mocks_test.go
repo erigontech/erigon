@@ -5,9 +5,11 @@ package txpool
 
 import (
 	"context"
+	"sync"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"sync"
+	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 // Ensure, that PoolMock does implement Pool.
@@ -52,13 +54,13 @@ var _ Pool = &PoolMock{}
 // 	}
 type PoolMock struct {
 	// AddLocalTxsFunc mocks the AddLocalTxs method.
-	AddLocalTxsFunc func(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error)
+	AddLocalTxsFunc func(ctx context.Context, newTxs types.TxSlots) ([]DiscardReason, error)
 
 	// AddNewGoodPeerFunc mocks the AddNewGoodPeer method.
-	AddNewGoodPeerFunc func(peerID PeerID)
+	AddNewGoodPeerFunc func(peerID types.PeerID)
 
 	// AddRemoteTxsFunc mocks the AddRemoteTxs method.
-	AddRemoteTxsFunc func(ctx context.Context, newTxs TxSlots)
+	AddRemoteTxsFunc func(ctx context.Context, newTxs types.TxSlots)
 
 	// GetRlpFunc mocks the GetRlp method.
 	GetRlpFunc func(tx kv.Tx, hash []byte) ([]byte, error)
@@ -67,7 +69,7 @@ type PoolMock struct {
 	IdHashKnownFunc func(tx kv.Tx, hash []byte) (bool, error)
 
 	// OnNewBlockFunc mocks the OnNewBlock method.
-	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots, tx kv.Tx) error
+	OnNewBlockFunc func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types.TxSlots, minedTxs types.TxSlots, tx kv.Tx) error
 
 	// StartedFunc mocks the Started method.
 	StartedFunc func() bool
@@ -82,19 +84,19 @@ type PoolMock struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// NewTxs is the newTxs argument value.
-			NewTxs TxSlots
+			NewTxs types.TxSlots
 		}
 		// AddNewGoodPeer holds details about calls to the AddNewGoodPeer method.
 		AddNewGoodPeer []struct {
 			// PeerID is the peerID argument value.
-			PeerID PeerID
+			PeerID types.PeerID
 		}
 		// AddRemoteTxs holds details about calls to the AddRemoteTxs method.
 		AddRemoteTxs []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// NewTxs is the newTxs argument value.
-			NewTxs TxSlots
+			NewTxs types.TxSlots
 		}
 		// GetRlp holds details about calls to the GetRlp method.
 		GetRlp []struct {
@@ -117,9 +119,9 @@ type PoolMock struct {
 			// StateChanges is the stateChanges argument value.
 			StateChanges *remote.StateChangeBatch
 			// UnwindTxs is the unwindTxs argument value.
-			UnwindTxs TxSlots
+			UnwindTxs types.TxSlots
 			// MinedTxs is the minedTxs argument value.
-			MinedTxs TxSlots
+			MinedTxs types.TxSlots
 			// Tx is the tx argument value.
 			Tx kv.Tx
 		}
@@ -143,10 +145,10 @@ type PoolMock struct {
 }
 
 // AddLocalTxs calls AddLocalTxsFunc.
-func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]DiscardReason, error) {
+func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types.TxSlots) ([]DiscardReason, error) {
 	callInfo := struct {
 		Ctx    context.Context
-		NewTxs TxSlots
+		NewTxs types.TxSlots
 	}{
 		Ctx:    ctx,
 		NewTxs: newTxs,
@@ -169,11 +171,11 @@ func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs TxSlots) ([]Discar
 //     len(mockedPool.AddLocalTxsCalls())
 func (mock *PoolMock) AddLocalTxsCalls() []struct {
 	Ctx    context.Context
-	NewTxs TxSlots
+	NewTxs types.TxSlots
 } {
 	var calls []struct {
 		Ctx    context.Context
-		NewTxs TxSlots
+		NewTxs types.TxSlots
 	}
 	mock.lockAddLocalTxs.RLock()
 	calls = mock.calls.AddLocalTxs
@@ -182,9 +184,9 @@ func (mock *PoolMock) AddLocalTxsCalls() []struct {
 }
 
 // AddNewGoodPeer calls AddNewGoodPeerFunc.
-func (mock *PoolMock) AddNewGoodPeer(peerID PeerID) {
+func (mock *PoolMock) AddNewGoodPeer(peerID types.PeerID) {
 	callInfo := struct {
-		PeerID PeerID
+		PeerID types.PeerID
 	}{
 		PeerID: peerID,
 	}
@@ -201,10 +203,10 @@ func (mock *PoolMock) AddNewGoodPeer(peerID PeerID) {
 // Check the length with:
 //     len(mockedPool.AddNewGoodPeerCalls())
 func (mock *PoolMock) AddNewGoodPeerCalls() []struct {
-	PeerID PeerID
+	PeerID types.PeerID
 } {
 	var calls []struct {
-		PeerID PeerID
+		PeerID types.PeerID
 	}
 	mock.lockAddNewGoodPeer.RLock()
 	calls = mock.calls.AddNewGoodPeer
@@ -213,10 +215,10 @@ func (mock *PoolMock) AddNewGoodPeerCalls() []struct {
 }
 
 // AddRemoteTxs calls AddRemoteTxsFunc.
-func (mock *PoolMock) AddRemoteTxs(ctx context.Context, newTxs TxSlots) {
+func (mock *PoolMock) AddRemoteTxs(ctx context.Context, newTxs types.TxSlots) {
 	callInfo := struct {
 		Ctx    context.Context
-		NewTxs TxSlots
+		NewTxs types.TxSlots
 	}{
 		Ctx:    ctx,
 		NewTxs: newTxs,
@@ -235,11 +237,11 @@ func (mock *PoolMock) AddRemoteTxs(ctx context.Context, newTxs TxSlots) {
 //     len(mockedPool.AddRemoteTxsCalls())
 func (mock *PoolMock) AddRemoteTxsCalls() []struct {
 	Ctx    context.Context
-	NewTxs TxSlots
+	NewTxs types.TxSlots
 } {
 	var calls []struct {
 		Ctx    context.Context
-		NewTxs TxSlots
+		NewTxs types.TxSlots
 	}
 	mock.lockAddRemoteTxs.RLock()
 	calls = mock.calls.AddRemoteTxs
@@ -326,12 +328,12 @@ func (mock *PoolMock) IdHashKnownCalls() []struct {
 }
 
 // OnNewBlock calls OnNewBlockFunc.
-func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs TxSlots, minedTxs TxSlots, tx kv.Tx) error {
+func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types.TxSlots, minedTxs types.TxSlots, tx kv.Tx) error {
 	callInfo := struct {
 		Ctx          context.Context
 		StateChanges *remote.StateChangeBatch
-		UnwindTxs    TxSlots
-		MinedTxs     TxSlots
+		UnwindTxs    types.TxSlots
+		MinedTxs     types.TxSlots
 		Tx           kv.Tx
 	}{
 		Ctx:          ctx,
@@ -358,15 +360,15 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 func (mock *PoolMock) OnNewBlockCalls() []struct {
 	Ctx          context.Context
 	StateChanges *remote.StateChangeBatch
-	UnwindTxs    TxSlots
-	MinedTxs     TxSlots
+	UnwindTxs    types.TxSlots
+	MinedTxs     types.TxSlots
 	Tx           kv.Tx
 } {
 	var calls []struct {
 		Ctx          context.Context
 		StateChanges *remote.StateChangeBatch
-		UnwindTxs    TxSlots
-		MinedTxs     TxSlots
+		UnwindTxs    types.TxSlots
+		MinedTxs     types.TxSlots
 		Tx           kv.Tx
 	}
 	mock.lockOnNewBlock.RLock()

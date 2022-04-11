@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/rlp"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,7 +164,7 @@ func parseSenders(in []byte) (nonces []uint64, balances []uint256.Int) {
 	return
 }
 
-func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*sender, senderIDs map[string]uint64, txs TxSlots, ok bool) {
+func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*sender, senderIDs map[string]uint64, txs types.TxSlots, ok bool) {
 	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawFeeCap) < 1 || len(rawSender) < 1+1 {
 		return nil, nil, txs, false
 	}
@@ -187,59 +188,59 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 
 	sendersInfo = map[uint64]*sender{}
 	senderIDs = map[string]uint64{}
-	senders := make(Addresses, 20*len(senderNonce))
+	senders := make(types.Addresses, 20*len(senderNonce))
 	for i := 0; i < len(senderNonce); i++ {
 		senderID := uint64(i + 1) //non-zero expected
 		binary.BigEndian.PutUint64(senders.At(i%senders.Len()), senderID)
 		sendersInfo[senderID] = newSender(senderNonce[i], senderBalance[i%len(senderBalance)])
 		senderIDs[string(senders.At(i%senders.Len()))] = senderID
 	}
-	txs.txs = make([]*TxSlot, len(txNonce))
-	parseCtx := NewTxParseContext(*u256.N1)
+	txs.Txs = make([]*types.TxSlot, len(txNonce))
+	parseCtx := types.NewTxParseContext(*u256.N1)
 	parseCtx.WithSender(false)
 	for i := range txNonce {
-		txs.txs[i] = &TxSlot{
-			nonce:  txNonce[i],
-			value:  values[i%len(values)],
-			tip:    tips[i%len(tips)],
-			feeCap: feeCap[i%len(feeCap)],
+		txs.Txs[i] = &types.TxSlot{
+			Nonce:  txNonce[i],
+			Value:  values[i%len(values)],
+			Tip:    tips[i%len(tips)],
+			FeeCap: feeCap[i%len(feeCap)],
 		}
-		txRlp := fakeRlpTx(txs.txs[i], senders.At(i%senders.Len()))
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.txs[i], nil, false, nil)
+		txRlp := fakeRlpTx(txs.Txs[i], senders.At(i%senders.Len()))
+		_, err := parseCtx.ParseTransaction(txRlp, 0, txs.Txs[i], nil, false, nil)
 		if err != nil {
 			panic(err)
 		}
-		txs.senders = append(txs.senders, senders.At(i%senders.Len())...)
-		txs.isLocal = append(txs.isLocal, true)
+		txs.Senders = append(txs.Senders, senders.At(i%senders.Len())...)
+		txs.IsLocal = append(txs.IsLocal, true)
 	}
 
 	return sendersInfo, senderIDs, txs, true
 }
 
 // fakeRlpTx add anything what identifying tx to `data` to make hash unique
-func fakeRlpTx(slot *TxSlot, data []byte) []byte {
+func fakeRlpTx(slot *types.TxSlot, data []byte) []byte {
 	dataLen := rlp.U64Len(1) + //chainID
-		rlp.U64Len(slot.nonce) + rlp.U64Len(slot.tip) + rlp.U64Len(slot.feeCap) +
+		rlp.U64Len(slot.Nonce) + rlp.U64Len(slot.Tip) + rlp.U64Len(slot.FeeCap) +
 		rlp.U64Len(0) + // gas
 		rlp.StringLen(0) + // dest addr
-		rlp.U256Len(&slot.value) +
+		rlp.U256Len(&slot.Value) +
 		rlp.StringLen(len(data)) + // data
 		rlp.ListPrefixLen(0) + //access list
 		+3 // v,r,s
 
 	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
-	buf[0] = byte(DynamicFeeTxType)
+	buf[0] = byte(types.DynamicFeeTxType)
 	p := 1
 	p += rlp.EncodeListPrefix(dataLen, buf[p:])
 	p += rlp.EncodeU64(1, buf[p:]) //chainID
-	p += rlp.EncodeU64(slot.nonce, buf[p:])
-	p += rlp.EncodeU64(slot.tip, buf[p:])
-	p += rlp.EncodeU64(slot.feeCap, buf[p:])
+	p += rlp.EncodeU64(slot.Nonce, buf[p:])
+	p += rlp.EncodeU64(slot.Tip, buf[p:])
+	p += rlp.EncodeU64(slot.FeeCap, buf[p:])
 	p += rlp.EncodeU64(0, buf[p:])           //gas
 	p += rlp.EncodeString([]byte{}, buf[p:]) //destrination addr
 	bb := bytes.NewBuffer(buf[p:p])
-	_ = slot.value.EncodeRLP(bb)
-	p += rlp.U256Len(&slot.value)
+	_ = slot.Value.EncodeRLP(bb)
+	p += rlp.U256Len(&slot.Value)
 	p += rlp.EncodeString(data, buf[p:])  //data
 	p += rlp.EncodeListPrefix(0, buf[p:]) // access list
 	p += rlp.EncodeU64(1, buf[p:])        //v
@@ -254,25 +255,25 @@ func iterateSubPoolUnordered(subPool *SubPool, f func(tx *metaTx)) {
 	}
 }
 
-func splitDataset(in TxSlots) (TxSlots, TxSlots, TxSlots, TxSlots) {
-	p1, p2, p3, p4 := TxSlots{}, TxSlots{}, TxSlots{}, TxSlots{}
-	l := len(in.txs) / 4
+func splitDataset(in types.TxSlots) (types.TxSlots, types.TxSlots, types.TxSlots, types.TxSlots) {
+	p1, p2, p3, p4 := types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}
+	l := len(in.Txs) / 4
 
-	p1.txs = in.txs[:l]
-	p1.isLocal = in.isLocal[:l]
-	p1.senders = in.senders[:l*20]
+	p1.Txs = in.Txs[:l]
+	p1.IsLocal = in.IsLocal[:l]
+	p1.Senders = in.Senders[:l*20]
 
-	p2.txs = in.txs[l : 2*l]
-	p2.isLocal = in.isLocal[l : 2*l]
-	p2.senders = in.senders[l*20 : 2*l*20]
+	p2.Txs = in.Txs[l : 2*l]
+	p2.IsLocal = in.IsLocal[l : 2*l]
+	p2.Senders = in.Senders[l*20 : 2*l*20]
 
-	p3.txs = in.txs[2*l : 3*l]
-	p3.isLocal = in.isLocal[2*l : 3*l]
-	p3.senders = in.senders[2*l*20 : 3*l*20]
+	p3.Txs = in.Txs[2*l : 3*l]
+	p3.IsLocal = in.IsLocal[2*l : 3*l]
+	p3.Senders = in.Senders[2*l*20 : 3*l*20]
 
-	p4.txs = in.txs[3*l : 4*l]
-	p4.isLocal = in.isLocal[3*l : 4*l]
-	p4.senders = in.senders[3*l*20 : 4*l*20]
+	p4.Txs = in.Txs[3*l : 4*l]
+	p4.IsLocal = in.IsLocal[3*l : 4*l]
+	p4.Senders = in.Senders[3*l*20 : 4*l*20]
 
 	return p1, p2, p3, p4
 }
@@ -299,8 +300,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 		assert, require := assert.New(t), require.New(t)
 		assert.NoError(txs.Valid())
 
-		var prevHashes Hashes
-		ch := make(chan Hashes, 100)
+		var prevHashes types.Hashes
+		ch := make(chan types.Hashes, 100)
 		db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 		cfg := DefaultConfig
@@ -312,7 +313,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			pool.senders.senderID2Addr[id] = []byte(addr)
 		}
 		pool.senders.senderID = uint64(len(senderIDs))
-		check := func(unwindTxs, minedTxs TxSlots, msg string) {
+		check := func(unwindTxs, minedTxs types.TxSlots, msg string) {
 			pending, baseFee, queued := pool.pending, pool.baseFee, pool.queued
 			best, worst := pending.Best(), pending.Worst()
 			assert.LessOrEqual(pending.Len(), cfg.PendingSubPoolLimit)
@@ -324,13 +325,13 @@ func FuzzOnNewBlocks(f *testing.F) {
 			for _, tx := range pending.best.ms {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
-					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg, i.senderID)
+					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg, i.SenderID)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.FeeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.FeeCap, msg)
 				}
 
 				// side data structures must have all txs
@@ -341,11 +342,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 				// pools can't have more then 1 tx with same SenderID+Nonce
 				iterateSubPoolUnordered(baseFee, func(mtx2 *metaTx) {
 					tx2 := mtx2.Tx
-					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
+					assert.False(tx2.SenderID == i.SenderID && tx2.Nonce == i.Nonce, msg)
 				})
 				iterateSubPoolUnordered(queued, func(mtx2 *metaTx) {
 					tx2 := mtx2.Tx
-					assert.False(tx2.senderID == i.senderID && tx2.nonce == i.nonce, msg)
+					assert.False(tx2.SenderID == i.SenderID && tx2.Nonce == i.Nonce, msg)
 				})
 			}
 
@@ -360,13 +361,13 @@ func FuzzOnNewBlocks(f *testing.F) {
 			iterateSubPoolUnordered(baseFee, func(tx *metaTx) {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
-					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg)
+					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.FeeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.FeeCap, msg)
 				}
 
 				assert.True(pool.all.has(tx), msg)
@@ -381,19 +382,19 @@ func FuzzOnNewBlocks(f *testing.F) {
 			iterateSubPoolUnordered(queued, func(tx *metaTx) {
 				i := tx.Tx
 				if tx.subPool&NoNonceGaps > 0 {
-					assert.GreaterOrEqual(i.nonce, senders[i.senderID].nonce, msg, i.senderID, senders[i.senderID].nonce)
+					assert.GreaterOrEqual(i.Nonce, senders[i.SenderID].nonce, msg, i.SenderID, senders[i.SenderID].nonce)
 				}
 				if tx.subPool&EnoughFeeCapProtocol > 0 {
-					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.feeCap, msg)
+					assert.LessOrEqual(calcProtocolBaseFee(pendingBaseFee), tx.Tx.FeeCap, msg)
 				}
 				if tx.subPool&EnoughFeeCapBlock > 0 {
-					assert.LessOrEqual(pendingBaseFee, tx.Tx.feeCap, msg)
+					assert.LessOrEqual(pendingBaseFee, tx.Tx.FeeCap, msg)
 				}
 
-				assert.True(pool.all.has(tx), "%s, %d, %x", msg, tx.Tx.nonce, tx.Tx.IDHash)
+				assert.True(pool.all.has(tx), "%s, %d, %x", msg, tx.Tx.Nonce, tx.Tx.IDHash)
 				_, ok = pool.byHash[string(i.IDHash[:])]
 				assert.True(ok, msg)
-				assert.GreaterOrEqual(tx.Tx.feeCap, pool.cfg.MinFeeCap)
+				assert.GreaterOrEqual(tx.Tx.FeeCap, pool.cfg.MinFeeCap)
 			})
 
 			// all txs in side data structures must be in some queue
@@ -411,8 +412,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 			}
 
 			// mined txs must be removed
-			for i := range minedTxs.txs {
-				_, ok = pool.byHash[string(minedTxs.txs[i].IDHash[:])]
+			for i := range minedTxs.Txs {
+				_, ok = pool.byHash[string(minedTxs.Txs[i].IDHash[:])]
 				assert.False(ok, msg)
 			}
 
@@ -425,21 +426,21 @@ func FuzzOnNewBlocks(f *testing.F) {
 			}
 		}
 
-		checkNotify := func(unwindTxs, minedTxs TxSlots, msg string) {
+		checkNotify := func(unwindTxs, minedTxs types.TxSlots, msg string) {
 			select {
 			case newHashes := <-ch:
 				assert.Greater(len(newHashes), 0)
 				for i := 0; i < newHashes.Len(); i++ {
 					newHash := newHashes.At(i)
-					for j := range unwindTxs.txs {
-						if bytes.Equal(unwindTxs.txs[j].IDHash[:], newHash) {
-							mt := pool.all.get(unwindTxs.txs[j].senderID, unwindTxs.txs[j].nonce)
+					for j := range unwindTxs.Txs {
+						if bytes.Equal(unwindTxs.Txs[j].IDHash[:], newHash) {
+							mt := pool.all.get(unwindTxs.Txs[j].SenderID, unwindTxs.Txs[j].Nonce)
 							require.True(mt != nil && mt.currentSubPool == PendingSubPool, msg)
 						}
 					}
-					for j := range minedTxs.txs {
-						if bytes.Equal(minedTxs.txs[j].IDHash[:], newHash) {
-							mt := pool.all.get(unwindTxs.txs[j].senderID, unwindTxs.txs[j].nonce)
+					for j := range minedTxs.Txs {
+						if bytes.Equal(minedTxs.Txs[j].IDHash[:], newHash) {
+							mt := pool.all.get(unwindTxs.Txs[j].SenderID, unwindTxs.Txs[j].Nonce)
 							require.True(mt != nil && mt.currentSubPool == PendingSubPool, msg)
 						}
 					}
@@ -472,8 +473,8 @@ func FuzzOnNewBlocks(f *testing.F) {
 		for id, sender := range senders {
 			var addr [20]byte
 			copy(addr[:], pool.senders.senderID2Addr[id])
-			v := make([]byte, EncodeSenderLengthForStorage(sender.nonce, sender.balance))
-			EncodeSender(sender.nonce, sender.balance, v)
+			v := make([]byte, types.EncodeSenderLengthForStorage(sender.nonce, sender.balance))
+			types.EncodeSender(sender.nonce, sender.balance, v)
 			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
 				Action:  remote.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(addr),
@@ -482,10 +483,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 		// go to first fork
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(ctx, change, txs1, TxSlots{}, tx)
+		err = pool.OnNewBlock(ctx, change, txs1, types.TxSlots{}, tx)
 		assert.NoError(err)
-		check(txs1, TxSlots{}, "fork1")
-		checkNotify(txs1, TxSlots{}, "fork1")
+		check(txs1, types.TxSlots{}, "fork1")
+		checkNotify(txs1, types.TxSlots{}, "fork1")
 
 		_, _, _ = p2pReceived, txs2, txs3
 		change = &remote.StateChangeBatch{
@@ -495,9 +496,9 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs2, tx)
-		check(TxSlots{}, txs2, "fork1 mined")
-		checkNotify(TxSlots{}, txs2, "fork1 mined")
+		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs2, tx)
+		check(types.TxSlots{}, txs2, "fork1 mined")
+		checkNotify(types.TxSlots{}, txs2, "fork1 mined")
 
 		// unwind everything and switch to new fork (need unwind mined now)
 		change = &remote.StateChangeBatch{
@@ -507,10 +508,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, txs2, TxSlots{}, tx)
+		err = pool.OnNewBlock(ctx, change, txs2, types.TxSlots{}, tx)
 		assert.NoError(err)
-		check(txs2, TxSlots{}, "fork2")
-		checkNotify(txs2, TxSlots{}, "fork2")
+		check(txs2, types.TxSlots{}, "fork2")
+		checkNotify(txs2, types.TxSlots{}, "fork2")
 
 		change = &remote.StateChangeBatch{
 			DatabaseViewID:      txID,
@@ -519,22 +520,22 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, TxSlots{}, txs3, tx)
+		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs3, tx)
 		assert.NoError(err)
-		check(TxSlots{}, txs3, "fork2 mined")
-		checkNotify(TxSlots{}, txs3, "fork2 mined")
+		check(types.TxSlots{}, txs3, "fork2 mined")
+		checkNotify(types.TxSlots{}, txs3, "fork2 mined")
 
 		// add some remote txs from p2p
 		pool.AddRemoteTxs(ctx, p2pReceived)
 		err = pool.processRemoteTxs(ctx)
 		assert.NoError(err)
-		check(p2pReceived, TxSlots{}, "p2pmsg1")
-		checkNotify(p2pReceived, TxSlots{}, "p2pmsg1")
+		check(p2pReceived, types.TxSlots{}, "p2pmsg1")
+		checkNotify(p2pReceived, types.TxSlots{}, "p2pmsg1")
 
 		err = pool.flushLocked(tx) // we don't test eviction here, because dedicated test exists
 		require.NoError(err)
-		check(p2pReceived, TxSlots{}, "after_flush")
-		checkNotify(p2pReceived, TxSlots{}, "after_flush")
+		check(p2pReceived, types.TxSlots{}, "after_flush")
+		checkNotify(p2pReceived, types.TxSlots{}, "after_flush")
 
 		p2, err := New(ch, coreDB, DefaultConfig, sendersCache, *u256.N1)
 		assert.NoError(err)
@@ -542,11 +543,11 @@ func FuzzOnNewBlocks(f *testing.F) {
 		err = coreDB.View(ctx, func(coreTx kv.Tx) error { return p2.fromDB(ctx, tx, coreTx) })
 		require.NoError(err)
 		for _, txn := range p2.byHash {
-			assert.Nil(txn.Tx.rlp)
+			assert.Nil(txn.Tx.Rlp)
 		}
 
-		check(txs2, TxSlots{}, "fromDB")
-		checkNotify(txs2, TxSlots{}, "fromDB")
+		check(txs2, types.TxSlots{}, "fromDB")
+		checkNotify(txs2, types.TxSlots{}, "fromDB")
 		assert.Equal(pool.senders.senderID, p2.senders.senderID)
 		assert.Equal(pool.lastSeenBlock.Load(), p2.lastSeenBlock.Load())
 		assert.Equal(pool.pending.Len(), p2.pending.Len())
@@ -556,7 +557,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 	})
 }
 
-func copyHashes(p *PendingPool) (hashes Hashes) {
+func copyHashes(p *PendingPool) (hashes types.Hashes) {
 	for i := range p.best.ms {
 		hashes = append(hashes, p.best.ms[i].Tx.IDHash[:]...)
 	}
@@ -564,7 +565,7 @@ func copyHashes(p *PendingPool) (hashes Hashes) {
 }
 
 //extractNewHashes - extract from h1 hashes which do not exist in h2
-func extractNewHashes(h1, h2 Hashes) (result Hashes) {
+func extractNewHashes(h1, h2 types.Hashes) (result types.Hashes) {
 	for i := 0; i < h1.Len(); i++ {
 		found := false
 		for j := 0; j < h2.Len(); j++ {
