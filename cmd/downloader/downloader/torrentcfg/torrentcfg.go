@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/time/rate"
 )
 
 // DefaultPieceSize - Erigon serves many big files, bigger pieces will reduce
@@ -70,7 +71,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 		}
 	}
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
-	//torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize)     // default: unlimited
+	torrentConfig.UploadRateLimiter = rate.NewLimiter(rate.Limit(uploadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
 	//torrentConfig.DownloadRateLimiter = rate.NewLimiter(rate.Limit(downloadRate.Bytes()/2), 2*DefaultPieceSize) // default: unlimited
 
 	// debug
