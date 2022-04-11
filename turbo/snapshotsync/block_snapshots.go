@@ -25,7 +25,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -1116,9 +1116,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	var count, prevTxID uint64
 	numBuf := make([]byte, binary.MaxVarintLen64)
-	parseCtx := txpool.NewTxParseContext(*chainID)
+	parseCtx := types2.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
+	slot := types2.TxSlot{}
 	var sender [20]byte
 	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
 		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
@@ -1466,9 +1466,9 @@ RETRY:
 	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
 		defer close(txsCh)
 		defer close(txsCh2)
-		parseCtx := txpool.NewTxParseContext(chainID)
+		parseCtx := types2.NewTxParseContext(chainID)
 		parseCtx.WithSender(false)
-		slot := txpool.TxSlot{}
+		slot := types2.TxSlot{}
 		var sender [20]byte
 		for it := range ch {
 			if it.err != nil {
