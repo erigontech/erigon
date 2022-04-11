@@ -1151,7 +1151,8 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-// DeleteAncientBlocks - delete old block after moving it to snapshots. [from, to)
+// DeleteAncientBlocks - delete old block after moving it to snapshots.
+// keeps genesis in db: [1, to)
 // doesn't delete reciepts
 func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	c, err := db.Cursor(kv.Headers)
@@ -1182,7 +1183,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n >= stopAtBlock {
+		if n > stopAtBlock {
 			break
 		}
 
