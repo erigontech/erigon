@@ -105,7 +105,7 @@ func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket s
 		if err := libcommon.Stopped(quit); err != nil {
 			return err
 		}
-		if innerErr := collectorFunc(k, v); innerErr != nil {
+		if innerErr := collectorFunc(libcommon.Copy(k), libcommon.Copy(v)); innerErr != nil {
 			return innerErr
 		}
 		return nil
