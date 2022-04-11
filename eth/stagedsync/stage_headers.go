@@ -102,10 +102,6 @@ func SpawnStageHeaders(
 	initialCycle bool,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 ) error {
-	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
-		return err
-	}
-
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -115,8 +111,11 @@ func SpawnStageHeaders(
 		}
 		defer tx.Rollback()
 	}
-	var blockNumber uint64
+	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle); err != nil {
+		return err
+	}
 
+	var blockNumber uint64
 	if s == nil {
 		blockNumber = 0
 	} else {
