@@ -1359,13 +1359,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	cfg.SnapshotDir = snDir
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		var downloadRateStr, uploadRateStr string
-		if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
-			downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
-		}
-		if ctx.GlobalIsSet(TorrentUploadRateFlag.Name) {
-			uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
-		}
+		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
+		uploadRateStr := ctx.GlobalString(TorrentUploadRateFlag.Name)
 		var downloadRate, uploadRate datasize.ByteSize
 		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
 			panic(err)
