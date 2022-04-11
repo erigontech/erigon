@@ -1153,7 +1153,8 @@ func min(a, b uint64) uint64 {
 
 // DeleteAncientBlocks - delete old block after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't delete reciepts
+// doesn't delete Reciepts
+// doesn't delete Canonical markers
 func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	c, err := db.Cursor(kv.Headers)
 	if err != nil {
