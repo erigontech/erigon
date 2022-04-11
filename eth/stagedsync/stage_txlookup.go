@@ -203,7 +203,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	return nil
 }
 
-func deleteTxLookupRange(tx kv.RwTx, logPrefix string, pruneFrom, pruneTo uint64, ctx context.Context, cfg TxLookupCfg) error {
+// deleteTxLookupRange [from,to)
+func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
@@ -227,8 +228,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, pruneFrom, pruneTo uint64
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: dbutils.EncodeBlockNumber(pruneFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(pruneTo),
+		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
+		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
