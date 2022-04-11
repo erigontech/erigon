@@ -1167,9 +1167,16 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		firstBlock := binary.BigEndian.Uint64(k)
+		if firstBlock == 0 { // keep genesis in DB
+			k, _, err := c.Next()
+			if err != nil {
+				return err
+			}
+			firstBlock = binary.BigEndian.Uint64(k)
+		}
 		stopAtBlock = min(blockTo, firstBlock+uint64(blocksDeleteLimit))
 	}
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
@@ -1188,6 +1195,9 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		b, err := ReadBodyForStorageByKey(db, k)
 		if err != nil {
 			return err
+		}
+		if b == nil {
+			fmt.Printf("alex: %d, %x\n", n, k)
 		}
 		txIDBytes := make([]byte, 8)
 		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
