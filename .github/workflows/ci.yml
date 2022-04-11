@@ -27,7 +27,7 @@ jobs:
             sudo apt update && sudo apt install build-essential
           fi
         shell: bash
-      - uses: actions/cache@v2
+      - uses: actions/cache@v3
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
