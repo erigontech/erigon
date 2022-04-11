@@ -13,6 +13,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -120,7 +121,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	blockNum := executionAt + 1
 	var txs []types.Transaction
 	if err = cfg.txPool2DB.View(context.Background(), func(tx kv.Tx) error {
-		txSlots := txpool.TxsRlp{}
+		txSlots := types2.TxsRlp{}
 		if err := cfg.txPool2.Best(200, &txSlots, tx); err != nil {
 			return err
 		}
