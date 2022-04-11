@@ -1197,7 +1197,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if b == nil {
-			fmt.Printf("alex: %d, %x\n", n, k)
+			return fmt.Errorf("DeleteAncientBlocks: block body not found for block %d", n)
 		}
 		txIDBytes := make([]byte, 8)
 		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
