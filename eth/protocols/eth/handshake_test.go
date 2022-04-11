@@ -87,7 +87,7 @@ func testHandshake(t *testing.T, protocol uint) {
 		defer app.Close()
 		defer net.Close()
 
-		peer := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{}, "peer", nil), net, nil)
+		peer := eth.NewPeer(protocol, p2p.NewPeer(enode.ID{}, [64]byte{1}, "peer", nil), net, nil)
 		defer peer.Close()
 
 		// Send the junk test with one peer, check the handshake failure

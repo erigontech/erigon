@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -69,7 +68,7 @@ type MockSentry struct {
 	Key           *ecdsa.PrivateKey
 	Genesis       *types.Block
 	SentryClient  direct.SentryClient
-	PeerId        *ptypes.H256
+	PeerId        *ptypes.H512
 	UpdateHead    func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
 	streams       map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages  []*proto_sentry.OutboundMessageData
@@ -201,7 +200,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		},
 		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
 		},
-		PeerId: gointerfaces.ConvertHashToH256([32]byte{0x12, 0x34, 0x50}), // "12345"
+		PeerId: gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -209,7 +208,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
-	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) (enode.ID, bool) { return enode.ID{}, false }
+	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) ([64]byte, bool) { return [64]byte{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 	cfg := ethconfig.Defaults
@@ -223,7 +222,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
-	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool) { return enode.ID{}, false }
+	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
 	if !cfg.TxPool.Disable {

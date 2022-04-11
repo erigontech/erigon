@@ -175,6 +175,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
+
+	config.SyncMode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	config.Snapshot.Enabled = config.SyncMode == ethconfig.SnapSync
+
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 

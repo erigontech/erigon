@@ -447,7 +447,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H256, sentry direct.SentryClient) error {
+func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
@@ -487,7 +487,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			} else {
 				var canRequestMore bool
 				for _, segment := range segments {
-					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH256ToPeerID(peerID))
+					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
 					canRequestMore = canRequestMore || requestMore
 					if len(penalties) > 0 {
 						cs.Penalize(ctx, penalties)
@@ -557,7 +557,7 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH256ToPeerID(inreq.PeerId)) // There is only one segment in this case
+			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
@@ -583,7 +583,7 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 	if _, err1 := sentry.PeerMinBlock(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
 		log.Error("Could not send min block for peer", "err", err1)
 	}
-	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH256ToPeerID(inreq.PeerId)))
+	log.Trace(fmt.Sprintf("NewBlockMsg{blockNumber: %d} from [%s]", request.Block.NumberU64(), ConvertH512ToPeerID(inreq.PeerId)))
 	return nil
 }
 
@@ -593,7 +593,7 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
-	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH256ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 
@@ -638,7 +638,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 		}
 		return fmt.Errorf("send header response 66: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH256ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockHeaderMsg{hash=%x, number=%d, amount=%d, skip=%d, reverse=%t, responseLen=%d}", ConvertH512ToPeerID(inreq.PeerId), query.Origin.Hash, query.Origin.Number, query.Amount, query.Skip, query.Reverse, len(b)))
 	return nil
 }
 
@@ -675,7 +675,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetBlockBodiesMsg responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 
@@ -715,7 +715,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 		}
 		return fmt.Errorf("send bodies response: %w", err)
 	}
-	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH256ToPeerID(inreq.PeerId), len(b)))
+	//log.Info(fmt.Sprintf("[%s] GetReceipts responseLen %d", ConvertH512ToPeerID(inreq.PeerId), len(b)))
 	return nil
 }
 

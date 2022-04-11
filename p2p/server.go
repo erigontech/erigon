@@ -226,11 +226,12 @@ const (
 type conn struct {
 	fd net.Conn
 	transport
-	node  *enode.Node
-	flags connFlag
-	cont  chan error // The run loop uses cont to signal errors to SetupConn.
-	caps  []Cap      // valid after the protocol handshake
-	name  string     // valid after the protocol handshake
+	node   *enode.Node
+	flags  connFlag
+	cont   chan error // The run loop uses cont to signal errors to SetupConn.
+	caps   []Cap      // valid after the protocol handshake
+	name   string     // valid after the protocol handshake
+	pubkey [64]byte
 }
 
 type transport interface {
@@ -784,7 +785,7 @@ running:
 			err := srv.addPeerChecks(peers, inboundCount, c)
 			if err == nil {
 				// The handshakes are done and it passed all checks.
-				p := srv.launchPeer(c)
+				p := srv.launchPeer(c, c.pubkey)
 				peers[c.node.ID()] = p
 				srv.log.Trace("Adding p2p peer", "peercount", len(peers), "id", p.ID(), "conn", c.flags, "addr", p.RemoteAddr(), "name", p.Name())
 				srv.dialsched.peerAdded(c)
@@ -990,6 +991,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		srv.log.Trace("Failed RLPx handshake", "addr", c.fd.RemoteAddr(), "conn", c.flags, "err", err)
 		return err
 	}
+	copy(c.pubkey[:], crypto.MarshalPubkey(remotePubkey)[1:])
 	if dialDest != nil {
 		c.node = dialDest
 	} else {
@@ -1043,8 +1045,8 @@ func (srv *Server) checkpoint(c *conn, stage chan<- *conn) error {
 	return <-c.cont
 }
 
-func (srv *Server) launchPeer(c *conn) *Peer {
-	p := newPeer(srv.log, c, srv.Protocols)
+func (srv *Server) launchPeer(c *conn, pubkey [64]byte) *Peer {
+	p := newPeer(srv.log, c, srv.Protocols, pubkey)
 	if srv.EnableMsgEvents {
 		// If message events are enabled, pass the peerFeed
 		// to the peer.

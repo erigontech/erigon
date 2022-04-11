@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -25,7 +24,7 @@ import (
 type BodiesCfg struct {
 	db              kv.RwDB
 	bd              *bodydownload.BodyDownload
-	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool)
+	bodyReqSend     func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool)
 	penalise        func(context.Context, []headerdownload.PenaltyItem)
 	blockPropagator adapter.BlockPropagator
 	timeout         int
@@ -38,7 +37,7 @@ type BodiesCfg struct {
 func StageBodiesCfg(
 	db kv.RwDB,
 	bd *bodydownload.BodyDownload,
-	bodyReqSend func(context.Context, *bodydownload.BodyRequest) (enode.ID, bool),
+	bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool),
 	penalise func(context.Context, []headerdownload.PenaltyItem),
 	blockPropagator adapter.BlockPropagator,
 	timeout int,
@@ -118,7 +117,7 @@ func BodiesForward(
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var blockNum uint64
 	var req *bodydownload.BodyRequest
-	var peer enode.ID
+	var peer [64]byte
 	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
@@ -135,7 +134,7 @@ Loop:
 			}
 			d1 += time.Since(start)
 		}
-		peer = enode.ID{}
+		peer = [64]byte{}
 		sentToPeer = false
 		if req != nil {
 			start := time.Now()
@@ -156,7 +155,7 @@ Loop:
 				return fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
-			peer = enode.ID{}
+			peer = [64]byte{}
 			sentToPeer = false
 			if req != nil {
 				start = time.Now()

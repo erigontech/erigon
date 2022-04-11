@@ -5,7 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 // DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header
@@ -14,7 +13,7 @@ type DoubleHash [2 * common.HashLength]byte
 const MaxBodiesInRequest = 1024
 
 type Delivery struct {
-	peerID          enode.ID
+	peerID          [64]byte
 	txs             [][][]byte
 	uncles          [][]*types.Header
 	lenOfP2PMessage uint64
@@ -22,7 +21,7 @@ type Delivery struct {
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
-	peerMap          map[enode.ID]int
+	peerMap          map[[64]byte]int
 	requestedMap     map[DoubleHash]uint64
 	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
@@ -45,7 +44,7 @@ type BodyDownload struct {
 type BodyRequest struct {
 	BlockNums []uint64
 	Hashes    []common.Hash
-	peerID    enode.ID
+	peerID    [64]byte
 	waitUntil uint64
 }
 
@@ -58,7 +57,7 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		deliveriesH:      make([]*types.Header, outstandingLimit+MaxBodiesInRequest),
 		deliveriesB:      make([]*types.RawBody, outstandingLimit+MaxBodiesInRequest),
 		requests:         make([]*BodyRequest, outstandingLimit+MaxBodiesInRequest),
-		peerMap:          make(map[enode.ID]int),
+		peerMap:          make(map[[64]byte]int),
 		prefetchedBlocks: NewPrefetchedBlocks(),
 		// DeliveryNotify has capacity 1, and it is also used so that senders never block
 		// This makes this channel a mailbox with no more than one letter in it, meaning

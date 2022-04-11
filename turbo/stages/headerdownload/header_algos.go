@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -368,7 +367,7 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 }
 
 // if anchor will be abandoned - given peerID will get Penalty
-func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID enode.ID) bool {
+func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID [64]byte) bool {
 	anchorH := segment[len(segment)-1]
 	anchorHeader := anchorH.Header
 
@@ -1129,7 +1128,7 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 // it allows higher-level algo immediately request more headers without waiting all stages precessing,
 // speeds up visibility of new blocks
 // It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
-func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID enode.ID) (requestMore bool, penalties []PenaltyItem) {
+func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID [64]byte) (requestMore bool, penalties []PenaltyItem) {
 	lowestNum := segment[0].Number
 	highest := segment[len(segment)-1]
 	highestNum := highest.Number
@@ -1334,7 +1333,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 		return err
 	}
 
-	peerID := enode.ID{'m', 'i', 'n', 'e', 'r'} // "miner"
+	peerID := [64]byte{'m', 'i', 'n', 'e', 'r'} // "miner"
 
 	for _, segment := range segments {
 		_, _ = hd.ProcessSegment(segment, false /* newBlock */, peerID)
@@ -1398,7 +1397,7 @@ func (hd *HeaderDownload) cleanUpPoSDownload() {
 
 func (hd *HeaderDownload) StartPoSDownloader(
 	ctx context.Context,
-	headerReqSend func(context.Context, *HeaderRequest) (enode.ID, bool),
+	headerReqSend func(context.Context, *HeaderRequest) ([64]byte, bool),
 	penalize func(context.Context, []PenaltyItem),
 ) {
 	go func() {

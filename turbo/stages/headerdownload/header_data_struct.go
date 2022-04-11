@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
@@ -101,7 +100,7 @@ func (lq *LinkQueue) Pop() interface{} {
 // header may share the same parent header. In such cases, `links` field will contain
 // more than one pointer.
 type Anchor struct {
-	peerID        enode.ID
+	peerID        [64]byte
 	links         []*Link     // Links attached immediately to this anchor
 	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
@@ -201,7 +200,7 @@ type HeaderRequest struct {
 }
 
 type PenaltyItem struct {
-	PeerID  enode.ID
+	PeerID  [64]byte
 	Penalty Penalty
 }
 type Announce struct {
