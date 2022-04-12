@@ -651,12 +651,12 @@ var (
 	}
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
-		Value: 10,
+		Value: 100,
 		Usage: "limit amount of torrent peers",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
-		Value: 5,
+		Value: 20,
 		Usage: "connections per file",
 	}
 	DbPageSizeFlag = cli.StringFlag{
