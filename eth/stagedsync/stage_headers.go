@@ -302,6 +302,8 @@ func startHandlingForkChoice(
 				Status:          remote.EngineStatus_INVALID,
 				LatestValidHash: lastValidHash,
 			}
+		} else {
+			cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
 		}
 		return nil
 	}
@@ -414,6 +416,8 @@ func handleNewPayload(
 				Status:          remote.EngineStatus_INVALID,
 				LatestValidHash: lastValidHash,
 			}
+		} else {
+			cfg.hd.ReportBadHeaderPoS(headerHash, lastValidHash)
 		}
 		return nil
 	}
@@ -438,6 +442,8 @@ func handleNewPayload(
 					LatestValidHash: header.ParentHash,
 					ValidationError: errors.New("typed txn marshalled as RLP string"),
 				}
+			} else {
+				cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 			}
 			return nil
 		}
@@ -452,6 +458,8 @@ func handleNewPayload(
 				LatestValidHash: header.ParentHash,
 				ValidationError: err,
 			}
+		} else {
+			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		}
 		return nil
 	}
@@ -490,6 +498,8 @@ func verifyAndSaveNewPoSHeader(
 				LatestValidHash: header.ParentHash,
 				ValidationError: verificationErr,
 			}
+		} else {
+			cfg.hd.ReportBadHeaderPoS(headerHash, header.ParentHash)
 		}
 		return
 	}
@@ -599,7 +609,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 	if err != nil {
 		log.Warn("Removing beacon request due to", "err", err, "requestId", cfg.hd.RequestId())
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
-		cfg.hd.ReportBadTipPoS(lastValidHash)
+		cfg.hd.ReportBadHeaderPoS(cfg.hd.PoSDownloaderTip(), lastValidHash)
 	} else {
 		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId())
 	}

@@ -178,10 +178,15 @@ func (hd *HeaderDownload) SetPoSDownloaderTip(hash common.Hash) {
 	defer hd.lock.Unlock()
 	hd.posDownloaderTip = hash
 }
-func (hd *HeaderDownload) ReportBadTipPoS(lastValidAncestor common.Hash) {
+func (hd *HeaderDownload) PoSDownloaderTip() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.posDownloaderTip
+}
+func (hd *HeaderDownload) ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.badPoSHeaders[hd.posDownloaderTip] = lastValidAncestor
+	hd.badPoSHeaders[badHeader] = lastValidAncestor
 }
 func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastValidAncestor common.Hash) {
 	hd.lock.RLock()
