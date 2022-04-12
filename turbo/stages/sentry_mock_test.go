@@ -569,12 +569,10 @@ func TestBogusForkchoice(t *testing.T) {
 func TestPoSDownloader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2 /* n */, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
-	if err != nil {
-		t.Fatalf("generate blocks: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Send a payload with missing parent
 	payloadMessage := engineapi.PayloadMessage{
@@ -583,9 +581,7 @@ func TestPoSDownloader(t *testing.T) {
 	}
 	m.SendPayloadRequest(&payloadMessage)
 	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	payloadStatus := m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus.Status)
 
@@ -603,14 +599,10 @@ func TestPoSDownloader(t *testing.T) {
 
 	// First cycle: save the downloaded header
 	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	// Second cycle: process the previous beacon request
 	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	// Point forkChoice to the head
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
@@ -620,8 +612,63 @@ func TestPoSDownloader(t *testing.T) {
 	}
 	m.SendForkChoiceRequest(&forkChoiceMessage)
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	assert.Equal(t, chain.TopBlock.Hash(), headBlockHash)
+}
+
+// https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+func TestPoSSyncWithInvalidHeader(t *testing.T) {
+	m := stages.MockWithZeroTTD(t)
+
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3 /* n */, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+	}, false /* intermediateHashes */)
+	require.NoError(t, err)
+
+	lastValidHeader := chain.Headers[0]
+
+	invalidParent := types.CopyHeader(chain.Headers[1])
+	invalidParent.Difficulty = common.Big1
+
+	invalidTip := chain.TopBlock.Header()
+	invalidTip.ParentHash = invalidParent.Hash()
+
+	// Send a payload with missing parent
+	payloadMessage := engineapi.PayloadMessage{
+		Header: invalidTip,
+		Body:   chain.TopBlock.RawBody(),
+	}
+	m.SendPayloadRequest(&payloadMessage)
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, true, m.UpdateHead, nil)
+	require.NoError(t, err)
+	payloadStatus1 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_SYNCING, payloadStatus1.Status)
+
+	// Send the missing headers
+	b, err := rlp.EncodeToBytes(&eth.BlockHeadersPacket66{
+		RequestId:          1,
+		BlockHeadersPacket: eth.BlockHeadersPacket{invalidParent, lastValidHeader},
+	})
+	require.NoError(t, err)
+	m.ReceiveWg.Add(1)
+	for _, err = range m.Send(&sentry.InboundMessage{Id: sentry.MessageId_BLOCK_HEADERS_66, Data: b, PeerId: m.PeerId}) {
+		require.NoError(t, err)
+	}
+	m.ReceiveWg.Wait()
+
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	require.NoError(t, err)
+
+	// Point forkChoice to the invalid tip
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
+		HeadBlockHash:      invalidTip.Hash(),
+		SafeBlockHash:      invalidTip.Hash(),
+		FinalizedBlockHash: invalidTip.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	_, err = stages.StageLoopStep(m.Ctx, m.DB, m.Sync, 0, m.Notifications, false, m.UpdateHead, nil)
+	require.NoError(t, err)
+	payloadStatus2 := m.ReceivePayloadStatus()
+	require.Equal(t, remote.EngineStatus_INVALID, payloadStatus2.Status)
+	assert.Equal(t, lastValidHeader.Hash(), payloadStatus2.LatestValidHash)
 }

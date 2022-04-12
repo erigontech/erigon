@@ -293,6 +293,19 @@ func startHandlingForkChoice(
 		return nil
 	}
 
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
+	if bad {
+		log.Info(fmt.Sprintf("[%s] Fork choice bad head block", s.LogPrefix()), "headerHash", headerHash)
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		if requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: lastValidHash,
+			}
+		}
+		return nil
+	}
+
 	header, err := rawdb.ReadHeaderByHash(tx, headerHash)
 	if err != nil {
 		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
@@ -307,6 +320,7 @@ func startHandlingForkChoice(
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
 		hashToDownload := headerHash
 		heighToDownload := cfg.hd.TopSeenHeight() // approximate
+		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestStatus, requestId, hashToDownload, heighToDownload, s, cfg)
 		return nil
 	}
@@ -388,11 +402,28 @@ func handleNewPayload(
 		return nil
 	}
 
+	bad, lastValidHash := cfg.hd.IsBadHeaderPoS(headerHash)
+	if !bad {
+		bad, lastValidHash = cfg.hd.IsBadHeaderPoS(header.ParentHash)
+	}
+	if bad {
+		log.Info(fmt.Sprintf("[%s] Previously known bad block", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+		cfg.hd.BeaconRequestList.Remove(requestId)
+		if requestStatus == engineapi.New {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: lastValidHash,
+			}
+		}
+		return nil
+	}
+
 	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
 		heightToDownload := headerNumber - 1
+		cfg.hd.SetPoSDownloaderTip(headerHash)
 		schedulePoSDownload(requestStatus, requestId, hashToDownload, heightToDownload, s, cfg)
 		return nil
 	}
@@ -544,11 +575,14 @@ func schedulePoSDownload(
 }
 
 func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) error {
+	var lastValidHash common.Hash
+
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		var h types.Header
 		if err := rlp.DecodeBytes(value, &h); err != nil {
 			return err
 		}
+		lastValidHash = h.ParentHash
 		if err := cfg.hd.VerifyHeader(&h); err != nil {
 			log.Warn("Verification failed for header", "hash", h.Hash(), "height", h.Number.Uint64(), "err", err)
 			return err
@@ -565,6 +599,7 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 	if err != nil {
 		log.Warn("Removing beacon request due to", "err", err, "requestId", cfg.hd.RequestId())
 		cfg.hd.BeaconRequestList.Remove(cfg.hd.RequestId())
+		cfg.hd.ReportBadTipPoS(lastValidHash)
 	} else {
 		log.Info("PoS headers verified and saved", "requestId", cfg.hd.RequestId())
 	}

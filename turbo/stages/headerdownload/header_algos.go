@@ -172,6 +172,24 @@ func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
 	return ok
 }
 
+// See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+func (hd *HeaderDownload) SetPoSDownloaderTip(hash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posDownloaderTip = hash
+}
+func (hd *HeaderDownload) ReportBadTipPoS(lastValidAncestor common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.badPoSHeaders[hd.posDownloaderTip] = lastValidAncestor
+}
+func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastValidAncestor common.Hash) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	lastValidAncestor, bad = hd.badPoSHeaders[tipHash]
+	return
+}
+
 // findAnchor attempts to find anchor to which given chain segment can be attached to
 func (hd *HeaderDownload) findAnchor(segment ChainSegment) (found bool, anchor *Anchor, start int) {
 	// Walk the segment from children towards parents
