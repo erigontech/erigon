@@ -196,7 +196,7 @@ func doCompress(cliCtx *cli.Context) error {
 	f := args[0]
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
-	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, runtime.NumCPU()/2, log.LvlInfo)
+	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, runtime.NumCPU()-2, log.LvlInfo)
 	if err != nil {
 		return err
 	}
