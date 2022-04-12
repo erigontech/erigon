@@ -1,4 +1,5 @@
-
+#!/bin/bash
+set -e
 
 dir=$1
 files=$(ls $dir/snapshots | grep -v tor | grep seg |  sort -n -t$'-' -k1)
