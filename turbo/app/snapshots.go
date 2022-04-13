@@ -166,7 +166,7 @@ func doUncompress(cliCtx *cli.Context) error {
 		var buf []byte
 		var EOL = []byte("\n")
 		for g.HasNext() {
-			buf, _ := g.Next(buf)
+			buf, _ := g.Next(buf[:0])
 			if _, err := wr.Write(buf); err != nil {
 				return err
 			}
