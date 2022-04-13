@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"sort"
@@ -318,7 +319,7 @@ type Pattern struct {
 	code     uint64 // Allocated numerical code
 	codeBits int    // Number of bits in the code
 	word     []byte // Pattern characters
-	offset   uint64 // Offset of this patten in the dictionary representation
+	depth    int    // Depth of the pattern in the huffman tree (for encoding in the file)
 }
 
 // PatternList is a sorted list of pattern for the purpose of
@@ -333,7 +334,7 @@ func (pl PatternList) Len() int {
 
 func (pl PatternList) Less(i, j int) bool {
 	if pl[i].uses == pl[j].uses {
-		return pl[i].code < pl[j].code
+		return bits.Reverse64(pl[i].code) < bits.Reverse64(pl[j].code)
 	}
 	return pl[i].uses < pl[j].uses
 }
@@ -350,7 +351,6 @@ type PatternHuff struct {
 	tieBreaker uint64
 	p0, p1     *Pattern
 	h0, h1     *PatternHuff
-	offset     uint64 // Offset of this huffman tree node in the dictionary representation
 }
 
 func (h *PatternHuff) AddZero() {
@@ -382,6 +382,23 @@ func (h *PatternHuff) AddOne() {
 		h.p1.codeBits++
 	} else {
 		h.h1.AddOne()
+	}
+}
+
+func (h *PatternHuff) SetDepth(depth int) {
+	if h.p0 != nil {
+		h.p0.depth = depth + 1
+		h.p0.uses = 0
+	}
+	if h.p1 != nil {
+		h.p1.depth = depth + 1
+		h.p1.uses = 0
+	}
+	if h.h0 != nil {
+		h.h0.SetDepth(depth + 1)
+	}
+	if h.h1 != nil {
+		h.h1.SetDepth(depth + 1)
 	}
 }
 
@@ -419,11 +436,11 @@ func (ph *PatternHeap) Pop() interface{} {
 }
 
 type Position struct {
-	pos      uint64
 	uses     uint64
+	pos      uint64
 	code     uint64
 	codeBits int
-	offset   uint64
+	depth    int // Depth of the position in the huffman tree (for encoding in the file)
 }
 
 type PositionHuff struct {
@@ -431,7 +448,6 @@ type PositionHuff struct {
 	tieBreaker uint64
 	p0, p1     *Position
 	h0, h1     *PositionHuff
-	offset     uint64
 }
 
 func (h *PositionHuff) AddZero() {
@@ -466,6 +482,23 @@ func (h *PositionHuff) AddOne() {
 	}
 }
 
+func (h *PositionHuff) SetDepth(depth int) {
+	if h.p0 != nil {
+		h.p0.depth = depth + 1
+		h.p0.uses = 0
+	}
+	if h.p1 != nil {
+		h.p1.depth = depth + 1
+		h.p1.uses = 0
+	}
+	if h.h0 != nil {
+		h.h0.SetDepth(depth + 1)
+	}
+	if h.h1 != nil {
+		h.h1.SetDepth(depth + 1)
+	}
+}
+
 type PositionList []*Position
 
 func (pl PositionList) Len() int {
@@ -474,7 +507,7 @@ func (pl PositionList) Len() int {
 
 func (pl PositionList) Less(i, j int) bool {
 	if pl[i].uses == pl[j].uses {
-		return pl[i].pos < pl[j].pos
+		return bits.Reverse64(pl[i].code) < bits.Reverse64(pl[j].code)
 	}
 	return pl[i].uses < pl[j].uses
 }
@@ -888,41 +921,27 @@ func (c *CompressorSequential) optimiseCodes() error {
 	}
 	sort.Sort(&patternList)
 
-	// Calculate offsets of the dictionary patterns and total size
-	var offset uint64
-	for _, p := range patternList {
-		p.offset = offset
-		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.word)))
-		offset += uint64(n + len(p.word))
-	}
-	patternCutoff := offset // All offsets below this will be considered patterns
-	i := 0                  // Will be going over the patternList
+	i := 0 // Will be going over the patternList
 	// Build Huffman tree for codes
 	var codeHeap PatternHeap
 	heap.Init(&codeHeap)
 	tieBreaker := uint64(0)
-	var huffs []*PatternHuff // To be used to output dictionary
 	for codeHeap.Len()+(patternList.Len()-i) > 1 {
 		// New node
 		h := &PatternHuff{
 			tieBreaker: tieBreaker,
-			offset:     offset,
 		}
 		if codeHeap.Len() > 0 && (i >= patternList.Len() || codeHeap[0].uses < patternList[i].uses) {
 			// Take h0 from the heap
 			h.h0 = heap.Pop(&codeHeap).(*PatternHuff)
 			h.h0.AddZero()
 			h.uses += h.h0.uses
-			n := binary.PutUvarint(c.numBuf[:], h.h0.offset)
-			offset += uint64(n)
 		} else {
 			// Take p0 from the list
 			h.p0 = patternList[i]
 			h.p0.code = 0
 			h.p0.codeBits = 1
 			h.uses += h.p0.uses
-			n := binary.PutUvarint(c.numBuf[:], h.p0.offset)
-			offset += uint64(n)
 			i++
 		}
 		if codeHeap.Len() > 0 && (i >= patternList.Len() || codeHeap[0].uses < patternList[i].uses) {
@@ -930,27 +949,28 @@ func (c *CompressorSequential) optimiseCodes() error {
 			h.h1 = heap.Pop(&codeHeap).(*PatternHuff)
 			h.h1.AddOne()
 			h.uses += h.h1.uses
-			n := binary.PutUvarint(c.numBuf[:], h.h1.offset)
-			offset += uint64(n)
 		} else {
 			// Take p1 from the list
 			h.p1 = patternList[i]
 			h.p1.code = 1
 			h.p1.codeBits = 1
 			h.uses += h.p1.uses
-			n := binary.PutUvarint(c.numBuf[:], h.p1.offset)
-			offset += uint64(n)
 			i++
 		}
 		tieBreaker++
 		heap.Push(&codeHeap, h)
-		huffs = append(huffs, h)
 	}
-	var root *PatternHuff
 	if codeHeap.Len() > 0 {
-		root = heap.Pop(&codeHeap).(*PatternHuff) // Root node of huffman tree
+		root := heap.Pop(&codeHeap).(*PatternHuff) // Root node of huffman tree
+		root.SetDepth(0)
 	}
-
+	// Calculate total size of the dictionary
+	var patternsSize uint64
+	for _, p := range patternList {
+		ns := binary.PutUvarint(c.numBuf[:], uint64(p.depth))    // Length of the word's depth
+		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.word))) // Length of the word's length
+		patternsSize += uint64(ns + n + len(p.word))
+	}
 	// Start writing to result file
 	cf, err := os.Create(c.outputFile)
 	if err != nil {
@@ -970,26 +990,17 @@ func (c *CompressorSequential) optimiseCodes() error {
 		return err
 	}
 	// 2-nd, output dictionary size
-	binary.BigEndian.PutUint64(c.numBuf[:], offset) // Dictionary size
+	binary.BigEndian.PutUint64(c.numBuf[:], patternsSize) // Dictionary size
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
-	// 3-rd, output directory root
-	if root == nil {
-		binary.BigEndian.PutUint64(c.numBuf[:], 0)
-	} else {
-		binary.BigEndian.PutUint64(c.numBuf[:], root.offset)
-	}
-	if _, err = cw.Write(c.numBuf[:8]); err != nil {
-		return err
-	}
-	// 4-th, output pattern cutoff offset
-	binary.BigEndian.PutUint64(c.numBuf[:], patternCutoff)
-	if _, err = cw.Write(c.numBuf[:8]); err != nil {
-		return err
-	}
-	// Write all the pattens
+	// 3-rd, write all the pattens, with their depths
+	sort.Sort(&patternList)
 	for _, p := range patternList {
+		ns := binary.PutUvarint(c.numBuf[:], uint64(p.depth))
+		if _, err = cw.Write(c.numBuf[:ns]); err != nil {
+			return err
+		}
 		n := binary.PutUvarint(c.numBuf[:], uint64(len(p.word)))
 		if _, err = cw.Write(c.numBuf[:n]); err != nil {
 			return err
@@ -997,70 +1008,37 @@ func (c *CompressorSequential) optimiseCodes() error {
 		if _, err = cw.Write(p.word); err != nil {
 			return err
 		}
-	}
-	// Write all the huffman nodes
-	for _, h := range huffs {
-		var n int
-		if h.h0 != nil {
-			n = binary.PutUvarint(c.numBuf[:], h.h0.offset)
-		} else {
-			n = binary.PutUvarint(c.numBuf[:], h.p0.offset)
-		}
-		if _, err = cw.Write(c.numBuf[:n]); err != nil {
-			return err
-		}
-		if h.h1 != nil {
-			n = binary.PutUvarint(c.numBuf[:], h.h1.offset)
-		} else {
-			n = binary.PutUvarint(c.numBuf[:], h.p1.offset)
-		}
-		if _, err = cw.Write(c.numBuf[:n]); err != nil {
-			return err
-		}
+		//fmt.Printf("[comp] depth=%d, code=[%b], pattern=[%x]\n", p.depth, p.code, p.word)
 	}
 	var positionList PositionList
 	pos2code := make(map[uint64]*Position)
 	for pos, uses := range c.posMap {
-		p := &Position{pos: pos, uses: uses, code: 0, codeBits: 0, offset: 0}
+		p := &Position{pos: pos, uses: uses, code: pos, codeBits: 0}
 		positionList = append(positionList, p)
 		pos2code[pos] = p
 	}
 	sort.Sort(&positionList)
-	// Calculate offsets of the dictionary positions and total size
-	offset = 0
-	for _, p := range positionList {
-		p.offset = offset
-		n := binary.PutUvarint(c.numBuf[:], p.pos)
-		offset += uint64(n)
-	}
-	positionCutoff := offset // All offsets below this will be considered positions
-	i = 0                    // Will be going over the positionList
+	i = 0 // Will be going over the positionList
 	// Build Huffman tree for codes
 	var posHeap PositionHeap
 	heap.Init(&posHeap)
 	tieBreaker = uint64(0)
-	var posHuffs []*PositionHuff // To be used to output dictionary
 	for posHeap.Len()+(positionList.Len()-i) > 1 {
 		// New node
 		h := &PositionHuff{
 			tieBreaker: tieBreaker,
-			offset:     offset,
 		}
 		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
 			// Take h0 from the heap
 			h.h0 = heap.Pop(&posHeap).(*PositionHuff)
 			h.h0.AddZero()
 			h.uses += h.h0.uses
-			n := binary.PutUvarint(c.numBuf[:], h.h0.offset)
-			offset += uint64(n)
 		} else {
 			// Take p0 from the list
 			h.p0 = positionList[i]
 			h.p0.code = 0
 			h.p0.codeBits = 1
 			h.uses += h.p0.uses
-			n := binary.PutUvarint(c.numBuf[:], h.p0.offset)
-			offset += uint64(n)
 			i++
 		}
 		if posHeap.Len() > 0 && (i >= positionList.Len() || posHeap[0].uses < positionList[i].uses) {
@@ -1068,68 +1046,41 @@ func (c *CompressorSequential) optimiseCodes() error {
 			h.h1 = heap.Pop(&posHeap).(*PositionHuff)
 			h.h1.AddOne()
 			h.uses += h.h1.uses
-			n := binary.PutUvarint(c.numBuf[:], h.h1.offset)
-			offset += uint64(n)
 		} else {
 			// Take p1 from the list
 			h.p1 = positionList[i]
 			h.p1.code = 1
 			h.p1.codeBits = 1
 			h.uses += h.p1.uses
-			n := binary.PutUvarint(c.numBuf[:], h.p1.offset)
-			offset += uint64(n)
 			i++
 		}
 		tieBreaker++
 		heap.Push(&posHeap, h)
-		posHuffs = append(posHuffs, h)
 	}
-	var posRoot *PositionHuff
 	if posHeap.Len() > 0 {
-		posRoot = heap.Pop(&posHeap).(*PositionHuff)
+		posRoot := heap.Pop(&posHeap).(*PositionHuff)
+		posRoot.SetDepth(0)
+	}
+	// Calculate the size of pos dictionary
+	var posSize uint64
+	for _, p := range positionList {
+		ns := binary.PutUvarint(c.numBuf[:], uint64(p.depth)) // Length of the position's depth
+		n := binary.PutUvarint(c.numBuf[:], p.pos)
+		posSize += uint64(ns + n)
 	}
 	// First, output dictionary size
-	binary.BigEndian.PutUint64(c.numBuf[:], offset) // Dictionary size
+	binary.BigEndian.PutUint64(c.numBuf[:], posSize) // Dictionary size
 	if _, err = cw.Write(c.numBuf[:8]); err != nil {
 		return err
 	}
-	// Secondly, output directory root
-	if posRoot == nil {
-		binary.BigEndian.PutUint64(c.numBuf[:], 0)
-	} else {
-		binary.BigEndian.PutUint64(c.numBuf[:], posRoot.offset)
-	}
-	if _, err = cw.Write(c.numBuf[:8]); err != nil {
-		return err
-	}
-	// Thirdly, output pattern cutoff offset
-	binary.BigEndian.PutUint64(c.numBuf[:], positionCutoff)
-	if _, err = cw.Write(c.numBuf[:8]); err != nil {
-		return err
-	}
-	// Write all the positions
+	sort.Sort(&positionList)
+	// Write all the positions and their depths
 	for _, p := range positionList {
+		ns := binary.PutUvarint(c.numBuf[:], uint64(p.depth))
+		if _, err = cw.Write(c.numBuf[:ns]); err != nil {
+			return err
+		}
 		n := binary.PutUvarint(c.numBuf[:], p.pos)
-		if _, err = cw.Write(c.numBuf[:n]); err != nil {
-			return err
-		}
-	}
-	// Write all the huffman nodes
-	for _, h := range posHuffs {
-		var n int
-		if h.h0 != nil {
-			n = binary.PutUvarint(c.numBuf[:], h.h0.offset)
-		} else {
-			n = binary.PutUvarint(c.numBuf[:], h.p0.offset)
-		}
-		if _, err = cw.Write(c.numBuf[:n]); err != nil {
-			return err
-		}
-		if h.h1 != nil {
-			n = binary.PutUvarint(c.numBuf[:], h.h1.offset)
-		} else {
-			n = binary.PutUvarint(c.numBuf[:], h.p1.offset)
-		}
 		if _, err = cw.Write(c.numBuf[:n]); err != nil {
 			return err
 		}

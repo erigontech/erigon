@@ -39,20 +39,6 @@ type posTable struct {
 	ptrs   []*posTable
 }
 
-type huffmanNodePos struct {
-	zero     *huffmanNodePos
-	one      *huffmanNodePos
-	pos      uint64
-	maxDepth int
-}
-
-type huffmanNodePattern struct {
-	zero     *huffmanNodePattern
-	one      *huffmanNodePattern
-	pattern  []byte
-	maxDepth int
-}
-
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	compressedFile string
@@ -82,7 +68,7 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 		return nil, err
 	}
 	d.size = stat.Size()
-	if d.size < 40 {
+	if d.size < 32 {
 		return nil, fmt.Errorf("compressed file is too short: %d", d.size)
 	}
 	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
@@ -92,16 +78,31 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	d.wordsCount = binary.BigEndian.Uint64(d.data[:8])
 	d.emptyWordsCount = binary.BigEndian.Uint64(d.data[8:16])
 	dictSize := binary.BigEndian.Uint64(d.data[16:24])
-	rootOffset := binary.BigEndian.Uint64(d.data[24:32])
-	cutoff := binary.BigEndian.Uint64(d.data[32:40])
-	data := d.data[40 : 40+dictSize]
+	data := d.data[24 : 24+dictSize]
+	var depths []uint64
+	var patterns [][]byte
+	var i uint64
+	var patternMaxDepth uint64
+	//fmt.Printf("[decomp] dictSize = %d\n", dictSize)
+	for i < dictSize {
+		d, ns := binary.Uvarint(data[i:])
+		depths = append(depths, d)
+		if d > patternMaxDepth {
+			patternMaxDepth = d
+		}
+		i += uint64(ns)
+		l, n := binary.Uvarint(data[i:])
+		i += uint64(n)
+		patterns = append(patterns, data[i:i+l])
+		//fmt.Printf("depth = %d, pattern = [%x]\n", d, data[i:i+l])
+		i += l
+	}
 	if dictSize > 0 {
-		tree := buildHuffmanPattern(data, rootOffset, cutoff)
 		var bitLen int
-		if tree.maxDepth > 9 {
+		if patternMaxDepth > 9 {
 			bitLen = 9
 		} else {
-			bitLen = tree.maxDepth
+			bitLen = int(patternMaxDepth)
 		}
 		//fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
 		tableSize := 1 << bitLen
@@ -111,20 +112,33 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 			lens:     make([]byte, tableSize),
 			ptrs:     make([]*patternTable, tableSize),
 		}
-		buildPatternTable(tree, d.dict, 0, 0)
+		buildPatternTable(depths, patterns, d.dict, 0, 0, 0, patternMaxDepth)
 	}
-	pos := 40 + dictSize
+	pos := 24 + dictSize
 	dictSize = binary.BigEndian.Uint64(d.data[pos : pos+8])
-	rootOffset = binary.BigEndian.Uint64(d.data[pos+8 : pos+16])
-	cutoff = binary.BigEndian.Uint64(d.data[pos+16 : pos+24])
-	data = d.data[pos+24 : pos+24+dictSize]
+	data = d.data[pos+8 : pos+8+dictSize]
+	var posDepths []uint64
+	var poss []uint64
+	var posMaxDepth uint64
+	//fmt.Printf("[decomp] posDictSize = %d\n", dictSize)
+	i = 0
+	for i < dictSize {
+		d, ns := binary.Uvarint(data[i:])
+		posDepths = append(posDepths, d)
+		if d > posMaxDepth {
+			posMaxDepth = d
+		}
+		i += uint64(ns)
+		pos, n := binary.Uvarint(data[i:])
+		i += uint64(n)
+		poss = append(poss, pos)
+	}
 	if dictSize > 0 {
-		tree := buildHuffmanPos(data, rootOffset, cutoff)
 		var bitLen int
-		if tree.maxDepth > 9 {
+		if posMaxDepth > 9 {
 			bitLen = 9
 		} else {
-			bitLen = tree.maxDepth
+			bitLen = int(posMaxDepth)
 		}
 		//fmt.Printf("pos maxDepth=%d\n", tree.maxDepth)
 		tableSize := 1 << bitLen
@@ -134,74 +148,42 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
-		buildPosTable(tree, d.posDict, 0, 0)
+		buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth)
 	}
-	d.wordsStart = pos + 24 + dictSize
+	d.wordsStart = pos + 8 + dictSize
 	return d, nil
 }
 
-func buildHuffmanPos(data []byte, offset uint64, cutoff uint64) *huffmanNodePos {
-	if offset < cutoff {
-		pos, _ := binary.Uvarint(data[offset:])
-		return &huffmanNodePos{pos: pos, maxDepth: 0}
+// returns number of depth and patterns comsumed
+func buildPatternTable(depths []uint64, patterns [][]byte, table *patternTable, code uint16, bits int, depth uint64, maxDepth uint64) int {
+	if len(depths) == 0 {
+		return 0
 	}
-	offsetZero, n := binary.Uvarint(data[offset:])
-	offsetOne, _ := binary.Uvarint(data[offset+uint64(n):])
-	t0 := buildHuffmanPos(data, offsetZero, cutoff)
-	t1 := buildHuffmanPos(data, offsetOne, cutoff)
-	var maxDepth int
-	if t0.maxDepth > t1.maxDepth {
-		maxDepth = t0.maxDepth + 1
-	} else {
-		maxDepth = t1.maxDepth + 1
-	}
-	return &huffmanNodePos{zero: t0, one: t1, maxDepth: maxDepth}
-}
-
-func buildHuffmanPattern(data []byte, offset uint64, cutoff uint64) *huffmanNodePattern {
-	if offset < cutoff {
-		l, n := binary.Uvarint(data[offset:])
-		return &huffmanNodePattern{pattern: data[offset+uint64(n) : offset+uint64(n)+l], maxDepth: 0}
-	}
-	offsetZero, n := binary.Uvarint(data[offset:])
-	offsetOne, _ := binary.Uvarint(data[offset+uint64(n):])
-	t0 := buildHuffmanPattern(data, offsetZero, cutoff)
-	t1 := buildHuffmanPattern(data, offsetOne, cutoff)
-	var maxDepth int
-	if t0.maxDepth > t1.maxDepth {
-		maxDepth = t0.maxDepth + 1
-	} else {
-		maxDepth = t1.maxDepth + 1
-	}
-	return &huffmanNodePattern{zero: t0, one: t1, maxDepth: maxDepth}
-}
-
-func buildPatternTable(tree *huffmanNodePattern, table *patternTable, code uint16, depth int) {
-	if tree.zero == nil && tree.one == nil {
-		if table.bitLen == depth {
-			table.patterns[code] = tree.pattern
-			//fmt.Printf(".[%b]%d=>[%s]\n", code, table.bitLen, tree.pattern)
-			table.lens[code] = byte(depth)
+	if depth == depths[0] {
+		pattern := patterns[0]
+		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
+		if table.bitLen == int(bits) {
+			table.patterns[code] = pattern
+			table.lens[code] = byte(bits)
 			table.ptrs[code] = nil
 		} else {
-			codeStep := uint16(1) << depth
+			codeStep := uint16(1) << bits
 			codeFrom := code
 			codeTo := code | (uint16(1) << table.bitLen)
 			for c := codeFrom; c < codeTo; c += codeStep {
-				table.patterns[c] = tree.pattern
-				//fmt.Printf("*[%b]%d=>[%s]\n", c, table.bitLen, tree.pattern)
-				table.lens[c] = byte(depth)
+				table.patterns[c] = pattern
+				table.lens[c] = byte(bits)
 				table.ptrs[c] = nil
 			}
 		}
-		return
+		return 1
 	}
-	if depth == 9 {
+	if bits == 9 {
 		var bitLen int
-		if tree.maxDepth > 9 {
+		if maxDepth > 9 {
 			bitLen = 9
 		} else {
-			bitLen = tree.maxDepth
+			bitLen = int(maxDepth)
 		}
 		tableSize := 1 << bitLen
 		newTable := &patternTable{
@@ -213,39 +195,41 @@ func buildPatternTable(tree *huffmanNodePattern, table *patternTable, code uint1
 		table.patterns[code] = nil
 		table.lens[code] = byte(0)
 		table.ptrs[code] = newTable
-		buildPatternTable(tree, newTable, 0, 0)
-		return
+		return buildPatternTable(depths, patterns, newTable, 0, 0, depth, maxDepth)
 	}
-	buildPatternTable(tree.zero, table, code, depth+1)
-	buildPatternTable(tree.one, table, (uint16(1)<<depth)|code, depth+1)
+	b0 := buildPatternTable(depths, patterns, table, code, bits+1, depth+1, maxDepth-1)
+	return b0 + buildPatternTable(depths[b0:], patterns[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
 }
 
-func buildPosTable(tree *huffmanNodePos, table *posTable, code uint16, depth int) {
-	if tree.zero == nil && tree.one == nil {
-		if table.bitLen == depth {
-			table.pos[code] = tree.pos
-			//fmt.Printf(".[%b]%d=>%d\n", code, table.bitLen, tree.pos)
-			table.lens[code] = byte(depth)
+func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) int {
+	if len(depths) == 0 {
+		return 0
+	}
+	if depth == depths[0] {
+		p := poss[0]
+		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pos=%d\n", depth, maxDepth, code, bits, p)
+		if table.bitLen == int(bits) {
+			table.pos[code] = p
+			table.lens[code] = byte(bits)
 			table.ptrs[code] = nil
 		} else {
-			codeStep := uint16(1) << depth
+			codeStep := uint16(1) << bits
 			codeFrom := code
 			codeTo := code | (uint16(1) << table.bitLen)
 			for c := codeFrom; c < codeTo; c += codeStep {
-				table.pos[c] = tree.pos
-				//fmt.Printf("*[%b]%d=>%d\n", c, table.bitLen, tree.pos)
-				table.lens[c] = byte(depth)
+				table.pos[c] = p
+				table.lens[c] = byte(bits)
 				table.ptrs[c] = nil
 			}
 		}
-		return
+		return 1
 	}
-	if depth == 9 {
+	if bits == 9 {
 		var bitLen int
-		if tree.maxDepth > 9 {
+		if maxDepth > 9 {
 			bitLen = 9
 		} else {
-			bitLen = tree.maxDepth
+			bitLen = int(maxDepth)
 		}
 		tableSize := 1 << bitLen
 		newTable := &posTable{
@@ -257,11 +241,10 @@ func buildPosTable(tree *huffmanNodePos, table *posTable, code uint16, depth int
 		table.pos[code] = 0
 		table.lens[code] = byte(0)
 		table.ptrs[code] = newTable
-		buildPosTable(tree, newTable, 0, 0)
-		return
+		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
 	}
-	buildPosTable(tree.zero, table, code, depth+1)
-	buildPosTable(tree.one, table, (uint16(1)<<depth)|code, depth+1)
+	b0 := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
+	return b0 + buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
 }
 
 func (d *Decompressor) Size() int64 {
