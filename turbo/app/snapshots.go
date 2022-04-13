@@ -162,10 +162,10 @@ func doUncompress(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
+	defer wr.Flush()
 	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
-		wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
-		defer wr.Flush()
 		g := decompressor.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
@@ -225,7 +225,7 @@ func doCompress(cliCtx *cli.Context) error {
 		default:
 		}
 	}
-	if err != nil && errors.Is(err, io.EOF) {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if err := c.Compress(); err != nil {
