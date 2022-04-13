@@ -161,7 +161,7 @@ Erigon has been tested with Lighthouse however all other clients that support JS
 
 ### Authentication API
 
-In order to establish a secure connection beetwen the Consensus Layer and the Execution Layer, a JWT secret key is automatically generated.
+In order to establish a secure connection between the Consensus Layer and the Execution Layer, a JWT secret key is automatically generated.
 
 The JWT secret key will be present in the datadir by default under the name of `jwt.hex` and its path can be specified with the flag `--authrpc.jwtsecret`.
 
