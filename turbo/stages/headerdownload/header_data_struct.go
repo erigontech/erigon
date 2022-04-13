@@ -294,6 +294,8 @@ type HeaderDownload struct {
 	pendingPayloadStatus common.Hash                   // Header whose status we still should send to PayloadStatusCh
 	unsettledForkChoice  *engineapi.ForkChoiceMessage  // Forkchoice to process after unwind
 	unsettledHeadHeight  uint64                        // Height of unsettledForkChoice.headBlockHash
+	posDownloaderTip     common.Hash                   // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+	badPoSHeaders        map[common.Hash]common.Hash   // Invalid Tip -> Last Valid Ancestor
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -325,6 +327,7 @@ func NewHeaderDownload(
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
+		badPoSHeaders:      make(map[common.Hash]common.Hash),
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
