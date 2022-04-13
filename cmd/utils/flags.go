@@ -636,12 +636,12 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
-		Value: "8mb",
+		Value: "4mb",
 		Usage: "bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name:  "torrent.upload.rate",
-		Value: "8mb",
+		Value: "4mb",
 		Usage: "byt,es per second, example: 32mb",
 	}
 	TorrentPortFlag = cli.IntFlag{
