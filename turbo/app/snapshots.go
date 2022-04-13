@@ -161,12 +161,13 @@ func doUncompress(cliCtx *cli.Context) error {
 		return err
 	}
 	if err := decompressor.WithReadAhead(func() error {
-		wr := bufio.NewWriterSize(os.Stdout, etl.BufIOSize)
+		wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
+		defer wr.Flush()
 		g := decompressor.MakeGetter()
-		var buf []byte
+		buf := make([]byte, 0, 16*etl.BufIOSize)
 		var EOL = []byte("\n")
 		for g.HasNext() {
-			buf, _ := g.Next(buf[:0])
+			buf, _ = g.Next(buf[:0])
 			if _, err := wr.Write(buf); err != nil {
 				return err
 			}
