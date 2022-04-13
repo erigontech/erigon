@@ -2,7 +2,7 @@
 set -e
 
 dir=$1
-files=$(ls $dir/snapshots | grep -v tor | grep seg |  sort -n -t$'-' -k1)
+files=$(ls $dir/snapshots | grep -v old | grep -v tor | grep seg |  sort -n -t$'-' -k1)
 for file in $files
 do
    from=$dir/snapshots/$file
