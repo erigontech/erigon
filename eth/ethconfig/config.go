@@ -303,7 +303,7 @@ func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName:
-		return SnapSync
+		return FastSync
 	default:
 		return FastSync
 	}
