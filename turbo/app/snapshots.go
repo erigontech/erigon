@@ -167,11 +167,20 @@ func doUncompress(cliCtx *cli.Context) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
 		g := decompressor.MakeGetter()
+<<<<<<< Updated upstream
 		buf := make([]byte, 0, 16*etl.BufIOSize)
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
 			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
 			if _, err := wr.Write(numBuf[:n]); err != nil {
+=======
+		buf := make([]byte, 0, 10*1024*1024)
+		var EOL = []byte("\n")
+		i := 0
+		for g.HasNext() {
+			buf, _ := g.Next(buf[:0])
+			if _, err := wr.Write(buf); err != nil {
+>>>>>>> Stashed changes
 				return err
 			}
 			if _, err := wr.Write(buf); err != nil {
