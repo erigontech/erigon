@@ -242,7 +242,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	var gas uint64             // used for logs
 	var currentStateGas uint64 // used for batch commits of state
 	// Transform batch_size limit into Ggas
-	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 3
+	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 2
 
 	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
 	if err != nil {
