@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -160,18 +162,19 @@ func doUncompress(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
+	defer wr.Flush()
+	var numBuf [binary.MaxVarintLen64]byte
 	if err := decompressor.WithReadAhead(func() error {
-		wr := bufio.NewWriterSize(os.Stdout, 16*etl.BufIOSize)
-		defer wr.Flush()
 		g := decompressor.MakeGetter()
 		buf := make([]byte, 0, 16*etl.BufIOSize)
-		var EOL = []byte("\n")
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
-			if _, err := wr.Write(buf); err != nil {
+			n := binary.PutUvarint(numBuf[:], uint64(len(buf)))
+			if _, err := wr.Write(numBuf[:n]); err != nil {
 				return err
 			}
-			if _, err := wr.Write(EOL); err != nil {
+			if _, err := wr.Write(buf); err != nil {
 				return err
 			}
 			select {
@@ -201,11 +204,19 @@ func doCompress(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	scanner := bufio.NewScanner(os.Stdin)
+	r := bufio.NewReaderSize(os.Stdin, 16*etl.BufIOSize)
 	buf := make([]byte, 0, 32*1024*1024)
-	scanner.Buffer(buf, cap(buf))
-	for scanner.Scan() {
-		if err := c.AddWord(scanner.Bytes()); err != nil {
+	var l uint64
+	for l, err = binary.ReadUvarint(r); err == nil; l, err = binary.ReadUvarint(r) {
+		if cap(buf) < int(l) {
+			buf = make([]byte, l)
+		} else {
+			buf = buf[:l]
+		}
+		if _, err = io.ReadFull(r, buf); err != nil {
+			return err
+		}
+		if err = c.AddWord(buf); err != nil {
 			return err
 		}
 		select {
@@ -214,8 +225,7 @@ func doCompress(cliCtx *cli.Context) error {
 		default:
 		}
 	}
-
-	if err := scanner.Err(); err != nil {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	if err := c.Compress(); err != nil {
