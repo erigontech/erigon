@@ -212,6 +212,7 @@ func (m *mapmutation) Put(table string, key []byte, value []byte) error {
 	}
 	m.puts[table][formattedKey] = value
 	m.size += len(formattedKey) + len(value)
+
 	m.count++
 	return nil
 }
