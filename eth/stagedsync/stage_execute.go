@@ -38,7 +38,7 @@ import (
 
 const (
 	logInterval    = 30 * time.Second
-	lruDefaultSize = 1_000_000
+	lruDefaultSize = 1_000_000 // 56 MB
 )
 
 type HasChangeSetWriter interface {
