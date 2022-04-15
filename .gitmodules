@@ -3,7 +3,7 @@
 	url = https://github.com/ethereum/tests
 [submodule "libmdbx"]
 	path = libmdbx
-	url = https://github.com/erthink/libmdbx
+	url = https://abf.io/erthink/libmdbx.git
 [submodule "turbo/snapshotsync/snapshothashes/erigon-snapshots"]
 	path = turbo/snapshotsync/snapshothashes/erigon-snapshots
 	url = https://github.com/ledgerwatch/erigon-snapshot.git
