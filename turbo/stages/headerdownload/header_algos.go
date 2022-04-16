@@ -737,7 +737,9 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 				link.header = nil // Drop header reference to free memory, as we won't need it anymore
 				hd.moveLinkToQueue(link, PersistedQueueID)
 				for _, nextLink := range link.next {
-					if nextLink.verified {
+					if nextLink.persisted {
+						log.Warn("Next link already persisted", "link", link.blockHeight, "next", nextLink.blockHeight)
+					} else if nextLink.verified {
 						hd.moveLinkToQueue(nextLink, InsertQueueID)
 					} else {
 						hd.moveLinkToQueue(nextLink, VerifyQueueID)
