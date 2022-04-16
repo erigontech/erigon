@@ -793,6 +793,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 					delete(hd.links, link.hash)
 					continue
 				}
+				link.verified = true
 				hd.moveLinkToQueue(link, InsertQueueID)
 				checkInsert = true
 			}
