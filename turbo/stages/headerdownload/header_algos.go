@@ -705,6 +705,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 					continue
 				}
 				hd.moveLinkToQueue(link, InsertQueueID)
+				link.verified = true
 				checkInsert = true
 			}
 		}
@@ -739,7 +740,7 @@ func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, hash commo
 					checkVerify = true // highestInDb changes, so that there might be more links in verifyQueue to process
 				}
 				link.persisted = true
-				//link.header = nil // Drop header reference to free memory, as we won't need it anymore
+				link.header = nil // Drop header reference to free memory, as we won't need it anymore
 				hd.moveLinkToQueue(link, PersistedQueueID)
 				for _, nextLink := range link.next {
 					if nextLink.verified {
