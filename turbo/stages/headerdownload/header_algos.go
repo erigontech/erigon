@@ -209,9 +209,6 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	if !attaching {
 		return fmt.Errorf("extendUp attachment link not found for %x", linkHeader.ParentHash)
 	}
-	if attachmentLink.verified && len(attachmentLink.next) > 0 {
-		return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
-	}
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
@@ -309,9 +306,6 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 	attachmentLink, ok1 := hd.getLink(linkHeader.ParentHash)
 	if !ok1 {
 		return nil, fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
-	}
-	if attachmentLink.verified && len(attachmentLink.next) > 0 {
-		return nil, fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
 	}
 	anchor, ok2 := hd.anchors[anchorHeader.Hash()]
 	if !ok2 {
