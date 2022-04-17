@@ -1151,8 +1151,10 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-// DeleteAncientBlocks - delete old block after moving it to snapshots. [from, to)
-// doesn't delete reciepts
+// DeleteAncientBlocks - delete old block after moving it to snapshots.
+// keeps genesis in db: [1, to)
+// doesn't delete Reciepts
+// doesn't delete Canonical markers
 func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	c, err := db.Cursor(kv.Headers)
 	if err != nil {
@@ -1167,15 +1169,22 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		firstBlock := binary.BigEndian.Uint64(k)
+		if firstBlock == 0 { // keep genesis in DB
+			k, _, err := c.Next()
+			if err != nil {
+				return err
+			}
+			firstBlock = binary.BigEndian.Uint64(k)
+		}
 		stopAtBlock = min(blockTo, firstBlock+uint64(blocksDeleteLimit))
 	}
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
+	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n >= stopAtBlock {
+		if n > stopAtBlock {
 			break
 		}
 
@@ -1188,6 +1197,9 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		b, err := ReadBodyForStorageByKey(db, k)
 		if err != nil {
 			return err
+		}
+		if b == nil {
+			return fmt.Errorf("DeleteAncientBlocks: block body not found for block %d", n)
 		}
 		txIDBytes := make([]byte, 8)
 		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
