@@ -250,7 +250,7 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
 		if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
 			hd.invalidateAnchor(anchor)
-			return false, fmt.Errorf("cannot connect to anchor %d below preverified", anchor.blockHeight)
+			return false, fmt.Errorf("cannot extendDown anchor %d below preverified", anchor.blockHeight)
 		}
 		anchorPreverified := false
 		for _, link := range anchor.links {
@@ -549,6 +549,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			return err
 		}
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
+		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
@@ -557,7 +558,9 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
 			}
-			hd.addHeaderAsLink(&h, true /* persisted */)
+			if h.Number.Uint64() <= hd.highestInDb {
+				hd.addHeaderAsLink(&h, true /* persisted */)
+			}
 
 			select {
 			case <-logEvery.C:
@@ -565,7 +568,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			default:
 			}
 		}
-		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
 		}
