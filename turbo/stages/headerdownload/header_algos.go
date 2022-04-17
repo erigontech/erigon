@@ -209,6 +209,9 @@ func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error 
 	if !attaching {
 		return fmt.Errorf("extendUp attachment link not found for %x", linkHeader.ParentHash)
 	}
+	if attachmentLink.blockHeight <= hd.preverifiedHeight && len(attachmentLink.next) > 0 {
+		return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
+	}
 	// Iterate over headers backwards (from parents towards children)
 	prevLink := attachmentLink
 	for i := end - 1; i >= start; i-- {
@@ -245,6 +248,10 @@ func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (boo
 	// Find attachment anchor again
 	anchorHeader := segment.Headers[start]
 	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
+		if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
+			hd.invalidateAnchor(anchor)
+			return false, fmt.Errorf("cannot connect to anchor %d below preverified", anchor.blockHeight)
+		}
 		anchorPreverified := false
 		for _, link := range anchor.links {
 			if link.verified {
@@ -307,9 +314,16 @@ func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]Pena
 	if !ok1 {
 		return nil, fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
 	}
+	if attachmentLink.blockHeight <= hd.preverifiedHeight && len(attachmentLink.next) > 0 {
+		return nil, fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
+	}
 	anchor, ok2 := hd.anchors[anchorHeader.Hash()]
 	if !ok2 {
 		return nil, fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
+	}
+	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
+		hd.invalidateAnchor(anchor)
+		return nil, fmt.Errorf("cannot connect to anchor %d below preverified", anchor.blockHeight)
 	}
 	anchorPreverified := false
 	for _, link := range anchor.links {
