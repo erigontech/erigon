@@ -25,7 +25,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -1037,7 +1037,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := BuildIndices(ctx, snapshots, rwSnapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), log.LvlInfo); err != nil {
 		return err
 	}
-	merger := NewMerger(tmpDir, workers, lvl, chainID)
+	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
 	ranges := merger.FindMergeRanges(snapshots)
 	if len(ranges) == 0 {
 		return nil
@@ -1045,9 +1045,6 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	err := merger.Merge(ctx, snapshots, ranges, rwSnapshotDir, true)
 	if err != nil {
 		return err
-	}
-	if notifier != nil { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
 	}
 	// start seed large .seg of large size
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(AllSnapshotTypes))}
@@ -1116,9 +1113,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	var count, prevTxID uint64
 	numBuf := make([]byte, binary.MaxVarintLen64)
-	parseCtx := txpool.NewTxParseContext(*chainID)
+	parseCtx := types2.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
-	slot := txpool.TxSlot{}
+	slot := types2.TxSlot{}
 	var sender [20]byte
 	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
 		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
@@ -1466,9 +1463,9 @@ RETRY:
 	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
 		defer close(txsCh)
 		defer close(txsCh2)
-		parseCtx := txpool.NewTxParseContext(chainID)
+		parseCtx := types2.NewTxParseContext(chainID)
 		parseCtx.WithSender(false)
-		slot := txpool.TxSlot{}
+		slot := types2.TxSlot{}
 		var sender [20]byte
 		for it := range ch {
 			if it.err != nil {
@@ -1791,14 +1788,15 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 }
 
 type Merger struct {
-	lvl     log.Lvl
-	workers int
-	tmpDir  string
-	chainID uint256.Int
+	lvl      log.Lvl
+	workers  int
+	tmpDir   string
+	chainID  uint256.Int
+	notifier DBEventNotifier
 }
 
-func NewMerger(tmpDir string, workers int, lvl log.Lvl, chainID uint256.Int) *Merger {
-	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl, chainID: chainID}
+func NewMerger(tmpDir string, workers int, lvl log.Lvl, chainID uint256.Int, notifier DBEventNotifier) *Merger {
+	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl, chainID: chainID, notifier: notifier}
 }
 
 type mergeRange struct {
@@ -1908,6 +1906,11 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		if err := snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
+		if m.notifier != nil { // notify about new snapshots of any size
+			m.notifier.OnNewSnapshot()
+			time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use
+		}
+
 		if err := m.removeOldFiles(toMergeHeaders, snapshotDir); err != nil {
 			return err
 		}

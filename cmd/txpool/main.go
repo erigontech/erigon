@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -129,7 +130,7 @@ var rootCmd = &cobra.Command{
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 
-		newTxs := make(chan txpool.Hashes, 1024)
+		newTxs := make(chan types.Hashes, 1024)
 		defer close(newTxs)
 		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
 			kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)

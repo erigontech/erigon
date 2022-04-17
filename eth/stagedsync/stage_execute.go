@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -36,7 +37,8 @@ import (
 )
 
 const (
-	logInterval = 30 * time.Second
+	logInterval    = 30 * time.Second
+	lruDefaultSize = 1_000_000 // 56 MB
 )
 
 type HasChangeSetWriter interface {
@@ -219,9 +221,16 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	startTime := time.Now()
 
+	whitelistedTables := []string{kv.Code, kv.ContractCode}
 	var batch ethdb.DbWithPendingMutations
+	// Contract code is unlikely to change too much, so let's keep it cached
+	contractCodeCache, err := lru.New(lruDefaultSize)
+	if err != nil {
+		return err
+	}
 	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+
 	defer batch.Rollback()
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
@@ -233,7 +242,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	var gas uint64             // used for logs
 	var currentStateGas uint64 // used for batch commits of state
 	// Transform batch_size limit into Ggas
-	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 3
+	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 2
 
 	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
 	if err != nil {
@@ -303,7 +312,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir)
+			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}

@@ -86,6 +86,7 @@ func StageLoop(
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header downloader", "err", recoveryErr)
 			}
+			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
 		}
 

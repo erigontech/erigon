@@ -636,12 +636,12 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
-		Value: "8mb",
+		Value: "4mb",
 		Usage: "bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name:  "torrent.upload.rate",
-		Value: "8mb",
+		Value: "4mb",
 		Usage: "byt,es per second, example: 32mb",
 	}
 	TorrentPortFlag = cli.IntFlag{
@@ -651,12 +651,12 @@ var (
 	}
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
-		Value: 10,
+		Value: 100,
 		Usage: "limit amount of torrent peers",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
-		Value: 5,
+		Value: 20,
 		Usage: "connections per file",
 	}
 	DbPageSizeFlag = cli.StringFlag{
@@ -1359,13 +1359,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	cfg.SnapshotDir = snDir
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
-		var downloadRateStr, uploadRateStr string
-		if ctx.GlobalIsSet(TorrentDownloadRateFlag.Name) {
-			downloadRateStr = ctx.GlobalString(TorrentDownloadRateFlag.Name)
-		}
-		if ctx.GlobalIsSet(TorrentUploadRateFlag.Name) {
-			uploadRateStr = ctx.GlobalString(TorrentUploadRateFlag.Name)
-		}
+		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
+		uploadRateStr := ctx.GlobalString(TorrentUploadRateFlag.Name)
 		var downloadRate, uploadRate datasize.ByteSize
 		if err := downloadRate.UnmarshalText([]byte(downloadRateStr)); err != nil {
 			panic(err)
