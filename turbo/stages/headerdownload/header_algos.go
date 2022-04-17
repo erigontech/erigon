@@ -844,6 +844,9 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				link.headerRaw = nil
 				hd.moveLinkToQueue(link, PersistedQueueID)
 				for _, nextLink := range link.next {
+					if nextLink.persisted {
+						continue
+					}
 					if nextLink.verified {
 						hd.moveLinkToQueue(nextLink, InsertQueueID)
 					} else {
