@@ -16,6 +16,7 @@ require (
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/matryer/moq v0.2.7
+	github.com/quasilyte/go-ruleguard/dsl v0.3.19
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.7.1
 	github.com/torquem-ch/mdbx-go v0.23.2
