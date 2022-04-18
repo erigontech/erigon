@@ -544,6 +544,9 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		}
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return err
+		}
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
 				return err
@@ -561,9 +564,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 				log.Info("recover headers from db", "left", hd.persistedLinkLimit-hd.persistedLinkQueue.Len())
 			default:
 			}
-		}
-		if err != nil {
-			return err
 		}
 		return nil
 	})
