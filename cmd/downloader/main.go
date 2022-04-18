@@ -182,10 +182,7 @@ var printTorrentHashes = &cobra.Command{
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			lockedSnapshotDir, err := dir.OpenRw(snapshotDir)
-			if err != nil {
-				return err
-			}
+			lockedSnapshotDir := &dir.Rw{Path: snapshotDir}
 			defer lockedSnapshotDir.Close()
 			removeChunksStorage(lockedSnapshotDir)
 
