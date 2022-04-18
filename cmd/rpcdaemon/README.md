@@ -139,10 +139,10 @@ to test the RPC.
 Next options available (by `--prune` flag):
 
 ```
-* h - prune history (ChangeSets, HistoryIndices - used to access historical state)
+* h - prune history (ChangeSets, HistoryIndices - used to access historical state, like `eth_getStorageAt`, `eth_getBalanceAt`, `debug_traceTransaction`, `trace_block`, `trace_transaction`, etc.)
 * r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 * t - prune tx lookup (used to get transaction by hash)
-* c - prune call traces (used by trace_* methods)
+* c - prune call traces (used by trace_filter method)
 ```
 
 By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
