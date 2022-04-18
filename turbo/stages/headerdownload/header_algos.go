@@ -291,8 +291,10 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 // ExtendDown extends some working trees down from the anchor, using given chain segment
 // it creates a new anchor and collects all the links from the attached anchors to it
 func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool {
-	// Find attachment anchor again
-
+	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
+		hd.invalidateAnchor(anchor, "anchor below preverified")
+		return false
+	}
 	anchorPreverified := false
 	for _, link := range anchor.links {
 		if link.verified {
@@ -342,6 +344,11 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool 
 
 // Connect connects some working trees using anchors of some, and a link of another
 func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, anchor *Anchor) []PenaltyItem {
+	var penalties []PenaltyItem
+	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
+		hd.invalidateAnchor(anchor, "anchor below preverified")
+		return penalties
+	}
 	anchorPreverified := false
 	for _, link := range anchor.links {
 		if link.verified {
@@ -374,7 +381,6 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 		// Mark the entire segment as preverified
 		hd.MarkPreverified(prevLink)
 	}
-	var penalties []PenaltyItem
 	if _, bad := hd.badHeaders[attachmentLink.hash]; bad {
 		hd.invalidateAnchor(anchor, "descendant of a known bad block")
 		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
@@ -584,6 +590,10 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
+		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return err
+		}
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
@@ -593,23 +603,21 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			if err = rlp.DecodeBytes(v, &header); err != nil {
 				return err
 			}
-			h := ChainSegmentHeader{
-				HeaderRaw: v,
-				Header:    &header,
-				Hash:      types.RawRlpHash(v),
-				Number:    header.Number.Uint64(),
+			if header.Number.Uint64() <= hd.highestInDb {
+				h := ChainSegmentHeader{
+					HeaderRaw: v,
+					Header:    &header,
+					Hash:      types.RawRlpHash(v),
+					Number:    header.Number.Uint64(),
+				}
+				hd.addHeaderAsLink(h, true /* persisted */)
 			}
-			hd.addHeaderAsLink(h, true /* persisted */)
 
 			select {
 			case <-logEvery.C:
 				log.Info("recover headers from db", "left", hd.persistedLinkLimit-hd.persistedLinkQueue.Len())
 			default:
 			}
-		}
-		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
-		if err != nil {
-			return err
 		}
 		return nil
 	})
