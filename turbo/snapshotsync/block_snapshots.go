@@ -1221,17 +1221,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			count++
 			j++
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
-					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
-				)
-			default:
-			}
 			return nil
 		}); err != nil {
 			return false, fmt.Errorf("ForAmount: %w", err)
@@ -1242,6 +1231,18 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 		prevTxID++
 		count++
+
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+			)
+		default:
+		}
 		return true, nil
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
