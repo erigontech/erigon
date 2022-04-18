@@ -1158,7 +1158,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	firstIDSaved := false
 
-	warmup := atomic.NewBool(false)
+	doWarmup, warmupTxs, warmupSenders := workers > 4, atomic.NewBool(false), atomic.NewBool(false)
 	from := dbutils.EncodeBlockNumber(blockFrom)
 	var lastBody types.BodyForStorage
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -1180,8 +1180,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if body.TxAmount == 0 {
 			return true, nil
 		}
-		if !warmup.Load() {
-			kv.ReadAhead(ctx, db, warmup, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100_000)
+		if doWarmup && !warmupSenders.Load() {
+			kv.ReadAhead(ctx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
+		}
+		if doWarmup && !warmupTxs.Load() {
+			kv.ReadAhead(ctx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
