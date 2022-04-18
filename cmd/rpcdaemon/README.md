@@ -139,7 +139,7 @@ to test the RPC.
 Next options available (by `--prune` flag):
 
 ```
-* h - prune history (ChangeSets, HistoryIndices - used to access historical state, like `eth_getStorageAt`, `eth_getBalanceAt`, `debug_traceTransaction`, `trace_block`, `trace_transaction`, etc.)
+* h - prune history (ChangeSets, HistoryIndices - used to access historical state, like eth_getStorageAt, eth_getBalanceAt, debug_traceTransaction, trace_block, trace_transaction, etc.)
 * r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 * t - prune tx lookup (used to get transaction by hash)
 * c - prune call traces (used by trace_filter method)
