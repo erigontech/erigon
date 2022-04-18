@@ -1180,10 +1180,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if body.TxAmount == 0 {
 			return true, nil
 		}
-		if doWarmup && !warmupSenders.Load() {
+		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
 			kv.ReadAhead(ctx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
 		}
-		if doWarmup && !warmupTxs.Load() {
+		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
 			kv.ReadAhead(ctx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
