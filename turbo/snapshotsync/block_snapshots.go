@@ -1563,6 +1563,7 @@ RETRY:
 					return it.err
 				}
 				for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+it.i { // skip empty blocks
+					panic(1)
 					if !bodyGetter.HasNext() {
 						return fmt.Errorf("not enough bodies")
 					}
