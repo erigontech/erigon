@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"go.uber.org/atomic"
 )
 
 // BigChunks - read `table` by big chunks - restart read transaction after each 1 minutes
@@ -97,4 +98,34 @@ func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (ok, e
 
 	enabled = bytes2bool(vBytes)
 	return value == enabled, enabled, nil
+}
+
+func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) {
+	if progress.Load() {
+		return
+	}
+	progress.Store(true)
+	go func() {
+		defer progress.Store(false)
+		_ = db.View(ctx, func(tx Tx) error {
+			c, err := tx.Cursor(table)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+
+			for k, _, err := c.Seek(from); k != nil && amount > 0; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				amount--
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+			}
+			return nil
+		})
+	}()
 }
