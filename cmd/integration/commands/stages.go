@@ -579,10 +579,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	var br *snapshotsync.BlockRetire
 	snapshots := allSnapshots(chainConfig)
 	if snapshots != nil {
-		d, err := dir.OpenRw(snapshots.Dir())
-		if err != nil {
-			return err
-		}
+		d := &dir.Rw{Path: snapshots.Dir()}
 		br = snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, snapshots, d, db, nil, nil)
 	}
 
@@ -1169,10 +1166,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Snapshot = allSn.Cfg()
 	}
 	if cfg.Snapshot.Enabled {
-		snDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
-		if err != nil {
-			panic(err)
-		}
+		snDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
 		cfg.SnapshotDir = snDir
 	}
 

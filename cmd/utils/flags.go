@@ -1352,10 +1352,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
 	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
-	snDir, err := dir.OpenRw(filepath.Join(nodeConfig.DataDir, "snapshots"))
-	if err != nil {
-		panic(err)
-	}
+	snDir := &dir.Rw{Path: filepath.Join(nodeConfig.DataDir, "snapshots")}
 	cfg.SnapshotDir = snDir
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {

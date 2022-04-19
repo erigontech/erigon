@@ -113,10 +113,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
-	if err != nil {
-		return err
-	}
+	snapshotDir := dir.Rw{Path:filepath.Join(datadir, "snapshots")}
 	defer snapshotDir.Close()
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
