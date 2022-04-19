@@ -126,7 +126,7 @@ func Downloader(ctx context.Context) error {
 	}
 	if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 		return err
-	}
+	})
 
 	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	natif, err := nat.Parse(natSetting)

@@ -138,7 +138,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		rwSnapshotDir := &dir.Rw{Path:snapshotDir}
+		rwSnapshotDir := &dir.Rw{Path: snapshotDir}
 		defer rwSnapshotDir.Close()
 		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from); err != nil {
 			log.Error("Error", "err", err)
@@ -246,7 +246,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
-	rwSnapshotDir := 	&dir.Rw{Path:snapshotDir}
+	rwSnapshotDir := &dir.Rw{Path: snapshotDir}
 	defer rwSnapshotDir.Close()
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
@@ -294,7 +294,7 @@ func doRecompressCommand(cliCtx *cli.Context) error {
 	defer cancel()
 
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := &dir.Rw{Path:filepath.Join(datadir, "snapshots")}
+	snapshotDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	dir.MustExist(tmpDir)
 
