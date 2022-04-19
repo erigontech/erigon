@@ -1158,6 +1158,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	firstIDSaved := false
 
+	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, atomic.NewBool(false), atomic.NewBool(false)
 	from := dbutils.EncodeBlockNumber(blockFrom)
 	var lastBody types.BodyForStorage
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -1178,6 +1179,12 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		lastBody = body
 		if body.TxAmount == 0 {
 			return true, nil
+		}
+		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
+			kv.ReadAhead(ctx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
+		}
+		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
+			kv.ReadAhead(ctx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
@@ -1217,17 +1224,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			count++
 			j++
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
-				log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
-					"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
-				)
-			default:
-			}
 			return nil
 		}); err != nil {
 			return false, fmt.Errorf("ForAmount: %w", err)
@@ -1238,6 +1234,18 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		}
 		prevTxID++
 		count++
+
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
+				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+			)
+		default:
+		}
 		return true, nil
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)

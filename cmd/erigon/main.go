@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -13,6 +14,16 @@ import (
 )
 
 func main() {
+	defer func() {
+		panicResult := recover()
+		if panicResult == nil {
+			return
+		}
+
+		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
+		os.Exit(1)
+	}()
+
 	app := erigonapp.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
