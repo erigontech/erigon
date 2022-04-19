@@ -576,10 +576,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	s := stage(sync, tx, nil, stages.Senders)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
+	var br *snapshotsync.BlockRetire
 	snapshots := allSnapshots(chainConfig)
-	d, err := dir.OpenRw(snapshots.Dir())
-	if err != nil {
-		return err
+	if snapshots != nil {
+		d := &dir.Rw{Path: snapshots.Dir()}
+		br = snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, snapshots, d, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
@@ -587,7 +588,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, snapshots, d, db, nil, nil))
+	cfg := stagedsync.StageSendersCfg(db, chainConfig, tmpdir, pm, br)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber)
 		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
@@ -1165,10 +1166,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Snapshot = allSn.Cfg()
 	}
 	if cfg.Snapshot.Enabled {
-		snDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
-		if err != nil {
-			panic(err)
-		}
+		snDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
 		cfg.SnapshotDir = snDir
 	}
 

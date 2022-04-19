@@ -303,7 +303,7 @@ func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName:
-		return FastSync // TODO change nack to snap mode when snapshots are re-created
+		return SnapSync
 	default:
 		return FastSync
 	}

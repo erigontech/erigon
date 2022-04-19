@@ -113,10 +113,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir, err := dir.OpenRw(filepath.Join(datadir, "snapshots"))
-	if err != nil {
-		return err
-	}
+	snapshotDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
 	defer snapshotDir.Close()
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
@@ -181,11 +178,8 @@ var printTorrentHashes = &cobra.Command{
 			return downloader.VerifyDtaFiles(ctx, snapshotDir)
 		}
 
+		lockedSnapshotDir := &dir.Rw{Path: snapshotDir}
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			lockedSnapshotDir, err := dir.OpenRw(snapshotDir)
-			if err != nil {
-				return err
-			}
 			defer lockedSnapshotDir.Close()
 			removeChunksStorage(lockedSnapshotDir)
 
@@ -198,9 +192,9 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, lockedSnapshotDir); err != nil {
-				return err
-			}
+		}
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, lockedSnapshotDir); err != nil {
+			return err
 		}
 
 		res := map[string]string{}

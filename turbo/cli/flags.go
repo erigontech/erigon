@@ -65,10 +65,10 @@ var (
 	PruneFlag = cli.StringFlag{
 		Name: "prune",
 		Usage: `Choose which ancient data delete from DB:
-	h - prune history (ChangeSets, HistoryIndices - used by historical state access)
+	h - prune history (ChangeSets, HistoryIndices - used by historical state access, like eth_getStorageAt, eth_getBalanceAt, debug_traceTransaction, trace_block, trace_transaction, etc.)
 	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 	t - prune transaction by it's hash index
-	c - prune call traces (used by trace_* methods)
+	c - prune call traces (used by trace_filter method)
 	Does delete data older than 90K block (can set another value by '--prune.*.older' flags). 
 	If item is NOT in the list - means NO pruning for this data.s
 	Example: --prune=hrtc`,

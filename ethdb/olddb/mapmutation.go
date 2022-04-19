@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -14,10 +15,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type mutationKey [61]byte
-
 type mapmutation struct {
-	puts              map[string]map[mutationKey][]byte
+	puts              map[string]map[string][]byte
 	whitelistedTables map[string]byte
 	whitelistCache    *lru.Cache
 	db                kv.RwTx
@@ -51,20 +50,13 @@ func NewHashBatch(tx kv.RwTx, quit <-chan struct{}, tmpdir string, whitelistedTa
 	}
 	return &mapmutation{
 		db:                tx,
-		puts:              make(map[string]map[mutationKey][]byte),
+		puts:              make(map[string]map[string][]byte),
 		whitelistCache:    whitelistCache,
 		quit:              quit,
 		clean:             clean,
 		tmpdir:            tmpdir,
 		whitelistedTables: make(map[string]byte),
 	}
-}
-
-func makeKey(key []byte) mutationKey {
-	var k mutationKey
-	copy(k[:], key)
-	k[len(k)-1] = byte(len(key))
-	return k
 }
 
 func (m *mapmutation) makeCacheKey(table string, key []byte) string {
@@ -89,7 +81,7 @@ func (m *mapmutation) getMem(table string, key []byte) ([]byte, bool) {
 	if _, ok := m.puts[table]; !ok {
 		return nil, false
 	}
-	if value, ok := m.puts[table][makeKey(key)]; ok {
+	if value, ok := m.puts[table][*(*string)(unsafe.Pointer(&key))]; ok {
 		return value, ok
 	}
 
@@ -199,20 +191,19 @@ func (m *mapmutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.puts[table]; !ok {
-		m.puts[table] = make(map[mutationKey][]byte)
+		m.puts[table] = make(map[string][]byte)
 	}
 
-	formattedKey := makeKey(key)
+	stringKey := *(*string)(unsafe.Pointer(&key))
 
 	var ok bool
-	if _, ok = m.puts[table][formattedKey]; !ok {
-		m.size += len(value) - len(m.puts[table][formattedKey])
-		m.puts[table][formattedKey] = value
+	if _, ok = m.puts[table][stringKey]; !ok {
+		m.size += len(value) - len(m.puts[table][stringKey])
+		m.puts[table][stringKey] = value
 		return nil
 	}
-	m.puts[table][formattedKey] = value
-	m.size += len(formattedKey) + len(value)
-
+	m.puts[table][stringKey] = value
+	m.size += len(key) + len(value)
 	m.count++
 	return nil
 }
@@ -262,13 +253,10 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer collector.Close()
 		for key, value := range bucket {
-			formattedKey := make([]byte, key[len(key)-1])
-			copy(formattedKey, key[:])
-
-			collector.Collect(formattedKey, value)
+			collector.Collect([]byte(key), value)
 			// Update cache on commits
 			if m.isWhitelisted(table) {
-				m.whitelistCache.Add(m.makeCacheKey(table, formattedKey), value)
+				m.whitelistCache.Add(m.makeCacheKey(table, []byte(key)), value)
 			}
 			count++
 			select {
@@ -298,7 +286,7 @@ func (m *mapmutation) Commit() error {
 		return err
 	}
 
-	m.puts = map[string]map[mutationKey][]byte{}
+	m.puts = map[string]map[string][]byte{}
 	m.size = 0
 	m.count = 0
 	m.clean()
@@ -308,7 +296,7 @@ func (m *mapmutation) Commit() error {
 func (m *mapmutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.puts = map[string]map[mutationKey][]byte{}
+	m.puts = map[string]map[string][]byte{}
 	m.size = 0
 	m.count = 0
 	m.size = 0
