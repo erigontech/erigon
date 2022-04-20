@@ -49,15 +49,6 @@ var snapshotCommand = cli.Command{
 			}, debug.Flags...),
 		},
 		{
-			Name:   "recompress",
-			Action: doRecompressCommand,
-			Usage:  "Recompress existing .seg files to apply new compression rules",
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
-				utils.DataDirFlag,
-			}, debug.Flags...),
-		},
-		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
@@ -289,20 +280,6 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapshotDir, tmpDir); err != nil {
-		log.Error("Error", "err", err)
-	}
-	return nil
-}
-func doRecompressCommand(cliCtx *cli.Context) error {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	datadir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
-	tmpDir := filepath.Join(datadir, etl.TmpDirName)
-	dir.MustExist(tmpDir)
-
-	if err := snapshotsync.RecompressSegments(ctx, snapshotDir, tmpDir); err != nil {
 		log.Error("Error", "err", err)
 	}
 	return nil
