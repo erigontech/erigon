@@ -762,10 +762,6 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 			defer func(t time.Time) { fmt.Printf("alex 1: %s\n", time.Since(t)) }(time.Now())
 			wg := &sync.WaitGroup{}
 			errs := make(chan error, len(segments))
-			workers := workers / 2
-			if workers < 1 {
-				workers = 1
-			}
 			workersCh := make(chan struct{}, workers)
 			for i, sn := range segments {
 				if sn.From < from {
