@@ -754,6 +754,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	}); err != nil {
 		return err
 	}
+	log.Info("aaaaaaaaaaaaaaa done")
 	// hack to read first block body - to get baseTxId from there
 	if err := s.ReopenSomeIndices(Headers, Bodies); err != nil {
 		return err
@@ -1739,6 +1740,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 		BaseDataID: firstDataID,
 	})
 	if err != nil {
+		panic(err)
 		return err
 	}
 	rs.LogLvl(log.LvlDebug)
@@ -1764,6 +1766,7 @@ RETRY:
 		}
 		return nil
 	}); err != nil {
+		panic(err)
 		return err
 	}
 
@@ -1773,10 +1776,12 @@ RETRY:
 			rs.ResetNextSalt()
 			goto RETRY
 		}
+		panic(err)
 		return err
 	}
 	fi, err := os.Stat(idxFilePath)
 	if err != nil {
+		panic(err)
 		return err
 	}
 	// get the size
