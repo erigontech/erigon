@@ -59,6 +59,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"github.com/ledgerwatch/erigon/params"
 )
 
