@@ -779,7 +779,6 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 						wg.Done()
 						<-workersCh
 					}()
-					defer func(t time.Time) { fmt.Printf("alex 2: %s\n", time.Since(t)) }(time.Now())
 					errs <- TransactionsIdx(ctx, chainID, blockFrom, blockTo, snapshotDir, tmpDir, lvl)
 					select {
 					case <-ctx.Done():
