@@ -140,7 +140,11 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
 		rwSnapshotDir := &dir.Rw{Path: snapshotDir}
 		defer rwSnapshotDir.Close()
-		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from); err != nil {
+		workers := runtime.NumCPU() - 1
+		if workers < 1 {
+			workers = 1
+		}
+		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -303,7 +307,7 @@ func doRecompressCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64, workers int) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
@@ -311,7 +315,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil
