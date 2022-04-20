@@ -759,7 +759,6 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	}
 	if err := s.Txs.View(func(segments []*TxnSegment) error {
 		return s.Bodies.View(func(bodySegments []*BodySegment) error {
-			defer func(t time.Time) { fmt.Printf("alex 1: %s\n", time.Since(t)) }(time.Now())
 			wg := &sync.WaitGroup{}
 			errs := make(chan error, len(segments))
 			workersCh := make(chan struct{}, workers)

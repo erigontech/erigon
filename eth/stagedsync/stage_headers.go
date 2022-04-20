@@ -1216,11 +1216,12 @@ Loop:
 				break Loop
 			} else {
 				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
-				//result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
+				// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
 
 				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
 				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
 					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+					// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
 				)
 				prevBytesCompleted = reply.BytesCompleted
 			}
