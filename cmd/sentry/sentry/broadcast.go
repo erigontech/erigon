@@ -3,6 +3,7 @@ package sentry
 import (
 	"context"
 	"errors"
+	"math"
 	"math/big"
 	"strings"
 	"syscall"
@@ -41,9 +42,14 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 		return
 	}
 	var req66 *proto_sentry.OutboundMessageData
-	for _, sentry := range cs.sentries {
+	// Send the block to a subset of our peers
+	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+	for i, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
+		}
+		if i > sendToAmount { //TODO: send to random sentries, not just to fi
+			break
 		}
 
 		switch sentry.Protocol() {
@@ -77,9 +83,14 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 		log.Error("broadcastNewBlock", "err", err)
 	}
 	var req66 *proto_sentry.SendMessageToRandomPeersRequest
-	for _, sentry := range cs.sentries {
+	// Send the block to a subset of our peers
+	sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+	for i, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
+		}
+		if i > sendToAmount { //TODO: send to random sentries, not just to fi
+			break
 		}
 
 		switch sentry.Protocol() {
@@ -131,9 +142,14 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 			log.Error("BroadcastLocalPooledTxs", "err", err)
 		}
 		var req66 *proto_sentry.OutboundMessageData
-		for _, sentry := range cs.sentries {
+		// Send the block to a subset of our peers
+		sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+		for i, sentry := range cs.sentries {
 			if !sentry.Ready() {
 				continue
+			}
+			if i > sendToAmount { //TODO: send to random sentries, not just to fi
+				break
 			}
 
 			switch sentry.Protocol() {
@@ -185,9 +201,14 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 			log.Error("BroadcastRemotePooledTxs", "err", err)
 		}
 		var req66 *proto_sentry.SendMessageToRandomPeersRequest
-		for _, sentry := range cs.sentries {
+		// Send the block to a subset of our peers
+		sendToAmount := int(math.Sqrt(float64(len(cs.sentries))))
+		for i, sentry := range cs.sentries {
 			if !sentry.Ready() {
 				continue
+			}
+			if i > sendToAmount { //TODO: send to random sentries, not just to fi
+				break
 			}
 
 			switch sentry.Protocol() {
