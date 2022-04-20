@@ -354,6 +354,7 @@ func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
 		if err != nil {
 			return err
 		}
+
 		err = verifyTorrent(&info, snapshotDir, func(i int, good bool) error {
 			j++
 			if !good {

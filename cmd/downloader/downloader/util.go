@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent/bencode"
@@ -119,17 +120,30 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 	if err != nil {
 		return err
 	}
+	errs := make(chan error, len(files)*2)
+	wg := &sync.WaitGroup{}
 	for i, f := range files {
-		if err := BuildTorrentFileIfNeed(ctx, f, root); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(f string) {
+			defer wg.Done()
+			errs <- BuildTorrentFileIfNeed(ctx, f, root)
 
-		select {
-		default:
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			log.Info("[torrent] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
+			select {
+			default:
+			case <-ctx.Done():
+				errs <- ctx.Err()
+			case <-logEvery.C:
+				log.Info("[torrent] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
+			}
+		}(f)
+	}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	for err := range errs {
+		if err != nil {
+			return err
 		}
 	}
 	return nil

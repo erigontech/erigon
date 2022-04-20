@@ -662,7 +662,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	defer logEvery.Stop()
 	if err := s.Headers.View(func(segments []*HeaderSegment) error {
 		wg := &sync.WaitGroup{}
-		errs := make(chan error, len(segments))
+		errs := make(chan error, len(segments)*2)
 		workersCh := make(chan struct{}, workers)
 		for _, sn := range segments {
 			if sn.From < from {
@@ -709,7 +709,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 
 	if err := s.Bodies.View(func(segments []*BodySegment) error {
 		wg := &sync.WaitGroup{}
-		errs := make(chan error, len(segments))
+		errs := make(chan error, len(segments)*2)
 		workersCh := make(chan struct{}, workers)
 		for _, sn := range segments {
 			if sn.From < from {
@@ -760,7 +760,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	if err := s.Txs.View(func(segments []*TxnSegment) error {
 		return s.Bodies.View(func(bodySegments []*BodySegment) error {
 			wg := &sync.WaitGroup{}
-			errs := make(chan error, len(segments))
+			errs := make(chan error, len(segments)*2)
 			workersCh := make(chan struct{}, workers)
 			for i, sn := range segments {
 				if sn.From < from {
