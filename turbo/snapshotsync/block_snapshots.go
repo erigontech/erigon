@@ -1477,10 +1477,10 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 
 var EmptyTxHash = common.Hash{}
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, lvl log.Lvl) (err error	) {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, lvl log.Lvl) (err error) {
 	defer func() {
-		if rec := recover(); rec!= nil {
-			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v",blockFrom,blockTo,rec)
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v", blockFrom, blockTo, rec)
 		}
 	}()
 	var expectedCount, firstTxID uint64
@@ -1749,16 +1749,19 @@ RETRY:
 		word := make([]byte, 0, 4096)
 		for g.HasNext() {
 			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, i, offset, word); err != nil {
+				return err
+			}
+
+			i++
+			offset = nextPos
+
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				if err := walker(rs, i, offset, word); err != nil {
-					return err
-				}
 			}
-			i++
-			offset = nextPos
+
 		}
 		return nil
 	}); err != nil {
