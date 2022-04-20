@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 )
 
@@ -1774,6 +1774,13 @@ RETRY:
 		}
 		return err
 	}
+	fi, err := os.Stat(idxFilePath)
+	if err != nil {
+		return err
+	}
+	// get the size
+	size := fi.Size()
+	log.Info("[snapshots] BodiesIdx", "blockNum", firstDataID, "sz", size, "f", idxFilePath)
 
 	return nil
 }
