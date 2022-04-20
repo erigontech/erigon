@@ -1477,7 +1477,12 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 
 var EmptyTxHash = common.Hash{}
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, lvl log.Lvl) error {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, lvl log.Lvl) (err error	) {
+	defer func() {
+		if rec := recover(); rec!= nil {
+			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v",blockFrom,blockTo,rec)
+		}
+	}()
 	var expectedCount, firstTxID uint64
 	firstBlockNum := blockFrom
 
