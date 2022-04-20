@@ -1087,7 +1087,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := runtime.NumCPU() - 1
+				workers := runtime.GOMAXPROCS(-1) - 1
 				if workers < 1 {
 					workers = 1
 				}

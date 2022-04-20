@@ -131,7 +131,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
 		rwSnapshotDir := &dir.Rw{Path: snapshotDir}
 		defer rwSnapshotDir.Close()
-		workers := runtime.NumCPU() - 1
+		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
 		}
@@ -192,7 +192,11 @@ func doCompress(cliCtx *cli.Context) error {
 	f := args[0]
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
-	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, runtime.NumCPU()-1, log.LvlInfo)
+	workers := runtime.GOMAXPROCS(-1) - 1
+	if workers < 1 {
+		workers = 1
+	}
+	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, workers, log.LvlInfo)
 	if err != nil {
 		return err
 	}
@@ -248,7 +252,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
 	snapshots.Reopen()
 
-	br := snapshotsync.NewBlockRetire(runtime.NumCPU()-1, tmpDir, snapshots, rwSnapshotDir, chainDB, nil, nil)
+	workers := runtime.GOMAXPROCS(-1) - 1
+	if workers < 1 {
+		workers = 1
+	}
+	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, rwSnapshotDir, chainDB, nil, nil)
 
 	for i := from; i < to; i += every {
 		br.RetireBlocksInBackground(ctx, i, i+every, *chainID, log.LvlInfo)
@@ -334,7 +342,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	dir.MustExist(snapshotDir)
 
 	log.Info("Last body number", "last", last)
-	workers := runtime.NumCPU() - 1
+	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
 		workers = 1
 	}
