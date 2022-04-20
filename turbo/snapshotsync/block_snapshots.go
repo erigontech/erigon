@@ -1551,12 +1551,6 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	txnHashIdx.LogLvl(log.LvlDebug)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
-	type txHashWithOffet struct {
-		txnHash   [32]byte
-		i, offset uint64
-		empty     bool // block may have empty txn in the beginning or end of block. such txs have no hash, but have ID
-		err       error
-	}
 	parseCtx := types2.NewTxParseContext(chainID)
 	parseCtx.WithSender(false)
 	slot := types2.TxSlot{}

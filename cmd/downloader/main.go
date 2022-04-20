@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
