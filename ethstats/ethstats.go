@@ -17,7 +17,6 @@
 // Package ethstats implements the network stats reporting service.
 package ethstats
 
-/*
 import (
 	"context"
 	"encoding/json"
@@ -33,19 +32,13 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth"
-	"github.com/ledgerwatch/erigon/eth/downloader"
-	"github.com/ledgerwatch/erigon/event"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/miner"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -60,32 +53,11 @@ const (
 	chainHeadChanSize = 10
 )
 
-// backend encompasses the bare-minimum functionality needed for ethstats reporting
-type backend interface {
-	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
-	SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription
-	CurrentHeader() *types.Header
-	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
-	GetTd(ctx context.Context, hash common.Hash) *big.Int
-	Stats() (pending int, queued int)
-	Downloader() *downloader.Downloader
-}
-
-// fullNodeBackend encompasses the functionality necessary for a full node
-// reporting to ethstats
-type fullNodeBackend interface {
-	backend
-	Miner() *miner.Miner
-	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
-	CurrentBlock() *types.Block
-	SuggestPrice(ctx context.Context) (*big.Int, error)
-}
-
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
 type Service struct {
 	server  *p2p.Server // Peer-to-peer server to retrieve networking infos
-	backend backend
+	chaindb kv.RoDB
 	engine  consensus.Engine // Consensus engine to retrieve variadic block fields
 
 	node string // Name of the node to display on the monitoring page
@@ -143,7 +115,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, backend backend, engine consensus.Engine, url string) error {
+func New(node *node.Node, chainDB kv.RoDB, engine consensus.Engine, url string) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -151,14 +123,13 @@ func New(node *node.Node, backend backend, engine consensus.Engine, url string) 
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}
 	ethstats := &Service{
-		backend: backend,
-		engine:  engine,
-		server:  node.Server(),
-		node:    parts[1],
-		pass:    parts[3],
-		host:    parts[4],
-		pongCh:  make(chan struct{}),
-		histCh:  make(chan []uint64, 1),
+		engine: engine,
+		server: node.Server(),
+		node:   parts[1],
+		pass:   parts[3],
+		host:   parts[4],
+		pongCh: make(chan struct{}),
+		histCh: make(chan []uint64, 1),
 	}
 
 	node.RegisterLifecycle(ethstats)
@@ -182,25 +153,14 @@ func (s *Service) Stop() error {
 // loop keeps trying to connect to the netstats server, reporting chain events
 // until termination.
 func (s *Service) loop() {
-	// Subscribe to chain events to execute updates on
-	chainHeadCh := make(chan core.ChainHeadEvent, chainHeadChanSize)
-	headSub := s.backend.SubscribeChainHeadEvent(chainHeadCh)
-	defer headSub.Unsubscribe()
-
-	txEventCh := make(chan core.NewTxsEvent, txChanSize)
-	txSub := s.backend.SubscribeNewTxsEvent(txEventCh)
-	defer txSub.Unsubscribe()
 
 	// Start a goroutine that exhausts the subscriptions to avoid events piling up
 	var (
 		quitCh = make(chan struct{})
 		headCh = make(chan *types.Block, 1)
-		txCh   = make(chan struct{}, 1)
 	)
 	go func() {
-		var lastTx mclock.AbsTime
 
-	HandleLoop:
 		for {
 			select {
 			// Notify of chain head events, but drop if too frequent
@@ -209,24 +169,6 @@ func (s *Service) loop() {
 				case headCh <- head.Block:
 				default:
 				}
-
-			// Notify of new transaction events, but drop if too frequent
-			case <-txEventCh:
-				if time.Duration(mclock.Now()-lastTx) < time.Second {
-					continue
-				}
-				lastTx = mclock.Now()
-
-				select {
-				case txCh <- struct{}{}:
-				default:
-				}
-
-			// node stopped
-			case <-txSub.Err():
-				break HandleLoop
-			case <-headSub.Err():
-				break HandleLoop
 			}
 		}
 		close(quitCh)
@@ -308,13 +250,6 @@ func (s *Service) loop() {
 				case head := <-headCh:
 					if err = s.reportBlock(conn, head); err != nil {
 						log.Warn("Block stats report failed", "err", err)
-					}
-					if err = s.reportPending(conn); err != nil {
-						log.Warn("Post-block transaction stats report failed", "err", err)
-					}
-				case <-txCh:
-					if err = s.reportPending(conn); err != nil {
-						log.Warn("Transaction stats report failed", "err", err)
 					}
 				}
 			}
@@ -600,22 +535,6 @@ func (s *Service) assembleBlockStats(block *types.Block) *blockStats {
 		uncles []*types.Header
 	)
 
-	// check if backend is a full node
-	fullBackend, ok := s.backend.(fullNodeBackend)
-	if ok {
-		if block == nil {
-			block = fullBackend.CurrentBlock()
-		}
-		header = block.Header()
-		td = fullBackend.GetTd(context.Background(), header.Hash())
-
-		txs = make([]txStats, len(block.Transactions()))
-		for i, tx := range block.Transactions() {
-			txs[i].Hash = tx.Hash()
-		}
-		uncles = block.Uncles()
-	}
-
 	// Assemble and return the block stats
 	author, _ := s.engine.Author(header)
 
@@ -657,17 +576,10 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	}
 	// Gather the batch of blocks to report
 	history := make([]*blockStats, len(indexes))
-	for i, number := range indexes {
-		fullBackend, ok := s.backend.(fullNodeBackend)
+	for i, _ := range indexes {
 		// Retrieve the next block if it's known to us
 		var block *types.Block
-		if ok {
-			block, _ = fullBackend.BlockByNumber(context.Background(), rpc.BlockNumber(number)) // TODO ignore error here ?
-		} else {
-			if header, _ := s.backend.HeaderByNumber(context.Background(), rpc.BlockNumber(number)); header != nil {
-				block = types.NewBlockWithHeader(header)
-			}
-		}
+
 		// If we do have the block, add to the history and continue
 		if block != nil {
 			history[len(history)-1-i] = s.assembleBlockStats(block)
@@ -701,32 +613,33 @@ type pendStats struct {
 // reportPending retrieves the current number of pending transactions and reports
 // it to the stats server.
 func (s *Service) reportPending(conn *connWrapper) error {
-	// Retrieve the pending count from the local blockchain
-	pending, _ := s.backend.Stats()
-	// Assemble the transaction stats and send it to the server
-	log.Trace("Sending pending transactions to ethstats", "count", pending)
+	/*	// Retrieve the pending count from the local blockchain
+		pending, _ := s.backend.Stats()
+		// Assemble the transaction stats and send it to the server
+		log.Trace("Sending pending transactions to ethstats", "count", pending)
 
-	stats := map[string]interface{}{
-		"id": s.node,
-		"stats": &pendStats{
-			Pending: pending,
-		},
-	}
-	report := map[string][]interface{}{
-		"emit": {"pending", stats},
-	}
-	return conn.WriteJSON(report)
+		stats := map[string]interface{}{
+			"id": s.node,
+			"stats": &pendStats{
+				Pending: pending,
+			},
+		}
+		report := map[string][]interface{}{
+			"emit": {"pending", stats},
+		}
+		return conn.WriteJSON(report)*/
+	return nil
 }
 
 // nodeStats is the information to report about the local node.
 type nodeStats struct {
-	Active   bool `json:"active"`
-	Syncing  bool `json:"syncing"`
-	Mining   bool `json:"mining"`
-	Hashrate int  `json:"hashrate"`
-	GoodPeers    int  `json:"peers"`
-	GasPrice int  `json:"gasPrice"`
-	Uptime   int  `json:"uptime"`
+	Active    bool `json:"active"`
+	Syncing   bool `json:"syncing"`
+	Mining    bool `json:"mining"`
+	Hashrate  int  `json:"hashrate"`
+	GoodPeers int  `json:"peers"`
+	GasPrice  int  `json:"gasPrice"`
+	Uptime    int  `json:"uptime"`
 }
 
 // reportStats retrieves various stats about the node at the networking and
@@ -757,13 +670,13 @@ func (s *Service) reportStats(conn *connWrapper) error {
 	stats := map[string]interface{}{
 		"id": s.node,
 		"stats": &nodeStats{
-			Active:   true,
-			Mining:   mining,
-			Hashrate: hashrate,
-			GoodPeers:    s.server.PeerCount(),
-			GasPrice: gasprice,
-			Syncing:  syncing,
-			Uptime:   100,
+			Active:    true,
+			Mining:    mining,
+			Hashrate:  hashrate,
+			GoodPeers: s.server.PeerCount(),
+			GasPrice:  gasprice,
+			Syncing:   syncing,
+			Uptime:    100,
 		},
 	}
 	report := map[string][]interface{}{
@@ -771,4 +684,3 @@ func (s *Service) reportStats(conn *connWrapper) error {
 	}
 	return conn.WriteJSON(report)
 }
-*/
