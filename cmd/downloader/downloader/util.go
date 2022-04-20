@@ -124,7 +124,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 	wg := &sync.WaitGroup{}
 	for i, f := range files {
 		wg.Add(1)
-		go func(f string) {
+		go func(f string, i int) {
 			defer wg.Done()
 			errs <- BuildTorrentFileIfNeed(ctx, f, root)
 
@@ -135,7 +135,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 			case <-logEvery.C:
 				log.Info("[torrent] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
 			}
-		}(f)
+		}(f, i)
 	}
 	go func() {
 		wg.Wait()
