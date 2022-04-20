@@ -36,7 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"go.uber.org/atomic"
 )
 
@@ -1752,7 +1752,6 @@ RETRY:
 			if err := walker(rs, i, offset, word); err != nil {
 				return err
 			}
-
 			i++
 			offset = nextPos
 
@@ -1761,7 +1760,6 @@ RETRY:
 				return ctx.Err()
 			default:
 			}
-
 		}
 		return nil
 	}); err != nil {
