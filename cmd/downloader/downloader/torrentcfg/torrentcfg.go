@@ -1,6 +1,7 @@
 package torrentcfg
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -15,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
-	"go.etcd.io/bbolt"
 	"golang.org/x/time/rate"
 )
 
@@ -99,8 +99,6 @@ const (
 	boltDbIncompleteValue = "i"
 )
 
-var completionBucketKey = []byte("completion")
-
 type boltPieceCompletion struct {
 	db kv.RwDB
 }
@@ -113,19 +111,15 @@ func NewBoltPieceCompletion(db kv.RwDB) (ret storage.PieceCompletion, err error)
 }
 
 func (me boltPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
-	err = me.db.View(func(tx kv.Tx) error {
-		cb, _ := tx.Cursor(kv.Snapshot)
-		if cb == nil {
-			return nil
-		}
-		ih := cb.Bucket(pk.InfoHash[:])
-		if ih == nil {
-			return nil
-		}
+	err = me.db.View(context.Background(), func(tx kv.Tx) error {
 		var key [4]byte
 		binary.BigEndian.PutUint32(key[:], uint32(pk.Index))
 		cn.Ok = true
-		switch string(ih.Get(key[:])) {
+		v, err := tx.GetOne(kv.BittorrentCompletion, append(pk.InfoHash[:], key[:]...))
+		if err != nil {
+			return err
+		}
+		switch string(v) {
 		case boltDbCompleteValue:
 			cn.Complete = true
 		case boltDbIncompleteValue:
@@ -142,24 +136,21 @@ func (me boltPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	if c, err := me.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}
-	return me.db.Update(func(tx *bbolt.Tx) error {
-		c, err := tx.CreateBucketIfNotExists(completionBucketKey)
-		if err != nil {
-			return err
-		}
-		ih, err := c.CreateBucketIfNotExists(pk.InfoHash[:])
-		if err != nil {
-			return err
-		}
+	return me.db.Update(context.Background(), func(tx kv.RwTx) error {
 		var key [4]byte
 		binary.BigEndian.PutUint32(key[:], uint32(pk.Index))
-		return ih.Put(key[:], []byte(func() string {
-			if b {
-				return boltDbCompleteValue
-			} else {
-				return boltDbIncompleteValue
-			}
-		}()))
+
+		v := []byte(boltDbCompleteValue)
+		if b {
+			v = []byte(boltDbCompleteValue)
+		} else {
+			v = []byte(boltDbIncompleteValue)
+		}
+		err := tx.Put(kv.BittorrentCompletion, append(pk.InfoHash[:], key[:]...), v)
+		if err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
