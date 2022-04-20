@@ -1,17 +1,21 @@
 package torrentcfg
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
+	"go.etcd.io/bbolt"
 	"golang.org/x/time/rate"
 )
 
@@ -37,7 +41,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int) (*torrent.ClientConfig, io.Closer, error) {
+func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB) (*torrent.ClientConfig, io.Closer, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -81,11 +85,85 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
-	c, err := storage.NewBoltPieceCompletion(snapshotsDir.Path)
+	c, err := NewBoltPieceCompletion(db)
 	if err != nil {
 		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
 	}
 	m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
 	torrentConfig.DefaultStorage = m
 	return torrentConfig, m, nil
+}
+
+const (
+	boltDbCompleteValue   = "c"
+	boltDbIncompleteValue = "i"
+)
+
+var completionBucketKey = []byte("completion")
+
+type boltPieceCompletion struct {
+	db kv.RwDB
+}
+
+var _ storage.PieceCompletion = (*boltPieceCompletion)(nil)
+
+func NewBoltPieceCompletion(db kv.RwDB) (ret storage.PieceCompletion, err error) {
+	ret = &boltPieceCompletion{db}
+	return
+}
+
+func (me boltPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
+	err = me.db.View(func(tx kv.Tx) error {
+		cb, _ := tx.Cursor(kv.Snapshot)
+		if cb == nil {
+			return nil
+		}
+		ih := cb.Bucket(pk.InfoHash[:])
+		if ih == nil {
+			return nil
+		}
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(pk.Index))
+		cn.Ok = true
+		switch string(ih.Get(key[:])) {
+		case boltDbCompleteValue:
+			cn.Complete = true
+		case boltDbIncompleteValue:
+			cn.Complete = false
+		default:
+			cn.Ok = false
+		}
+		return nil
+	})
+	return
+}
+
+func (me boltPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
+	if c, err := me.Get(pk); err == nil && c.Ok && c.Complete == b {
+		return nil
+	}
+	return me.db.Update(func(tx *bbolt.Tx) error {
+		c, err := tx.CreateBucketIfNotExists(completionBucketKey)
+		if err != nil {
+			return err
+		}
+		ih, err := c.CreateBucketIfNotExists(pk.InfoHash[:])
+		if err != nil {
+			return err
+		}
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(pk.Index))
+		return ih.Put(key[:], []byte(func() string {
+			if b {
+				return boltDbCompleteValue
+			} else {
+				return boltDbIncompleteValue
+			}
+		}()))
+	})
+}
+
+func (me *boltPieceCompletion) Close() error {
+	me.db.Close()
+	return nil
 }

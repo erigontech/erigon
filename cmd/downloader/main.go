@@ -17,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -134,13 +136,26 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile)
+	db, err := mdbx.NewMDBX(log.New()).
+		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
+		Label(kv.DownloaderDB).
+		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return kv.DownloaderTablesCfg
+		}).
+		SyncPeriod(15 * time.Second).
+		Path(filepath.Join(snapshotDir.Path, "db")).
+		Open()
+	if err != nil {
+		return err
+	}
+
+	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db)
 	if err != nil {
 		return err
 	}
 	defer pieceCompletion.Close()
 
-	protocols, err := downloader.New(cfg, snapshotDir)
+	protocols, err := downloader.New(cfg, snapshotDir, db)
 	if err != nil {
 		return err
 	}

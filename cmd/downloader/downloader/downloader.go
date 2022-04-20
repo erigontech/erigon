@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -12,9 +11,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 const ASSERT = false
@@ -24,16 +21,7 @@ type Protocols struct {
 	DB            kv.RwDB
 }
 
-func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw) (*Protocols, error) {
-	db, err := mdbx.NewMDBX(log.New()).
-		Flags(func(f uint) uint { return f | mdbx2.WriteMap | mdbx2.SafeNoSync }).
-		SyncPeriod(15 * time.Second).
-		Path(filepath.Join(snapshotDir.Path, "db")).
-		Open()
-	if err != nil {
-		return nil, err
-	}
-
+func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw, db kv.RwDB) (*Protocols, error) {
 	peerID, err := readPeerID(db)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
