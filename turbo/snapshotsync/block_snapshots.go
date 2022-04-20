@@ -715,6 +715,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 			if sn.From < from {
 				continue
 			}
+			log.Info("alex body", "from", sn.From, "to", sn.To)
 
 			wg.Add(1)
 			workersCh <- struct{}{}
