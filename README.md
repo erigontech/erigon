@@ -63,7 +63,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/README.md)</code> 
+Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
 
 Use `--datadir` to choose where to store data.
 
@@ -245,7 +245,7 @@ Most of Erigon's components can work inside Erigon and as independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
-Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/readme.md)</code> 
+Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code> 
 
 #### **For remote DB**
 
