@@ -65,28 +65,31 @@ var (
 	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
 )
 
+var l, _ = new(big.Int).SetString("47074600000000000000000", 10)
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
-		ChainName:           networkname.MainnetChainName,
-		ChainID:             big.NewInt(1),
-		Consensus:           EtHashConsensus,
-		HomesteadBlock:      big.NewInt(1_150_000),
-		DAOForkBlock:        big.NewInt(1_920_000),
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(2_463_000),
-		EIP150Hash:          common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
-		EIP155Block:         big.NewInt(2_675_000),
-		EIP158Block:         big.NewInt(2_675_000),
-		ByzantiumBlock:      big.NewInt(4_370_000),
-		ConstantinopleBlock: big.NewInt(7_280_000),
-		PetersburgBlock:     big.NewInt(7_280_000),
-		IstanbulBlock:       big.NewInt(9_069_000),
-		MuirGlacierBlock:    big.NewInt(9_200_000),
-		BerlinBlock:         big.NewInt(12_244_000),
-		LondonBlock:         big.NewInt(12_965_000),
-		ArrowGlacierBlock:   big.NewInt(13_773_000),
-		Ethash:              new(EthashConfig),
+		ChainName:               networkname.MainnetChainName,
+		ChainID:                 big.NewInt(1),
+		Consensus:               EtHashConsensus,
+		TerminalTotalDifficulty: l,
+		MergeForkBlock:          big.NewInt(15660963),
+		HomesteadBlock:          big.NewInt(1_150_000),
+		DAOForkBlock:            big.NewInt(1_920_000),
+		DAOForkSupport:          true,
+		EIP150Block:             big.NewInt(2_463_000),
+		EIP150Hash:              common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
+		EIP155Block:             big.NewInt(2_675_000),
+		EIP158Block:             big.NewInt(2_675_000),
+		ByzantiumBlock:          big.NewInt(4_370_000),
+		ConstantinopleBlock:     big.NewInt(7_280_000),
+		PetersburgBlock:         big.NewInt(7_280_000),
+		IstanbulBlock:           big.NewInt(9_069_000),
+		MuirGlacierBlock:        big.NewInt(9_200_000),
+		BerlinBlock:             big.NewInt(12_244_000),
+		LondonBlock:             big.NewInt(12_965_000),
+		ArrowGlacierBlock:       big.NewInt(13_773_000),
+		Ethash:                  new(EthashConfig),
 	}
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
