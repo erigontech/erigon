@@ -65,6 +65,8 @@ make erigon
 
 Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`
 
+Use `--datadir` to choose where to store data.
+
 ### Optional stages
 
 There is an optional stage that can be enabled through flags:
