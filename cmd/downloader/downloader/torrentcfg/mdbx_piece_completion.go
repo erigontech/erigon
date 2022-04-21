@@ -10,22 +10,22 @@ import (
 )
 
 const (
-	boltDbCompleteValue   = "c"
-	boltDbIncompleteValue = "i"
+	complete   = "c"
+	incomplete = "i"
 )
 
-type boltPieceCompletion struct {
+type mdbxPieceCompletion struct {
 	db kv.RwDB
 }
 
-var _ storage.PieceCompletion = (*boltPieceCompletion)(nil)
+var _ storage.PieceCompletion = (*mdbxPieceCompletion)(nil)
 
-func NewBoltPieceCompletion(db kv.RwDB) (ret storage.PieceCompletion, err error) {
-	ret = &boltPieceCompletion{db}
+func NewMdbxPieceCompletion(db kv.RwDB) (ret storage.PieceCompletion, err error) {
+	ret = &mdbxPieceCompletion{db}
 	return
 }
 
-func (me boltPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
+func (me mdbxPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, err error) {
 	err = me.db.View(context.Background(), func(tx kv.Tx) error {
 		var key [4]byte
 		binary.BigEndian.PutUint32(key[:], uint32(pk.Index))
@@ -35,9 +35,9 @@ func (me boltPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, 
 			return err
 		}
 		switch string(v) {
-		case boltDbCompleteValue:
+		case complete:
 			cn.Complete = true
-		case boltDbIncompleteValue:
+		case incomplete:
 			cn.Complete = false
 		default:
 			cn.Ok = false
@@ -47,7 +47,7 @@ func (me boltPieceCompletion) Get(pk metainfo.PieceKey) (cn storage.Completion, 
 	return
 }
 
-func (me boltPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
+func (me mdbxPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	if c, err := me.Get(pk); err == nil && c.Ok && c.Complete == b {
 		return nil
 	}
@@ -55,9 +55,9 @@ func (me boltPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 		var key [4]byte
 		binary.BigEndian.PutUint32(key[:], uint32(pk.Index))
 
-		v := []byte(boltDbIncompleteValue)
+		v := []byte(incomplete)
 		if b {
-			v = []byte(boltDbCompleteValue)
+			v = []byte(complete)
 		}
 		err := tx.Put(kv.BittorrentCompletion, append(pk.InfoHash[:], key[:]...), v)
 		if err != nil {
@@ -67,7 +67,7 @@ func (me boltPieceCompletion) Set(pk metainfo.PieceKey, b bool) error {
 	})
 }
 
-func (me *boltPieceCompletion) Close() error {
+func (me *mdbxPieceCompletion) Close() error {
 	me.db.Close()
 	return nil
 }

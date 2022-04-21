@@ -11,9 +11,9 @@ import (
 	"github.com/anacrolix/torrent/storage"
 )
 
-func TestBoltPieceCompletion(t *testing.T) {
+func TestMdbxPieceCompletion(t *testing.T) {
 	db := memdb.NewTestDownloaderDB(t)
-	pc, err := NewBoltPieceCompletion(db)
+	pc, err := NewMdbxPieceCompletion(db)
 	require.NoError(t, err)
 	defer pc.Close()
 
