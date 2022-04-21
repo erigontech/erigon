@@ -47,11 +47,11 @@ func Default() *torrent.ClientConfig {
 func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
-	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
-	torrentConfig.TorrentPeersHighWater = maxPeers          // default: 500
-	torrentConfig.TorrentPeersLowWater = 5                  // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = 5               // default: 25
-	torrentConfig.TotalHalfOpenConns = 100                  // default: 100
+	torrentConfig.EstablishedConnsPerTorrent = 50  // connsPerFile // default: 50
+	torrentConfig.TorrentPeersHighWater = maxPeers // default: 500
+	torrentConfig.TorrentPeersLowWater = 5         // default: 50
+	torrentConfig.HalfOpenConnsPerTorrent = 5      // default: 25
+	torrentConfig.TotalHalfOpenConns = 100         // default: 100
 
 	torrentConfig.ListenPort = port
 	torrentConfig.Seed = true
