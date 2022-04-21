@@ -1249,6 +1249,9 @@ func DeleteNewBlocks(db kv.RwTx, blockFrom uint64) error {
 		if err != nil {
 			return err
 		}
+		if b == nil {
+			return fmt.Errorf("body not found: %d", n)
+		}
 		txIDBytes := make([]byte, 8)
 		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
 			binary.BigEndian.PutUint64(txIDBytes, txID)
