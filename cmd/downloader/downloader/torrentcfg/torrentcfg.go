@@ -83,7 +83,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 
 	// debug
 	if lg.Debug == verbosity {
-		torrentConfig.Debug = true
+		// torrentConfig.Debug = true
 	}
 	torrentConfig.Debug = true
 	torrentConfig.Logger = lg.Default.FilterLevel(lg.Debug)
