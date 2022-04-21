@@ -47,12 +47,6 @@ const (
 	// historyUpdateRange is the number of blocks a node should report upon login or
 	// history request.
 	historyUpdateRange = 50
-
-	// txChanSize is the size of channel listening to NewTxsEvent.
-	// The number is referenced from the size of tx pool.
-	txChanSize = 4096
-	// chainHeadChanSize is the size of channel listening to ChainHeadEvent.
-	chainHeadChanSize = 10
 )
 
 // Service implements an Ethereum netstats reporting daemon that pushes local
@@ -189,8 +183,8 @@ func (s *Service) loop() {
 			header := make(http.Header)
 			header.Set("origin", "http://localhost")
 			for _, url := range urls {
-				c, _, e := dialer.Dial(url, header)
-				err = e
+				//nolint
+				c, _, err := dialer.Dial(url, header)
 				if err == nil {
 					conn = newConnectionWrapper(c)
 					break
@@ -263,7 +257,7 @@ func (s *Service) readLoop(conn *connWrapper) {
 		// If the network packet is a system ping, respond to it directly
 		var ping string
 		if err := json.Unmarshal(blob, &ping); err == nil && strings.HasPrefix(ping, "primus::ping::") {
-			if err := conn.WriteJSON(strings.Replace(ping, "ping", "pong", -1)); err != nil {
+			if err := conn.WriteJSON(strings.ReplaceAll(ping, "ping", "pong")); err != nil {
 				log.Warn("Failed to respond to system ping message", "err", err)
 				return
 			}
@@ -368,7 +362,7 @@ func (s *Service) login(conn *connWrapper) error {
 	}
 	nodeName := "Erigon"
 	if len(s.servers) > 0 {
-		nodeInfo, err := s.servers[0].NodeInfo(nil, nil)
+		nodeInfo, err := s.servers[0].NodeInfo(context.TODO(), nil)
 		if err != nil {
 			return err
 		}
@@ -564,11 +558,11 @@ func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStat
 // stats server.
 func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	roTx, err := s.chaindb.BeginRo(context.Background())
-	defer roTx.Rollback()
-
 	if err != nil {
 		return err
 	}
+	defer roTx.Rollback()
+
 	// Figure out the indexes that need reporting
 	indexes := make([]uint64, 0, historyUpdateRange)
 	if len(list) > 0 {
@@ -581,7 +575,7 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		if headNumber == nil {
 			return nil
 		}
-		start := *headNumber - historyUpdateRange + 1
+		start := int(*headNumber - historyUpdateRange + 1)
 		if start < 0 {
 			start = 0
 		}
@@ -624,11 +618,6 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		"emit": {"history", stats},
 	}
 	return conn.WriteJSON(report)
-}
-
-// pendStats is the information to report about pending transactions.
-type pendStats struct {
-	Pending int `json:"pending"`
 }
 
 // reportPending retrieves the current number of pending transactions and reports
