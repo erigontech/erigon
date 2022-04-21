@@ -70,6 +70,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -519,7 +520,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-
+	if config.Ethstats != "" {
+		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.engine, config.Ethstats, backend.networkID); err != nil {
+			return nil, err
+		}
+	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	if httpRpcCfg.Enabled {

@@ -33,11 +33,13 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -56,9 +58,10 @@ const (
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
 type Service struct {
-	server  *p2p.Server // Peer-to-peer server to retrieve networking infos
-	chaindb kv.RoDB
-	engine  consensus.Engine // Consensus engine to retrieve variadic block fields
+	servers   []*sentry.SentryServerImpl // Peer-to-peer server to retrieve networking infos
+	chaindb   kv.RoDB
+	networkid uint64
+	engine    consensus.Engine // Consensus engine to retrieve variadic block fields
 
 	node string // Name of the node to display on the monitoring page
 	pass string // Password to authorize access to the monitoring page
@@ -115,7 +118,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, chainDB kv.RoDB, engine consensus.Engine, url string) error {
+func New(node *node.Node, servers []*sentry.SentryServerImpl, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -123,13 +126,15 @@ func New(node *node.Node, chainDB kv.RoDB, engine consensus.Engine, url string) 
 		return fmt.Errorf("invalid netstats url: \"%s\", should be nodename:secret@host:port", url)
 	}
 	ethstats := &Service{
-		engine: engine,
-		server: node.Server(),
-		node:   parts[1],
-		pass:   parts[3],
-		host:   parts[4],
-		pongCh: make(chan struct{}),
-		histCh: make(chan []uint64, 1),
+		engine:    engine,
+		servers:   servers,
+		node:      parts[1],
+		pass:      parts[3],
+		host:      parts[4],
+		pongCh:    make(chan struct{}),
+		histCh:    make(chan []uint64, 1),
+		networkid: networkid,
+		chaindb:   chainDB,
 	}
 
 	node.RegisterLifecycle(ethstats)
@@ -157,21 +162,42 @@ func (s *Service) loop() {
 	// Start a goroutine that exhausts the subscriptions to avoid events piling up
 	var (
 		quitCh = make(chan struct{})
-		headCh = make(chan *types.Block, 1)
+		headCh = make(chan types.Block, 1)
 	)
 	go func() {
+		roTx, err := s.chaindb.BeginRo(context.Background())
+		if err != nil {
+			log.Warn("could not start ethstats", "err", err)
+			return
+		}
+		defer roTx.Rollback()
+		progress := uint64(0)
+		if err != nil {
+			log.Warn("could not start ethstats", "err", err)
+			return
+		}
 
 		for {
-			select {
-			// Notify of chain head events, but drop if too frequent
-			case head := <-chainHeadCh:
-				select {
-				case headCh <- head.Block:
-				default:
+			newProgress, err := stages.GetStageProgress(roTx, stages.Finish)
+			if err != nil {
+				log.Warn("could not start ethstats", "err", err)
+				return
+			}
+			if newProgress > progress {
+				progress = newProgress
+				block := rawdb.ReadCurrentBlock(roTx)
+				if block != nil {
+					headCh <- *block
 				}
 			}
+			timer := time.NewTicker(50 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-quitCh:
+				close(quitCh)
+				return
+			}
 		}
-		close(quitCh)
 	}()
 
 	// Resolve the URL, defaulting to TLS, but falling back to none too
@@ -221,13 +247,6 @@ func (s *Service) loop() {
 			}
 			go s.readLoop(conn)
 
-			// Send the initial stats so our node looks decent from the get go
-			if err = s.report(conn); err != nil {
-				log.Warn("Initial stats report failed", "err", err)
-				conn.Close()
-				errTimer.Reset(0)
-				continue
-			}
 			// Keep sending status updates until the connection breaks
 			fullReport := time.NewTicker(15 * time.Second)
 
@@ -248,9 +267,10 @@ func (s *Service) loop() {
 						log.Warn("Requested history report failed", "err", err)
 					}
 				case head := <-headCh:
-					if err = s.reportBlock(conn, head); err != nil {
+					if err = s.reportBlock(conn, &head); err != nil {
 						log.Warn("Block stats report failed", "err", err)
 					}
+
 				}
 			}
 			fullReport.Stop()
@@ -377,23 +397,28 @@ type authMsg struct {
 // login tries to authorize the client at the remote server.
 func (s *Service) login(conn *connWrapper) error {
 	// Construct and send the login authentication
-	infos := s.server.NodeInfo()
+	// infos := s.server.NodeInfo()
 
 	var protocols []string
-	for _, proto := range s.server.Protocols {
-		protocols = append(protocols, fmt.Sprintf("%s/%d", proto.Name, proto.Version))
+	for _, srv := range s.servers {
+		protocols = append(protocols, fmt.Sprintf("%s/%d", srv.Protocol.Name, srv.Protocol.Version))
 	}
-	var network string
-	if info := infos.Protocols["eth"]; info != nil {
-		network = fmt.Sprintf("%d", info.(*ethproto.NodeInfo).Network)
+	nodeName := "Erigon"
+	if len(s.servers) > 0 {
+		nodeInfo, err := s.servers[0].NodeInfo(nil, nil)
+		if err != nil {
+			return err
+		}
+		nodeName = nodeInfo.Name
 	}
+
 	auth := &authMsg{
 		ID: s.node,
 		Info: nodeInfo{
 			Name:     s.node,
-			Node:     infos.Name,
-			Port:     infos.Ports.Listener,
-			Network:  network,
+			Node:     nodeName,
+			Port:     0,
+			Network:  fmt.Sprintf("%d", s.networkid),
 			Protocol: strings.Join(protocols, ", "),
 			API:      "No",
 			Os:       runtime.GOOS,
@@ -508,8 +533,25 @@ func (s uncleStats) MarshalJSON() ([]byte, error) {
 
 // reportBlock retrieves the current chain head and reports it to the stats server.
 func (s *Service) reportBlock(conn *connWrapper, block *types.Block) error {
+	roTx, err := s.chaindb.BeginRo(context.Background())
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+	if block == nil {
+		block, err = rawdb.ReadLastBlockSynced(roTx)
+		if err != nil {
+			return err
+		}
+	}
+
+	td, err := rawdb.ReadTd(roTx, block.Hash(), block.NumberU64())
+	if err != nil {
+		return err
+	}
+
 	// Gather the block details from the header or block chain
-	details := s.assembleBlockStats(block)
+	details := s.assembleBlockStats(block, td)
 
 	// Assemble the block report and send it to the server
 	log.Trace("Sending new block to ethstats", "number", details.Number, "hash", details.Hash)
@@ -526,38 +568,44 @@ func (s *Service) reportBlock(conn *connWrapper, block *types.Block) error {
 
 // assembleBlockStats retrieves any required metadata to report a single block
 // and assembles the block stats. If block is nil, the current head is processed.
-func (s *Service) assembleBlockStats(block *types.Block) *blockStats {
+func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
+	if td == nil {
+		td = common.Big0
+	}
 	// Gather the block infos from the local blockchain
 	var (
-		header *types.Header
-		td     *big.Int
-		txs    []txStats
-		uncles []*types.Header
+		txs []txStats
 	)
-
-	// Assemble and return the block stats
-	author, _ := s.engine.Author(header)
+	for _, tx := range block.Transactions() {
+		txs = append(txs, txStats{tx.Hash()})
+	}
 
 	return &blockStats{
-		Number:     header.Number,
-		Hash:       header.Hash(),
-		ParentHash: header.ParentHash,
-		Timestamp:  new(big.Int).SetUint64(header.Time),
-		Miner:      author,
-		GasUsed:    header.GasUsed,
-		GasLimit:   header.GasLimit,
-		Diff:       header.Difficulty.String(),
+		Number:     block.Header().Number,
+		Hash:       block.Hash(),
+		ParentHash: block.Header().ParentHash,
+		Timestamp:  new(big.Int).SetUint64(block.Header().Time),
+		Miner:      block.Header().Coinbase,
+		GasUsed:    block.Header().GasUsed,
+		GasLimit:   block.Header().GasLimit,
+		Diff:       block.Header().Difficulty.String(),
 		TotalDiff:  td.String(),
 		Txs:        txs,
-		TxHash:     header.TxHash,
-		Root:       header.Root,
-		Uncles:     uncles,
+		TxHash:     block.Header().TxHash,
+		Root:       block.Header().Root,
+		Uncles:     block.Uncles(),
 	}
 }
 
 // reportHistory retrieves the most recent batch of blocks and reports it to the
 // stats server.
 func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
+	roTx, err := s.chaindb.BeginRo(context.Background())
+	defer roTx.Rollback()
+
+	if err != nil {
+		return err
+	}
 	// Figure out the indexes that need reporting
 	indexes := make([]uint64, 0, historyUpdateRange)
 	if len(list) > 0 {
@@ -565,24 +613,34 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		indexes = append(indexes, list...)
 	} else {
 		// No indexes requested, send back the top ones
-		head := s.backend.CurrentHeader().Number.Int64()
-		start := head - historyUpdateRange + 1
+		headHash := rawdb.ReadHeadBlockHash(roTx)
+		headNumber := rawdb.ReadHeaderNumber(roTx, headHash)
+		if headNumber == nil {
+			return nil
+		}
+		start := *headNumber - historyUpdateRange + 1
 		if start < 0 {
 			start = 0
 		}
-		for i := uint64(start); i <= uint64(head); i++ {
+		for i := uint64(start); i <= *headNumber; i++ {
 			indexes = append(indexes, i)
 		}
 	}
 	// Gather the batch of blocks to report
 	history := make([]*blockStats, len(indexes))
-	for i, _ := range indexes {
+	for i, number := range indexes {
 		// Retrieve the next block if it's known to us
-		var block *types.Block
-
+		block, err := rawdb.ReadBlockByNumber(roTx, number)
+		if err != nil {
+			return err
+		}
+		td, err := rawdb.ReadTd(roTx, block.Hash(), number)
+		if err != nil {
+			return err
+		}
 		// If we do have the block, add to the history and continue
 		if block != nil {
-			history[len(history)-1-i] = s.assembleBlockStats(block)
+			history[len(history)-1-i] = s.assembleBlockStats(block, td)
 			continue
 		}
 		// Ran out of blocks, cut the report short and send
@@ -645,37 +703,33 @@ type nodeStats struct {
 // reportStats retrieves various stats about the node at the networking and
 // mining layer and reports it to the stats server.
 func (s *Service) reportStats(conn *connWrapper) error {
-	// Gather the syncing and mining infos from the local miner instance
-	var (
-		mining   bool
-		hashrate int
-		syncing  bool
-		gasprice int
-	)
-	// check if backend is a full node
-	fullBackend, ok := s.backend.(fullNodeBackend)
-	if ok {
-		mining = fullBackend.Miner().Mining()
-		hashrate = int(fullBackend.Miner().HashRate())
-
-		sync := fullBackend.Downloader().Progress()
-		syncing = fullBackend.CurrentHeader().Number.Uint64() >= sync.HighestBlock
-
-		price, _ := fullBackend.SuggestPrice(context.Background())
-		gasprice = int(price.Uint64())
+	roTx, err := s.chaindb.BeginRo(context.Background())
+	if err != nil {
+		return err
 	}
-	// Assemble the node stats and send it to the server
-	log.Trace("Sending node details to ethstats")
-
+	defer roTx.Rollback()
+	sync, err := stages.GetStageProgress(roTx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	finishSync, err := stages.GetStageProgress(roTx, stages.Finish)
+	if err != nil {
+		return err
+	}
+	// TODO(Giulio2002): peer tracking
+	peerCount := 33
+	for _, srv := range s.servers {
+		peerCount += srv.SimplePeerCount()
+	}
 	stats := map[string]interface{}{
 		"id": s.node,
 		"stats": &nodeStats{
 			Active:    true,
-			Mining:    mining,
-			Hashrate:  hashrate,
-			GoodPeers: s.server.PeerCount(),
-			GasPrice:  gasprice,
-			Syncing:   syncing,
+			Mining:    false,
+			Hashrate:  0,
+			GoodPeers: peerCount,
+			GasPrice:  0,
+			Syncing:   sync != finishSync,
 			Uptime:    100,
 		},
 	}

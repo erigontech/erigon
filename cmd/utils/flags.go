@@ -294,6 +294,7 @@ var (
 	EthStatsURLFlag = cli.StringFlag{
 		Name:  "ethstats",
 		Usage: "Reporting URL of a ethstats service (nodename:secret@host:port)",
+		Value: "",
 	}
 	FakePoWFlag = cli.BoolFlag{
 		Name:  "fakepow",
@@ -1398,6 +1399,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
 
+	cfg.Ethstats = ctx.GlobalString(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.EnabledIssuance = ctx.GlobalIsSet(EnabledIssuance.Name)
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
