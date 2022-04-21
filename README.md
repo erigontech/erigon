@@ -245,7 +245,7 @@ Most of Erigon's components can work inside Erigon and as independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
-Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code> 
+Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/readme.md)</code> 
 
 #### **For remote DB**
 
