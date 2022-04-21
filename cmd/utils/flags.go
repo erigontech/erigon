@@ -313,7 +313,7 @@ var (
 	}
 	HTTPEnabledFlag = cli.BoolFlag{
 		Name:  "http",
-		Usage: "Enable the HTTP-RPC server",
+		Usage: "Enabled by default. Use --http=false to disable the HTTP-RPC server",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
@@ -344,11 +344,11 @@ var (
 
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Usage: "Enable compression over HTTP-RPC",
 	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Usage: "Enable compression over WebSocket",
 	}
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
@@ -645,7 +645,7 @@ var (
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name:  "torrent.upload.rate",
 		Value: "4mb",
-		Usage: "byt,es per second, example: 32mb",
+		Usage: "bytes per second, example: 32mb",
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
