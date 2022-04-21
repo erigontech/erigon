@@ -63,7 +63,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`
+Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/README.md)</code> 
 
 Use `--datadir` to choose where to store data.
 
