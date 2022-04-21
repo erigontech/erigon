@@ -1129,7 +1129,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	var idxWorkers := workers
+	idxWorkers := workers
 	if idxWorkers > 4 {
 		idxWorkers = 4
 	}
