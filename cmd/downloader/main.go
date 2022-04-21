@@ -150,13 +150,13 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db)
 	if err != nil {
 		return err
 	}
-	defer pieceCompletion.Close()
+	defer cfg.CompletionCloser.Close()
 
-	protocols, err := downloader.New(cfg, snapshotDir, db)
+	protocols, err := downloader.New(cfg, snapshotDir)
 	if err != nil {
 		return err
 	}
