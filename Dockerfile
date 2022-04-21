@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM docker.io/library/golang:1.17-alpine3.15 AS builder
+FROM docker.io/library/golang:1.18-alpine3.15 AS builder
 
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
