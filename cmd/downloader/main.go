@@ -178,8 +178,8 @@ var printTorrentHashes = &cobra.Command{
 			return downloader.VerifyDtaFiles(ctx, snapshotDir)
 		}
 
-		lockedSnapshotDir := &dir.Rw{Path: snapshotDir}
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
+			lockedSnapshotDir := &dir.Rw{Path: snapshotDir}
 			defer lockedSnapshotDir.Close()
 			removeChunksStorage(lockedSnapshotDir)
 
@@ -192,9 +192,9 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, lockedSnapshotDir); err != nil {
-			return err
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, lockedSnapshotDir); err != nil {
+				return err
+			}
 		}
 
 		res := map[string]string{}

@@ -369,8 +369,8 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Does limit amount of parallel db reads (Default: number of CPU)",
-		Value: runtime.NumCPU(),
+		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
+		Value: runtime.GOMAXPROCS(-1),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
