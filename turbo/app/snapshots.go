@@ -135,7 +135,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		if workers < 1 {
 			workers = 1
 		}
-		if workers > 4  {
+		if workers > 4 {
 			workers = 4
 		}
 		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from, workers); err != nil {
