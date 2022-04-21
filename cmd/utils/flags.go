@@ -59,8 +59,8 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"github.com/ledgerwatch/erigon/params"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func init() {
@@ -1369,19 +1369,15 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			panic(err)
 		}
 
-		db, err := mdbx.NewMDBX(log.New()).
+		db := mdbx.NewMDBX(log.New()).
 			Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
 			Label(kv.DownloaderDB).
-			WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-				return kv.DownloaderTablesCfg
-			}).
+			WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 			SyncPeriod(15 * time.Second).
 			Path(filepath.Join(cfg.SnapshotDir.Path, "db")).
-			Open()
-		if err != nil {
-			panic(err)
-		}
-		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir,
+			MustOpen()
+		var err error
+		cfg.Torrent, err = torrentcfg.New(cfg.SnapshotDir,
 			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
@@ -1393,8 +1389,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent = torrentCfg
-		cfg.TorrentDirCloser = dirCloser
 	}
 
 	nodeConfig.Http.Snapshot = cfg.Snapshot

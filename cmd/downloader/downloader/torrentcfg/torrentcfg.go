@@ -24,6 +24,12 @@ import (
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 const DefaultPieceSize = 2 * 1024 * 1024
 
+type Cfg struct {
+	*torrent.ClientConfig
+	DB               kv.RwDB
+	CompletionCloser io.Closer
+}
+
 func Default() *torrent.ClientConfig {
 	torrentConfig := torrent.NewDefaultClientConfig()
 
@@ -41,7 +47,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB) (*torrent.ClientConfig, io.Closer, error) {
+func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -87,11 +93,11 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 
 	c, err := NewBoltPieceCompletion(db)
 	if err != nil {
-		return nil, nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
+		return nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
 	}
 	m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
 	torrentConfig.DefaultStorage = m
-	return torrentConfig, m, nil
+	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m}, nil
 }
 
 const (

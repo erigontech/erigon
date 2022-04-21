@@ -11,6 +11,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -19,27 +20,29 @@ const ASSERT = false
 type Protocols struct {
 	TorrentClient *torrent.Client
 	DB            kv.RwDB
+	cfg           *torrentcfg.Cfg
 }
 
-func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw, db kv.RwDB) (*Protocols, error) {
-	peerID, err := readPeerID(db)
+func New(cfg *torrentcfg.Cfg, snapshotDir *dir.Rw) (*Protocols, error) {
+	peerID, err := readPeerID(cfg.DB)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
 	}
 	cfg.PeerID = string(peerID)
-	torrentClient, err := torrent.NewClient(cfg)
+	torrentClient, err := torrent.NewClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
 	if len(peerID) == 0 {
-		if err = savePeerID(db, torrentClient.PeerID()); err != nil {
+		if err = savePeerID(cfg.DB, torrentClient.PeerID()); err != nil {
 			return nil, fmt.Errorf("save peer id: %w", err)
 		}
 	}
 
 	return &Protocols{
+		cfg:           cfg,
 		TorrentClient: torrentClient,
-		DB:            db,
+		DB:            cfg.DB,
 	}, nil
 }
 
@@ -69,6 +72,9 @@ func (cli *Protocols) Close() {
 	}
 	cli.TorrentClient.Close()
 	cli.DB.Close()
+	if cli.cfg.CompletionCloser != nil {
+		cli.cfg.CompletionCloser.Close() //nolint
+	}
 }
 
 func (cli *Protocols) PeerID() []byte {

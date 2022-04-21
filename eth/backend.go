@@ -798,9 +798,6 @@ func (s *Ethereum) Stop() error {
 	if s.downloadProtocols != nil {
 		s.downloadProtocols.Close()
 	}
-	if s.config.TorrentDirCloser != nil {
-		s.config.TorrentDirCloser.Close() //nolint
-	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)
 		go func() {
