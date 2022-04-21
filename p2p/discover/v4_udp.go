@@ -301,8 +301,14 @@ func (t *UDPv4) newLookup(ctx context.Context, targetKey *ecdsa.PublicKey) *look
 	return it
 }
 
-// findnode sends a findnode request to the given node and waits until
-// the node has sent up to k neighbors.
+// FindNode sends a "FindNode" request to the given node and waits until
+// the node has sent up to bucketSize neighbors or a respTimeout has passed.
+func (t *UDPv4) FindNode(toNode *enode.Node, targetKey *ecdsa.PublicKey) ([]*enode.Node, error) {
+	targetKeyEnc := v4wire.EncodePubkey(targetKey)
+	nodes, err := t.findnode(toNode.ID(), wrapNode(toNode).addr(), targetKeyEnc)
+	return unwrapNodes(nodes), err
+}
+
 func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubkey) ([]*node, error) {
 	t.ensureBond(toid, toaddr)
 

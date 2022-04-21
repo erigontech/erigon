@@ -61,6 +61,7 @@ COMMANDS += downloader
 COMMANDS += evm
 COMMANDS += hack
 COMMANDS += integration
+COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest
