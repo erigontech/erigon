@@ -1091,6 +1091,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				if workers < 1 {
 					workers = 1
 				}
+				if workers > 4 {
+					workers = 4
+				}
 				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
 				}
