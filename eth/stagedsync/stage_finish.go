@@ -25,13 +25,15 @@ type FinishCfg struct {
 	db     kv.RwDB
 	tmpDir string
 	log    log.Logger
+	headCh chan *types.Block
 }
 
-func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger) FinishCfg {
+func StageFinishCfg(db kv.RwDB, tmpDir string, logger log.Logger, headCh chan *types.Block) FinishCfg {
 	return FinishCfg{
 		db:     db,
 		log:    logger,
 		tmpDir: tmpDir,
+		headCh: headCh,
 	}
 }
 
@@ -65,6 +67,10 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		if err := params.SetErigonVersion(tx, params.VersionKeyFinished); err != nil {
 			return err
 		}
+	}
+
+	if cfg.headCh != nil {
+		cfg.headCh <- rawdb.ReadCurrentBlock(tx)
 	}
 
 	if !useExternalTx {

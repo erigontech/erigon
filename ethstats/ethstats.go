@@ -67,6 +67,9 @@ type Service struct {
 	pass string // Password to authorize access to the monitoring page
 	host string // Remote address of the monitoring service
 
+	quitCh <-chan struct{}
+	headCh <-chan *types.Block
+
 	pongCh chan struct{} // Pong notifications are fed into this channel
 	histCh chan []uint64 // History request block numbers are fed into this channel
 
@@ -118,7 +121,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.SentryServerImpl, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64) error {
+func New(node *node.Node, servers []*sentry.SentryServerImpl, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan *types.Block) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)
@@ -135,6 +138,8 @@ func New(node *node.Node, servers []*sentry.SentryServerImpl, chainDB kv.RoDB, e
 		histCh:    make(chan []uint64, 1),
 		networkid: networkid,
 		chaindb:   chainDB,
+		headCh:    headCh,
+		quitCh:    quitCh,
 	}
 
 	node.RegisterLifecycle(ethstats)
@@ -158,48 +163,6 @@ func (s *Service) Stop() error {
 // loop keeps trying to connect to the netstats server, reporting chain events
 // until termination.
 func (s *Service) loop() {
-
-	// Start a goroutine that exhausts the subscriptions to avoid events piling up
-	var (
-		quitCh = make(chan struct{})
-		headCh = make(chan types.Block, 1)
-	)
-	go func() {
-		roTx, err := s.chaindb.BeginRo(context.Background())
-		if err != nil {
-			log.Warn("could not start ethstats", "err", err)
-			return
-		}
-		defer roTx.Rollback()
-		progress := uint64(0)
-		if err != nil {
-			log.Warn("could not start ethstats", "err", err)
-			return
-		}
-
-		for {
-			newProgress, err := stages.GetStageProgress(roTx, stages.Finish)
-			if err != nil {
-				log.Warn("could not start ethstats", "err", err)
-				return
-			}
-			if newProgress > progress {
-				progress = newProgress
-				block := rawdb.ReadCurrentBlock(roTx)
-				if block != nil {
-					headCh <- *block
-				}
-			}
-			timer := time.NewTicker(50 * time.Millisecond)
-			select {
-			case <-timer.C:
-			case <-quitCh:
-				close(quitCh)
-				return
-			}
-		}
-	}()
-
 	// Resolve the URL, defaulting to TLS, but falling back to none too
 	path := fmt.Sprintf("%s/api", s.host)
 	urls := []string{path}
@@ -214,7 +177,7 @@ func (s *Service) loop() {
 	// Loop reporting until termination
 	for {
 		select {
-		case <-quitCh:
+		case <-s.quitCh:
 			return
 		case <-errTimer.C:
 			// Establish a websocket connection to the server on any supported URL
@@ -252,7 +215,7 @@ func (s *Service) loop() {
 
 			for err == nil {
 				select {
-				case <-quitCh:
+				case <-s.quitCh:
 					fullReport.Stop()
 					// Make sure the connection is closed
 					conn.Close()
@@ -266,8 +229,8 @@ func (s *Service) loop() {
 					if err = s.reportHistory(conn, list); err != nil {
 						log.Warn("Requested history report failed", "err", err)
 					}
-				case head := <-headCh:
-					if err = s.reportBlock(conn, &head); err != nil {
+				case head := <-s.headCh:
+					if err = s.reportBlock(conn, head); err != nil {
 						log.Warn("Block stats report failed", "err", err)
 					}
 
@@ -717,7 +680,7 @@ func (s *Service) reportStats(conn *connWrapper) error {
 		return err
 	}
 	// TODO(Giulio2002): peer tracking
-	peerCount := 33
+	peerCount := 0
 	for _, srv := range s.servers {
 		peerCount += srv.SimplePeerCount()
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -253,6 +254,7 @@ func NewStagedSync(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDir *dir.Rw,
+	headCh chan *types.Block,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader
 	if cfg.Snapshot.Enabled {
@@ -320,7 +322,7 @@ func NewStagedSync(
 			stagedsync.StageLogIndexCfg(db, cfg.Prune, tmpdir),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, snapshots, isBor),
-			stagedsync.StageFinishCfg(db, tmpdir, logger), runInTestMode),
+			stagedsync.StageFinishCfg(db, tmpdir, logger, headCh), runInTestMode),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil
