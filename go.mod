@@ -37,7 +37,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220420093249-08435dac4f5b
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220421013732-03014c56505e
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/magiconair/properties v1.8.6 // indirect
@@ -61,7 +61,6 @@ require (
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart/v2 v2.1.0
 	github.com/xsleonard/go-merkle v1.1.0
-	go.etcd.io/bbolt v1.3.6
 	go.uber.org/atomic v1.9.0
 	golang.org/x/crypto v0.0.0-20220131195533-30dcbda58838
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
