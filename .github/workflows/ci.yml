@@ -35,8 +35,10 @@ jobs:
       - name: Reproducible build test
         run: |
           make erigon
+          go version -m ./build/bin/erigon
           shasum -a256 ./build/bin/erigon > erigon1.sha256
           make erigon
+          go version -m ./build/bin/erigon
           shasum -a256 ./build/bin/erigon > erigon2.sha256
           if ! cmp -s erigon1.sha256 erigon2.sha256; then
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
