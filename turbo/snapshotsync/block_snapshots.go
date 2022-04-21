@@ -1133,7 +1133,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if idxWorkers > 4 {
 		idxWorkers = 4
 	}
-	if err := BuildIndices(ctx, snapshots, rwSnapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), idxWorkersw, log.LvlInfo); err != nil {
+	if err := BuildIndices(ctx, snapshots, rwSnapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), idxWorkers, log.LvlInfo); err != nil {
 		return err
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
