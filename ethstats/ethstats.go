@@ -93,6 +93,9 @@ func newConnectionWrapper(conn *websocket.Conn) *connWrapper {
 
 // WriteJSON wraps corresponding method on the websocket but is safe for concurrent calling
 func (w *connWrapper) WriteJSON(v interface{}) error {
+	if w.conn == nil {
+		return nil
+	}
 	w.wlock.Lock()
 	defer w.wlock.Unlock()
 
@@ -190,8 +193,8 @@ func (s *Service) loop() {
 					break
 				}
 			}
-			if err != nil {
-				log.Warn("Stats server unreachable", "err", err)
+			if err != nil || conn == nil {
+				log.Warn("Stats server unreachable")
 				errTimer.Reset(10 * time.Second)
 				continue
 			}

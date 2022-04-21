@@ -490,7 +490,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 
 	var headCh chan *types.Block
 	if config.Ethstats != "" {
-		headCh = make(chan *types.Block)
+		headCh = make(chan *types.Block, 1)
 	}
 
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
