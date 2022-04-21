@@ -18,7 +18,6 @@
 package ethconfig
 
 import (
-	"io"
 	"math/big"
 	"os"
 	"os/user"
@@ -27,17 +26,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/params/networkname"
-
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -47,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -175,10 +173,9 @@ type Config struct {
 	BadBlockHash common.Hash // hash of the block marked as bad
 
 	Snapshot Snapshot
-	Torrent  *torrent.ClientConfig
+	Torrent  *torrentcfg.Cfg
 
-	TorrentDirCloser io.Closer
-	SnapshotDir      *dir.Rw
+	SnapshotDir *dir.Rw
 
 	BlockDownloaderWindow int
 

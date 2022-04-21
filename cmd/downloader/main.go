@@ -17,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -26,6 +28,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -58,7 +61,7 @@ func init() {
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
 	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
 	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", "8mb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "8mb", "bytes per second, example: 32mb")
+	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "4mb", "bytes per second, example: 32mb")
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", 10, "")
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", 5, "connections per file")
@@ -134,11 +137,24 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile)
+	db, err := mdbx.NewMDBX(log.New()).
+		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
+		Label(kv.DownloaderDB).
+		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+			return kv.DownloaderTablesCfg
+		}).
+		SyncPeriod(15 * time.Second).
+		Path(filepath.Join(snapshotDir.Path, "db")).
+		Open()
 	if err != nil {
 		return err
 	}
-	defer pieceCompletion.Close()
+
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db)
+	if err != nil {
+		return err
+	}
+	defer cfg.CompletionCloser.Close()
 
 	protocols, err := downloader.New(cfg, snapshotDir)
 	if err != nil {
