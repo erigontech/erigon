@@ -142,7 +142,7 @@ func bToMb(b uint64) uint64 {
 }
 
 func batchServer() {
-	numWorkers := runtime.NumCPU() - 2
+	numWorkers := runtime.GOMAXPROCS(-1) - 2
 	fmt.Printf("Number of cores: %v\n", numWorkers)
 
 	file, err := os.Open("absintdata/contract_bytecode_txcnt.csv")

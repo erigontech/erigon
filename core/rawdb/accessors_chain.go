@@ -1249,15 +1249,17 @@ func DeleteNewBlocks(db kv.RwTx, blockFrom uint64) error {
 		if err != nil {
 			return err
 		}
-		txIDBytes := make([]byte, 8)
-		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
-			binary.BigEndian.PutUint64(txIDBytes, txID)
-			bucket := kv.EthTx
-			if !isCanonical {
-				bucket = kv.NonCanonicalTxs
-			}
-			if err := db.Delete(bucket, txIDBytes, nil); err != nil {
-				return err
+		if b != nil { // b == nil means body were marked as non-canonical already
+			txIDBytes := make([]byte, 8)
+			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+				binary.BigEndian.PutUint64(txIDBytes, txID)
+				bucket := kv.EthTx
+				if !isCanonical {
+					bucket = kv.NonCanonicalTxs
+				}
+				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+					return err
+				}
 			}
 		}
 		if err := db.Delete(kv.Headers, k, nil); err != nil {

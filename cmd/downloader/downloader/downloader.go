@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"time"
 
@@ -12,9 +11,8 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/log/v3"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 const ASSERT = false
@@ -22,36 +20,29 @@ const ASSERT = false
 type Protocols struct {
 	TorrentClient *torrent.Client
 	DB            kv.RwDB
+	cfg           *torrentcfg.Cfg
 }
 
-func New(cfg *torrent.ClientConfig, snapshotDir *dir.Rw) (*Protocols, error) {
-	db, err := mdbx.NewMDBX(log.New()).
-		Flags(func(f uint) uint { return f | mdbx2.WriteMap | mdbx2.SafeNoSync }).
-		SyncPeriod(15 * time.Second).
-		Path(filepath.Join(snapshotDir.Path, "db")).
-		Open()
-	if err != nil {
-		return nil, err
-	}
-
-	peerID, err := readPeerID(db)
+func New(cfg *torrentcfg.Cfg, snapshotDir *dir.Rw) (*Protocols, error) {
+	peerID, err := readPeerID(cfg.DB)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
 	}
 	cfg.PeerID = string(peerID)
-	torrentClient, err := torrent.NewClient(cfg)
+	torrentClient, err := torrent.NewClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("fail to start torrent client: %w", err)
 	}
 	if len(peerID) == 0 {
-		if err = savePeerID(db, torrentClient.PeerID()); err != nil {
+		if err = savePeerID(cfg.DB, torrentClient.PeerID()); err != nil {
 			return nil, fmt.Errorf("save peer id: %w", err)
 		}
 	}
 
 	return &Protocols{
+		cfg:           cfg,
 		TorrentClient: torrentClient,
-		DB:            db,
+		DB:            cfg.DB,
 	}, nil
 }
 
@@ -81,6 +72,9 @@ func (cli *Protocols) Close() {
 	}
 	cli.TorrentClient.Close()
 	cli.DB.Close()
+	if cli.cfg.CompletionCloser != nil {
+		cli.cfg.CompletionCloser.Close() //nolint
+	}
 }
 
 func (cli *Protocols) PeerID() []byte {
@@ -354,6 +348,7 @@ func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
 		if err != nil {
 			return err
 		}
+
 		err = verifyTorrent(&info, snapshotDir, func(i int, good bool) error {
 			j++
 			if !good {

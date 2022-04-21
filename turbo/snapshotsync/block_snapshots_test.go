@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -125,20 +124,6 @@ func TestCanRetire(t *testing.T) {
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo)
 	}
 }
-func TestRecompress(t *testing.T) {
-	dir, require := t.TempDir(), require.New(t)
-	createFile := func(from, to uint64) { createTestSegmentFile(t, from, to, Headers, dir) }
-
-	createFile(0, 1_000)
-	err := RecompressSegments(context.Background(), &dir2.Rw{Path: dir}, dir)
-	require.NoError(err)
-
-	d, err := compress.NewDecompressor(filepath.Join(dir, SegmentFileName(0, 1_000, Headers)))
-	require.NoError(err)
-	defer d.Close()
-	assert.Equal(t, 1, d.Count())
-}
-
 func TestOpenAllSnapshot(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	chainSnapshotCfg := snapshothashes.KnownConfig(networkname.MainnetChainName)

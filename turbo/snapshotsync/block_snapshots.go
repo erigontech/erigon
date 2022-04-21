@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -655,18 +656,49 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
-func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, lvl log.Lvl) error {
+func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, workers int, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Build indices", "from", from)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
 	if err := s.Headers.View(func(segments []*HeaderSegment) error {
+		wg := &sync.WaitGroup{}
+		errs := make(chan error, len(segments)*2)
+		workersCh := make(chan struct{}, workers)
 		for _, sn := range segments {
 			if sn.From < from {
 				continue
 			}
-			f := filepath.Join(snapshotDir.Path, SegmentFileName(sn.From, sn.To, Headers))
-			if err := HeadersIdx(ctx, f, sn.From, tmpDir, logEvery, lvl); err != nil {
+
+			wg.Add(1)
+			workersCh <- struct{}{}
+			go func(blockFrom, blockTo uint64) {
+				defer func() {
+					wg.Done()
+					<-workersCh
+				}()
+
+				f := filepath.Join(snapshotDir.Path, SegmentFileName(blockFrom, blockTo, Headers))
+				errs <- HeadersIdx(ctx, f, blockFrom, tmpDir, lvl)
+				select {
+				case <-ctx.Done():
+					errs <- ctx.Err()
+					return
+				case <-logEvery.C:
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					log.Log(lvl, "[snapshots] HeadersIdx", "blockNum", blockTo,
+						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				default:
+				}
+
+			}(sn.From, sn.To)
+		}
+		go func() {
+			wg.Wait()
+			close(errs)
+		}()
+		for err := range errs {
+			if err != nil {
 				return err
 			}
 		}
@@ -676,12 +708,44 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	}
 
 	if err := s.Bodies.View(func(segments []*BodySegment) error {
+		wg := &sync.WaitGroup{}
+		errs := make(chan error, len(segments)*2)
+		workersCh := make(chan struct{}, workers)
 		for _, sn := range segments {
 			if sn.From < from {
 				continue
 			}
-			f := filepath.Join(snapshotDir.Path, SegmentFileName(sn.From, sn.To, Bodies))
-			if err := BodiesIdx(ctx, f, sn.From, tmpDir, logEvery, lvl); err != nil {
+
+			wg.Add(1)
+			workersCh <- struct{}{}
+			go func(blockFrom, blockTo uint64) {
+				defer func() {
+					wg.Done()
+					<-workersCh
+				}()
+
+				f := filepath.Join(snapshotDir.Path, SegmentFileName(blockFrom, blockTo, Bodies))
+				errs <- BodiesIdx(ctx, f, blockFrom, tmpDir, lvl)
+				select {
+				case <-ctx.Done():
+					errs <- ctx.Err()
+					return
+				case <-logEvery.C:
+					var m runtime.MemStats
+					runtime.ReadMemStats(&m)
+					log.Log(lvl, "[snapshots] BodiesIdx", "blockNum", blockTo,
+						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				default:
+				}
+
+			}(sn.From, sn.To)
+		}
+		go func() {
+			wg.Wait()
+			close(errs)
+		}()
+		for err := range errs {
+			if err != nil {
 				return err
 			}
 		}
@@ -695,6 +759,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	}
 	if err := s.Txs.View(func(segments []*TxnSegment) error {
 		return s.Bodies.View(func(bodySegments []*BodySegment) error {
+			wg := &sync.WaitGroup{}
+			errs := make(chan error, len(segments)*2)
+			workersCh := make(chan struct{}, workers)
 			for i, sn := range segments {
 				if sn.From < from {
 					continue
@@ -705,10 +772,38 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 					continue
 				}
 
-				if err := TransactionsIdx(ctx, chainID, sn.From, sn.To, snapshotDir, tmpDir, logEvery, lvl); err != nil {
+				wg.Add(1)
+				workersCh <- struct{}{}
+				go func(blockFrom, blockTo uint64) {
+					defer func() {
+						wg.Done()
+						<-workersCh
+					}()
+					errs <- TransactionsIdx(ctx, chainID, blockFrom, blockTo, snapshotDir, tmpDir, lvl)
+					select {
+					case <-ctx.Done():
+						errs <- ctx.Err()
+						return
+					case <-logEvery.C:
+						var m runtime.MemStats
+						runtime.ReadMemStats(&m)
+						log.Log(lvl, "[Snapshots Indexing] TransactionsIdx", "blockNum", blockTo,
+							"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					default:
+					}
+
+				}(sn.From, sn.To)
+			}
+			go func() {
+				wg.Wait()
+				close(errs)
+			}()
+			for err := range errs {
+				if err != nil {
 					return err
 				}
 			}
+
 			return nil
 		})
 	}); err != nil {
@@ -1034,7 +1129,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-	if err := BuildIndices(ctx, snapshots, rwSnapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), log.LvlInfo); err != nil {
+	if err := BuildIndices(ctx, snapshots, rwSnapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 		return err
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
@@ -1382,7 +1477,12 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 
 var EmptyTxHash = common.Hash{}
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, lvl log.Lvl) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v", blockFrom, blockTo, rec)
+		}
+	}()
 	var expectedCount, firstTxID uint64
 	firstBlockNum := blockFrom
 
@@ -1429,8 +1529,6 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	}
 	defer d.Close()
 
-	buf := make([]byte, 1024)
-
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
 		Enums:      true,
@@ -1458,199 +1556,111 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	txnHashIdx.LogLvl(log.LvlDebug)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
-RETRY:
-	ch := forEachAsync(ctx, d)
-	type txHashWithOffet struct {
-		txnHash   [32]byte
-		i, offset uint64
-		empty     bool // block may have empty txn in the beginning or end of block. such txs have no hash, but have ID
-		err       error
+	parseCtx := types2.NewTxParseContext(chainID)
+	parseCtx.WithSender(false)
+	slot := types2.TxSlot{}
+	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
+
+	withReadAhead := func(f func(g, bodyGetter *compress.Getter) error) error {
+		return d.WithReadAhead(func() error {
+			return bodiesSegment.WithReadAhead(func() error {
+				return f(d.MakeGetter(), bodiesSegment.MakeGetter())
+			})
+		})
 	}
-	txsCh := make(chan txHashWithOffet, 1024)
-	txsCh2 := make(chan txHashWithOffet, 1024)
-	go func() { //TODO: can't spawn multiple goroutines, because consumer expecting right order of txWithOffet.i
-		defer close(txsCh)
-		defer close(txsCh2)
-		parseCtx := types2.NewTxParseContext(chainID)
-		parseCtx.WithSender(false)
-		slot := types2.TxSlot{}
-		var sender [20]byte
-		for it := range ch {
-			if it.err != nil {
-				txsCh <- txHashWithOffet{err: it.err}
-				txsCh2 <- txHashWithOffet{err: it.err}
-				return
-			}
-			if len(it.word) == 0 {
-				txsCh <- txHashWithOffet{empty: true, i: it.i, offset: it.offset}
-				txsCh2 <- txHashWithOffet{empty: true, i: it.i, offset: it.offset}
-				continue
-			}
 
-			if _, err := parseCtx.ParseTransaction(it.word[1+20:], 0, &slot, sender[:], true /* hasEnvelope */, nil); err != nil {
-				txsCh <- txHashWithOffet{err: it.err}
-				txsCh2 <- txHashWithOffet{err: it.err}
-				return
-			}
-			txsCh <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
-			txsCh2 <- txHashWithOffet{txnHash: slot.IDHash, i: it.i, offset: it.offset}
-		}
-	}()
-
-	wg := sync.WaitGroup{}
-	errCh := make(chan error, 2)
-	defer close(errCh)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		hash := make([]byte, 32)
-
-		var j uint64
-		for it := range txsCh {
-			if it.err != nil {
-				errCh <- it.err
-				return
-			}
-			j++
-			if it.empty { // system-txs hash: pad32(txnID)
-				binary.BigEndian.PutUint64(hash, firstTxID+it.i)
-				if err := txnHashIdx.AddKey(hash, it.offset); err != nil {
-					errCh <- err
-					return
-				}
-			} else {
-				if err := txnHashIdx.AddKey(it.txnHash[:], it.offset); err != nil {
-					errCh <- err
-					return
-				}
-			}
-
-			select {
-			case <-ctx.Done():
-				errCh <- ctx.Err()
-				return
-			default:
-			}
-		}
-
-		if j != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, j))
-		}
-
-		if err := txnHashIdx.Build(); err != nil {
-			errCh <- fmt.Errorf("txnHashIdx: %w", err)
-		} else {
-			errCh <- nil
-		}
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		hash := make([]byte, 32)
+RETRY:
+	if err := withReadAhead(func(g, bodyGetter *compress.Getter) error {
+		var i, offset, nextPos uint64
 		blockNum := firstBlockNum
 		body := &types.BodyForStorage{}
-		if err := bodiesSegment.WithReadAhead(func() error {
-			bodyGetter := bodiesSegment.MakeGetter()
-			bodyGetter.Reset(0)
-			buf, _ = bodyGetter.Next(buf[:0])
-			if err := rlp.DecodeBytes(buf, body); err != nil {
+
+		bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
+		if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+			return err
+		}
+
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
+			for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+				if !bodyGetter.HasNext() {
+					return fmt.Errorf("not enough bodies")
+				}
+				bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
+				if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+					return err
+				}
+				blockNum++
+			}
+
+			isSystemTx := len(word) == 0
+			if isSystemTx { // system-txs hash:pad32(txnID)
+				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
+			} else {
+				if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, nil, true /* hasEnvelope */, nil); err != nil {
+					return err
+				}
+			}
+
+			if err := txnHashIdx.AddKey(slot.IDHash[:], offset); err != nil {
+				return err
+			}
+			if err := txnHash2BlockNumIdx.AddKey(slot.IDHash[:], blockNum); err != nil {
 				return err
 			}
 
-			for it := range txsCh2 {
-				if it.err != nil {
-					return it.err
-				}
-				for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+it.i { // skip empty blocks
-					if !bodyGetter.HasNext() {
-						return fmt.Errorf("not enough bodies")
-					}
-					buf, _ = bodyGetter.Next(buf[:0])
-					if err := rlp.DecodeBytes(buf, body); err != nil {
-						return err
-					}
-					blockNum++
-				}
+			i++
+			offset = nextPos
+		}
 
-				if it.empty { // system-txs hash: pad32(txnID)
-					binary.BigEndian.PutUint64(hash, firstTxID+it.i)
-					if err := txnHash2BlockNumIdx.AddKey(hash, blockNum); err != nil {
-						return err
-					}
-				} else {
-					if err := txnHash2BlockNumIdx.AddKey(it.txnHash[:], blockNum); err != nil {
-						return err
-					}
-				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
-					log.Log(lvl, "[Snapshots Indexing] TransactionsIdx", "blockNum", blockNum,
-						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-				default:
-				}
-			}
-			return nil
-		}); err != nil {
-			errCh <- err
-			return
+		if i != expectedCount {
+			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, i))
+		}
+
+		if err := txnHashIdx.Build(); err != nil {
+			return fmt.Errorf("txnHashIdx: %w", err)
 		}
 		if err := txnHash2BlockNumIdx.Build(); err != nil {
-			errCh <- fmt.Errorf("txnHash2BlockNumIdx: %w", err)
-		} else {
-			errCh <- nil
+			return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
 		}
-	}()
 
-	wg.Wait()
-
-	for i := 0; i < cap(errCh); i++ {
-		err = <-errCh
-		if err != nil {
-			if errors.Is(err, recsplit.ErrCollision) {
-				log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				txnHashIdx.ResetNextSalt()
-				txnHash2BlockNumIdx.ResetNextSalt()
-				goto RETRY
-			}
-			return err
+		return nil
+	}); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			log.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+			txnHashIdx.ResetNextSalt()
+			txnHash2BlockNumIdx.ResetNextSalt()
+			goto RETRY
 		}
+		return err
 	}
 
 	return nil
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
+func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) error {
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 
+	hasher := crypto.NewKeccakState()
+	var h common.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		h := types.Header{}
-		if err := rlp.DecodeBytes(word[1:], &h); err != nil {
+		headerRlp := word[1:]
+		hasher.Reset()
+		hasher.Write(headerRlp)
+		hasher.Read(h[:])
+		if err := idx.AddKey(h[:], offset); err != nil {
 			return err
-		}
-		if err := idx.AddKey(h.Hash().Bytes(), offset); err != nil {
-			return err
-		}
-		//TODO: optimize by - types.RawRlpHash(word).Bytes()
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Log(lvl, "[Snapshots Indexing] HeadersIdx", "blockNum", h.Number.Uint64(),
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-		default:
 		}
 		return nil
 	}); err != nil {
@@ -1659,7 +1669,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, logEvery *time.Ticker, lvl log.Lvl) error {
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) error {
 	num := make([]byte, 8)
 
 	d, err := compress.NewDecompressor(segmentFilePath)
@@ -1672,17 +1682,6 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Log(lvl, "[Snapshots Indexing] BodyNumberIdx", "blockNum", firstBlockNumInSegment+i,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-		default:
 		}
 		return nil
 	}); err != nil {
@@ -1744,14 +1743,27 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	rs.LogLvl(log.LvlDebug)
 
 RETRY:
-	ch := forEachAsync(ctx, d)
-	for it := range ch {
-		if it.err != nil {
-			return it.err
+	if err := d.WithReadAhead(func() error {
+		g := d.MakeGetter()
+		var i, offset, nextPos uint64
+		word := make([]byte, 0, 4096)
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, i, offset, word); err != nil {
+				return err
+			}
+			i++
+			offset = nextPos
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
-		if err := walker(rs, it.i, it.offset, it.word); err != nil {
-			return err
-		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if err = rs.Build(); err != nil {
@@ -1762,7 +1774,6 @@ RETRY:
 		}
 		return err
 	}
-
 	return nil
 }
 
@@ -1881,7 +1892,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
-				if err := BodiesIdx(ctx, segFilePath, r.from, m.tmpDir, logEvery, m.lvl); err != nil {
+				if err := BodiesIdx(ctx, segFilePath, r.from, m.tmpDir, m.lvl); err != nil {
 					return fmt.Errorf("BodiesIdx: %w", err)
 				}
 			}
@@ -1893,7 +1904,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
-				if err := HeadersIdx(ctx, segFilePath, r.from, m.tmpDir, logEvery, m.lvl); err != nil {
+				if err := HeadersIdx(ctx, segFilePath, r.from, m.tmpDir, m.lvl); err != nil {
 					return fmt.Errorf("HeadersIdx: %w", err)
 				}
 			}
@@ -1905,7 +1916,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
-				if err := TransactionsIdx(ctx, m.chainID, r.from, r.to, snapshotDir, m.tmpDir, logEvery, m.lvl); err != nil {
+				if err := TransactionsIdx(ctx, m.chainID, r.from, r.to, snapshotDir, m.tmpDir, m.lvl); err != nil {
 					return fmt.Errorf("TransactionsIdx: %w", err)
 				}
 			}
@@ -2001,73 +2012,6 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
 	}
 	for _, f := range tmpFiles {
 		_ = os.Remove(f)
-	}
-	return nil
-}
-
-func RecompressSegments(ctx context.Context, snapshotDir *dir.Rw, tmpDir string) error {
-	allFiles, err := Segments(snapshotDir.Path)
-	if err != nil {
-		return err
-	}
-	for _, f := range allFiles {
-		outFile := snapshotDir.Path + ".tmp2"
-		if err := cpSegmentByWords(ctx, f.Path, outFile, tmpDir); err != nil {
-			return err
-		}
-		if err = os.Remove(f.Path); err != nil {
-			return err
-		}
-		if err = os.Rename(outFile, f.Path); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func cpSegmentByWords(ctx context.Context, srcF, dstF, tmpDir string) error {
-	logEvery := time.NewTicker(10 * time.Second)
-	defer logEvery.Stop()
-
-	workers := runtime.NumCPU() - 1
-	if workers < 1 {
-		workers = 1
-	}
-	buf := make([]byte, 4096)
-	d, err := compress.NewDecompressor(srcF)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	out, err := compress.NewCompressor(ctx, "", dstF, tmpDir, compress.MinPatternScore, workers, log.LvlDebug)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	i := 0
-	if err := d.WithReadAhead(func() error {
-		g := d.MakeGetter()
-		for g.HasNext() {
-			buf, _ = g.Next(buf[:0])
-			if err := out.AddWord(buf); err != nil {
-				return err
-			}
-
-			select {
-			default:
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-logEvery.C:
-				log.Info("[snapshots] Recompress", "file", srcF, "progress", fmt.Sprintf("%.2f%%", 100*float64(i)/float64(d.Count())))
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := out.Compress(); err != nil {
-		return err
 	}
 	return nil
 }

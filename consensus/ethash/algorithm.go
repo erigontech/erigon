@@ -343,7 +343,7 @@ func generateDataset(dest []uint32, epoch uint64, cache []uint32) {
 	datasetHdr.Cap = destHdr.Cap * 4
 
 	// Generate the dataset on many goroutines since it takes a while
-	threads := runtime.NumCPU()
+	threads := runtime.GOMAXPROCS(-1)
 	size := uint64(len(dataset))
 
 	var pend sync.WaitGroup

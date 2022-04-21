@@ -580,7 +580,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	snapshots := allSnapshots(chainConfig)
 	if snapshots != nil {
 		d := &dir.Rw{Path: snapshots.Dir()}
-		br = snapshotsync.NewBlockRetire(runtime.NumCPU(), tmpdir, snapshots, d, db, nil, nil)
+		workers := runtime.GOMAXPROCS(-1) - 1
+		if workers < 1 {
+			workers = 1
+		}
+		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, d, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
