@@ -1087,7 +1087,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), log.LvlInfo); err != nil {
+				workers := runtime.GOMAXPROCS(-1) - 1
+				if workers < 1 {
+					workers = 1
+				}
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
 				}
 			}
@@ -1212,11 +1216,12 @@ Loop:
 				break Loop
 			} else {
 				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
-				//result.writeBytesPerSec += (result.bytesWritten - prevStats.bytesWritten) / int64(interval.Seconds())
+				// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
 
 				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
 				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
 					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+					// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
 				)
 				prevBytesCompleted = reply.BytesCompleted
 			}

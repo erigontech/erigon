@@ -28,12 +28,14 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
+	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/log/v3"
@@ -58,6 +60,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func init() {
@@ -369,8 +372,8 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Does limit amount of parallel db reads (Default: number of CPU)",
-		Value: runtime.NumCPU(),
+		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
+		Value: runtime.GOMAXPROCS(-1),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -636,7 +639,7 @@ var (
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
-		Value: "4mb",
+		Value: "8mb",
 		Usage: "bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
@@ -1366,19 +1369,26 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			panic(err)
 		}
 
-		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir,
+		db := mdbx.NewMDBX(log.New()).
+			Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
+			Label(kv.DownloaderDB).
+			WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
+			SyncPeriod(15 * time.Second).
+			Path(filepath.Join(cfg.SnapshotDir.Path, "db")).
+			MustOpen()
+		var err error
+		cfg.Torrent, err = torrentcfg.New(cfg.SnapshotDir,
 			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
 			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
+			db,
 		)
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent = torrentCfg
-		cfg.TorrentDirCloser = dirCloser
 	}
 
 	nodeConfig.Http.Snapshot = cfg.Snapshot

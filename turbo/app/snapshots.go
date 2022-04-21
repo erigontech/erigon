@@ -49,15 +49,6 @@ var snapshotCommand = cli.Command{
 			}, debug.Flags...),
 		},
 		{
-			Name:   "recompress",
-			Action: doRecompressCommand,
-			Usage:  "Recompress existing .seg files to apply new compression rules",
-			Before: func(ctx *cli.Context) error { return debug.Setup(ctx) },
-			Flags: append([]cli.Flag{
-				utils.DataDirFlag,
-			}, debug.Flags...),
-		},
-		{
 			Name:   "index",
 			Action: doIndicesCommand,
 			Usage:  "Create all indices for snapshots",
@@ -140,7 +131,11 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
 		rwSnapshotDir := &dir.Rw{Path: snapshotDir}
 		defer rwSnapshotDir.Close()
-		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from); err != nil {
+		workers := runtime.GOMAXPROCS(-1) - 1
+		if workers < 1 {
+			workers = 1
+		}
+		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -197,7 +192,11 @@ func doCompress(cliCtx *cli.Context) error {
 	f := args[0]
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
-	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, runtime.NumCPU()-1, log.LvlInfo)
+	workers := runtime.GOMAXPROCS(-1) - 1
+	if workers < 1 {
+		workers = 1
+	}
+	c, err := compress.NewCompressor(ctx, "", f, tmpDir, compress.MinPatternScore, workers, log.LvlInfo)
 	if err != nil {
 		return err
 	}
@@ -253,7 +252,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
 	snapshots.Reopen()
 
-	br := snapshotsync.NewBlockRetire(runtime.NumCPU()-1, tmpDir, snapshots, rwSnapshotDir, chainDB, nil, nil)
+	workers := runtime.GOMAXPROCS(-1) - 1
+	if workers < 1 {
+		workers = 1
+	}
+	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, rwSnapshotDir, chainDB, nil, nil)
 
 	for i := from; i < to; i += every {
 		br.RetireBlocksInBackground(ctx, i, i+every, *chainID, log.LvlInfo)
@@ -289,21 +292,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func doRecompressCommand(cliCtx *cli.Context) error {
-	ctx, cancel := common.RootContext()
-	defer cancel()
-
-	datadir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
-	tmpDir := filepath.Join(datadir, etl.TmpDirName)
-	dir.MustExist(tmpDir)
-
-	if err := snapshotsync.RecompressSegments(ctx, snapshotDir, tmpDir); err != nil {
-		log.Error("Error", "err", err)
-	}
-	return nil
-}
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64, workers int) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
@@ -311,7 +300,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil
@@ -353,7 +342,7 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	dir.MustExist(snapshotDir)
 
 	log.Info("Last body number", "last", last)
-	workers := runtime.NumCPU() - 1
+	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
 		workers = 1
 	}

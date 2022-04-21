@@ -63,6 +63,10 @@ make erigon
 ./build/bin/erigon
 ```
 
+Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
+
+Use `--datadir` to choose where to store data.
+
 ### Optional stages
 
 There is an optional stage that can be enabled through flags:
@@ -169,25 +173,18 @@ This piece of info needs to be specified in the Consensus Layer as well in order
     
 ### Multiple Instances / One Machine
 
-Here's an example of running multiple instances of Erigon against different chains on the same machine:
-
-Against mainnet:
+Define 5 flags to avoid conflicts: `--datadir --port --http.port --torrent.port --private.api.addr`. Example of multiple chains on the same machine:
 
 ```
-./build/bin/erigon    --datadir "<your-mainnet-data-path>" --private.api.addr=localhost:9091 -port 30303 --chain mainnet
-./build/bin/rpcdaemon --datadir "<your-mainnet-data-path>" --private.api.addr=localhost:9091 --http.api=eth,debug,net,trace,web3,erigon --http.port 8546
+# mainnet
+./build/bin/erigon --datadir="<your_mainnet_data_path>" --chain=mainnet --port=30303 --http.port=8545 --torrent.port=42069 --private.api.addr=127.0.0.1:9090 --http --ws --http.api=eth,debug,net,trace,web3,erigon 
+
+
+# rinkeby
+./build/bin/erigon --datadir="<your_rinkeby_data_path>" --chain=rinkeby --port=30304 --http.port=8546 --torrent.port=42068 --private.api.addr=127.0.0.1:9091 --http --ws --http.api=eth,debug,net,trace,web3,erigon 
 ```
 
-As usual, use the same `datadir` and `private.api.addr` for both Erigon and RPC. Explicitly specify the chain and the other ports to make things clearer. Quote your path if it has spaces.
-
-Against rinkeby:
-
-```
-./build/bin/erigon    --datadir "<your-rinkeby-data-path>" --private.api.addr=localhost:9092 -port 30304 --chain rinkeby
-./build/bin/rpcdaemon --datadir "<your-rinkeby-data-path>" --private.api.addr=localhost:9092 --http.api=eth,debug,net,trace,web3,erigon --http.port 8547
-```
-
-Same command, but use different `datadir` and different ports throughout.
+Quote your path if it has spaces.
 
 ### Dev Chain
 <code> 🔬 Detailed explanation is [DEV_CHAIN](/DEV_CHAIN.md).</code>
@@ -244,24 +241,11 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-In Erigon RPC calls are extracted out of the main binary into a separate daemon. This daemon can use both local or
-remote DBs. That means, that this RPC daemon doesn't have to be running on the same machine as the main Erigon binary or
-it can run from a snapshot of a database for read-only calls.
+Most of Erigon's components can work inside Erigon and as independent process. 
 
-<code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code>
+To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
-#### **For local DB**
-
-This is only possible if RPC daemon runs on the same computer as Erigon. This mode uses shared memory access to the
-database of Erigon, which has better performance than accessing via TPC socket (see "For remote DB" section below).
-Provide both `--datadir` and `--private.api.addr` options:
-
-```sh
-make erigon
-./build/bin/erigon --private.api.addr=localhost:9090
-make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
-```
+Run RPCDaemon as separated process: this daemon can use local DB (with running Erigon or on snapshot of a database) or remote DB (run on another server). <code>🔬 See [RPC-Daemon docs](./cmd/rpcdaemon/README.md)</code> 
 
 #### **For remote DB**
 
@@ -275,7 +259,9 @@ make rpcdaemon
 ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
-**gRPC ports**: `9090` erigon, `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+#### **gRPC ports**
+
+`9090` erigon, `9091` sentry, `9092` consensus engine, `9093` torrent downloader, `9094` transactions pool
 
 Supported JSON-RPC calls ([eth](./cmd/rpcdaemon/commands/eth_api.go), [debug](./cmd/rpcdaemon/commands/debug_api.go)
 , [net](./cmd/rpcdaemon/commands/net_api.go), [web3](./cmd/rpcdaemon/commands/web3_api.go)):

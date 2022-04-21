@@ -1,8 +1,10 @@
-# Downloader
+# Downloader 
 
-Service to seed/download historical data (immutable .seg files)
+Service to seed/download historical data (snapshots, immutable .seg files) by Bittorrent protocol
 
 ## How to Start Erigon in snapshot sync mode
+
+As many other Erigon components (txpool, sentry, rpc daemon) it may be built-into Erigon or run as separated process. 
 
 ```shell
 # 1. Downloader by default run inside Erigon, by `--syncmode=snap` flag:
@@ -13,7 +15,7 @@ erigon --syncmode=snap --datadir=<your_datadir>
 # 2. It's possible to start Downloader as independent process, by `--syncmode=snap --downloader.api.addr=127.0.0.1:9093` flags:
 make erigon downloader 
 
-# Start downloader (can limit network usage by 512mb/sec: --download.rate=512mb --upload.rate=512mb)
+# Start downloader (can limit network usage by 512mb/sec: --torrent.download.rate=512mb --torrent.upload.rate=512mb)
 downloader --downloader.api.addr=127.0.0.1:9093 --torrent.port=42068 --datadir=<your_datadir>
 # --downloader.api.addr - is for internal communication with Erigon
 # --torrent.port=42068  - is for public BitTorrent protocol listen 
@@ -49,6 +51,9 @@ downloader torrent_hashes --rebuild --datadir=<your_datadir>
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 
 # Erigon is not required for snapshots seeding 
+
+# But Erigon can use snapshots only after indexing them (this step is not required for seeding)
+erigon snapshots index --datadir=<your_datadir> 
 ```
 
 ## Architecture
