@@ -51,7 +51,7 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	torrentConfig.TorrentPeersHighWater = maxPeers          // default: 500
 	torrentConfig.TorrentPeersLowWater = 5                  // default: 50
 	torrentConfig.HalfOpenConnsPerTorrent = 5               // default: 25
-	torrentConfig.TotalHalfOpenConns = 10                   // default: 100
+	torrentConfig.TotalHalfOpenConns = 100                  // default: 100
 
 	torrentConfig.ListenPort = port
 	torrentConfig.Seed = true
@@ -83,10 +83,9 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 
 	// debug
 	if lg.Debug == verbosity {
-		// torrentConfig.Debug = true
+		torrentConfig.Debug = true
 	}
-	torrentConfig.Debug = true
-	torrentConfig.Logger = lg.Default.FilterLevel(lg.Debug)
+	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
 	c, err := NewMdbxPieceCompletion(db)
