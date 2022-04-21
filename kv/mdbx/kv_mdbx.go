@@ -249,8 +249,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 
 	if opts.roTxsLimiter == nil {
-
-		opts.roTxsLimiter = make(chan struct{}, runtime.NumCPU())
+		opts.roTxsLimiter = make(chan struct{}, runtime.GOMAXPROCS(-1))
 	}
 	db := &MdbxKV{
 		opts:         opts,

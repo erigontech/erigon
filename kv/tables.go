@@ -205,9 +205,7 @@ const TrieOfStorage = "TrieStorage"
 
 const (
 	// DatabaseInfo is used to store information about data layout.
-	DatabaseInfo   = "DbInfo"
-	SnapshotInfo   = "SnapshotInfo"
-	BittorrentInfo = "BittorrentInfo"
+	DatabaseInfo = "DbInfo"
 
 	// Data item prefixes (use single byte to avoid mixing data types, avoid `i`, used for indexes).
 	HeaderNumber = "HeaderNumber" // header_hash -> num_u64
@@ -326,6 +324,10 @@ const (
 	BorReceipts = "BorReceipt"
 	BorTxLookup = "BlockBorTransactionLookup"
 	BorSeparate = "BorSeparate"
+
+	// Downloader
+	BittorrentCompletion = "BittorrentCompletion"
+	BittorrentInfo       = "BittorrentInfo"
 )
 
 // Keys
@@ -387,7 +389,6 @@ var ChaindataTables = []string{
 	Migrations,
 	LogTopicIndex,
 	LogAddressIndex,
-	SnapshotInfo,
 	CallTraceSet,
 	CallFromIndex,
 	CallToIndex,
@@ -401,7 +402,6 @@ var ChaindataTables = []string{
 	TrieOfStorage,
 	HashedAccounts,
 	HashedStorage,
-	BittorrentInfo,
 	HeaderCanonical,
 	Headers,
 	HeaderTD,
@@ -429,6 +429,10 @@ var TxPoolTables = []string{
 	PoolInfo,
 }
 var SentryTables = []string{}
+var DownloaderTables = []string{
+	BittorrentCompletion,
+	BittorrentInfo,
+}
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{
@@ -496,6 +500,7 @@ var ChaindataTablesCfg = TableCfg{
 
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
+var DownloaderTablesCfg = TableCfg{}
 
 func sortBuckets() {
 	sort.SliceStable(ChaindataTables, func(i, j int) bool {
@@ -541,4 +546,10 @@ func reinit() {
 		}
 	}
 
+	for _, name := range DownloaderTables {
+		_, ok := DownloaderTablesCfg[name]
+		if !ok {
+			DownloaderTablesCfg[name] = TableCfgItem{}
+		}
+	}
 }
