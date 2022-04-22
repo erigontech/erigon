@@ -1,4 +1,5 @@
-GOBIN = $(CURDIR)/build/bin
+GOBINREL = build/bin
+GOBIN = $(CURDIR)/$(GOBINREL)
 GOBUILD = env GO111MODULE=on go build -trimpath
 OS = $(shell uname -s)
 ARCH = $(shell uname -m)
@@ -10,24 +11,42 @@ ifeq ($(OS),Linux)
 PROTOC_OS = linux
 endif
 
+PROTOC_INCLUDE = build/include/google
+
+default: gen
 
 gen: grpc mocks
 
-grpc:
-	mkdir -p ./build/bin/
-	rm -f ./build/bin/protoc*
-	rm -rf ./build/include*
+$(GOBINREL):
+	mkdir -p "$(GOBIN)"
 
+$(GOBINREL)/protoc: | $(GOBINREL)
 	$(eval PROTOC_TMP := $(shell mktemp -d))
-	cd $(PROTOC_TMP); curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.20.1/protoc-3.20.1-$(PROTOC_OS)-$(ARCH).zip -o protoc.zip
-	cd $(PROTOC_TMP); unzip protoc.zip && mv bin/protoc "$(GOBIN)" && mv include "$(GOBIN)"/..
+	curl -sSL https://github.com/protocolbuffers/protobuf/releases/download/v3.20.1/protoc-3.20.1-$(PROTOC_OS)-$(ARCH).zip -o "$(PROTOC_TMP)/protoc.zip"
+	cd "$(PROTOC_TMP)" && unzip protoc.zip
+	cp "$(PROTOC_TMP)/bin/protoc" "$(GOBIN)"
+	mkdir -p "$(PROTOC_INCLUDE)"
+	cp -R "$(PROTOC_TMP)/include/google/" "$(PROTOC_INCLUDE)"
+	rm -rf "$(PROTOC_TMP)"
 
-	$(GOBUILD) -o "$(GOBIN)"/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go # generates proto messages
-	$(GOBUILD) -o "$(GOBIN)"/protoc-gen-go-grpc google.golang.org/grpc/cmd/protoc-gen-go-grpc # generates grpc services
+# 'protoc-gen-go' tool generates proto messages
+$(GOBINREL)/protoc-gen-go: | $(GOBINREL)
+	$(GOBUILD) -o "$(GOBIN)/protoc-gen-go" google.golang.org/protobuf/cmd/protoc-gen-go
 
-	PATH="$(GOBIN)":"$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces -I=build/include/google \
+# 'protoc-gen-go-grpc' tool generates grpc services
+$(GOBINREL)/protoc-gen-go-grpc: | $(GOBINREL)
+	$(GOBUILD) -o "$(GOBIN)/protoc-gen-go-grpc" google.golang.org/grpc/cmd/protoc-gen-go-grpc
+
+protoc-all: $(GOBINREL)/protoc $(PROTOC_INCLUDE) $(GOBINREL)/protoc-gen-go $(GOBINREL)/protoc-gen-go-grpc
+
+protoc-clean:
+	rm -f "$(GOBIN)/protoc"*
+	rm -rf "$(PROTOC_INCLUDE)"
+
+grpc: protoc-all
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		types/types.proto
-	PATH="$(GOBIN)":"$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=build/include/google \
+	PATH="$(GOBIN):$(PATH)" protoc --proto_path=interfaces --go_out=gointerfaces --go-grpc_out=gointerfaces -I=$(PROTOC_INCLUDE) \
 		--go_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		--go-grpc_opt=Mtypes/types.proto=github.com/ledgerwatch/erigon-lib/gointerfaces/types \
 		p2psentry/sentry.proto \
@@ -38,14 +57,22 @@ grpc:
 		testing/testing.proto \
 		txpool/txpool.proto txpool/mining.proto
 
+$(GOBINREL)/moq: | $(GOBINREL)
+	$(GOBUILD) -o "$(GOBIN)/moq" github.com/matryer/moq
 
-mocks:
-	$(GOBUILD) -o "$(GOBIN)"/moq	  github.com/matryer/moq
-	PATH="$(GOBIN)":"$(PATH)" go generate ./...
+mocks: $(GOBINREL)/moq
+	PATH="$(GOBIN):$(PATH)" go generate ./...
 
-lint:
-	@./build/bin/golangci-lint run --config ./.golangci.yml
+lint: $(GOBINREL)/golangci-lint
+	@"$(GOBIN)/golangci-lint" run --config ./.golangci.yml
 
-lintci-deps:
-	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.45.0
+# force re-make golangci-lint
+lintci-deps: lintci-deps-clean $(GOBINREL)/golangci-lint
+lintci-deps-clean: golangci-lint-clean
+
+# download and build golangci-lint (https://golangci-lint.run)
+$(GOBINREL)/golangci-lint: | $(GOBINREL)
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.45.0
+
+golangci-lint-clean:
+	rm -f "$(GOBIN)/golangci-lint"
