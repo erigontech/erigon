@@ -14,13 +14,8 @@ GO_MINOR_VERSION = $(shell $(GO) version | cut -c 16-17)
 BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
-GO_FLAGS += -tags $(BUILD_TAGS)
-GO_FLAGS += -trimpath
+GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
-
-ifeq ($(shell test $(GO_MINOR_VERSION) -ge 18; echo $$?), 0)
-	GO_FLAGS += -buildvcs=false
-endif
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
@@ -29,8 +24,8 @@ GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 default: all
 
 go-version:
-	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
-		echo "minimum required Golang version is 1.16"; \
+	@if [ $(GO_MINOR_VERSION) -lt 18 ]; then \
+		echo "minimum required Golang version is 1.18"; \
 		exit 1 ;\
 	fi
 
