@@ -4,10 +4,12 @@ on:
     branches:
       - main
       - stable
+      - alpha
   pull_request:
     branches:
       - main
       - stable
+      - alpha
 env:
   CGO_ENABLED: "1"
   CGO_CXXFLAGS: "-std=c++17"
