@@ -564,9 +564,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			return readNodeInfo()
 		},
 		PeerInfo: func(peerID [64]byte) interface{} {
-			if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-				return peerInfo.peer.Info()
-			}
+			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
 			return nil
 		},
 		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
@@ -869,6 +867,35 @@ func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sen
 		ss.statusData = statusData
 	}
 	return reply, nil
+}
+
+func (ss *SentryServerImpl) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.PeersReply, error) {
+	if ss.P2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+
+	peers := ss.P2pServer.PeersInfo()
+
+	var reply proto_sentry.PeersReply
+	reply.Peers = make([]*proto_types.PeerInfo, 0, len(peers))
+
+	for _, peer := range peers {
+		rpcPeer := proto_types.PeerInfo{
+			Id:             peer.ID,
+			Name:           peer.Name,
+			Enode:          peer.Enode,
+			Enr:            peer.ENR,
+			Caps:           peer.Caps,
+			ConnLocalAddr:  peer.Network.LocalAddress,
+			ConnRemoteAddr: peer.Network.RemoteAddress,
+			ConnIsInbound:  peer.Network.Inbound,
+			ConnIsTrusted:  peer.Network.Trusted,
+			ConnIsStatic:   peer.Network.Static,
+		}
+		reply.Peers = append(reply.Peers, &rpcPeer)
+	}
+
+	return &reply, nil
 }
 
 func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
