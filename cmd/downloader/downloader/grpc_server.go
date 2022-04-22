@@ -97,6 +97,8 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 			reply.BytesCompleted += uint64(t.BytesCompleted())
 			reply.BytesTotal += uint64(t.Info().TotalLength())
 			reply.Completed = reply.Completed && t.Complete.Bool()
+			reply.Connections += uint64(len(t.PeerConns()))
+
 			for _, peer := range t.PeerConns() {
 				peers[peer.PeerID] = struct{}{}
 			}
