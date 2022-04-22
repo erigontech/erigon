@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -257,6 +258,18 @@ func ReadCurrentBlock(db kv.Tx) *types.Block {
 		return nil
 	}
 	return ReadBlock(db, headHash, *headNumber)
+}
+
+func ReadLastBlockSynced(db kv.Tx) (*types.Block, error) {
+	headNumber, err := stages.GetStageProgress(db, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+	headHash, err := ReadCanonicalHash(db, headNumber)
+	if err != nil {
+		return nil, err
+	}
+	return ReadBlock(db, headHash, headNumber), nil
 }
 
 func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {

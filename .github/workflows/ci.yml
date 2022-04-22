@@ -3,10 +3,12 @@ on:
   push:
     branches:
       - devel
+      - alpha
       - stable
   pull_request:
     branches:
       - devel
+      - alpha
       - stable
 jobs:
   tests:
