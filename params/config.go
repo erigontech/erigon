@@ -65,7 +65,7 @@ var (
 	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
 )
 
-var l, _ = new(big.Int).SetString("47074600000000000000000", 10)
+var l, _ = new(big.Int).SetString("47101300000000000000000", 10)
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
