@@ -31,4 +31,7 @@ message StatsReply {
   int32 torrents = 4;
   uint64 bytesCompleted = 5;
   uint64 bytesTotal = 6;
+  uint64 bytesUploadPerSec = 7;
+  uint64 bytesDownloadPerSec = 8;
+  uint64 connections = 9;
 }
