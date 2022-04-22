@@ -224,6 +224,8 @@ type Config struct {
 
 	// No heimdall service
 	WithoutHeimdall bool
+	// Ethstats service
+	Ethstats string
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string) consensus.Engine {

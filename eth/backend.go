@@ -70,6 +70,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
@@ -486,10 +487,16 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.quitMining); err != nil {
 		return nil, err
 	}
+
+	var headCh chan *types.Block
+	if config.Ethstats != "" {
+		headCh = make(chan *types.Block, 1)
+	}
+
 	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
 		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
 		backend.sentryControlServer, tmpdir, backend.notifications,
-		backend.downloaderClient, allSnapshots, config.SnapshotDir)
+		backend.downloaderClient, allSnapshots, config.SnapshotDir, headCh)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +526,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-
+	if config.Ethstats != "" {
+		if err := ethstats.New(stack, backend.sentryServers, chainKv, backend.engine, config.Ethstats, backend.networkID, ctx.Done(), headCh); err != nil {
+			return nil, err
+		}
+	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	if httpRpcCfg.Enabled {
