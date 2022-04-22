@@ -1224,6 +1224,8 @@ Loop:
 				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
 				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
 					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+					"torrent_peers", reply.Peers,
+					"connections", reply.Connections,
 					// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
 				)
 				prevBytesCompleted = reply.BytesCompleted
