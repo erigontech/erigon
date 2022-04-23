@@ -159,7 +159,6 @@ func finishHandlingForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
-	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
 	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
 
@@ -167,9 +166,7 @@ func finishHandlingForkChoice(
 	if err != nil {
 		return err
 	}
-	if safeIsCanonical {
-		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-	} else {
+	if !safeIsCanonical {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -184,9 +181,7 @@ func finishHandlingForkChoice(
 	if err != nil {
 		return err
 	}
-	if finalizedIsCanonical {
-		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
-	} else {
+	if !finalizedIsCanonical {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
