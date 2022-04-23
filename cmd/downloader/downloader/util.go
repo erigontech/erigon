@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,7 +45,7 @@ func AllTorrentPaths(dir string) ([]string, error) {
 }
 
 func AllTorrentFiles(dir string) ([]string, error) {
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +54,11 @@ func AllTorrentFiles(dir string) ([]string, error) {
 		if !snapshotsync.IsCorrectFileName(f.Name()) {
 			continue
 		}
-		if f.Size() == 0 {
+		fileInfo, err := f.Info()
+		if err != nil {
+			return nil, err
+		}
+		if fileInfo.Size() == 0 {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".torrent" { // filter out only compressed files
@@ -66,7 +69,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 func allSegmentFiles(dir string) ([]string, error) {
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +78,11 @@ func allSegmentFiles(dir string) ([]string, error) {
 		if !snapshotsync.IsCorrectFileName(f.Name()) {
 			continue
 		}
-		if f.Size() == 0 {
+		fileInfo, err := f.Info()
+		if err != nil {
+			return nil, err
+		}
+		if fileInfo.Size() == 0 {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".seg" { // filter out only compressed files

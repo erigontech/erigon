@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"io/ioutil"
 	"reflect"
 	"testing"
 
@@ -770,7 +769,7 @@ func BenchmarkSeedHash(b *testing.B) {
 		}
 	}
 
-	_, err := io.Copy(ioutil.Discard, bytes.NewBuffer(res))
+	_, err := io.Copy(io.Discard, bytes.NewBuffer(res))
 	if err != nil {
 		b.Error(err)
 	}
@@ -785,7 +784,7 @@ func BenchmarkSeedHashOld(b *testing.B) {
 		}
 	}
 
-	_, err := io.Copy(ioutil.Discard, bytes.NewBuffer(res))
+	_, err := io.Copy(io.Discard, bytes.NewBuffer(res))
 	if err != nil {
 		b.Error(err)
 	}
