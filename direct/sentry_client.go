@@ -253,18 +253,18 @@ func (c *SentryMessagesStreamC) Context() context.Context { return c.ctx }
 // -- end Messages
 // -- start Peers
 
-func (c *SentryClientDirect) Peers(ctx context.Context, in *sentry.PeersRequest, opts ...grpc.CallOption) (sentry.Sentry_PeersClient, error) {
+func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentry.PeerEventsRequest, opts ...grpc.CallOption) (sentry.Sentry_PeerEventsClient, error) {
 	ch := make(chan *peersReply, 16384)
 	streamServer := &SentryPeersStreamS{ch: ch, ctx: ctx}
 	go func() {
 		defer close(ch)
-		streamServer.Err(c.server.Peers(in, streamServer))
+		streamServer.Err(c.server.PeerEvents(in, streamServer))
 	}()
 	return &SentryPeersStreamC{ch: ch, ctx: ctx}, nil
 }
 
 type peersReply struct {
-	r   *sentry.PeersReply
+	r   *sentry.PeerEvent
 	err error
 }
 
@@ -275,7 +275,7 @@ type SentryPeersStreamS struct {
 	grpc.ServerStream
 }
 
-func (s *SentryPeersStreamS) Send(m *sentry.PeersReply) error {
+func (s *SentryPeersStreamS) Send(m *sentry.PeerEvent) error {
 	s.ch <- &peersReply{r: m}
 	return nil
 }
@@ -293,7 +293,7 @@ type SentryPeersStreamC struct {
 	grpc.ClientStream
 }
 
-func (c *SentryPeersStreamC) Recv() (*sentry.PeersReply, error) {
+func (c *SentryPeersStreamC) Recv() (*sentry.PeerEvent, error) {
 	m, ok := <-c.ch
 	if !ok || m == nil {
 		return nil, io.EOF

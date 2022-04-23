@@ -40,8 +40,8 @@ type SentryClient interface {
 	// It is possible to subscribe to the same set if ids more than once.
 	Messages(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error)
 	PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error)
-	// Notifications about connected (after sub-protocol handshake) or lost peer
-	Peers(ctx context.Context, in *PeersRequest, opts ...grpc.CallOption) (Sentry_PeersClient, error)
+	// Subscribe to notifications about connected or lost peers.
+	PeerEvents(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (Sentry_PeerEventsClient, error)
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error)
 }
@@ -167,12 +167,12 @@ func (c *sentryClient) PeerCount(ctx context.Context, in *PeerCountRequest, opts
 	return out, nil
 }
 
-func (c *sentryClient) Peers(ctx context.Context, in *PeersRequest, opts ...grpc.CallOption) (Sentry_PeersClient, error) {
-	stream, err := c.cc.NewStream(ctx, &Sentry_ServiceDesc.Streams[1], "/sentry.Sentry/Peers", opts...)
+func (c *sentryClient) PeerEvents(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (Sentry_PeerEventsClient, error) {
+	stream, err := c.cc.NewStream(ctx, &Sentry_ServiceDesc.Streams[1], "/sentry.Sentry/PeerEvents", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &sentryPeersClient{stream}
+	x := &sentryPeerEventsClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -182,17 +182,17 @@ func (c *sentryClient) Peers(ctx context.Context, in *PeersRequest, opts ...grpc
 	return x, nil
 }
 
-type Sentry_PeersClient interface {
-	Recv() (*PeersReply, error)
+type Sentry_PeerEventsClient interface {
+	Recv() (*PeerEvent, error)
 	grpc.ClientStream
 }
 
-type sentryPeersClient struct {
+type sentryPeerEventsClient struct {
 	grpc.ClientStream
 }
 
-func (x *sentryPeersClient) Recv() (*PeersReply, error) {
-	m := new(PeersReply)
+func (x *sentryPeerEventsClient) Recv() (*PeerEvent, error) {
+	m := new(PeerEvent)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
@@ -228,8 +228,8 @@ type SentryServer interface {
 	// It is possible to subscribe to the same set if ids more than once.
 	Messages(*MessagesRequest, Sentry_MessagesServer) error
 	PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error)
-	// Notifications about connected (after sub-protocol handshake) or lost peer
-	Peers(*PeersRequest, Sentry_PeersServer) error
+	// Subscribe to notifications about connected or lost peers.
+	PeerEvents(*PeerEventsRequest, Sentry_PeerEventsServer) error
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(context.Context, *emptypb.Empty) (*types.NodeInfoReply, error)
 	mustEmbedUnimplementedSentryServer()
@@ -269,8 +269,8 @@ func (UnimplementedSentryServer) Messages(*MessagesRequest, Sentry_MessagesServe
 func (UnimplementedSentryServer) PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PeerCount not implemented")
 }
-func (UnimplementedSentryServer) Peers(*PeersRequest, Sentry_PeersServer) error {
-	return status.Errorf(codes.Unimplemented, "method Peers not implemented")
+func (UnimplementedSentryServer) PeerEvents(*PeerEventsRequest, Sentry_PeerEventsServer) error {
+	return status.Errorf(codes.Unimplemented, "method PeerEvents not implemented")
 }
 func (UnimplementedSentryServer) NodeInfo(context.Context, *emptypb.Empty) (*types.NodeInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeInfo not implemented")
@@ -471,24 +471,24 @@ func _Sentry_PeerCount_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Sentry_Peers_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(PeersRequest)
+func _Sentry_PeerEvents_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PeerEventsRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(SentryServer).Peers(m, &sentryPeersServer{stream})
+	return srv.(SentryServer).PeerEvents(m, &sentryPeerEventsServer{stream})
 }
 
-type Sentry_PeersServer interface {
-	Send(*PeersReply) error
+type Sentry_PeerEventsServer interface {
+	Send(*PeerEvent) error
 	grpc.ServerStream
 }
 
-type sentryPeersServer struct {
+type sentryPeerEventsServer struct {
 	grpc.ServerStream
 }
 
-func (x *sentryPeersServer) Send(m *PeersReply) error {
+func (x *sentryPeerEventsServer) Send(m *PeerEvent) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -565,8 +565,8 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "Peers",
-			Handler:       _Sentry_Peers_Handler,
+			StreamName:    "PeerEvents",
+			Handler:       _Sentry_PeerEvents_Handler,
 			ServerStreams: true,
 		},
 	},

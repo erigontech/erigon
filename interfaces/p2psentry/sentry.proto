@@ -127,14 +127,15 @@ message PeerCountRequest {}
 
 message PeerCountReply {uint64 count = 1;}
 
-message PeersRequest {}
-message PeersReply {
-  enum PeerEvent {
+message PeerEventsRequest {}
+message PeerEvent {
+  enum PeerEventId {
+    // Happens after after a successful sub-protocol handshake.
     Connect = 0;
     Disconnect = 1;
   }
   types.H512 peer_id = 1;
-  PeerEvent event = 2;
+  PeerEventId event_id = 2;
 }
 
 service Sentry {
@@ -153,15 +154,15 @@ service Sentry {
       returns (SentPeers);
   rpc SendMessageToAll(OutboundMessageData) returns (SentPeers);
 
-
   // Subscribe to receive messages.
   // Calling multiple times with a different set of ids starts separate streams.
   // It is possible to subscribe to the same set if ids more than once.
   rpc Messages(MessagesRequest) returns (stream InboundMessage);
-  rpc PeerCount(PeerCountRequest) returns (PeerCountReply);
 
-  // Notifications about connected (after sub-protocol handshake) or lost peer
-  rpc Peers(PeersRequest) returns (stream PeersReply);
+  rpc PeerCount(PeerCountRequest) returns (PeerCountReply);
+  // Subscribe to notifications about connected or lost peers.
+  rpc PeerEvents(PeerEventsRequest) returns (stream PeerEvent);
+
   // NodeInfo returns a collection of metadata known about the host.
   rpc NodeInfo(google.protobuf.Empty) returns(types.NodeInfoReply);
 }

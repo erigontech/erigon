@@ -31,7 +31,7 @@ import (
 type MockSentry struct {
 	*sentry.SentryServerMock
 	streams      map[sentry.MessageId][]sentry.Sentry_MessagesServer
-	peersStreams []sentry.Sentry_PeersServer
+	peersStreams []sentry.Sentry_PeerEventsServer
 	StreamWg     sync.WaitGroup
 	ctx          context.Context
 	lock         sync.RWMutex
@@ -78,7 +78,7 @@ func (ms *MockSentry) Messages(req *sentry.MessagesRequest, stream sentry.Sentry
 	}
 }
 
-func (ms *MockSentry) Peers(req *sentry.PeersRequest, stream sentry.Sentry_PeersServer) error {
+func (ms *MockSentry) PeerEvents(req *sentry.PeerEventsRequest, stream sentry.Sentry_PeerEventsServer) error {
 	ms.lock.Lock()
 	ms.peersStreams = append(ms.peersStreams, stream)
 	ms.lock.Unlock()

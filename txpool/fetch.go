@@ -383,7 +383,7 @@ func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
 	streamCtx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
 
-	stream, err := sentryClient.Peers(streamCtx, &sentry.PeersRequest{})
+	stream, err := sentryClient.PeerEvents(streamCtx, &sentry.PeerEventsRequest{})
 	if err != nil {
 		select {
 		case <-f.ctx.Done():
@@ -393,7 +393,7 @@ func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
 		return err
 	}
 
-	var req *sentry.PeersReply
+	var req *sentry.PeerEvent
 	for req, err = stream.Recv(); ; req, err = stream.Recv() {
 		if err != nil {
 			return err
@@ -410,12 +410,12 @@ func (f *Fetch) receivePeer(sentryClient sentry.SentryClient) error {
 	}
 }
 
-func (f *Fetch) handleNewPeer(req *sentry.PeersReply) error {
+func (f *Fetch) handleNewPeer(req *sentry.PeerEvent) error {
 	if req == nil {
 		return nil
 	}
-	switch req.Event {
-	case sentry.PeersReply_Connect:
+	switch req.EventId {
+	case sentry.PeerEvent_Connect:
 		f.pool.AddNewGoodPeer(req.PeerId)
 	}
 
