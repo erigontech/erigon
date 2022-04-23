@@ -988,18 +988,18 @@ func (ss *SentryServerImpl) Close() {
 }
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
-	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_Connect}); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "err", err)
 	}
 }
 
 func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H512) {
-	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_Disconnect}); err != nil {
 		log.Warn("Sending gone peer notice to core P2P failed", "err", err)
 	}
 }
 
-func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_sentry.Sentry_PeersServer) error {
+func (ss *SentryServerImpl) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
 	clean := ss.peersStreams.Add(server)
 	defer clean()
 	select {
@@ -1041,18 +1041,18 @@ func (ss *SentryServerImpl) NodeInfo(_ context.Context, _ *emptypb.Empty) (*prot
 type PeersStreams struct {
 	mu      sync.RWMutex
 	id      uint
-	streams map[uint]proto_sentry.Sentry_PeersServer
+	streams map[uint]proto_sentry.Sentry_PeerEventsServer
 }
 
 func NewPeersStreams() *PeersStreams {
 	return &PeersStreams{}
 }
 
-func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func()) {
+func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeerEventsServer) (remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.streams == nil {
-		s.streams = make(map[uint]proto_sentry.Sentry_PeersServer)
+		s.streams = make(map[uint]proto_sentry.Sentry_PeerEventsServer)
 	}
 	s.id++
 	id := s.id
@@ -1060,7 +1060,7 @@ func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func(
 	return func() { s.remove(id) }
 }
 
-func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeersReply) (ids []uint, errs []error) {
+func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeerEvent) (ids []uint, errs []error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for id, stream := range s.streams {
@@ -1077,7 +1077,7 @@ func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeersReply) (ids []uint, 
 	return
 }
 
-func (s *PeersStreams) Broadcast(reply *proto_sentry.PeersReply) (errs []error) {
+func (s *PeersStreams) Broadcast(reply *proto_sentry.PeerEvent) (errs []error) {
 	var ids []uint
 	ids, errs = s.doBroadcast(reply)
 	if len(ids) > 0 {
