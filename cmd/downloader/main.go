@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -238,7 +237,7 @@ var printTorrentHashes = &cobra.Command{
 			return nil
 		}
 
-		oldContent, err := ioutil.ReadFile(targetFile)
+		oldContent, err := os.ReadFile(targetFile)
 		if err != nil {
 			return err
 		}
@@ -250,7 +249,7 @@ var printTorrentHashes = &cobra.Command{
 			log.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 			return nil
 		}
-		if err := ioutil.WriteFile(targetFile, serialized, 0644); err != nil {
+		if err := os.WriteFile(targetFile, serialized, 0644); err != nil {
 			return err
 		}
 		return nil

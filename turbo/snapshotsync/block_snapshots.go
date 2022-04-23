@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -825,7 +824,7 @@ type FileInfo struct {
 func IdxFiles(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return filesWithExt(dir, ".seg") }
 func TmpFiles(dir string) (res []string, err error) {
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -858,12 +857,16 @@ func noGaps(in []FileInfo) (out []FileInfo, err error) {
 	return out, nil
 }
 func parseDir(dir string) (res []FileInfo, err error) {
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	for _, f := range files {
-		if f.IsDir() || f.Size() == 0 || len(f.Name()) < 3 {
+		fileInfo, err := f.Info()
+		if err != nil {
+			return nil, err
+		}
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue
 		}
 

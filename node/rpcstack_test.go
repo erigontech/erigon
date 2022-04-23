@@ -19,7 +19,7 @@ package node
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -299,7 +299,7 @@ func testCustomRequest(t *testing.T, srv *httpServer, method string) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	assert.NoError(t, err)
 
 	return !strings.Contains(string(respBody), "error")
