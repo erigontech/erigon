@@ -317,7 +317,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if cc.TerminalTotalDifficulty != nil {
 			hasEthApiEnabled := false
 			hasEngineApiEnabled := false
-			hasNetApiEnabled := false
 
 			for _, api := range cfg.API {
 				switch api {
@@ -325,9 +324,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					hasEthApiEnabled = true
 				case "engine":
 					hasEngineApiEnabled = true
-				case "net":
-					hasNetApiEnabled = true
-				}
 			}
 
 			if !hasEthApiEnabled {
@@ -337,11 +333,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if !hasEngineApiEnabled {
 				cfg.API = append(cfg.API, "engine")
 			}
-
-			if !hasNetApiEnabled {
-				cfg.API = append(cfg.API, "net")
-			}
-
 		}
 	}
 
