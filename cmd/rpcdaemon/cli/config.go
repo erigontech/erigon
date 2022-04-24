@@ -288,7 +288,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
-	
+
 	if db != nil {
 		var cc *params.ChainConfig
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
