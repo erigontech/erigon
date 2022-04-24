@@ -325,6 +325,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				case "engine":
 					hasEngineApiEnabled = true
 			}
+			}
 
 			if !hasEthApiEnabled {
 				cfg.API = append(cfg.API, "eth")
