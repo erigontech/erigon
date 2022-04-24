@@ -313,7 +313,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
 		}
 
-		// if chain config has terminal total difficulty then rpc has to have these API's to function
+		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
 		if cc.TerminalTotalDifficulty != nil {
 			hasEthApiEnabled := false
 			hasEngineApiEnabled := false
