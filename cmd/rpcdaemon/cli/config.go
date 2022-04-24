@@ -324,7 +324,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					hasEthApiEnabled = true
 				case "engine":
 					hasEngineApiEnabled = true
-			}
+				}
 			}
 
 			if !hasEthApiEnabled {
