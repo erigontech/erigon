@@ -1169,8 +1169,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
 	checkStatsEvery := time.NewTicker(5 * time.Second)
 	defer checkStatsEvery.Stop()
 
@@ -1202,7 +1200,10 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			continue
 		}
 
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
 		var prevBytesCompleted uint64
+
 		// Print download progress until all segments are available
 	Loop:
 		for {
