@@ -1205,8 +1205,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			case <-logEvery.C:
 				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 					log.Warn("Error while waiting for snapshots progress", "err", err)
-				} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
-					log.Warn("Downloader has not enough snapshots (yet)")
 				} else if reply.Completed {
 					break Loop
 				} else {
