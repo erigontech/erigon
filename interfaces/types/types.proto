@@ -89,3 +89,16 @@ message NodeInfoReply {
   string listenerAddr = 6;
   bytes protocols = 7;
 }
+
+message PeerInfo {
+  string id = 1;
+  string name = 2;
+  string enode = 3;
+  string enr = 4;
+  repeated string caps = 5;
+  string connLocalAddr = 6;
+  string connRemoteAddr = 7;
+  bool connIsInbound = 8;
+  bool connIsTrusted = 9;
+  bool connIsStatic = 10;
+}

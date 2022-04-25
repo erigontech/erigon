@@ -49,8 +49,10 @@ type ETHBACKENDClient interface {
 	// High-level method - can find block number by txn hash
 	// it doesn't provide consistency
 	TxnLookup(ctx context.Context, in *TxnLookupRequest, opts ...grpc.CallOption) (*TxnLookupReply, error)
-	// NodeInfo collects and returns NodeInfo from all running celery instances.
+	// NodeInfo collects and returns NodeInfo from all running sentry instances.
 	NodeInfo(ctx context.Context, in *NodesInfoRequest, opts ...grpc.CallOption) (*NodesInfoReply, error)
+	// Peers collects and returns peers information from all running sentry instances.
+	Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -232,6 +234,15 @@ func (c *eTHBACKENDClient) NodeInfo(ctx context.Context, in *NodesInfoRequest, o
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error) {
+	out := new(PeersReply)
+	err := c.cc.Invoke(ctx, "/remote.ETHBACKEND/Peers", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility
@@ -261,8 +272,10 @@ type ETHBACKENDServer interface {
 	// High-level method - can find block number by txn hash
 	// it doesn't provide consistency
 	TxnLookup(context.Context, *TxnLookupRequest) (*TxnLookupReply, error)
-	// NodeInfo collects and returns NodeInfo from all running celery instances.
+	// NodeInfo collects and returns NodeInfo from all running sentry instances.
 	NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error)
+	// Peers collects and returns peers information from all running sentry instances.
+	Peers(context.Context, *emptypb.Empty) (*PeersReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -311,6 +324,9 @@ func (UnimplementedETHBACKENDServer) TxnLookup(context.Context, *TxnLookupReques
 }
 func (UnimplementedETHBACKENDServer) NodeInfo(context.Context, *NodesInfoRequest) (*NodesInfoReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeInfo not implemented")
+}
+func (UnimplementedETHBACKENDServer) Peers(context.Context, *emptypb.Empty) (*PeersReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Peers not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 
@@ -588,6 +604,24 @@ func _ETHBACKEND_NodeInfo_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_Peers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).Peers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.ETHBACKEND/Peers",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).Peers(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -642,6 +676,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "NodeInfo",
 			Handler:    _ETHBACKEND_NodeInfo_Handler,
+		},
+		{
+			MethodName: "Peers",
+			Handler:    _ETHBACKEND_Peers_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

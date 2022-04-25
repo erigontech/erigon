@@ -39,6 +39,7 @@ type SentryClient interface {
 	// Calling multiple times with a different set of ids starts separate streams.
 	// It is possible to subscribe to the same set if ids more than once.
 	Messages(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error)
+	Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error)
 	PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error)
 	// Subscribe to notifications about connected or lost peers.
 	PeerEvents(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (Sentry_PeerEventsClient, error)
@@ -158,6 +159,15 @@ func (x *sentryMessagesClient) Recv() (*InboundMessage, error) {
 	return m, nil
 }
 
+func (c *sentryClient) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error) {
+	out := new(PeersReply)
+	err := c.cc.Invoke(ctx, "/sentry.Sentry/Peers", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sentryClient) PeerCount(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
 	out := new(PeerCountReply)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/PeerCount", in, out, opts...)
@@ -227,6 +237,7 @@ type SentryServer interface {
 	// Calling multiple times with a different set of ids starts separate streams.
 	// It is possible to subscribe to the same set if ids more than once.
 	Messages(*MessagesRequest, Sentry_MessagesServer) error
+	Peers(context.Context, *emptypb.Empty) (*PeersReply, error)
 	PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error)
 	// Subscribe to notifications about connected or lost peers.
 	PeerEvents(*PeerEventsRequest, Sentry_PeerEventsServer) error
@@ -265,6 +276,9 @@ func (UnimplementedSentryServer) SendMessageToAll(context.Context, *OutboundMess
 }
 func (UnimplementedSentryServer) Messages(*MessagesRequest, Sentry_MessagesServer) error {
 	return status.Errorf(codes.Unimplemented, "method Messages not implemented")
+}
+func (UnimplementedSentryServer) Peers(context.Context, *emptypb.Empty) (*PeersReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Peers not implemented")
 }
 func (UnimplementedSentryServer) PeerCount(context.Context, *PeerCountRequest) (*PeerCountReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PeerCount not implemented")
@@ -453,6 +467,24 @@ func (x *sentryMessagesServer) Send(m *InboundMessage) error {
 	return x.ServerStream.SendMsg(m)
 }
 
+func _Sentry_Peers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(emptypb.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentryServer).Peers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentry.Sentry/Peers",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentryServer).Peers(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Sentry_PeerCount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PeerCountRequest)
 	if err := dec(in); err != nil {
@@ -548,6 +580,10 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SendMessageToAll",
 			Handler:    _Sentry_SendMessageToAll_Handler,
+		},
+		{
+			MethodName: "Peers",
+			Handler:    _Sentry_Peers_Handler,
 		},
 		{
 			MethodName: "PeerCount",

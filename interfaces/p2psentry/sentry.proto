@@ -123,6 +123,10 @@ message MessagesRequest {
   repeated MessageId ids = 1;
 }
 
+message PeersReply {
+  repeated types.PeerInfo peers = 1;
+}
+
 message PeerCountRequest {}
 
 message PeerCountReply {uint64 count = 1;}
@@ -159,6 +163,7 @@ service Sentry {
   // It is possible to subscribe to the same set if ids more than once.
   rpc Messages(MessagesRequest) returns (stream InboundMessage);
 
+  rpc Peers(google.protobuf.Empty) returns (PeersReply);
   rpc PeerCount(PeerCountRequest) returns (PeerCountReply);
   // Subscribe to notifications about connected or lost peers.
   rpc PeerEvents(PeerEventsRequest) returns (stream PeerEvent);

@@ -47,11 +47,16 @@ service ETHBACKEND {
   // it doesn't provide consistency
   // Request fields are optional - it's ok to request block only by hash or only by number
   rpc Block(BlockRequest) returns (BlockReply);
+
   // High-level method - can find block number by txn hash
   // it doesn't provide consistency
   rpc TxnLookup(TxnLookupRequest) returns (TxnLookupReply);
-  // NodeInfo collects and returns NodeInfo from all running celery instances.
-  rpc NodeInfo(NodesInfoRequest) returns(NodesInfoReply);
+
+  // NodeInfo collects and returns NodeInfo from all running sentry instances.
+  rpc NodeInfo(NodesInfoRequest) returns (NodesInfoReply);
+
+  // Peers collects and returns peers information from all running sentry instances.
+  rpc Peers(google.protobuf.Empty) returns (PeersReply);
 }
 
 enum Event {
@@ -178,4 +183,8 @@ message NodesInfoRequest {
 
 message NodesInfoReply {
   repeated types.NodeInfoReply nodesInfo = 1;
+}
+
+message PeersReply {
+  repeated types.PeerInfo peers = 1;
 }

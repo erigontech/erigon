@@ -194,6 +194,10 @@ func (c *SentryClientDirect) SetStatus(ctx context.Context, in *sentry.StatusDat
 	return c.server.SetStatus(ctx, in)
 }
 
+func (c *SentryClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*sentry.PeersReply, error) {
+	return c.server.Peers(ctx, in)
+}
+
 func (c *SentryClientDirect) PeerCount(ctx context.Context, in *sentry.PeerCountRequest, opts ...grpc.CallOption) (*sentry.PeerCountReply, error) {
 	return c.server.PeerCount(ctx, in)
 }

@@ -198,3 +198,7 @@ func (s *EthBackendClientDirect) TxnLookup(ctx context.Context, in *remote.TxnLo
 func (s *EthBackendClientDirect) NodeInfo(ctx context.Context, in *remote.NodesInfoRequest, opts ...grpc.CallOption) (*remote.NodesInfoReply, error) {
 	return s.server.NodeInfo(ctx, in)
 }
+
+func (s *EthBackendClientDirect) Peers(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remote.PeersReply, error) {
+	return s.server.Peers(ctx, in)
+}
