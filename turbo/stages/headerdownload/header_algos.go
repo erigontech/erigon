@@ -817,7 +817,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			delete(hd.links, link.hash)
 		}
 		// Perform verification if needed
-		if hd.verifyQueue.Len() > 0 {
+		for hd.verifyQueue.Len() > 0 {
 			link := hd.verifyQueue[0]
 			select {
 			case <-logChannel:
@@ -854,11 +854,12 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			if skip {
 				hd.moveLinkToQueue(link, NoQueue)
 				delete(hd.links, link.hash)
-				continue
+			} else {
+				link.verified = true
+				hd.moveLinkToQueue(link, InsertQueueID)
+				checkInsert = true
+				break
 			}
-			link.verified = true
-			hd.moveLinkToQueue(link, InsertQueueID)
-			checkInsert = true
 		}
 	}
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
