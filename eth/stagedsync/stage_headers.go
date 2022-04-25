@@ -1224,8 +1224,8 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 					readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
 					// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
 
-					readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-					log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
+					//readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
+					log.Info("[Snapshots] download", "progress", //fmt.Sprintf("%.2f%%", readiness),
 						"download", libcommon.ByteCount(readBytesPerSec)+"/s",
 						"torrent_peers", reply.Peers,
 						"connections", reply.Connections,
