@@ -262,7 +262,6 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-		//t.DownloadAll()
 	}
 	if !silent {
 		ctxLocal, cancel := context.WithCancel(ctx)
@@ -275,6 +274,9 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.GotInfo():
+			if !t.Complete.Bool() {
+				t.DownloadAll()
+			}
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi); err != nil {
 				return err
