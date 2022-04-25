@@ -1226,6 +1226,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 					//readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
 					log.Info("[Snapshots] download", //"progress", fmt.Sprintf("%.2f%%", readiness),
+						"progress", libcommon.ByteCount(reply.BytesCompleted),
 						"download", libcommon.ByteCount(readBytesPerSec)+"/s",
 						"torrent_peers", reply.Peers,
 						"connections", reply.Connections,
