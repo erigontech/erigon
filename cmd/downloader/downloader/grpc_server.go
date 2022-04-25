@@ -97,8 +97,8 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			}
 		}
 		t.AllowDataUpload()
+		t.AllowDataDownload()
 		if !t.Complete.Bool() {
-			t.AllowDataDownload()
 			t.DownloadAll()
 		}
 	}
