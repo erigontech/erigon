@@ -1174,6 +1174,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
+	var prevBytesCompleted uint64
 	for _, p := range preverified {
 		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 1)}
 		req.Items[0] = &proto_downloader.DownloadItem{
@@ -1202,7 +1203,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
-		var prevBytesCompleted uint64
 
 		// Print download progress until all segments are available
 	Loop:
@@ -1226,7 +1226,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 					// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
 
 					readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-					log.Info("[Snapshots] download", "file", p.Name, "progress", fmt.Sprintf("%.2f%%", readiness),
+					log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
 						"download", libcommon.ByteCount(readBytesPerSec)+"/s",
 						"torrent_peers", reply.Peers,
 						"connections", reply.Connections,
