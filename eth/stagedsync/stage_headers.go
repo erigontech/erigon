@@ -1169,16 +1169,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
-	for filePath, infoHashStr := range preverified {
+	for _, p := range preverified {
 		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 1)}
 		req.Items[0] = &proto_downloader.DownloadItem{
-			TorrentHash: downloadergrpc.String2Proto(infoHashStr),
-			Path:        filePath,
+			TorrentHash: downloadergrpc.String2Proto(p.Hash),
+			Path:        p.Name,
 		}
-		log.Info("[Snapshots] Fetching torrent file metadata", "file", filePath)
+		log.Info("[Snapshots] Fetching torrent file metadata", "file", p.Name)
 		for {
 			select {
 			case <-ctx.Done():
@@ -1193,8 +1195,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			break
 		}
 		var prevBytesCompleted uint64
-		logEvery := time.NewTicker(logInterval)
-		defer logEvery.Stop()
 
 		// Print download progress until all segments are available
 	Loop:
@@ -1212,7 +1212,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 					// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
 
 					readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-					log.Info("[Snapshots] download", "file", filePath, "progress", fmt.Sprintf("%.2f%%", readiness),
+					log.Info("[Snapshots] download", "file", p.Name, "progress", fmt.Sprintf("%.2f%%", readiness),
 						"download", libcommon.ByteCount(readBytesPerSec)+"/s",
 						"torrent_peers", reply.Peers,
 						"connections", reply.Connections,
