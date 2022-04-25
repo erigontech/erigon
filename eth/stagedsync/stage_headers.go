@@ -1180,7 +1180,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			TorrentHash: downloadergrpc.String2Proto(p.Hash),
 			Path:        p.Name,
 		}
-		log.Info("[Snapshots] Fetching torrent file metadata", "file", p.Name)
 		for {
 			select {
 			case <-ctx.Done():
