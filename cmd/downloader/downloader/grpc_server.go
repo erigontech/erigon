@@ -41,9 +41,9 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir *dir.Rw, torrentC
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {
-		t.AllowDataDownload()
 		t.AllowDataUpload()
 		if !t.Complete.Bool() {
+			t.AllowDataDownload()
 			t.DownloadAll()
 		}
 	}
