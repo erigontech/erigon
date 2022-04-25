@@ -1218,6 +1218,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			}
 			break
 		}
+		log.Info("Requested download", "file", p.Name)
 
 		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 			log.Warn("Error while waiting for snapshots progress", "err", err)
@@ -1251,6 +1252,8 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 						"download", libcommon.ByteCount(readBytesPerSec)+"/s",
 						"torrent_peers", reply.Peers,
 						"connections", reply.Connections,
+						"bytes completed", reply.BytesCompleted,
+						"total bytes", reply.BytesTotal,
 						// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
 					)
 					prevBytesCompleted = reply.BytesCompleted
