@@ -163,19 +163,6 @@ type AggStats struct {
 	bytesWritten int64
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Client) (result AggStats) {
 	var aggBytesCompleted, aggLen int64
 	//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
