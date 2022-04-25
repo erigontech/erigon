@@ -60,6 +60,7 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
+	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	infoHashes := make([]metainfo.Hash, len(request.Items))
 	for i, it := range request.Items {
 		if it.TorrentHash == nil {
@@ -74,6 +75,12 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		} else {
 			infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 		}
+		if _, ok := s.t.TorrentClient.Torrent(infoHashes[i]); !ok {
+			magnet := mi.Magnet(&infoHashes[i], nil)
+			if _, err := s.t.TorrentClient.AddMagnet(magnet.String()); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if len(request.Items) == 1 {
 		t, ok := s.t.TorrentClient.Torrent(infoHashes[0])
@@ -84,11 +91,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-t.GotInfo():
-			if !t.Complete.Bool() {
-				t.DownloadAll()
-			}
-			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), &mi); err != nil {
+			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), mi); err != nil {
 				return nil, err
 			}
 		}
