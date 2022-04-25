@@ -305,7 +305,7 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-		t.DownloadAll()
+		//t.DownloadAll()
 	}
 	if !silent {
 		ctxLocal, cancel := context.WithCancel(ctx)
