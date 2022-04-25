@@ -43,7 +43,9 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir *dir.Rw, torrentC
 	for _, t := range torrentClient.Torrents() {
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-		t.DownloadAll()
+		if !t.Complete.Bool() {
+			t.DownloadAll()
+		}
 	}
 	return nil
 }
@@ -78,7 +80,9 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	for _, t := range s.t.TorrentClient.Torrents() {
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-		t.DownloadAll()
+		if !t.Complete.Bool() {
+			t.DownloadAll()
+		}
 	}
 	return &emptypb.Empty{}, nil
 }

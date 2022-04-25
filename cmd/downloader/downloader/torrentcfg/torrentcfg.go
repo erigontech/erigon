@@ -37,9 +37,9 @@ func Default() *torrent.ClientConfig {
 	//torrentConfig.DisableWebseeds = true
 
 	// Increase default timeouts, because we often run on commodity networks
-	torrentConfig.MinDialTimeout = 6 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
+	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
+	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
+	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
 
 	return torrentConfig
 }
@@ -49,9 +49,9 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
 	torrentConfig.TorrentPeersHighWater = maxPeers          // default: 500
-	torrentConfig.TorrentPeersLowWater = 5                  // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = 5               // default: 25
-	torrentConfig.TotalHalfOpenConns = 100                  // default: 100
+	torrentConfig.TorrentPeersLowWater = 50                 // default: 50
+	torrentConfig.HalfOpenConnsPerTorrent = 25              // default: 25
+	torrentConfig.TotalHalfOpenConns = 200                  // default: 100
 
 	torrentConfig.ListenPort = port
 	torrentConfig.Seed = true

@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"math"
 	"runtime"
 	"time"
 
@@ -118,10 +117,6 @@ func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
 					"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 					"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 					"unique_peers", stats.peersCount,
-					"min_peers", stats.minPeers,
-					"max_peers", stats.maxPeers,
-					"min_seeds", stats.minSeeds,
-					"max_seeds", stats.maxSeeds,
 					"files", stats.torrentsCount,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				continue
@@ -132,10 +127,6 @@ func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
 				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
 				"unique_peers", stats.peersCount,
-				"min_peers", stats.minPeers,
-				"max_peers", stats.maxPeers,
-				"min_seeds", stats.minSeeds,
-				"max_seeds", stats.maxSeeds,
 				"files", stats.torrentsCount,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			if stats.peersCount == 0 {
@@ -170,9 +161,6 @@ type AggStats struct {
 
 	bytesRead    int64
 	bytesWritten int64
-
-	minPeers, maxPeers int
-	minSeeds, maxSeeds int
 }
 
 func min(a, b int) int {
@@ -198,44 +186,13 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 	result.bytesRead += connStats.BytesReadUsefulIntendedData.Int64()
 	result.bytesWritten += connStats.BytesWrittenData.Int64()
 
-	result.minSeeds = math.MaxInt
-	result.minPeers = math.MaxInt
 	for _, t := range torrents {
-		stats := t.Stats()
-		if !t.Complete.Bool() {
-			result.minSeeds = min(result.minSeeds, stats.ConnectedSeeders)
-			result.maxSeeds = max(result.maxSeeds, stats.ConnectedSeeders)
-		}
-		result.minPeers = min(result.minPeers, stats.ActivePeers)
-		result.maxPeers = max(result.maxPeers, stats.ActivePeers)
-
-		/*
-			var completedPieces, partialPieces int
-			psrs := t.PieceStateRuns()
-			for _, r := range psrs {
-				if r.Complete {
-					completedPieces += r.Length
-				}
-				if r.Partial {
-					partialPieces += r.Length
-				}
-			}
-			aggCompletedPieces += completedPieces
-			aggPartialPieces += partialPieces
-			aggNumPieces = t.NumPieces()
-		*/
 		aggBytesCompleted += t.BytesCompleted()
 		aggLen += t.Length()
 
 		for _, peer := range t.PeerConns() {
 			peers[peer.PeerID] = peer
 		}
-	}
-	if result.minSeeds == math.MaxInt {
-		result.minSeeds = 0
-	}
-	if result.minPeers == math.MaxInt {
-		result.minPeers = 0
 	}
 
 	result.readBytesPerSec += (result.bytesRead - prevStats.bytesRead) / int64(interval.Seconds())
@@ -305,7 +262,6 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		}
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-		t.DownloadAll()
 	}
 	if !silent {
 		ctxLocal, cancel := context.WithCancel(ctx)
@@ -318,6 +274,9 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.GotInfo():
+			if !t.Complete.Bool() {
+				t.DownloadAll()
+			}
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi); err != nil {
 				return err
