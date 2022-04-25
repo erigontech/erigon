@@ -77,8 +77,18 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		}
 		if _, ok := s.t.TorrentClient.Torrent(infoHashes[i]); !ok {
 			magnet := mi.Magnet(&infoHashes[i], nil)
-			if _, err := s.t.TorrentClient.AddMagnet(magnet.String()); err != nil {
+			t, err := s.t.TorrentClient.AddMagnet(magnet.String())
+			if err != nil {
 				return nil, err
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-t.GotInfo():
+				metaInfo := t.Metainfo()
+				if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), &metaInfo); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -86,15 +96,6 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		t, ok := s.t.TorrentClient.Torrent(infoHashes[0])
 		if !ok {
 			return nil, fmt.Errorf("torrent not found: [%x]", infoHashes[0])
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-t.GotInfo():
-			metaInfo := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), &metaInfo); err != nil {
-				return nil, err
-			}
 		}
 		t.AllowDataUpload()
 		t.AllowDataDownload()
