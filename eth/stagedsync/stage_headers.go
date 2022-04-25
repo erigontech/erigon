@@ -1169,9 +1169,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	var prevBytesCompleted uint64
+	checkStatsEvery := time.NewTicker(5 * time.Second)
+	defer checkStatsEvery.Stop()
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
@@ -1195,12 +1196,25 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			break
 		}
 
+		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			log.Warn("Error while waiting for snapshots progress", "err", err)
+		} else if reply.Completed {
+			continue
+		}
+
+		var prevBytesCompleted uint64
 		// Print download progress until all segments are available
 	Loop:
 		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case <-checkStatsEvery.C:
+				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+					log.Warn("Error while waiting for snapshots progress", "err", err)
+				} else if reply.Completed {
+					break Loop
+				}
 			case <-logEvery.C:
 				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 					log.Warn("Error while waiting for snapshots progress", "err", err)
