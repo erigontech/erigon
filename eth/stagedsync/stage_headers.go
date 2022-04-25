@@ -1196,9 +1196,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			time.Sleep(10 * time.Second)
 			continue
 		}
-		if _, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-			log.Warn("Error while waiting for snapshots progress", "err", err)
-		}
 		break
 	}
 	// Now send all info hashes 1 by one
@@ -1222,6 +1219,12 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			break
 		}
 		log.Info("Requested download", "file", p.Name)
+
+		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			log.Warn("Error while waiting for snapshots progress", "err", err)
+		} else if reply.Completed {
+			continue
+		}
 
 		// Print download progress until all segments are available
 	Loop:
