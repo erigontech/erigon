@@ -1171,6 +1171,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	var prevBytesCompleted uint64
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
@@ -1193,7 +1194,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 			}
 			break
 		}
-		var prevBytesCompleted uint64
 
 		// Print download progress until all segments are available
 	Loop:
