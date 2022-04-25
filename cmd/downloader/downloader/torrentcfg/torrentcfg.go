@@ -3,6 +3,7 @@ package torrentcfg
 import (
 	"fmt"
 	"io"
+	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -36,9 +37,9 @@ func Default() *torrent.ClientConfig {
 	//torrentConfig.DisableWebseeds = true
 
 	// Increase default timeouts, because we often run on commodity networks
-	//torrentConfig.MinDialTimeout = 6 * time.Second      // default: 3sec
-	//torrentConfig.NominalDialTimeout = 20 * time.Second // default: 20sec
-	//torrentConfig.HandshakesTimeout = 8 * time.Second   // default: 4sec
+	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
+	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
+	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
 
 	return torrentConfig
 }
