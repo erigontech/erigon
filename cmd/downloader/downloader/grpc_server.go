@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 
 	"github.com/anacrolix/torrent"
@@ -75,26 +74,13 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 		}
 	}
-	if len(request.Items) == 1 {
-		t, ok := s.t.TorrentClient.Torrent(infoHashes[0])
-		if !ok {
-			return nil, fmt.Errorf("torrent not found: [%x]", infoHashes[0])
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-t.GotInfo():
-			if !t.Complete.Bool() {
-				t.DownloadAll()
-			}
-			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), &mi); err != nil {
-				return nil, err
-			}
-		}
+	if err := ResolveAbsentTorrents(ctx, s.t.TorrentClient, infoHashes, s.snapshotDir, s.silent); err != nil {
+		return nil, err
+	}
+	for _, t := range s.t.TorrentClient.Torrents() {
+		t.AllowDataDownload()
 		t.AllowDataUpload()
 		if !t.Complete.Bool() {
-			t.AllowDataDownload()
 			t.DownloadAll()
 		}
 	}
@@ -116,6 +102,7 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 			reply.BytesTotal += uint64(t.Info().TotalLength())
 			reply.Completed = reply.Completed && t.Complete.Bool()
 			reply.Connections += uint64(len(t.PeerConns()))
+
 			for _, peer := range t.PeerConns() {
 				peers[peer.PeerID] = struct{}{}
 			}
