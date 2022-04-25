@@ -1177,6 +1177,28 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	var prevBytesCompleted uint64
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	// Initially send all info hashes to calculate total size of all files, to calculate correct progress
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+	for i, p := range preverified {
+		req.Items[i] = &proto_downloader.DownloadItem{
+			TorrentHash: downloadergrpc.String2Proto(p.Hash),
+			Path:        p.Name,
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
+			log.Error("[Snapshots] Can't call downloader", "err", err)
+			time.Sleep(10 * time.Second)
+			continue
+		}
+		break
+	}
+	// Now send all info hashes 1 by one
 	for _, p := range preverified {
 		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 1)}
 		req.Items[0] = &proto_downloader.DownloadItem{
