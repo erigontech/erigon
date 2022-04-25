@@ -82,7 +82,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			}
 		}
 	}
-	if len(infoHashes) == 1 {
+	if len(request.Items) == 1 {
 		t, ok := s.t.TorrentClient.Torrent(infoHashes[0])
 		if !ok {
 			return nil, fmt.Errorf("torrent not found: [%x]", infoHashes[0])
@@ -91,8 +91,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-t.GotInfo():
-			metaInfo := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), &metaInfo); err != nil {
+			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), mi); err != nil {
 				return nil, err
 			}
 		}
