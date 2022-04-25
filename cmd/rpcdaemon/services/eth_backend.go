@@ -39,6 +39,7 @@ type ApiBackend interface {
 	EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)
 	EngineGetPayloadV1(ctx context.Context, payloadId uint64) (*types2.ExecutionPayload, error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
+	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 }
 
 type RemoteBackend struct {
@@ -244,4 +245,41 @@ func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.No
 	}
 
 	return ret, nil
+}
+
+func (back *RemoteBackend) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
+	rpcPeers, err := back.remoteEthBackend.Peers(ctx, &emptypb.Empty{})
+	if err != nil {
+		return nil, fmt.Errorf("ETHBACKENDClient.Peers() error: %w", err)
+	}
+
+	peers := make([]*p2p.PeerInfo, 0, len(rpcPeers.Peers))
+
+	for _, rpcPeer := range rpcPeers.Peers {
+		peer := p2p.PeerInfo{
+			ENR:   rpcPeer.Enr,
+			Enode: rpcPeer.Enode,
+			ID:    rpcPeer.Id,
+			Name:  rpcPeer.Name,
+			Caps:  rpcPeer.Caps,
+			Network: struct {
+				LocalAddress  string `json:"localAddress"`
+				RemoteAddress string `json:"remoteAddress"`
+				Inbound       bool   `json:"inbound"`
+				Trusted       bool   `json:"trusted"`
+				Static        bool   `json:"static"`
+			}{
+				LocalAddress:  rpcPeer.ConnLocalAddr,
+				RemoteAddress: rpcPeer.ConnRemoteAddr,
+				Inbound:       rpcPeer.ConnIsInbound,
+				Trusted:       rpcPeer.ConnIsTrusted,
+				Static:        rpcPeer.ConnIsStatic,
+			},
+			Protocols: nil,
+		}
+
+		peers = append(peers, &peer)
+	}
+
+	return peers, nil
 }

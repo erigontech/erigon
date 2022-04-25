@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -768,6 +769,18 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 	sort.Sort(nodesInfo)
 
 	return nodesInfo, nil
+}
+
+func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
+	var reply remote.PeersReply
+	for _, sentryClient := range s.sentries {
+		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, fmt.Errorf("Ethereum backend SentryClient.Peers error: %w", err)
+		}
+		reply.Peers = append(reply.Peers, peers.Peers...)
+	}
+	return &reply, nil
 }
 
 // Protocols returns all the currently configured
