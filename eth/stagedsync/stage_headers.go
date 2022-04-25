@@ -1169,61 +1169,70 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // for MVP we sync with Downloader only once, in future will send new snapshots also
 func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
+	checkStatsEvery := time.NewTicker(5 * time.Second)
+	defer checkStatsEvery.Stop()
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
-	i := 0
-	for filePath, infoHashStr := range preverified {
-		req.Items[i] = &proto_downloader.DownloadItem{
-			TorrentHash: downloadergrpc.String2Proto(infoHashStr),
-			Path:        filePath,
-		}
-		i++
-	}
-	log.Info("[Snapshots] Fetching torrent files metadata")
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
-			log.Error("[Snapshots] Can't call downloader", "err", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
-	}
 	var prevBytesCompleted uint64
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
+	for _, p := range preverified {
+		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 1)}
+		req.Items[0] = &proto_downloader.DownloadItem{
+			TorrentHash: downloadergrpc.String2Proto(p.Hash),
+			Path:        p.Name,
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
+				log.Error("[Snapshots] Can't call downloader", "err", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			break
+		}
 
-	// Print download progress until all segments are available
-Loop:
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
-				log.Warn("Downloader has not enough snapshots (yet)")
-			} else if reply.Completed {
-				break Loop
-			} else {
-				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
-				// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
+		if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			log.Warn("Error while waiting for snapshots progress", "err", err)
+		} else if reply.Completed {
+			continue
+		}
 
-				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
-					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
-					"torrent_peers", reply.Peers,
-					"connections", reply.Connections,
-					// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
-				)
-				prevBytesCompleted = reply.BytesCompleted
+		// Print download progress until all segments are available
+	Loop:
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-checkStatsEvery.C:
+				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+					log.Warn("Error while waiting for snapshots progress", "err", err)
+				} else if reply.Completed {
+					break Loop
+				}
+			case <-logEvery.C:
+				if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+					log.Warn("Error while waiting for snapshots progress", "err", err)
+				} else if reply.Completed {
+					break Loop
+				} else {
+					readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
+					// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
+
+					//readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
+					log.Info("[Snapshots] download", //"progress", fmt.Sprintf("%.2f%%", readiness),
+						"download", libcommon.ByteCount(readBytesPerSec)+"/s",
+						"torrent_peers", reply.Peers,
+						"connections", reply.Connections,
+						// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
+					)
+					prevBytesCompleted = reply.BytesCompleted
+				}
 			}
 		}
 	}
