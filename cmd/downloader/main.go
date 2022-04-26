@@ -164,9 +164,11 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
 	}
 
-	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
+	if err := protocols.Start(ctx, false); err != nil {
+		return err
+	}
 
-	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, true)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

@@ -23,12 +23,11 @@ var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir *dir.Rw, silent bool) (*GrpcServer, error) {
+func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir *dir.Rw) (*GrpcServer, error) {
 	sn := &GrpcServer{
 		db:          db,
 		t:           client,
 		snapshotDir: snapshotDir,
-		silent:      silent,
 	}
 	return sn, nil
 }
@@ -55,7 +54,6 @@ type GrpcServer struct {
 	t           *Protocols
 	db          kv.RwDB
 	snapshotDir *dir.Rw
-	silent      bool
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
@@ -74,7 +72,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 		}
 	}
-	if err := ResolveAbsentTorrents(ctx, s.t.TorrentClient, infoHashes, s.snapshotDir, s.silent); err != nil {
+	if err := ResolveAbsentTorrents(ctx, s.t, infoHashes, s.snapshotDir); err != nil {
 		return nil, err
 	}
 	for _, t := range s.t.TorrentClient.Torrents() {
