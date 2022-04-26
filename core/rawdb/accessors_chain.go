@@ -498,18 +498,6 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 
 // ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	k, _, err := c.Last()
-	if err != nil {
-		return err
-	}
-	if k != nil && binary.BigEndian.Uint64(k) >= newValue {
-		panic(fmt.Sprintf("must not happen. ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k)))
-	}
-
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, newValue)
 	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
@@ -1148,9 +1136,6 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if b == nil {
-			if firstNonGenesisInDB == n { // TODO: this is temporary hack for nodes which deleted too much bodies. See https://github.com/ledgerwatch/erigon/issues/3964
-				continue
-			}
 			return fmt.Errorf("DeleteAncientBlocks: block body not found for block %d", n)
 		}
 		txIDBytes := make([]byte, 8)

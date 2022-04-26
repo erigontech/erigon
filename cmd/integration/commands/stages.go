@@ -477,7 +477,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 				return err
 			}
 			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
-				log.Error("ReadHeadHeaderHash failed", "err", err)
+				return err
 			}
 			log.Info("Progress", "headers", progress)
 			return nil
