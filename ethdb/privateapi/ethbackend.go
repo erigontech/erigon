@@ -70,6 +70,7 @@ type EthBackend interface {
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
+	Peers(ctx context.Context) (*remote.PeersReply, error)
 }
 
 // This is the status of a newly execute block.
@@ -614,6 +615,10 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 		return nil, err
 	}
 	return nodesInfo, nil
+}
+
+func (s *EthBackendServer) Peers(ctx context.Context, _ *emptypb.Empty) (*remote.PeersReply, error) {
+	return s.eth.Peers(ctx)
 }
 
 func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {

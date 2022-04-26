@@ -37,7 +37,7 @@ import (
 )
 
 const (
-	logInterval    = 30 * time.Second
+	logInterval    = 20 * time.Second
 	lruDefaultSize = 1_000_000 // 56 MB
 )
 

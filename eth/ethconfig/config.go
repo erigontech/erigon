@@ -224,6 +224,8 @@ type Config struct {
 
 	// No heimdall service
 	WithoutHeimdall bool
+	// Ethstats service
+	Ethstats string
 }
 
 func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string) consensus.Engine {
@@ -299,8 +301,10 @@ func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
 		return SnapSync
 	}
 	switch chain {
-	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName:
+	case networkname.MainnetChainName, networkname.GoerliChainName:
 		return SnapSync
+	case networkname.BSCChainName:
+		return FastSync
 	default:
 		return FastSync
 	}

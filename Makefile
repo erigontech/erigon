@@ -1,6 +1,5 @@
 GO = go
 GOBIN = $(CURDIR)/build/bin
-GOTEST = GODEBUG=cgocheck=0 $(GO) test -tags nosqlite,noboltdb -trimpath ./... -p 2
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
@@ -11,17 +10,22 @@ CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'd
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-GOBUILD = $(CGO_CFLAGS) $(GO) build -tags nosqlite,noboltdb -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
-GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build -tags nosqlite,noboltdb -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
+GO_MINOR_VERSION = $(shell $(GO) version | cut -c 16-17)
+BUILD_TAGS = nosqlite,noboltdb
+PACKAGE = github.com/ledgerwatch/erigon
 
-GO_MAJOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
-GO_MINOR_VERSION = $(shell $(GO) version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
+GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+
+GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
 go-version:
-	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
-		echo "minimum required Golang version is 1.16"; \
+	@if [ $(GO_MINOR_VERSION) -lt 18 ]; then \
+		echo "minimum required Golang version is 1.18"; \
 		exit 1 ;\
 	fi
 
@@ -57,6 +61,7 @@ COMMANDS += downloader
 COMMANDS += evm
 COMMANDS += hack
 COMMANDS += integration
+COMMANDS += observer
 COMMANDS += pics
 COMMANDS += rpcdaemon
 COMMANDS += rpctest

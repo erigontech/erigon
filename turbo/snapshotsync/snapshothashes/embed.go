@@ -3,6 +3,7 @@ package snapshothashes
 import (
 	_ "embed"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -22,12 +23,26 @@ var Goerli = fromToml(goerli)
 var bsc []byte
 var Bsc = fromToml(bsc)
 
-type Preverified map[string]string
+type PreverifiedItem struct {
+	Name string
+	Hash string
+}
+type Preverified []PreverifiedItem
+type preverified map[string]string
 
 func fromToml(in []byte) (out Preverified) {
-	if err := toml.Unmarshal(in, &out); err != nil {
+	var outMap preverified
+	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
+	return doSort(outMap)
+}
+func doSort(in preverified) Preverified {
+	out := make(Preverified, 0, len(in))
+	for k, v := range in {
+		out = append(out, PreverifiedItem{k, v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -43,8 +58,8 @@ func newConfig(preverified Preverified) *Config {
 
 func maxBlockNum(preverified Preverified) uint64 {
 	max := uint64(0)
-	for name := range preverified {
-		_, fileName := filepath.Split(name)
+	for _, p := range preverified {
+		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
 		if ext != ".seg" {
 			continue

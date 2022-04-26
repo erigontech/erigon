@@ -122,4 +122,5 @@ var DefaultFlags = []cli.Flag{
 	HealthCheckFlag,
 	utils.HeimdallURLFlag,
 	utils.WithoutHeimdallFlag,
+	utils.EthStatsURLFlag,
 }

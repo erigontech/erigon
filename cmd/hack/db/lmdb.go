@@ -5,10 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+
 	// "errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
@@ -773,7 +773,7 @@ func checkReader(tx kv.Tx, errorCh chan error) (bool, error) {
 }
 
 func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.RwDB, kv.RwTx) (bool, error)) error {
-	dir, err := ioutil.TempDir(".", "db-vis")
+	dir, err := os.MkdirTemp(".", "db-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}

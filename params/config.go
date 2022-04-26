@@ -448,12 +448,16 @@ var (
 		Bor: &BorConfig{
 			JaipurBlock: 22770000,
 			Period: map[string]uint64{
-				"0": 2,
-			}, ProducerDelay: 6,
-			Sprint: 64,
+				"0":        2,
+				"25275000": 5,
+			},
+			ProducerDelay: 6,
+			Sprint:        64,
 			BackupMultiplier: map[string]uint64{
-				"0": 2,
-			}, ValidatorContract: "0x0000000000000000000000000000000000001000",
+				"0":        2,
+				"25275000": 5,
+			},
+			ValidatorContract:     "0x0000000000000000000000000000000000001000",
 			StateReceiverContract: "0x0000000000000000000000000000000000001001",
 			BurntContract: map[string]string{
 				"22640000": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",

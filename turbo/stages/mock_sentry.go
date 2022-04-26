@@ -117,7 +117,7 @@ func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.S
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
 }
-func (ms *MockSentry) Peers(req *proto_sentry.PeersRequest, server proto_sentry.Sentry_PeersServer) error {
+func (ms *MockSentry) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
 	return nil
 }
 func (ms *MockSentry) SendMessageById(_ context.Context, r *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
@@ -337,7 +337,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			stagedsync.StageLogIndexCfg(mock.DB, prune, mock.tmpdir),
 			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, mock.tmpdir),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, mock.tmpdir, allSnapshots, isBor),
-			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log), true),
+			stagedsync.StageFinishCfg(mock.DB, mock.tmpdir, mock.Log, nil), true),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)

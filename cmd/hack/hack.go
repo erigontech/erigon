@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
@@ -221,7 +220,7 @@ func mychart() {
 	buffer := bytes.NewBuffer([]byte{})
 	err := graph1.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart1.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart1.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 
 	heapSeries := &chart.ContinuousSeries{
@@ -302,7 +301,7 @@ func mychart() {
 	buffer.Reset()
 	err = graph2.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart2.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart2.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 }
 
@@ -350,7 +349,7 @@ func bucketStats(chaindata string) error {
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
-	data, err := ioutil.ReadFile("dust/hack.log")
+	data, err := os.ReadFile("dust/hack.log")
 	tool.Check(err)
 	thresholds := []float64{}
 	counts := map[int][]float64{}
@@ -468,7 +467,7 @@ func trieChart() {
 	buffer := bytes.NewBuffer([]byte{})
 	err := graph3.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart3.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart3.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 	graph4 := chart.Chart{
 		Width:  1280,
@@ -504,7 +503,7 @@ func trieChart() {
 	buffer = bytes.NewBuffer([]byte{})
 	err = graph4.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart4.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart4.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 	graph5 := chart.Chart{
 		Width:  1280,
@@ -551,7 +550,7 @@ func trieChart() {
 	buffer = bytes.NewBuffer([]byte{})
 	err = graph5.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart5.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart5.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 }
 
@@ -2372,7 +2371,7 @@ func mainnetGenesis() error {
 }
 
 func junkdb() error {
-	dir, err := ioutil.TempDir(".", "junk")
+	dir, err := os.MkdirTemp(".", "junk")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db size test: %w", err)
 	}
