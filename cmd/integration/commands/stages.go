@@ -452,6 +452,10 @@ func max(a, b uint64) uint64 { //nolint:unparam
 
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		if !(unwind > 0 || reset) {
+			log.Info("This command only works with --unwind or --reset options")
+		}
+
 		if reset {
 			progress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
@@ -459,62 +463,59 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}
 			unwind = progress
 		}
-		if unwind > 0 || reset {
-			progress, err := stages.GetStageProgress(tx, stages.Headers)
+
+		progress, err := stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return fmt.Errorf("read Bodies progress: %w", err)
+		}
+		var unwindTo uint64
+		if unwind > progress {
+			unwindTo = 1 // keep genesis
+		} else {
+			unwindTo = max(1, progress-unwind)
+		}
+
+		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
+			return fmt.Errorf("saving Bodies progress failed: %w", err)
+		}
+		progress, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return fmt.Errorf("re-read Bodies progress: %w", err)
+		}
+		{ // hard-unwind stage_body also
+			if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
+				return err
+			}
+			progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
 			if err != nil {
 				return fmt.Errorf("read Bodies progress: %w", err)
 			}
-			var unwindTo uint64
-			if unwind > progress {
-				unwindTo = 1 // keep genesis
-			} else {
-				unwindTo = max(1, progress-unwind)
-			}
-
-			if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
-				return fmt.Errorf("saving Bodies progress failed: %w", err)
-			}
-			progress, err = stages.GetStageProgress(tx, stages.Headers)
-			if err != nil {
-				return fmt.Errorf("re-read Bodies progress: %w", err)
-			}
-			{ // hard-unwind stage_body also
-				if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
-					return err
-				}
-				progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
-				if err != nil {
-					return fmt.Errorf("read Bodies progress: %w", err)
-				}
-				if progress < progressBodies {
-					if err = stages.SaveStageProgress(tx, stages.Bodies, progress); err != nil {
-						return fmt.Errorf("saving Bodies progress failed: %w", err)
-					}
+			if progress < progressBodies {
+				if err = stages.SaveStageProgress(tx, stages.Bodies, progress); err != nil {
+					return fmt.Errorf("saving Bodies progress failed: %w", err)
 				}
 			}
-			// remove all canonical markers from this point
-			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-				return tx.Delete(kv.HeaderCanonical, k, nil)
-			}); err != nil {
-				return err
-			}
-			if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-				return tx.Delete(kv.HeaderTD, k, nil)
-			}); err != nil {
-				return err
-			}
-			hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
-			if err != nil {
-				return err
-			}
-			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
-				return err
-			}
-
-			log.Info("Progress", "headers", progress)
-			return nil
 		}
-		log.Info("This command only works with --unwind option")
+		// remove all canonical markers from this point
+		if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+			return tx.Delete(kv.HeaderCanonical, k, nil)
+		}); err != nil {
+			return err
+		}
+		if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
+			return tx.Delete(kv.HeaderTD, k, nil)
+		}); err != nil {
+			return err
+		}
+		hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
+		if err != nil {
+			return err
+		}
+		if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
+			return err
+		}
+
+		log.Info("Progress", "headers", progress)
 		return nil
 	})
 }
