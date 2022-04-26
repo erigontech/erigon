@@ -322,6 +322,7 @@ func init() {
 
 	withDataDir(cmdStageHeaders)
 	withUnwind(cmdStageHeaders)
+	withReset(cmdStageHeaders)
 	withChain(cmdStageHeaders)
 	withHeimdall(cmdStageHeaders)
 
@@ -443,6 +444,13 @@ func init() {
 
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
+		if reset {
+			progress, err := stages.GetStageProgress(tx, stages.Headers)
+			if err != nil {
+				return fmt.Errorf("read Bodies progress: %w", err)
+			}
+			unwind = progress
+		}
 		if unwind > 0 {
 			progress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
@@ -458,8 +466,19 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("re-read Bodies progress: %w", err)
 			}
-			if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
-				return err
+			{ // hard-unwind stage_body also
+				if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
+					return err
+				}
+				progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
+				if err != nil {
+					return fmt.Errorf("read Bodies progress: %w", err)
+				}
+				if progress < progressBodies {
+					if err = stages.SaveStageProgress(tx, stages.Bodies, progress); err != nil {
+						return fmt.Errorf("saving Bodies progress failed: %w", err)
+					}
+				}
 			}
 			// remove all canonical markers from this point
 			if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
@@ -479,6 +498,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
 				return err
 			}
+
 			log.Info("Progress", "headers", progress)
 			return nil
 		}
