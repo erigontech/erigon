@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strings"
 
@@ -68,7 +67,7 @@ func ProcessHealthcheckIfNeeded(
 func parseHealthCheckBody(reader io.Reader) (requestBody, error) {
 	var body requestBody
 
-	bodyBytes, err := ioutil.ReadAll(reader)
+	bodyBytes, err := io.ReadAll(reader)
 	if err != nil {
 		return body, err
 	}

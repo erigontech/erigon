@@ -288,6 +288,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
+
 	if db != nil {
 		var cc *params.ChainConfig
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -313,11 +314,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
 		}
 
-		// if chain config has terminal total difficulty then rpc has to have these API's to function
+		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
 		if cc.TerminalTotalDifficulty != nil {
 			hasEthApiEnabled := false
 			hasEngineApiEnabled := false
-			hasNetApiEnabled := false
 
 			for _, api := range cfg.API {
 				switch api {
@@ -325,8 +325,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					hasEthApiEnabled = true
 				case "engine":
 					hasEngineApiEnabled = true
-				case "net":
-					hasNetApiEnabled = true
 				}
 			}
 
@@ -337,11 +335,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if !hasEngineApiEnabled {
 				cfg.API = append(cfg.API, "engine")
 			}
-
-			if !hasNetApiEnabled {
-				cfg.API = append(cfg.API, "net")
-			}
-
 		}
 	}
 

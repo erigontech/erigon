@@ -805,7 +805,19 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 
 // NewP2PConfig
 //  - doesn't setup bootnodes - they will set when genesisHash will know
-func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, trustedPeers []string, port, protocol uint) (*p2p.Config, error) {
+func NewP2PConfig(
+	nodiscover bool,
+	datadir string,
+	netRestrict string,
+	natSetting string,
+	maxPeers int,
+	maxPendPeers int,
+	nodeName string,
+	staticPeers []string,
+	trustedPeers []string,
+	port,
+	protocol uint,
+) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
@@ -820,14 +832,15 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:   fmt.Sprintf(":%d", port),
-		MaxPeers:     100,
-		NAT:          nat.Any(),
-		NoDiscovery:  nodiscover,
-		PrivateKey:   serverKey,
-		Name:         nodeName,
-		Log:          log.New(),
-		NodeDatabase: enodeDBPath,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		Log:             log.New(),
+		NodeDatabase:    enodeDBPath,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)

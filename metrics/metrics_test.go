@@ -2,14 +2,14 @@ package metrics
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"time"
 )
 
 // Stop the compiler from complaining during debugging.
 var (
-	_ = ioutil.Discard
+	_ = io.Discard
 	_ = log.LstdFlags
 )
 

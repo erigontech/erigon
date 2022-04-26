@@ -41,9 +41,11 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir *dir.Rw, torrentC
 		return err
 	}
 	for _, t := range torrentClient.Torrents() {
-		t.AllowDataDownload()
 		t.AllowDataUpload()
-		t.DownloadAll()
+		if !t.Complete.Bool() {
+			t.AllowDataDownload()
+			t.DownloadAll()
+		}
 	}
 	return nil
 }
@@ -78,7 +80,9 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	for _, t := range s.t.TorrentClient.Torrents() {
 		t.AllowDataDownload()
 		t.AllowDataUpload()
-		t.DownloadAll()
+		if !t.Complete.Bool() {
+			t.DownloadAll()
+		}
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -97,6 +101,8 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 			reply.BytesCompleted += uint64(t.BytesCompleted())
 			reply.BytesTotal += uint64(t.Info().TotalLength())
 			reply.Completed = reply.Completed && t.Complete.Bool()
+			reply.Connections += uint64(len(t.PeerConns()))
+
 			for _, peer := range t.PeerConns() {
 				peers[peer.PeerID] = struct{}{}
 			}

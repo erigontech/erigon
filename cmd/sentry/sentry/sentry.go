@@ -564,9 +564,7 @@ func NewSentryServer(ctx context.Context, dialCandidates enode.Iterator, readNod
 			return readNodeInfo()
 		},
 		PeerInfo: func(peerID [64]byte) interface{} {
-			if peerInfo := ss.getPeer(peerID); peerInfo != nil {
-				return peerInfo.peer.Info()
-			}
+			// TODO: remember handshake reply per peer ID and return eth-related Status info (see ethPeerInfo in geth)
 			return nil
 		},
 		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
@@ -871,6 +869,35 @@ func (ss *SentryServerImpl) SetStatus(ctx context.Context, statusData *proto_sen
 	return reply, nil
 }
 
+func (ss *SentryServerImpl) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.PeersReply, error) {
+	if ss.P2pServer == nil {
+		return nil, errors.New("p2p server was not started")
+	}
+
+	peers := ss.P2pServer.PeersInfo()
+
+	var reply proto_sentry.PeersReply
+	reply.Peers = make([]*proto_types.PeerInfo, 0, len(peers))
+
+	for _, peer := range peers {
+		rpcPeer := proto_types.PeerInfo{
+			Id:             peer.ID,
+			Name:           peer.Name,
+			Enode:          peer.Enode,
+			Enr:            peer.ENR,
+			Caps:           peer.Caps,
+			ConnLocalAddr:  peer.Network.LocalAddress,
+			ConnRemoteAddr: peer.Network.RemoteAddress,
+			ConnIsInbound:  peer.Network.Inbound,
+			ConnIsTrusted:  peer.Network.Trusted,
+			ConnIsStatic:   peer.Network.Static,
+		}
+		reply.Peers = append(reply.Peers, &rpcPeer)
+	}
+
+	return &reply, nil
+}
+
 func (ss *SentryServerImpl) SimplePeerCount() (pc int) {
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		pc++
@@ -988,18 +1015,18 @@ func (ss *SentryServerImpl) Close() {
 }
 
 func (ss *SentryServerImpl) sendNewPeerToClients(peerID *proto_types.H512) {
-	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Connect}); err != nil {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_Connect}); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "err", err)
 	}
 }
 
 func (ss *SentryServerImpl) sendGonePeerToClients(peerID *proto_types.H512) {
-	if err := ss.peersStreams.Broadcast(&proto_sentry.PeersReply{PeerId: peerID, Event: proto_sentry.PeersReply_Disconnect}); err != nil {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_Disconnect}); err != nil {
 		log.Warn("Sending gone peer notice to core P2P failed", "err", err)
 	}
 }
 
-func (ss *SentryServerImpl) Peers(req *proto_sentry.PeersRequest, server proto_sentry.Sentry_PeersServer) error {
+func (ss *SentryServerImpl) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
 	clean := ss.peersStreams.Add(server)
 	defer clean()
 	select {
@@ -1041,18 +1068,18 @@ func (ss *SentryServerImpl) NodeInfo(_ context.Context, _ *emptypb.Empty) (*prot
 type PeersStreams struct {
 	mu      sync.RWMutex
 	id      uint
-	streams map[uint]proto_sentry.Sentry_PeersServer
+	streams map[uint]proto_sentry.Sentry_PeerEventsServer
 }
 
 func NewPeersStreams() *PeersStreams {
 	return &PeersStreams{}
 }
 
-func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func()) {
+func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeerEventsServer) (remove func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.streams == nil {
-		s.streams = make(map[uint]proto_sentry.Sentry_PeersServer)
+		s.streams = make(map[uint]proto_sentry.Sentry_PeerEventsServer)
 	}
 	s.id++
 	id := s.id
@@ -1060,7 +1087,7 @@ func (s *PeersStreams) Add(stream proto_sentry.Sentry_PeersServer) (remove func(
 	return func() { s.remove(id) }
 }
 
-func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeersReply) (ids []uint, errs []error) {
+func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeerEvent) (ids []uint, errs []error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for id, stream := range s.streams {
@@ -1077,7 +1104,7 @@ func (s *PeersStreams) doBroadcast(reply *proto_sentry.PeersReply) (ids []uint, 
 	return
 }
 
-func (s *PeersStreams) Broadcast(reply *proto_sentry.PeersReply) (errs []error) {
+func (s *PeersStreams) Broadcast(reply *proto_sentry.PeerEvent) (errs []error) {
 	var ids []uint
 	ids, errs = s.doBroadcast(reply)
 	if len(ids) > 0 {

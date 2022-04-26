@@ -102,8 +102,6 @@ func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
 				case <-t.GotInfo(): // all good
 					gotInfo++
 				default:
-					t.AllowDataUpload()
-					t.AllowDataDownload()
 				}
 				allComplete = allComplete && t.Complete.Bool()
 			}
@@ -118,8 +116,8 @@ func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
 				log.Info("[torrent] Seeding",
 					"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 					"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
-					"peers", stats.peersCount,
-					"torrents", stats.torrentsCount,
+					"unique_peers", stats.peersCount,
+					"files", stats.torrentsCount,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				continue
 			}
@@ -128,8 +126,8 @@ func LoggingLoop(ctx context.Context, torrentClient *torrent.Client) {
 				"Progress", fmt.Sprintf("%.2f%%", stats.Progress),
 				"download", common2.ByteCount(uint64(stats.readBytesPerSec))+"/s",
 				"upload", common2.ByteCount(uint64(stats.writeBytesPerSec))+"/s",
-				"peers", stats.peersCount,
-				"torrents", stats.torrentsCount,
+				"unique_peers", stats.peersCount,
+				"files", stats.torrentsCount,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			if stats.peersCount == 0 {
 				ips := torrentClient.BadPeerIPs()
@@ -170,27 +168,15 @@ func CalcStats(prevStats AggStats, interval time.Duration, client *torrent.Clien
 	//var aggCompletedPieces, aggNumPieces, aggPartialPieces int
 	peers := map[torrent.PeerID]*torrent.PeerConn{}
 	torrents := client.Torrents()
+	connStats := client.ConnStats()
+
+	result.bytesRead += connStats.BytesReadUsefulIntendedData.Int64()
+	result.bytesWritten += connStats.BytesWrittenData.Int64()
+
 	for _, t := range torrents {
-		stats := t.Stats()
-		/*
-			var completedPieces, partialPieces int
-			psrs := t.PieceStateRuns()
-			for _, r := range psrs {
-				if r.Complete {
-					completedPieces += r.Length
-				}
-				if r.Partial {
-					partialPieces += r.Length
-				}
-			}
-			aggCompletedPieces += completedPieces
-			aggPartialPieces += partialPieces
-			aggNumPieces = t.NumPieces()
-		*/
-		result.bytesRead += stats.BytesRead.Int64() + stats.BytesReadData.Int64()
-		result.bytesWritten += stats.BytesWritten.Int64() + stats.BytesWrittenData.Int64()
 		aggBytesCompleted += t.BytesCompleted()
 		aggLen += t.Length()
+
 		for _, peer := range t.PeerConns() {
 			peers[peer.PeerID] = peer
 		}
@@ -275,6 +261,9 @@ func ResolveAbsentTorrents(ctx context.Context, torrentClient *torrent.Client, p
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.GotInfo():
+			if !t.Complete.Bool() {
+				t.DownloadAll()
+			}
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(snapshotDir, t.Info(), &mi); err != nil {
 				return err

@@ -13,6 +13,10 @@ import (
 type AdminAPI interface {
 	// NodeInfo returns a collection of metadata known about the host.
 	NodeInfo(ctx context.Context) (*p2p.NodeInfo, error)
+
+	// Peers returns information about the connected remote nodes.
+	// https://geth.ethereum.org/docs/rpc/ns-admin#admin_peers
+	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 }
 
 // AdminAPIImpl data structure to store things needed for admin_* commands.
@@ -38,4 +42,8 @@ func (api *AdminAPIImpl) NodeInfo(ctx context.Context) (*p2p.NodeInfo, error) {
 	}
 
 	return &nodes[0], nil
+}
+
+func (api *AdminAPIImpl) Peers(ctx context.Context) ([]*p2p.PeerInfo, error) {
+	return api.ethBackend.Peers(ctx)
 }
