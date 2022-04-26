@@ -451,7 +451,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}
 			unwind = progress
 		}
-		if unwind > 0 {
+		if unwind > 0 || reset {
 			progress, err := stages.GetStageProgress(tx, stages.Headers)
 			if err != nil {
 				return fmt.Errorf("read Bodies progress: %w", err)
