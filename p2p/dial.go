@@ -146,9 +146,6 @@ type dialConfig struct {
 }
 
 func (cfg dialConfig) withDefaults() dialConfig {
-	if cfg.maxActiveDials == 0 {
-		cfg.maxActiveDials = defaultMaxPendingPeers
-	}
 	if cfg.log == nil {
 		cfg.log = log.Root()
 	}
