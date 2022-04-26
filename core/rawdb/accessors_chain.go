@@ -1133,7 +1133,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n >= stopAtBlock {
+		if n >= stopAtBlock { // [from, to)
 			break
 		}
 
