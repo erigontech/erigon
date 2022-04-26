@@ -1111,13 +1111,13 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	}
 	defer c.Close()
 
-	var stopAtBlock uint64
+	var stopAtBlock, firstNonGenesisInDB uint64
 	{
 		k, _, err := c.First()
 		if err != nil {
 			return err
 		}
-		firstNonGenesisInDB := binary.BigEndian.Uint64(k)
+		firstNonGenesisInDB = binary.BigEndian.Uint64(k)
 		if firstNonGenesisInDB == 0 { // keep genesis in DB
 			k, _, err := c.Next()
 			if err != nil {
@@ -1148,6 +1148,9 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if b == nil {
+			if firstNonGenesisInDB == n { // TODO: this is temporary hack for nodes which deleted too much bodies. See https://github.com/ledgerwatch/erigon/issues/3964
+				continue
+			}
 			return fmt.Errorf("DeleteAncientBlocks: block body not found for block %d", n)
 		}
 		txIDBytes := make([]byte, 8)
