@@ -442,6 +442,14 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
+// max is a helper function which returns the larger of the two given integers.
+func max(a, b uint64) uint64 { //nolint:unparam
+	if a > b {
+		return a
+	}
+	return b
+}
+
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
@@ -457,9 +465,9 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 				return fmt.Errorf("read Bodies progress: %w", err)
 			}
 			if unwind > progress {
-				return fmt.Errorf("cannot unwind past 0")
+				unwind = progress - 1 // keep genesis
 			}
-			if err = stages.SaveStageProgress(tx, stages.Headers, progress-unwind); err != nil {
+			if err = stages.SaveStageProgress(tx, stages.Headers, max(1, progress-unwind)); err != nil {
 				return fmt.Errorf("saving Bodies progress failed: %w", err)
 			}
 			progress, err = stages.GetStageProgress(tx, stages.Headers)
