@@ -1265,7 +1265,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	var lastBody types.BodyForStorage
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= blockTo {
+		if blockNum >= blockTo { // [from, to)
 			return false, nil
 		}
 

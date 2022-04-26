@@ -498,18 +498,6 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 
 // ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	k, _, err := c.Last()
-	if err != nil {
-		return err
-	}
-	if k != nil && binary.BigEndian.Uint64(k) >= newValue {
-		panic(fmt.Sprintf("must not happen. ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k)))
-	}
-
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, newValue)
 	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
@@ -1111,13 +1099,13 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	}
 	defer c.Close()
 
-	var stopAtBlock uint64
+	var stopAtBlock, firstNonGenesisInDB uint64
 	{
 		k, _, err := c.First()
 		if err != nil {
 			return err
 		}
-		firstNonGenesisInDB := binary.BigEndian.Uint64(k)
+		firstNonGenesisInDB = binary.BigEndian.Uint64(k)
 		if firstNonGenesisInDB == 0 { // keep genesis in DB
 			k, _, err := c.Next()
 			if err != nil {
@@ -1133,7 +1121,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n >= stopAtBlock {
+		if n >= stopAtBlock { // [from, to)
 			break
 		}
 
