@@ -1100,7 +1100,7 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-// DeleteAncientBlocks - delete old block after moving it to snapshots.
+// DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't delete Reciepts
 // doesn't delete Canonical markers
@@ -1117,15 +1117,15 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		if err != nil {
 			return err
 		}
-		firstBlock := binary.BigEndian.Uint64(k)
-		if firstBlock == 0 { // keep genesis in DB
+		firstNonGenesisInDB := binary.BigEndian.Uint64(k)
+		if firstNonGenesisInDB == 0 { // keep genesis in DB
 			k, _, err := c.Next()
 			if err != nil {
 				return err
 			}
-			firstBlock = binary.BigEndian.Uint64(k)
+			firstNonGenesisInDB = binary.BigEndian.Uint64(k)
 		}
-		stopAtBlock = min(blockTo, firstBlock+uint64(blocksDeleteLimit))
+		stopAtBlock = min(blockTo, firstNonGenesisInDB+uint64(blocksDeleteLimit))
 	}
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
@@ -1133,7 +1133,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n > stopAtBlock {
+		if n >= stopAtBlock {
 			break
 		}
 
