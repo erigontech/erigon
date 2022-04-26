@@ -1100,7 +1100,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if s.BlockNumber == 0 {
+	if s.BlockNumber < 2 { // allow genesis
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
