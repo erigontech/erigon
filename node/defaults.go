@@ -46,7 +46,7 @@ var DefaultConfig = Config{
 		ListenAddr:      ":30303",
 		ListenAddr65:    ":30304",
 		MaxPeers:        100,
-		MaxPendingPeers: 50,
+		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),
 	},
 }
