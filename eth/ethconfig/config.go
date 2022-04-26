@@ -71,7 +71,7 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode: FastSync,
+	SyncMode: FullSync,
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
@@ -290,13 +290,13 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 type SyncMode string
 
 const (
-	FastSync SyncMode = "fast"
+	FullSync SyncMode = "full"
 	SnapSync SyncMode = "snap"
 )
 
 func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
-	if syncCliFlag == "fast" {
-		return FastSync
+	if syncCliFlag == "full" {
+		return FullSync
 	} else if syncCliFlag == "snap" {
 		return SnapSync
 	}
@@ -304,6 +304,6 @@ func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName:
 		return SnapSync
 	default:
-		return FastSync
+		return FullSync
 	}
 }

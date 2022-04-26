@@ -20,7 +20,7 @@ func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
 		if v {
 			return fmt.Errorf("we recently changed default of --syncmode flag, please add flag --syncmode=snap")
 		} else {
-			return fmt.Errorf("we recently changed default of --syncmode flag, please add flag --syncmode=fast")
+			return fmt.Errorf("we recently changed default of --syncmode flag, please add flag --syncmode=full")
 		}
 	}
 	return nil
