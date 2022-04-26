@@ -227,7 +227,9 @@ func HeadersPOS(
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: errors.New("server is stopping")}
 		}
 		if interrupt == engineapi.Synced {
-			verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter)
+			if err := verifyAndSaveDownloadedPoSHeaders(tx, cfg, headerInserter); err != nil {
+				return err
+			}
 		}
 		if !useExternalTx {
 			return tx.Commit()
@@ -248,7 +250,9 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter)
+		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter); err != nil {
+			return err
+		}
 	} else {
 		if err := handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
