@@ -464,10 +464,14 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("read Bodies progress: %w", err)
 			}
+			var unwindTo uint64
 			if unwind > progress {
-				unwind = progress - 1 // keep genesis
+				unwindTo = 1 // keep genesis
+			} else {
+				unwindTo = max(1, progress-unwind)
 			}
-			if err = stages.SaveStageProgress(tx, stages.Headers, max(1, progress-unwind)); err != nil {
+
+			if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
 				return fmt.Errorf("saving Bodies progress failed: %w", err)
 			}
 			progress, err = stages.GetStageProgress(tx, stages.Headers)
