@@ -3,7 +3,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -74,12 +73,9 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 }
 
 func (cli *Protocols) Start(ctx context.Context, silent bool) error {
-	t := time.Now()
-	fmt.Printf("Start\n")
 	if err := BuildTorrentsAndAdd(ctx, cli.snapshotDir, cli.TorrentClient); err != nil {
 		return err
 	}
-	fmt.Printf("start: %s, %d\n", time.Since(t), len(cli.TorrentClient.Torrents()))
 
 	var sem = semaphore.NewWeighted(int64(cli.cfg.DownloadSlots))
 
@@ -198,11 +194,14 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 	stats.DownloadRate = (stats.BytesRead - prevStats.BytesRead) / uint64(interval.Seconds())
 	stats.UploadRate = (stats.BytesWritten - prevStats.BytesWritten) / uint64(interval.Seconds())
 
-	stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
-	if stats.Progress == 100 && !stats.Completed {
-		stats.Progress = 99.99
+	if stats.BytesTotal == 0 {
+		stats.Progress = 0
+	} else {
+		stats.Progress = float32(float64(100) * (float64(stats.BytesCompleted) / float64(stats.BytesTotal)))
+		if stats.Progress == 100 && !stats.Completed {
+			stats.Progress = 99.99
+		}
 	}
-
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
@@ -216,26 +215,18 @@ func (cli *Protocols) Stats() AggStats {
 }
 
 func (cli *Protocols) Close() {
-	fmt.Printf("alex: CLOse\n")
-	//t, ok := cli.TorrentClient.Torrent(hash)
-	//if !ok {
-	//	return nil
+	//for _, tr := range cli.TorrentClient.Torrents() {
+	//	go func() {}()
+	//	fmt.Printf("alex: CLOse01: %s\n", tr.Name())
+	//	tr.DisallowDataUpload()
+	//	fmt.Printf("alex: CLOse02: %s\n", tr.Name())
+	//	tr.DisallowDataDownload()
+	//	fmt.Printf("alex: CLOse03: %s\n", tr.Name())
+	//  ch := t.Closed()
+	//	tr.Drop()
+	//  <-ch
 	//}
-	//ch := t.Closed()
-	//t.Drop()
-	//<-ch
-
-	for _, tr := range cli.TorrentClient.Torrents() {
-		fmt.Printf("alex: CLOse01: %s\n", tr.Name())
-		tr.DisallowDataUpload()
-		fmt.Printf("alex: CLOse02: %s\n", tr.Name())
-		tr.DisallowDataDownload()
-		fmt.Printf("alex: CLOse03: %s\n", tr.Name())
-		tr.Drop()
-	}
-	fmt.Printf("alex: CLOse2\n")
 	cli.TorrentClient.Close()
-	fmt.Printf("alex: CLOse3\n")
 	cli.DB.Close()
 	if cli.cfg.CompletionCloser != nil {
 		if err := cli.cfg.CompletionCloser.Close(); err != nil {
@@ -276,13 +267,16 @@ type AggStats struct {
 	BytesWritten uint64
 }
 
+// AddTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
+// added first time - pieces verification process will start (disk IO heavy) - Progress
+// kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
+// Don't need call torrent.VerifyData manually
 func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *torrent.Client) (*torrent.Torrent, error) {
 	mi, err := metainfo.LoadFromFile(torrentFilePath)
 	if err != nil {
 		return nil, err
 	}
 	mi.AnnounceList = Trackers
-
 	t, err := torrentClient.AddTorrent(mi)
 	if err != nil {
 		return nil, err
@@ -290,37 +284,6 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	t.DisallowDataDownload()
 	t.AllowDataUpload()
 	return t, nil
-}
-
-// AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
-// added first time - pieces verification process will start (disk IO heavy) - Progress
-// kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
-// Don't need call torrent.VerifyData manually
-func AddTorrentFiles(ctx context.Context, snapshotsDir *dir.Rw, torrentClient *torrent.Client) error {
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	files, err := AllTorrentPaths(snapshotsDir.Path)
-	if err != nil {
-		return err
-	}
-	for _, torrentFilePath := range files {
-		t, err := AddTorrentFile(ctx, torrentFilePath, torrentClient)
-		if err != nil {
-			return err
-		}
-		<-t.GotInfo()
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			_, fname := filepath.Split(torrentFilePath)
-			log.Info("[Snapshots] Verify existing snapshots", "file", fname)
-		default:
-		}
-	}
-
-	return nil
 }
 
 func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {

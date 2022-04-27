@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
 )
 
 // Trackers - break down by priority tier
@@ -126,7 +128,8 @@ func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDi
 	if err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir); err != nil {
 		return nil, err
 	}
-	t, err := AddTorrentFile(ctx, filepath.Join(snapshotDir.Path, originalFileName+".torrent"), client)
+	torrentFilePath := filepath.Join(snapshotDir.Path, originalFileName+".torrent")
+	t, err := AddTorrentFile(ctx, torrentFilePath, client)
 	if err != nil {
 		return nil, err
 	}
@@ -175,23 +178,43 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir *dir.Rw) error {
 func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torrent.Client) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
 	files, err := allSegmentFiles(snapshotDir.Path)
 	if err != nil {
 		return err
 	}
+	errs := make(chan error, len(files)*2)
+	wg := &sync.WaitGroup{}
+	workers := runtime.GOMAXPROCS(-1) - 1
+	if workers < 1 {
+		workers = 1
+	}
+	var sem = semaphore.NewWeighted(int64(workers))
 	for i, f := range files {
-		if _, err := BuildTorrentAndAdd(ctx, f, snapshotDir, client); err != nil {
+		wg.Add(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
 			return err
 		}
+		go func(f string, i int) {
+			defer sem.Release(1)
+			defer wg.Done()
 
-		select {
-		default:
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-logEvery.C:
-			_, fname := filepath.Split(f)
-			log.Info("[Snapshots] Verify existing snapshots", "Progress", fmt.Sprintf("%d/%d", i, len(files)), "file", fname)
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+			default:
+			}
+
+			_, err := BuildTorrentAndAdd(ctx, f, snapshotDir, client)
+			errs <- err
+		}(f, i)
+	}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	for err := range errs {
+		if err != nil {
+			return err
 		}
 	}
 	return nil
