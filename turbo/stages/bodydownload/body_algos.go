@@ -133,12 +133,13 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader interfaces.Ful
 				bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 
 				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-				var td *big.Int
 				if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
 					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
 				} else if parent != nil {
-					td = new(big.Int).Add(block.Difficulty(), parent)
-					go blockPropagator(context.Background(), block, td)
+					if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
+						td := new(big.Int).Add(block.Difficulty(), parent)
+						go blockPropagator(context.Background(), block, td)
+					}
 				} else {
 					log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 				}

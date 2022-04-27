@@ -555,7 +555,7 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 		return fmt.Errorf("newBlock66: %w", err)
 	}
 
-	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header()); err == nil {
+	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header(), true /* penalizePoSBlocks */); err == nil {
 		if penalty == headerdownload.NoPenalty {
 			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
