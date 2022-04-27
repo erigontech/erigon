@@ -3,9 +3,7 @@ package downloader
 import (
 	"context"
 	"errors"
-	"path/filepath"
 
-	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -33,16 +31,6 @@ func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir *dir.Rw) (*GrpcSer
 	return sn, nil
 }
 
-func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir *dir.Rw, torrentClient *torrent.Client) error {
-	if err := BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
-		return err
-	}
-	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient); err != nil {
-		return err
-	}
-	return nil
-}
-
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	t           *Protocols
@@ -53,25 +41,21 @@ type GrpcServer struct {
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
 	torrentClient := s.t.TorrentClient
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
-	preverifiedHashes := make([]metainfo.Hash, len(request.Items))
-	for i, it := range request.Items {
+	for _, it := range request.Items {
 		if it.TorrentHash == nil {
-			if err := BuildTorrentFileIfNeed(ctx, it.Path, s.snapshotDir); err != nil {
-				return nil, err
-			}
-			metaInfo, err := AddTorrentFile(ctx, filepath.Join(s.snapshotDir.Path, it.Path+".torrent"), s.t.TorrentClient)
+			_, err := BuildTorrentAndAdd(ctx, it.Path, s.snapshotDir, s.t.TorrentClient)
 			if err != nil {
 				return nil, err
 			}
-			preverifiedHashes[i] = metaInfo.HashInfoBytes()
-		} else {
-			preverifiedHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
-		}
-
-		if _, ok := torrentClient.Torrent(preverifiedHashes[i]); ok {
 			continue
 		}
-		magnet := mi.Magnet(&preverifiedHashes[i], nil)
+
+		hash := Proto2InfoHash(it.TorrentHash)
+		if _, ok := torrentClient.Torrent(hash); ok {
+			continue
+		}
+
+		magnet := mi.Magnet(&hash, nil)
 		go func(magnetUrl string) {
 			t, err := torrentClient.AddMagnet(magnetUrl)
 			if err != nil {
@@ -87,6 +71,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				return
 			}
 		}(magnet.String())
+
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -110,12 +95,6 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 	}, nil
 }
 
-func Proto2InfoHashes(in []*prototypes.H160) []metainfo.Hash {
-	infoHashes := make([]metainfo.Hash, len(in))
-	i := 0
-	for _, h := range in {
-		infoHashes[i] = gointerfaces.ConvertH160toAddress(h)
-		i++
-	}
-	return infoHashes
+func Proto2InfoHash(in *prototypes.H160) metainfo.Hash {
+	return gointerfaces.ConvertH160toAddress(in)
 }

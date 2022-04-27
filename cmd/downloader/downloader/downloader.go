@@ -18,8 +18,6 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-const ASSERT = false
-
 type Protocols struct {
 	TorrentClient *torrent.Client
 	DB            kv.RwDB
@@ -76,9 +74,12 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 }
 
 func (cli *Protocols) Start(ctx context.Context, silent bool) error {
-	if err := CreateTorrentFilesAndAdd(ctx, cli.snapshotDir, cli.TorrentClient); err != nil {
-		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
+	t := time.Now()
+	fmt.Printf("Start\n")
+	if err := BuildTorrentsAndAdd(ctx, cli.snapshotDir, cli.TorrentClient); err != nil {
+		return err
 	}
+	fmt.Printf("start: %s, %d\n", time.Since(t), len(cli.TorrentClient.Torrents()))
 
 	var sem = semaphore.NewWeighted(int64(cli.cfg.DownloadSlots))
 
@@ -103,7 +104,7 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 					sem.Release(1)
 				}(t)
 			}
-			time.Sleep(10 * time.Second)
+			time.Sleep(330 * time.Second)
 		}
 	}()
 
@@ -215,13 +216,31 @@ func (cli *Protocols) Stats() AggStats {
 }
 
 func (cli *Protocols) Close() {
+	fmt.Printf("alex: CLOse\n")
+	//t, ok := cli.TorrentClient.Torrent(hash)
+	//if !ok {
+	//	return nil
+	//}
+	//ch := t.Closed()
+	//t.Drop()
+	//<-ch
+
 	for _, tr := range cli.TorrentClient.Torrents() {
+		fmt.Printf("alex: CLOse01: %s\n", tr.Name())
+		tr.DisallowDataUpload()
+		fmt.Printf("alex: CLOse02: %s\n", tr.Name())
+		tr.DisallowDataDownload()
+		fmt.Printf("alex: CLOse03: %s\n", tr.Name())
 		tr.Drop()
 	}
+	fmt.Printf("alex: CLOse2\n")
 	cli.TorrentClient.Close()
+	fmt.Printf("alex: CLOse3\n")
 	cli.DB.Close()
 	if cli.cfg.CompletionCloser != nil {
-		cli.cfg.CompletionCloser.Close() //nolint
+		if err := cli.cfg.CompletionCloser.Close(); err != nil {
+			log.Warn("[Snapshots] CompletionCloser", "err", err)
+		}
 	}
 }
 
@@ -257,19 +276,20 @@ type AggStats struct {
 	BytesWritten uint64
 }
 
-func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *torrent.Client) (mi *metainfo.MetaInfo, err error) {
-	mi, err = metainfo.LoadFromFile(torrentFilePath)
+func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *torrent.Client) (*torrent.Torrent, error) {
+	mi, err := metainfo.LoadFromFile(torrentFilePath)
 	if err != nil {
 		return nil, err
 	}
 	mi.AnnounceList = Trackers
 
-	torrent, err := torrentClient.AddTorrent(mi)
+	t, err := torrentClient.AddTorrent(mi)
 	if err != nil {
-		return mi, err
+		return nil, err
 	}
-	torrent.DisallowDataDownload()
-	return mi, nil
+	t.DisallowDataDownload()
+	t.AllowDataUpload()
+	return t, nil
 }
 
 // AddTorrentFiles - adding .torrent files to torrentClient (and checking their hashes), if .torrent file
@@ -284,9 +304,12 @@ func AddTorrentFiles(ctx context.Context, snapshotsDir *dir.Rw, torrentClient *t
 		return err
 	}
 	for _, torrentFilePath := range files {
-		if _, err := AddTorrentFile(ctx, torrentFilePath, torrentClient); err != nil {
+		t, err := AddTorrentFile(ctx, torrentFilePath, torrentClient)
+		if err != nil {
 			return err
 		}
+		<-t.GotInfo()
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

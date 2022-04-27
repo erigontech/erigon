@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/mmap_span"
@@ -121,12 +122,23 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *
 	return nil
 }
 
+func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) (*torrent.Torrent, error) {
+	if err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir); err != nil {
+		return nil, err
+	}
+	t, err := AddTorrentFile(ctx, filepath.Join(snapshotDir.Path, originalFileName+".torrent"), client)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
+func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir *dir.Rw) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := allSegmentFiles(root.Path)
+	files, err := allSegmentFiles(snapshotDir.Path)
 	if err != nil {
 		return err
 	}
@@ -136,7 +148,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 		wg.Add(1)
 		go func(f string, i int) {
 			defer wg.Done()
-			errs <- BuildTorrentFileIfNeed(ctx, f, root)
+			errs <- BuildTorrentFileIfNeed(ctx, f, snapshotDir)
 
 			select {
 			default:
@@ -154,6 +166,32 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 	for err := range errs {
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// BuildTorrentsAndAdd - create .torrent files from .seg files (big IO) - if .seg files were placed manually to snapshotDir
+func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torrent.Client) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	files, err := allSegmentFiles(snapshotDir.Path)
+	if err != nil {
+		return err
+	}
+	for i, f := range files {
+		if _, err := BuildTorrentAndAdd(ctx, f, snapshotDir, client); err != nil {
+			return err
+		}
+
+		select {
+		default:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			_, fname := filepath.Split(f)
+			log.Info("[Snapshots] Verify existing snapshots", "Progress", fmt.Sprintf("%d/%d", i, len(files)), "file", fname)
 		}
 	}
 	return nil
