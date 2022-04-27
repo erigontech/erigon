@@ -60,19 +60,19 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	}
 
 	startBlock := s.BlockNumber
-	if cfg.prune.TxIndex.Enabled() {
+	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+		if cfg.snapshots.BlocksAvailable() > startBlock {
+			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
+			startBlock = cfg.snapshots.BlocksAvailable()
+			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+				return err
+			}
+		}
+	} else if cfg.prune.TxIndex.Enabled() {
 		pruneTo := cfg.prune.TxIndex.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
 			if err = s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
-				return err
-			}
-		}
-	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		if cfg.snapshots.BlocksAvailable() > startBlock {
-			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
-			startBlock = cfg.snapshots.BlocksAvailable() + 1
-			if err = s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
 				return err
 			}
 		}
