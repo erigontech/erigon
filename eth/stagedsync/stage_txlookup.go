@@ -214,9 +214,9 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		if body == nil {
 			if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled && blocknum <= cfg.snapshots.BlocksAvailable() {
 				log.Warn("TxLookup pruning, empty block body", "height", blocknum)
-			} else {
-				return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
+				return nil
 			}
+			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
 		}
 
 		for _, txn := range body.Transactions {
