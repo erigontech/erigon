@@ -47,7 +47,7 @@ For a full archive node of Mainnet we recommend >=3TB storage space on a single 
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
 Bear in mind that SSD performance deteriorates when close to capacity.
 
-RAM: >=16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
+RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
 
 <code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
 
@@ -118,7 +118,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.18
     * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
