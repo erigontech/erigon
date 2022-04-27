@@ -16,8 +16,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -166,6 +168,40 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 	}
 	if err = flushBitmaps64(collectorTo, tos); err != nil {
 		return err
+	}
+
+	// Clean up before loading call traces to reclaim space
+	var prunedMin uint64 = math.MaxUint64
+	var prunedMax uint64 = 0
+	for k, _, err = traceCursor.First(); k != nil; k, _, err = traceCursor.NextNoDup() {
+		if err != nil {
+			return err
+		}
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum+params.FullImmutabilityThreshold >= endBlock {
+			break
+		}
+		select {
+		default:
+		case <-logEvery.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
+				"alloc", common.StorageSize(m.Alloc),
+				"sys", common.StorageSize(m.Sys))
+		}
+		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {
+			return fmt.Errorf("remove trace call set for block %d: %w", blockNum, err)
+		}
+		if blockNum < prunedMin {
+			prunedMin = blockNum
+		}
+		if blockNum > prunedMax {
+			prunedMax = blockNum
+		}
+	}
+	if prunedMax != 0 && prunedMax > prunedMin+16 {
+		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 
 	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
