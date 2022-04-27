@@ -197,6 +197,44 @@ func HeadersPOS(
 	return nil
 }
 
+func safeAndFinalizedBlocksAreCanonical(
+	forkChoice *engineapi.ForkChoiceMessage,
+	s *StageState,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	sendErrResponse bool,
+) (bool, error) {
+	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+	if err != nil {
+		return false, err
+	}
+	if !safeIsCanonical {
+		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+		if sendErrResponse {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: errors.New("safe block is not an ancestor of head block"),
+			}
+		}
+		return false, nil
+	}
+
+	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+	if err != nil {
+		return false, err
+	}
+	if !finalizedIsCanonical {
+		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+		if sendErrResponse {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: errors.New("finalized block is not an ancestor of head block"),
+			}
+		}
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func startHandlingForkChoice(
 	forkChoice *engineapi.ForkChoiceMessage,
 	requestStatus engineapi.RequestStatus,
@@ -215,7 +253,15 @@ func startHandlingForkChoice(
 	if currentHeadHash == headerHash { // no-op
 		log.Info(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		if requestStatus == engineapi.New {
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
+		if err != nil {
+			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			if requestStatus == engineapi.New {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			}
+			return err
+		}
+		if canonical && requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
 				LatestValidHash: currentHeadHash,
@@ -317,34 +363,12 @@ func finishHandlingForkChoice(
 	}
 
 	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
-
-	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, sendErrResponse)
 	if err != nil {
 		return err
 	}
-	if !safeIsCanonical {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("safe block is not an ancestor of head block"),
-			}
-			cfg.hd.ClearPendingPayloadStatus()
-			sendErrResponse = false
-		}
-	}
-
-	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
-	if err != nil {
-		return err
-	}
-	if !finalizedIsCanonical {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("finalized block is not an ancestor of head block"),
-			}
-			cfg.hd.ClearPendingPayloadStatus()
-		}
+	if !canonical {
+		cfg.hd.ClearPendingPayloadStatus()
 	}
 
 	if err := s.Update(tx, headHeight); err != nil {
