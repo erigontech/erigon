@@ -74,19 +74,16 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
 	stats := s.t.Stats()
 	return &proto_downloader.StatsReply{
-		MetadataReady:  stats.MetadataReady,
-		FilesTotal:     int32(stats.TorrentsCount),
-		Completed:      stats.Completed,
+		MetadataReady: stats.MetadataReady,
+		FilesTotal:    stats.FilesTotal,
+
+		Completed: stats.Completed,
+		Progress:  stats.Progress,
+
 		BytesCompleted: stats.BytesCompleted,
 		BytesTotal:     stats.BytesTotal,
-
-		ConnectionsTotal: stats.PeerConnections,
-		Peers:            stats.PeersCount,
-
-		BytesDownloadPerSec: stats.DownloadRate,
-		BytesUploadPerSec:   stats.UploadRate,
-
-		Progress: int32(stats.Progress),
+		UploadRate:     stats.UploadRate,
+		DownloadRate:   stats.DownloadRate,
 	}, nil
 }
 

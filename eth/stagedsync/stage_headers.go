@@ -1195,7 +1195,6 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		break
 	}
-	var prevBytesCompleted uint64
 	logEvery := time.NewTicker(logInterval / 3)
 	defer logEvery.Stop()
 
@@ -1211,18 +1210,13 @@ Loop:
 			} else if reply.Completed {
 				break Loop
 			} else {
-				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
-				// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
-
-				//readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-				log.Info("[Snapshots] download", //"progress", fmt.Sprintf("%.2f%%", readiness),
-					"progress", fmt.Sprintf(reply.Progress,
-					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
-					"torrent_peers", reply.Peers,
+				log.Info("[Snapshots] download",
+					"progress", fmt.Sprintf("%.2f%%", reply.Progress),
+					"download", libcommon.ByteCount(reply.DownloadRate)+"/s",
+					"upload", libcommon.ByteCount(reply.UploadRate)+"/s",
+					"peers_unique", reply.PeersUnique,
 					"connections", reply.ConnectionsTotal,
-					// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
 				)
-				prevBytesCompleted = reply.BytesCompleted
 			}
 		}
 	}

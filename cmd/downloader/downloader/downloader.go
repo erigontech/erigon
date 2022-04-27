@@ -122,8 +122,8 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 				stats := cli.Stats()
 
 				fmt.Printf("alex111: %d, %d\n ", stats.MetadataReady, len(torrents))
-				if stats.MetadataReady < len(torrents) {
-					log.Info(fmt.Sprintf("[torrent] Waiting for torrents metadata: %d/%d", stats.MetadataReady, len(torrents)))
+				if stats.MetadataReady < stats.FilesTotal {
+					log.Info(fmt.Sprintf("[torrent] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
 
@@ -132,8 +132,8 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 					log.Info("[torrent] Seeding",
 						"download", common2.ByteCount(uint64(stats.DownloadRate))+"/s",
 						"upload", common2.ByteCount(uint64(stats.UploadRate))+"/s",
-						"unique_peers", stats.PeersCount,
-						"files", stats.TorrentsCount,
+						"unique_peers", stats.PeersUnique,
+						"files", stats.FilesTotal,
 						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 					continue
 				}
@@ -142,10 +142,10 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 					"Progress", fmt.Sprintf("%.2f%%", stats.Progress),
 					"download", common2.ByteCount(uint64(stats.DownloadRate))+"/s",
 					"upload", common2.ByteCount(uint64(stats.UploadRate))+"/s",
-					"unique_peers", stats.PeersCount,
-					"files", stats.TorrentsCount,
+					"unique_peers", stats.PeersUnique,
+					"files", stats.FilesTotal,
 					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
-				if stats.PeersCount == 0 {
+				if stats.PeersUnique == 0 {
 					ips := cli.TorrentClient.BadPeerIPs()
 					if len(ips) > 0 {
 						log.Info("[torrent] Stats", "banned", ips)
@@ -170,7 +170,8 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 	stats.BytesRead += uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesWritten += uint64(connStats.BytesWrittenData.Int64())
 
-	stats.BytesTotal, stats.BytesCompleted, stats.PeerConnections, stats.MetadataReady = 0, 0, 0, 0
+	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0, 0
+	stats.PeersTotal = 0
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
@@ -182,13 +183,14 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 		aggLen += t.Length()
 
 		for _, peer := range t.PeerConns() {
+			stats.PeersTotal++
 			peers[peer.PeerID] = peer
 		}
 
 		stats.Completed = stats.Completed && t.Complete.Bool()
 		stats.BytesCompleted += uint64(t.BytesCompleted())
 		stats.BytesTotal += uint64(t.Info().TotalLength())
-		stats.PeerConnections += uint64(len(t.PeerConns()))
+		stats.ConnectionsTotal += uint64(len(t.PeerConns()))
 	}
 
 	stats.DownloadRate += (stats.BytesRead - prevStats.BytesRead) / uint64(interval.Seconds())
@@ -199,8 +201,8 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 		stats.Progress = 99.99
 	}
 
-	stats.PeersCount = int32(len(peers))
-	stats.TorrentsCount = len(torrents)
+	stats.PeersUnique = int32(len(peers))
+	stats.FilesTotal = int32(len(torrents))
 
 	cli.stats = stats
 }
@@ -239,16 +241,16 @@ func (cli *Protocols) StopSeeding(hash metainfo.Hash) error {
 }
 
 type AggStats struct {
-	Completed                  bool
+	MetadataReady, FilesTotal int32
+	PeersTotal, PeersUnique   int32
+	ConnectionsTotal          uint64
+
+	Completed bool
+	Progress  float32
+
 	BytesCompleted, BytesTotal uint64
-	PeerConnections            uint64
 
-	DownloadRate uint64
-	UploadRate   uint64
-	PeersCount   int32
-
-	Progress                     float32
-	TorrentsCount, MetadataReady int
+	UploadRate, DownloadRate uint64
 
 	BytesRead    uint64
 	BytesWritten uint64
