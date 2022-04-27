@@ -309,7 +309,7 @@ func NewStagedSync(
 				nil,
 				controlServer.ChainConfig,
 				controlServer.Engine,
-				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM, TraceJumpDest: true},
 				notifications.Accumulator,
 				cfg.StateStream,
 				tmpdir,
