@@ -155,7 +155,7 @@ var (
 	}
 	SyncModeFlag = cli.StringFlag{
 		Name:  "syncmode",
-		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "fast" in all other cases`,
+		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "full" in all other cases`,
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
