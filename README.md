@@ -153,9 +153,9 @@ Erigon can be used as an execution-layer for beacon chain consensus clients (Eth
 relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
  are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
 
-You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
+You must enable JSON-RPC by `--http` and add `engine` to `--http.api` list. (Or run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon)
 
-If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default)
+If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC listen on localhost by default)
 .
 
 Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
