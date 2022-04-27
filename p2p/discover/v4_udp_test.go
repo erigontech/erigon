@@ -61,6 +61,17 @@ type udpTest struct {
 }
 
 func newUDPTest(t *testing.T) *udpTest {
+	return newUDPTestContext(context.Background(), t)
+}
+
+func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
+	ctx = disableLookupSlowdown(ctx)
+
+	replyTimeout := contextGetReplyTimeout(ctx)
+	if replyTimeout == 0 {
+		replyTimeout = 50 * time.Millisecond
+	}
+
 	test := &udpTest{
 		t:          t,
 		pipe:       newpipe(),
@@ -75,11 +86,13 @@ func newUDPTest(t *testing.T) *udpTest {
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey)
-	ctx := context.Background()
-	ctx = disableLookupSlowdown(ctx)
 	test.udp, err = ListenV4(ctx, test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlError),
+
+		ReplyTimeout: replyTimeout,
+
+		PrivateKeyGenerator: contextGetPrivateKeyGenerator(ctx),
 	})
 	if err != nil {
 		panic(err)
@@ -175,9 +188,12 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 	if runtime.GOOS == `darwin` {
 		t.Skip("unstable test on darwin")
 	}
-
 	t.Parallel()
-	test := newUDPTest(t)
+
+	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, respTimeout)
+
+	test := newUDPTestContext(ctx, t)
 	defer test.close()
 
 	rand.Seed(time.Now().UnixNano())
@@ -602,6 +618,24 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 		t.Fatal(err)
 	}
 	return udp
+}
+
+func contextWithReplyTimeout(ctx context.Context, value time.Duration) context.Context {
+	return context.WithValue(ctx, "p2p.discover.Config.ReplyTimeout", value)
+}
+
+func contextGetReplyTimeout(ctx context.Context) time.Duration {
+	value, _ := ctx.Value("p2p.discover.Config.ReplyTimeout").(time.Duration)
+	return value
+}
+
+func contextWithPrivateKeyGenerator(ctx context.Context, value func() (*ecdsa.PrivateKey, error)) context.Context {
+	return context.WithValue(ctx, "p2p.discover.Config.PrivateKeyGenerator", value)
+}
+
+func contextGetPrivateKeyGenerator(ctx context.Context) func() (*ecdsa.PrivateKey, error) {
+	value, _ := ctx.Value("p2p.discover.Config.PrivateKeyGenerator").(func() (*ecdsa.PrivateKey, error))
+	return value
 }
 
 // dgramPipe is a fake UDP socket. It queues all sent datagrams.
