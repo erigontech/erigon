@@ -131,13 +131,16 @@ func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, P
 }
 
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header, penalizePoSBlocks bool) ([]ChainSegment, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
+	}
+	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
+		return nil, NewBlockGossipAfterMergePenalty, nil
 	}
 	h := ChainSegmentHeader{
 		Header:    header,
@@ -1356,7 +1359,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	if err := header.EncodeRLP(buf); err != nil {
 		return err
 	}
-	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), header)
+	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), header, false /* penalizePoSBlocks */)
 	if err != nil {
 		return err
 	}
