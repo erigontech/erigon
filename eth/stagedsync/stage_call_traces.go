@@ -178,7 +178,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 			return err
 		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum+params.FullImmutabilityThreshold <= endBlock {
+		if blockNum+params.FullImmutabilityThreshold >= endBlock {
 			break
 		}
 		select {
