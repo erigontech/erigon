@@ -198,7 +198,7 @@ func HeadersPOS(
 }
 
 func startHandlingForkChoice(
-	forkChoiceMessage *engineapi.ForkChoiceMessage,
+	forkChoice *engineapi.ForkChoiceMessage,
 	requestStatus engineapi.RequestStatus,
 	requestId int,
 	s *StageState,
@@ -208,7 +208,7 @@ func startHandlingForkChoice(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
-	headerHash := forkChoiceMessage.HeadBlockHash
+	headerHash := forkChoice.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
@@ -290,7 +290,7 @@ func startHandlingForkChoice(
 	u.UnwindTo(forkingPoint, common.Hash{})
 	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
-	cfg.hd.SetUnsettledForkChoice(forkChoiceMessage, headerNumber)
+	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
 	return nil
 }
