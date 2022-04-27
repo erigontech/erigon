@@ -648,6 +648,11 @@ var (
 		Value: "4mb",
 		Usage: "bytes per second, example: 32mb",
 	}
+	TorrentDownloadSlotsFlag = cli.IntFlag{
+		Name:  "torrent.download.slots",
+		Value: 2,
+		Usage: "amount of files to download in parallel. If network has enough seeders 2 slot enough, if network has lack of seeders increase to 5 (too big value will slow down everything).",
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -1399,6 +1404,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
 			db,
+			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
 		)
 		if err != nil {
 			panic(err)

@@ -1189,7 +1189,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		default:
 		}
 		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
-			log.Error("[Snapshots] Can't call downloader", "err", err)
+			log.Error("[Snapshots] call downloader", "err", err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -1205,17 +1205,23 @@ Loop:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if reply.Completed {
+			} else if stats.Completed {
 				break Loop
 			} else {
+				if stats.MetadataReady < stats.FilesTotal {
+					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
+					continue
+				}
+
 				log.Info("[Snapshots] download",
-					"progress", fmt.Sprintf("%.2f%%", reply.Progress),
-					"download", libcommon.ByteCount(reply.DownloadRate)+"/s",
-					"upload", libcommon.ByteCount(reply.UploadRate)+"/s",
-					"peers_unique", reply.PeersUnique,
-					"connections", reply.ConnectionsTotal,
+					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
+					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
+					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
+					"peers", stats.PeersUnique,
+					"connections", stats.ConnectionsTotal,
+					"files", stats.FilesTotal,
 				)
 			}
 		}

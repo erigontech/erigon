@@ -25,7 +25,7 @@ import (
 
 // Trackers - break down by priority tier
 var Trackers = [][]string{
-	trackers.First(10, trackers.Best),
+	trackers.First(7, trackers.Best),
 	//trackers.First(3, trackers.Udp),
 	//trackers.First(3, trackers.Https),
 	//trackers.First(10, trackers.Ws),
@@ -107,7 +107,10 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		info, err := BuildInfoBytesForFile(root.Path, originalFileName)
+		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
+		if err := info.BuildFromFilePath(filepath.Join(root.Path, originalFileName)); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -140,7 +143,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 			case <-ctx.Done():
 				errs <- ctx.Err()
 			case <-logEvery.C:
-				log.Info("[torrent] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
+				log.Info("[Snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
 			}
 		}(f, i)
 	}
@@ -154,14 +157,6 @@ func BuildTorrentFilesIfNeed(ctx context.Context, root *dir.Rw) error {
 		}
 	}
 	return nil
-}
-
-func BuildInfoBytesForFile(root string, fileName string) (*metainfo.Info, error) {
-	info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
-	if err := info.BuildFromFilePath(filepath.Join(root, fileName)); err != nil {
-		return nil, err
-	}
-	return info, nil
 }
 
 func CreateTorrentFileIfNotExists(root *dir.Rw, info *metainfo.Info, mi *metainfo.MetaInfo) error {

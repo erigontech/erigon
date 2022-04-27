@@ -25,6 +25,7 @@ type Cfg struct {
 	*torrent.ClientConfig
 	DB               kv.RwDB
 	CompletionCloser io.Closer
+	DownloadSlots    int
 }
 
 func Default() *torrent.ClientConfig {
@@ -36,7 +37,7 @@ func Default() *torrent.ClientConfig {
 	//torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
-	// Increase default timeouts, because we often run on commodity networks
+	// Reduce defaults - to avoid peers with very bad geography
 	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
 	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
@@ -44,7 +45,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB) (*Cfg, error) {
+func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -100,5 +101,5 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	}
 	m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
 	torrentConfig.DefaultStorage = m
-	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m}, nil
+	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m, DownloadSlots: downloadSlots}, nil
 }

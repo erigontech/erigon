@@ -12,6 +12,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -50,7 +51,9 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
-	infoHashes := make([]metainfo.Hash, len(request.Items))
+	torrentClient := s.t.TorrentClient
+	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
+	preverifiedHashes := make([]metainfo.Hash, len(request.Items))
 	for i, it := range request.Items {
 		if it.TorrentHash == nil {
 			if err := BuildTorrentFileIfNeed(ctx, it.Path, s.snapshotDir); err != nil {
@@ -60,13 +63,30 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			if err != nil {
 				return nil, err
 			}
-			infoHashes[i] = metaInfo.HashInfoBytes()
+			preverifiedHashes[i] = metaInfo.HashInfoBytes()
 		} else {
-			infoHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
+			preverifiedHashes[i] = gointerfaces.ConvertH160toAddress(it.TorrentHash)
 		}
-	}
-	if err := ResolveAbsentTorrents(ctx, s.t, infoHashes, s.snapshotDir); err != nil {
-		return nil, err
+
+		if _, ok := torrentClient.Torrent(preverifiedHashes[i]); ok {
+			continue
+		}
+		magnet := mi.Magnet(&preverifiedHashes[i], nil)
+		go func(magnetUrl string) {
+			t, err := torrentClient.AddMagnet(magnetUrl)
+			if err != nil {
+				log.Warn("[downloader] add magnet link", "err", err)
+				return
+			}
+			t.DisallowDataDownload()
+			t.AllowDataUpload()
+			<-t.GotInfo()
+			mi := t.Metainfo()
+			if err := CreateTorrentFileIfNotExists(s.snapshotDir, t.Info(), &mi); err != nil {
+				log.Warn("[downloader] create torrent file", "err", err)
+				return
+			}
+		}(magnet.String())
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -79,6 +99,9 @@ func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsR
 
 		Completed: stats.Completed,
 		Progress:  stats.Progress,
+
+		PeersUnique:      stats.PeersUnique,
+		ConnectionsTotal: stats.ConnectionsTotal,
 
 		BytesCompleted: stats.BytesCompleted,
 		BytesTotal:     stats.BytesTotal,

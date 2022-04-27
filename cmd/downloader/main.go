@@ -43,6 +43,7 @@ var (
 	natSetting                     string
 	torrentVerbosity               string
 	downloadRateStr, uploadRateStr string
+	torrentDownloadSlots           int
 	torrentPort                    int
 	torrentMaxPeers                int
 	torrentConnsPerFile            int
@@ -63,6 +64,7 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -148,7 +150,7 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
