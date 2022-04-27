@@ -557,11 +557,12 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-
+	log.Info("Apply headers to snapshots", "headers", len(headers), "parents", len(parents))
 	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Finished apply")
 	p.recentSnaps.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
