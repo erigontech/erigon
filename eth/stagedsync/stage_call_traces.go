@@ -392,10 +392,6 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	return nil
 }
 
-func pruneTemporarySets(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context, tmpdir string) error {
-	return nil
-}
-
 func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context, tmpdir string) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
