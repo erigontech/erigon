@@ -39,13 +39,6 @@ func CreateTorrentFilesAndAdd(ctx context.Context, snapshotDir *dir.Rw, torrentC
 	if err := AddTorrentFiles(ctx, snapshotDir, torrentClient); err != nil {
 		return err
 	}
-	for _, t := range torrentClient.Torrents() {
-		t.AllowDataUpload()
-		if !t.Complete.Bool() {
-			t.AllowDataDownload()
-			t.DownloadAll()
-		}
-	}
 	return nil
 }
 
@@ -75,46 +68,26 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	if err := ResolveAbsentTorrents(ctx, s.t, infoHashes, s.snapshotDir); err != nil {
 		return nil, err
 	}
-	for _, t := range s.t.TorrentClient.Torrents() {
-		t.AllowDataDownload()
-		t.AllowDataUpload()
-		if !t.Complete.Bool() {
-			t.DownloadAll()
-		}
-	}
 	return &emptypb.Empty{}, nil
 }
 
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-	torrents := s.t.TorrentClient.Torrents()
-	reply := &proto_downloader.StatsReply{Completed: true, Torrents: int32(len(torrents))}
+	stats := s.t.Stats()
+	return &proto_downloader.StatsReply{
+		MetadataReady:  stats.MetadataReady,
+		FilesTotal:     int32(stats.TorrentsCount),
+		Completed:      stats.Completed,
+		BytesCompleted: stats.BytesCompleted,
+		BytesTotal:     stats.BytesTotal,
 
-	peers := map[torrent.PeerID]struct{}{}
+		ConnectionsTotal: stats.PeerConnections,
+		Peers:            stats.PeersCount,
 
-	for _, t := range torrents {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-t.GotInfo():
-			reply.BytesCompleted += uint64(t.BytesCompleted())
-			reply.BytesTotal += uint64(t.Info().TotalLength())
-			reply.Completed = reply.Completed && t.Complete.Bool()
-			reply.Connections += uint64(len(t.PeerConns()))
+		BytesDownloadPerSec: stats.DownloadRate,
+		BytesUploadPerSec:   stats.UploadRate,
 
-			for _, peer := range t.PeerConns() {
-				peers[peer.PeerID] = struct{}{}
-			}
-		default:
-			reply.Completed = false
-		}
-	}
-
-	reply.Peers = int32(len(peers))
-	reply.Progress = int32(100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal)))
-	if reply.Progress == 100 && !reply.Completed {
-		reply.Progress = 99
-	}
-	return reply, nil
+		Progress: int32(stats.Progress),
+	}, nil
 }
 
 func Proto2InfoHashes(in []*prototypes.H160) []metainfo.Hash {
