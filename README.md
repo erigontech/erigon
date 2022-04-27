@@ -96,8 +96,8 @@ Support only remote-miners.
 * To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
 * Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
   , `--miner.gastarget`
-* RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-* RPCDaemon supports websocket methods: newPendingTransaction
+* JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
+* JSON-RPC supports websocket methods: newPendingTransaction
 * TODO:
     + we don't broadcast mined blocks to p2p-network
       yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
@@ -158,8 +158,8 @@ You must enable JSON-RPC by `--http` and add `engine` to `--http.api` list. (Or 
 If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC listen on localhost by default)
 .
 
-Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
-where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC daemon.
+Once the JSON-RPC is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
+where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
 
@@ -241,7 +241,7 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components can work inside Erigon and as independent process. 
+Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process. 
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
