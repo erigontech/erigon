@@ -248,7 +248,9 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter)
+		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter); err != nil {
+			return err
+		}
 	} else {
 		if err := handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
@@ -579,7 +581,7 @@ func schedulePoSDownload(
 	cfg.hd.SetPosStatus(headerdownload.Syncing)
 }
 
-func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) error {
+func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
 	var lastValidHash common.Hash
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
@@ -612,8 +614,6 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 	cfg.hd.HeadersCollector().Close()
 	cfg.hd.SetHeadersCollector(nil)
 	cfg.hd.SetPosStatus(headerdownload.Idle)
-
-	return err
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
