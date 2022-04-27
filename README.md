@@ -42,8 +42,8 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-For a full archive node we recommend >=3TB storage space on a single partition: 1.8TB state (as of March 2022),
-200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk).
+For a full archive node of Mainnet we recommend >=3TB storage space on a single partition: 1.8TB state (as of March 2022),
+200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). BSC: 7Tb
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
 Bear in mind that SSD performance deteriorates when close to capacity.
 
