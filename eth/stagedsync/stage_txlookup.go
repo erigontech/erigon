@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type TxLookupCfg struct {
@@ -211,7 +212,11 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
-			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
+			if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled && blocknum <= cfg.snapshots.BlocksAvailable() {
+				log.Warn("TxLookup pruning, empty block body", "height", blocknum)
+			} else {
+				return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
+			}
 		}
 
 		for _, txn := range body.Transactions {
