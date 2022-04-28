@@ -1,12 +1,14 @@
 package snap
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 type Type int
@@ -65,7 +67,7 @@ func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, t
 func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
 func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
 
-func FilterExt(in []snapshotsync.FileInfo, expectExt string) (out []snapshotsync.FileInfo) {
+func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	for _, f := range in {
 		if f.Ext != expectExt { // filter out only compressed files
 			continue
@@ -74,8 +76,8 @@ func FilterExt(in []snapshotsync.FileInfo, expectExt string) (out []snapshotsync
 	}
 	return out
 }
-func FilesWithExt(dir, expectExt string) ([]snapshotsync.FileInfo, error) {
-	files, err := snapshotsync.ParseDir(dir)
+func FilesWithExt(dir, expectExt string) ([]FileInfo, error) {
+	files, err := ParseDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +89,7 @@ func IsCorrectFileName(name string) bool {
 	return len(parts) == 4 && parts[3] != "v1"
 }
 
-func ParseFileName(dir, fileName string) (res snapshotsync.FileInfo, err error) {
+func ParseFileName(dir, fileName string) (res FileInfo, err error) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
@@ -120,9 +122,81 @@ func ParseFileName(dir, fileName string) (res snapshotsync.FileInfo, err error) 
 	default:
 		return res, fmt.Errorf("unexpected snapshot suffix: %s,%w", parts[2], ErrInvalidFileName)
 	}
-	return snapshotsync.FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
+	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: snapshotType, Ext: ext}, nil
 }
 
 const MERGE_THRESHOLD = 2 // don't trigger merge if have too small amount of partial segments
 const DEFAULT_SEGMENT_SIZE = 500_000
 const MIN_SEGMENT_SIZE = 1_000
+
+// FileInfo - parsed file metadata
+type FileInfo struct {
+	_         fs.FileInfo
+	Version   uint8
+	From, To  uint64
+	Path, Ext string
+	T         Type
+}
+
+func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
+func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
+func TmpFiles(dir string) (res []string, err error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		if f.IsDir() || len(f.Name()) < 3 {
+			continue
+		}
+		if filepath.Ext(f.Name()) != ".tmp" {
+			continue
+		}
+		res = append(res, filepath.Join(dir, f.Name()))
+	}
+	return res, nil
+}
+
+var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
+
+func ParseDir(dir string) (res []FileInfo, err error) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		fileInfo, err := f.Info()
+		if err != nil {
+			return nil, err
+		}
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
+			continue
+		}
+
+		meta, err := ParseFileName(dir, f.Name())
+		if err != nil {
+			if errors.Is(err, ErrInvalidFileName) {
+				continue
+			}
+			return nil, err
+		}
+		res = append(res, meta)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		if res[i].Version != res[j].Version {
+			return res[i].Version < res[j].Version
+		}
+		if res[i].From != res[j].From {
+			return res[i].From < res[j].From
+		}
+		if res[i].To != res[j].To {
+			return res[i].To < res[j].To
+		}
+		if res[i].T != res[j].T {
+			return res[i].T < res[j].T
+		}
+		return res[i].Ext < res[j].Ext
+	})
+
+	return res, nil
+}

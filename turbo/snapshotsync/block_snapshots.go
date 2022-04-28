@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -381,7 +380,7 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 				return
 			default:
 			}
-			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, ErrSnapshotMissed) {
+			if err := s.Reopen(); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, snap.ErrSnapshotMissed) {
 				log.Error("AsyncOpenAll", "err", err)
 			}
 			time.Sleep(15 * time.Second)
@@ -756,93 +755,22 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 	return nil
 }
 
-// FileInfo - parsed file metadata
-type FileInfo struct {
-	_         fs.FileInfo
-	Version   uint8
-	From, To  uint64
-	Path, Ext string
-	T         snap.Type
-}
-
-func IdxFiles(dir string) (res []FileInfo, err error) { return snap.FilesWithExt(dir, ".idx") }
-func Segments(dir string) (res []FileInfo, err error) { return snap.FilesWithExt(dir, ".seg") }
-func TmpFiles(dir string) (res []string, err error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range files {
-		if f.IsDir() || len(f.Name()) < 3 {
-			continue
-		}
-		if filepath.Ext(f.Name()) != ".tmp" {
-			continue
-		}
-		res = append(res, filepath.Join(dir, f.Name()))
-	}
-	return res, nil
-}
-
-var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
-
-func noGaps(in []FileInfo) (out []FileInfo, err error) {
+func noGaps(in []snap.FileInfo) (out []snap.FileInfo, err error) {
 	var prevTo uint64
 	for _, f := range in {
 		if f.To <= prevTo {
 			continue
 		}
 		if f.From != prevTo { // no gaps
-			return nil, fmt.Errorf("%w: from %d to %d", ErrSnapshotMissed, prevTo, f.From)
+			return nil, fmt.Errorf("%w: from %d to %d", snap.ErrSnapshotMissed, prevTo, f.From)
 		}
 		prevTo = f.To
 		out = append(out, f)
 	}
 	return out, nil
 }
-func ParseDir(dir string) (res []FileInfo, err error) {
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range files {
-		fileInfo, err := f.Info()
-		if err != nil {
-			return nil, err
-		}
-		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
-			continue
-		}
 
-		meta, err := snap.ParseFileName(dir, f.Name())
-		if err != nil {
-			if errors.Is(err, snap.ErrInvalidFileName) {
-				continue
-			}
-			return nil, err
-		}
-		res = append(res, meta)
-	}
-	sort.Slice(res, func(i, j int) bool {
-		if res[i].Version != res[j].Version {
-			return res[i].Version < res[j].Version
-		}
-		if res[i].From != res[j].From {
-			return res[i].From < res[j].From
-		}
-		if res[i].To != res[j].To {
-			return res[i].To < res[j].To
-		}
-		if res[i].T != res[j].T {
-			return res[i].T < res[j].T
-		}
-		return res[i].Ext < res[j].Ext
-	})
-
-	return res, nil
-}
-
-func allTypeOfSegmentsMustExist(dir string, in []FileInfo) (res []FileInfo) {
+func allTypeOfSegmentsMustExist(dir string, in []snap.FileInfo) (res []snap.FileInfo) {
 MainLoop:
 	for _, f := range in {
 		if f.From == f.To {
@@ -863,7 +791,7 @@ MainLoop:
 }
 
 // noOverlaps - keep largest ranges and avoid overlap
-func noOverlaps(in []FileInfo) (res []FileInfo) {
+func noOverlaps(in []snap.FileInfo) (res []snap.FileInfo) {
 	for i := range in {
 		f := in[i]
 		if f.From == f.To {
@@ -887,8 +815,8 @@ func noOverlaps(in []FileInfo) (res []FileInfo) {
 	return res
 }
 
-func segments2(dir string) (res []FileInfo, err error) {
-	list, err := Segments(dir)
+func segments2(dir string) (res []snap.FileInfo, err error) {
+	list, err := snap.Segments(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -1895,7 +1823,7 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
 			_ = os.Remove(withoutExt + "-id.idx")
 		}
 	}
-	tmpFiles, err := TmpFiles(snapshotsDir.Path)
+	tmpFiles, err := snap.TmpFiles(snapshotsDir.Path)
 	if err != nil {
 		return err
 	}
