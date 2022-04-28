@@ -25,13 +25,22 @@ message StatsRequest {
 }
 
 message StatsReply {
-  bool completed = 1;
-  int32 progress = 2;
-  int32 peers = 3;
-  int32 torrents = 4;
-  uint64 bytesCompleted = 5;
-  uint64 bytesTotal = 6;
-  uint64 bytesUploadPerSec = 7;
-  uint64 bytesDownloadPerSec = 8;
-  uint64 connections = 9;
+  // First step on startup - "resolve metadata":
+  //   - understand total amount of data to download
+  //   - ensure all pieces hashes available
+  //   - validate files after crush
+  //   - when all metadata ready - can start download/upload
+  int32  metadataReady = 1;
+  int32 filesTotal = 2;
+
+  int32 peersUnique = 4;
+  uint64 connectionsTotal = 5;
+
+  bool completed = 6;
+  float progress = 7;
+
+  uint64 bytesCompleted = 8;
+  uint64 bytesTotal = 9;
+  uint64 uploadRate = 10; // bytes/sec
+  uint64 downloadRate = 11; // bytes/sec
 }
