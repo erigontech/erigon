@@ -171,6 +171,7 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 	torrents := cli.TorrentClient.Torrents()
 	connStats := cli.TorrentClient.ConnStats()
 
+	stats.Completed = true
 	stats.BytesRead = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesWritten = uint64(connStats.BytesWrittenData.Int64())
 
