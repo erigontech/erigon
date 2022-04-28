@@ -591,7 +591,6 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 
 		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
 		blockNum = reader2.Lookup(txnHash[:])
-		fmt.Printf("blockNum: %d\n", blockNum)
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {
 			return
