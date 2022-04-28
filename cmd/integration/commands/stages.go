@@ -1149,7 +1149,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	vmConfig := &vm.Config{}
 
-	genesis, chainConfig := byChain(chain)
+	genesis, _ := byChain(chain)
 
 	events := privateapi.NewEvents()
 
