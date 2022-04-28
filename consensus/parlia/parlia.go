@@ -509,12 +509,10 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				}
 			}
 			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
+				log.Info("Constructing checkpoint", "number", number, "checkpointInterval", checkpointInterval, "blocksAvailble", p.snapshots.BlocksAvailable())
 				// Headers included into the snapshots have to be trusted as checkpoints
-				checkpoint := chain.GetHeaderByNumber(number)
+				checkpoint := chain.GetHeader(hash, number)
 				if checkpoint != nil {
-					// get checkpoint data
-					hash := checkpoint.Hash()
-
 					validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
 					// get validators from headers
 					validators, err := ParseValidators(validatorBytes)
