@@ -232,14 +232,16 @@ type Parlia struct {
 	slashABI        abi.ABI
 
 	// The fields below are for testing only
-	fakeDiff bool     // Skip difficulty verifications
-	forks    []uint64 // Forks extracted from the chainConfig
+	fakeDiff       bool     // Skip difficulty verifications
+	forks          []uint64 // Forks extracted from the chainConfig
+	snapshotBlocks uint64   // Number of blocks available via snapshots
 }
 
 // New creates a Parlia consensus engine.
 func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
+	snapshotBlocks uint64,
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia
@@ -276,6 +278,7 @@ func New(
 		slashABI:        sABI,
 		signer:          types.LatestSigner(chainConfig),
 		forks:           forkid.GatherForks(chainConfig),
+		snapshotBlocks:  snapshotBlocks,
 	}
 
 	return c
@@ -502,29 +505,28 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				snap = s
 				break
 			}
-		}
+			if number <= p.snapshotBlocks || number == 0 {
+				// Headers included into the snapshots have to be trusted as checkpoints
+				checkpoint := chain.GetHeaderByNumber(number)
+				if checkpoint != nil {
+					// get checkpoint data
+					hash := checkpoint.Hash()
 
-		// If we're at the genesis, snapshot the initial state.
-		if number == 0 {
-			checkpoint := chain.GetHeaderByNumber(number)
-			if checkpoint != nil {
-				// get checkpoint data
-				hash := checkpoint.Hash()
+					validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
+					// get validators from headers
+					validators, err := ParseValidators(validatorBytes)
+					if err != nil {
+						return nil, err
+					}
 
-				validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
-				// get validators from headers
-				validators, err := ParseValidators(validatorBytes)
-				if err != nil {
-					return nil, err
+					// new snapshot
+					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
+					if err := snap.store(p.db); err != nil {
+						return nil, err
+					}
+					log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+					break
 				}
-
-				// new snapshot
-				snap = newSnapshot(p.config, p.signatures, number, hash, validators)
-				if err := snap.store(p.db); err != nil {
-					return nil, err
-				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
-				break
 			}
 		}
 
