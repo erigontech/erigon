@@ -581,6 +581,10 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		gg.Reset(offset)
 		buf, _ = gg.Next(buf[:0])
 		fmt.Printf("alex3: %d\n", len(buf))
+		if len(buf) == 0 {
+			continue
+		}
+
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if len(buf) > 1 && txnHash[0] != buf[0] {
 			continue
