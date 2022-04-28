@@ -368,18 +368,18 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
-		"blk/s", speed,
-		"tx/s", speedTx,
-		"Mgas/s", speedMgas,
-		"gasState", gasState,
+		"blk/s", fmt.Sprintf("%.1f", speed),
+		"tx/s", fmt.Sprintf("%.1f", speedTx),
+		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
+		"gasState", fmt.Sprintf("%.2f", gasState),
 	}
 	if estimatedTime > 0 {
 		logpairs = append(logpairs, "estimated duration", estimatedTime)
 	}
 	if batch != nil {
-		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
+		logpairs = append(logpairs, "batch", libcommon.ByteCount(uint64(batch.BatchSize())))
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	logpairs = append(logpairs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime

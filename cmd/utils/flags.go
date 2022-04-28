@@ -491,7 +491,7 @@ var (
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of pending connection attempts (defaults used if set to 0)",
+		Usage: "Maximum number of TCP connections pending to become connected peers",
 		Value: node.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
@@ -648,6 +648,11 @@ var (
 		Value: "4mb",
 		Usage: "bytes per second, example: 32mb",
 	}
+	TorrentDownloadSlotsFlag = cli.IntFlag{
+		Name:  "torrent.download.slots",
+		Value: 3,
+		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -656,7 +661,7 @@ var (
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
 		Value: 100,
-		Usage: "limit amount of torrent peers",
+		Usage: "unused parameter (reserved for future use)",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
@@ -1060,14 +1065,12 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 
-	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
-			panic(err)
-		}
-		sz := cfg.MdbxPageSize.Bytes()
-		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
-		}
+	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+		panic(err)
+	}
+	sz := cfg.MdbxPageSize.Bytes()
+	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
 	}
 }
 
@@ -1396,9 +1399,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
-			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
 			db,
+			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
 		)
 		if err != nil {
 			panic(err)

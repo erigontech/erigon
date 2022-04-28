@@ -46,31 +46,29 @@ func (s *TxPoolServer) All(context.Context, *proto_txpool.AllRequest) (*proto_tx
 	reply := &proto_txpool.AllReply{}
 	reply.Txs = make([]*proto_txpool.AllReply_Tx, 0, 32)
 	for addr, list := range pending {
-		addrBytes := addr.Bytes()
 		for i := range list {
 			b, err := rlp.EncodeToBytes(list[i])
 			if err != nil {
 				return nil, err
 			}
 			reply.Txs = append(reply.Txs, &proto_txpool.AllReply_Tx{
-				Sender: addrBytes,
-				Type:   proto_txpool.AllReply_PENDING,
-				RlpTx:  b,
+				Sender:  gointerfaces.ConvertAddressToH160(addr),
+				TxnType: proto_txpool.AllReply_PENDING,
+				RlpTx:   b,
 			})
 		}
 	}
 
 	for addr, list := range queued {
-		addrBytes := addr.Bytes()
 		for i := range list {
 			b, err := rlp.EncodeToBytes(list[i])
 			if err != nil {
 				return nil, err
 			}
 			reply.Txs = append(reply.Txs, &proto_txpool.AllReply_Tx{
-				Sender: addrBytes,
-				Type:   proto_txpool.AllReply_QUEUED,
-				RlpTx:  b,
+				Sender:  gointerfaces.ConvertAddressToH160(addr),
+				TxnType: proto_txpool.AllReply_QUEUED,
+				RlpTx:   b,
 			})
 		}
 	}

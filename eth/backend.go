@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/holiman/uint256"
@@ -79,7 +80,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -287,10 +288,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			if err != nil {
 				return nil, err
 			}
-			if err = downloader.CreateTorrentFilesAndAdd(ctx, config.SnapshotDir, backend.downloadProtocols.TorrentClient); err != nil {
-				return nil, fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
+			if err := backend.downloadProtocols.Start(ctx, true); err != nil {
+				return nil, fmt.Errorf("downloadProtocols start: %w", err)
 			}
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir, false)
+
+			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir)
 			if err != nil {
 				return nil, fmt.Errorf("new server: %w", err)
 			}
@@ -319,7 +321,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		consensusConfig = &config.Ethash
 	}
 
-	backend.engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots.BlocksAvailable())
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots.BlocksAvailable())
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 
@@ -332,7 +334,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		if err != nil {
 			return err
 		}
-		if err := snapshotsynccli.EnsureNotChanged(tx, config.Snapshot); err != nil {
+		if err := snap.EnsureNotChanged(tx, config.Snapshot); err != nil {
 			return err
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())

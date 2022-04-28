@@ -751,7 +751,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 			return err
 		}
 		if k != nil && binary.BigEndian.Uint64(k) >= firstMovedTxnID {
-			panic(fmt.Sprintf("must not happen, ResetSequence: %d, lastInDB: %d\n", firstMovedTxnID, binary.BigEndian.Uint64(k)))
+			panic(fmt.Sprintf("must not happen, ResetSequence: %d, lastInDB: %d", firstMovedTxnID, binary.BigEndian.Uint64(k)))
 		}
 
 		if err := ResetSequence(tx, kv.EthTx, firstMovedTxnID); err != nil {

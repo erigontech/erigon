@@ -69,12 +69,13 @@ func (c *testTransport) close(err error) {
 
 func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *Server {
 	config := Config{
-		Name:        "test",
-		MaxPeers:    10,
-		ListenAddr:  "127.0.0.1:0",
-		NoDiscovery: true,
-		PrivateKey:  newkey(),
-		Log:         testlog.Logger(t, log.LvlError),
+		Name:            "test",
+		MaxPeers:        10,
+		MaxPendingPeers: 10,
+		ListenAddr:      "127.0.0.1:0",
+		NoDiscovery:     true,
+		PrivateKey:      newkey(),
+		Log:             testlog.Logger(t, log.LvlError),
 	}
 	server := &Server{
 		Config:      config,
@@ -211,18 +212,20 @@ func TestServerDial(t *testing.T) {
 // This test checks that RemovePeer disconnects the peer if it is connected.
 func TestServerRemovePeerDisconnect(t *testing.T) {
 	srv1 := &Server{Config: Config{
-		PrivateKey:  newkey(),
-		MaxPeers:    1,
-		NoDiscovery: true,
-		Log:         testlog.Logger(t, log.LvlTrace).New("server", "1"),
+		PrivateKey:      newkey(),
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		Log:             testlog.Logger(t, log.LvlTrace).New("server", "1"),
 	}}
 	srv2 := &Server{Config: Config{
-		PrivateKey:  newkey(),
-		MaxPeers:    1,
-		NoDiscovery: true,
-		NoDial:      true,
-		ListenAddr:  "127.0.0.1:0",
-		Log:         testlog.Logger(t, log.LvlTrace).New("server", "2"),
+		PrivateKey:      newkey(),
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+		ListenAddr:      "127.0.0.1:0",
+		Log:             testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
 	if err := srv1.TestStart(); err != nil {
 		t.Fatal("cant start srv1")
@@ -249,12 +252,13 @@ func TestServerAtCap(t *testing.T) {
 	trustedID := enode.PubkeyToIDV4(&trustedNode.PublicKey)
 	srv := &Server{
 		Config: Config{
-			PrivateKey:   newkey(),
-			MaxPeers:     10,
-			NoDial:       true,
-			NoDiscovery:  true,
-			TrustedNodes: []*enode.Node{newNode(trustedID, "")},
-			Log:          testlog.Logger(t, log.LvlTrace),
+			PrivateKey:      newkey(),
+			MaxPeers:        10,
+			MaxPendingPeers: 10,
+			NoDial:          true,
+			NoDiscovery:     true,
+			TrustedNodes:    []*enode.Node{newNode(trustedID, "")},
+			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 	}
 	if err := srv.TestStart(); err != nil {
@@ -325,12 +329,13 @@ func TestServerPeerLimits(t *testing.T) {
 
 	srv := &Server{
 		Config: Config{
-			PrivateKey:  srvkey,
-			MaxPeers:    0,
-			NoDial:      true,
-			NoDiscovery: true,
-			Protocols:   []Protocol{discard},
-			Log:         testlog.Logger(t, log.LvlTrace),
+			PrivateKey:      srvkey,
+			MaxPeers:        0,
+			MaxPendingPeers: 50,
+			NoDial:          true,
+			NoDiscovery:     true,
+			Protocols:       []Protocol{discard},
+			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return tp },
 	}
@@ -432,12 +437,13 @@ func TestServerSetupConn(t *testing.T) {
 	for i, test := range tests {
 		t.Run(test.wantCalls, func(t *testing.T) {
 			cfg := Config{
-				PrivateKey:  srvkey,
-				MaxPeers:    10,
-				NoDial:      true,
-				NoDiscovery: true,
-				Protocols:   []Protocol{discard},
-				Log:         testlog.Logger(t, log.LvlTrace),
+				PrivateKey:      srvkey,
+				MaxPeers:        10,
+				MaxPendingPeers: 10,
+				NoDial:          true,
+				NoDiscovery:     true,
+				Protocols:       []Protocol{discard},
+				Log:             testlog.Logger(t, log.LvlTrace),
 			}
 			srv := &Server{
 				Config:       cfg,
@@ -518,13 +524,14 @@ func TestServerInboundThrottle(t *testing.T) {
 	newTransportCalled := make(chan struct{})
 	srv := &Server{
 		Config: Config{
-			PrivateKey:  newkey(),
-			ListenAddr:  "127.0.0.1:0",
-			MaxPeers:    10,
-			NoDial:      true,
-			NoDiscovery: true,
-			Protocols:   []Protocol{discard},
-			Log:         testlog.Logger(t, log.LvlTrace),
+			PrivateKey:      newkey(),
+			ListenAddr:      "127.0.0.1:0",
+			MaxPeers:        10,
+			MaxPendingPeers: 10,
+			NoDial:          true,
+			NoDiscovery:     true,
+			Protocols:       []Protocol{discard},
+			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport {
 			newTransportCalled <- struct{}{}
