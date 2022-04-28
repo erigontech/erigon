@@ -39,7 +39,7 @@ message AllReply {
   }
   message Tx {
     TxnType txnType = 1;
-    bytes sender = 2;
+    types.H160 sender = 2;
     bytes rlpTx = 3;
   }
   repeated Tx txs = 1;
@@ -47,7 +47,7 @@ message AllReply {
 
 message PendingReply {
   message Tx {
-    bytes sender = 1;
+    types.H160 sender = 1;
     bytes rlpTx = 2;
     bool isLocal = 3;
   }

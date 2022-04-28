@@ -133,9 +133,11 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpo
 	defer tx.Rollback()
 	reply := &txpool_proto.AllReply{}
 	reply.Txs = make([]*txpool_proto.AllReply_Tx, 0, 32)
+	var senderArr [20]byte
 	s.txPool.deprecatedForEach(ctx, func(rlp, sender []byte, t SubPoolType) {
+		copy(senderArr[:], sender) // TODO: optimize
 		reply.Txs = append(reply.Txs, &txpool_proto.AllReply_Tx{
-			Sender:  sender,
+			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
 			TxnType: convertSubPoolType(t),
 			RlpTx:   common.Copy(rlp),
 		})
@@ -155,9 +157,11 @@ func (s *GrpcServer) Pending(ctx context.Context, _ *emptypb.Empty) (*txpool_pro
 	if err := s.txPool.Best(math.MaxInt16, &txSlots, tx); err != nil {
 		return nil, err
 	}
+	var senderArr [20]byte
 	for i := range txSlots.Txs {
+		copy(senderArr[:], txSlots.Senders.At(i)) // TODO: optimize
 		reply.Txs = append(reply.Txs, &txpool_proto.PendingReply_Tx{
-			Sender:  txSlots.Senders.At(i),
+			Sender:  gointerfaces.ConvertAddressToH160(senderArr),
 			RlpTx:   txSlots.Txs[i],
 			IsLocal: txSlots.IsLocal[i],
 		})
