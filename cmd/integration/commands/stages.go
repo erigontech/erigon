@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -296,7 +296,7 @@ var cmdSetSnapshto = &cobra.Command{
 			snCfg = allSnapshots(chainConfig).Cfg()
 		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return snapshotsynccli.ForceSetFlags(tx, snCfg)
+			return snap.ForceSetFlags(tx, snCfg)
 		}); err != nil {
 			return err
 		}

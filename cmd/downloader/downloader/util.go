@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 )
@@ -54,7 +54,7 @@ func AllTorrentFiles(dir string) ([]string, error) {
 	}
 	var res []string
 	for _, f := range files {
-		if !snapshotsync.IsCorrectFileName(f.Name()) {
+		if !snap.IsCorrectFileName(f.Name()) {
 			continue
 		}
 		fileInfo, err := f.Info()
@@ -78,7 +78,7 @@ func allSegmentFiles(dir string) ([]string, error) {
 	}
 	var res []string
 	for _, f := range files {
-		if !snapshotsync.IsCorrectFileName(f.Name()) {
+		if !snap.IsCorrectFileName(f.Name()) {
 			continue
 		}
 		fileInfo, err := f.Info()
@@ -98,11 +98,11 @@ func allSegmentFiles(dir string) ([]string, error) {
 
 // BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
 func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (ok bool, err error) {
-	f, err := snapshotsync.ParseFileName(root.Path, originalFileName)
+	f, err := snap.ParseFileName(root.Path, originalFileName)
 	if err != nil {
 		return false, err
 	}
-	if f.To-f.From != snapshotsync.DEFAULT_SEGMENT_SIZE {
+	if f.To-f.From != snap.DEFAULT_SEGMENT_SIZE {
 		return false, nil
 	}
 	torrentFilePath := filepath.Join(root.Path, originalFileName+".torrent")
