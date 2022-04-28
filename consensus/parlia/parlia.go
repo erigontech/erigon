@@ -511,7 +511,6 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 		if number%p.config.Epoch == 0 {
 			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
-				log.Info("Constructing checkpoint", "number", number, "epoch", p.config.Epoch, "blocksAvailble", p.snapshots.BlocksAvailable())
 				// Headers included into the snapshots have to be trusted as checkpoints
 				checkpoint := chain.GetHeader(hash, number)
 				if checkpoint != nil {
@@ -562,12 +561,10 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for i := 0; i < len(headers)/2; i++ {
 		headers[i], headers[len(headers)-1-i] = headers[len(headers)-1-i], headers[i]
 	}
-	log.Info("Apply headers to snapshots", "headers", len(headers), "parents", len(parents))
 	snap, err := snap.apply(headers, chain, parents, p.chainConfig.ChainID)
 	if err != nil {
 		return nil, err
 	}
-	log.Info("Finished apply")
 	p.recentSnaps.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
