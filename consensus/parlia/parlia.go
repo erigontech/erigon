@@ -520,13 +520,8 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					if err != nil {
 						return nil, err
 					}
-
 					// new snapshot
 					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
-					if err := snap.store(p.db); err != nil {
-						return nil, err
-					}
-					log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash, "validators", len(validators))
 					break
 				}
 			}
