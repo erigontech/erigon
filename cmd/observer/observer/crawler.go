@@ -243,6 +243,9 @@ func (crawler *Crawler) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("failed to count ping errors: %w", err)
 		}
+		if prevPingTries == nil {
+			prevPingTries = new(uint)
+		}
 
 		handshakeNextRetryTime, err := crawler.db.FindHandshakeRetryTime(ctx, id)
 		if err != nil {
