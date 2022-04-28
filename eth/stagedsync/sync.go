@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -301,7 +300,7 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 			if err1 != nil {
 				return err1
 			}
-			bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
+			bucketSizes = append(bucketSizes, bucket, common.StorageSize(sz))
 		}
 		log.Info("Tables", bucketSizes...)
 	}
