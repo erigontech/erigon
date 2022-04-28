@@ -1344,7 +1344,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
 		default:
 		}
@@ -1412,7 +1412,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
 		default:
 		}
@@ -1467,7 +1467,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
-				"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys),
+				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
 		default:
 		}

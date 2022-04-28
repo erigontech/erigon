@@ -975,8 +975,8 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc),
+		"sys", libcommon.ByteCount(m.Sys))
 
 	return now
 }
