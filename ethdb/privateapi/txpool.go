@@ -53,9 +53,9 @@ func (s *TxPoolServer) All(context.Context, *proto_txpool.AllRequest) (*proto_tx
 				return nil, err
 			}
 			reply.Txs = append(reply.Txs, &proto_txpool.AllReply_Tx{
-				Sender: addrBytes,
-				Type:   proto_txpool.AllReply_PENDING,
-				RlpTx:  b,
+				Sender:  addrBytes,
+				TxnType: proto_txpool.AllReply_PENDING,
+				RlpTx:   b,
 			})
 		}
 	}
@@ -68,9 +68,9 @@ func (s *TxPoolServer) All(context.Context, *proto_txpool.AllRequest) (*proto_tx
 				return nil, err
 			}
 			reply.Txs = append(reply.Txs, &proto_txpool.AllReply_Tx{
-				Sender: addrBytes,
-				Type:   proto_txpool.AllReply_QUEUED,
-				RlpTx:  b,
+				Sender:  addrBytes,
+				TxnType: proto_txpool.AllReply_QUEUED,
+				RlpTx:   b,
 			})
 		}
 	}
