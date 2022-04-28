@@ -43,7 +43,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
 		if it.TorrentHash == nil {
-			_, err := BuildTorrentAndAdd(ctx, it.Path, s.snapshotDir, s.t.TorrentClient)
+			err := BuildTorrentAndAdd(ctx, it.Path, s.snapshotDir, s.t.TorrentClient)
 			if err != nil {
 				return nil, err
 			}

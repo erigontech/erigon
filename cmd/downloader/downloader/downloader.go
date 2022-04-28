@@ -74,7 +74,7 @@ func readPeerID(db kv.RoDB) (peerID []byte, err error) {
 
 func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 	if err := BuildTorrentsAndAdd(ctx, cli.snapshotDir, cli.TorrentClient); err != nil {
-		return err
+		return fmt.Errorf("BuildTorrentsAndAdd: %w", err)
 	}
 
 	var sem = semaphore.NewWeighted(int64(cli.cfg.DownloadSlots))
