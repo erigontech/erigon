@@ -124,4 +124,5 @@ var DefaultFlags = []cli.Flag{
 	utils.HeimdallURLFlag,
 	utils.WithoutHeimdallFlag,
 	utils.EthStatsURLFlag,
+	utils.OverrideTerminalTotalDifficulty,
 }
