@@ -57,7 +57,7 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 			return nil, err
 		}
 		addr := common.BytesToAddress(reply.Txs[i].Sender)
-		switch reply.Txs[i].Type {
+		switch reply.Txs[i].TxnType {
 		case proto_txpool.AllReply_PENDING:
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)
