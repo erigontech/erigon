@@ -786,13 +786,12 @@ running:
 				// Ensure that the trusted flag is set before checking against MaxPeers.
 				c.flags |= trustedConn
 			}
-			// TODO: track in-progress inbound node IDs (pre-Peer) to avoid dialing them.
-			c.cont <- srv.postHandshakeChecks(peers, inboundCount, c)
+			c.cont <- nil
 
 		case c := <-srv.checkpointAddPeer:
 			// At this point the connection is past the protocol handshake.
 			// Its capabilities are known and the remote identity is verified.
-			err := srv.addPeerChecks(peers, inboundCount, c)
+			err := srv.postHandshakeChecks(peers, inboundCount, c)
 			if err == nil {
 				// The handshakes are done and it passed all checks.
 				p := srv.launchPeer(c, c.pubkey)
@@ -850,19 +849,11 @@ func (srv *Server) postHandshakeChecks(peers map[enode.ID]*Peer, inboundCount in
 		return DiscAlreadyConnected
 	case c.node.ID() == srv.localnode.ID():
 		return DiscSelf
+	case (len(srv.Protocols) > 0) && (countMatchingProtocols(srv.Protocols, c.caps) == 0):
+		return DiscUselessPeer
 	default:
 		return nil
 	}
-}
-
-func (srv *Server) addPeerChecks(peers map[enode.ID]*Peer, inboundCount int, c *conn) error {
-	// Drop connections with no matching protocols.
-	if len(srv.Protocols) > 0 && countMatchingProtocols(srv.Protocols, c.caps) == 0 {
-		return DiscUselessPeer
-	}
-	// Repeat the post-handshake checks because the
-	// peer set might have changed since those checks were performed.
-	return srv.postHandshakeChecks(peers, inboundCount, c)
 }
 
 // listenLoop runs in its own goroutine and accepts

@@ -274,22 +274,30 @@ func TestServerAtCap(t *testing.T) {
 	}
 
 	// Inject a few connections to fill up the peer set.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < srv.Config.MaxPeers; i++ {
 		c := newconn(randomID())
 		if err := srv.checkpoint(c, srv.checkpointAddPeer); err != nil {
 			t.Fatalf("could not add conn %d: %v", i, err)
 		}
 	}
+
 	// Try inserting a non-trusted connection.
 	anotherID := randomID()
 	c := newconn(anotherID)
-	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
 		t.Error("wrong error for insert:", err)
 	}
+
 	// Try inserting a trusted connection.
 	c = newconn(trustedID)
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
-		t.Error("unexpected error for trusted conn @posthandshake:", err)
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != nil {
+		t.Error("unexpected error for trusted conn:", err)
 	}
 	if !c.is(trustedConn) {
 		t.Error("Server did not set trusted flag")
@@ -298,7 +306,10 @@ func TestServerAtCap(t *testing.T) {
 	// Remove from trusted set and try again
 	srv.RemoveTrustedPeer(newNode(trustedID, ""))
 	c = newconn(trustedID)
-	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -306,7 +317,10 @@ func TestServerAtCap(t *testing.T) {
 	srv.AddTrustedPeer(newNode(anotherID, ""))
 	c = newconn(anotherID)
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
-		t.Error("unexpected error for trusted conn @posthandshake:", err)
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != nil {
+		t.Error("unexpected error for trusted conn:", err)
 	}
 	if !c.is(trustedConn) {
 		t.Error("Server did not set trusted flag")
@@ -322,8 +336,7 @@ func TestServerPeerLimits(t *testing.T) {
 		pubkey: &clientkey.PublicKey,
 		phs: protoHandshake{
 			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),
-			// Force "DiscUselessPeer" due to unmatching caps
-			// Caps: []Cap{discard.cap()},
+			Caps:   []Cap{discard.cap()},
 		},
 	}
 
@@ -348,35 +361,31 @@ func TestServerPeerLimits(t *testing.T) {
 	flags := dynDialedConn
 	dialDest := clientnode
 	conn, _ := net.Pipe()
-	srv.SetupConn(conn, flags, dialDest)
-	if tp.closeErr != DiscTooManyPeers {
-		t.Errorf("unexpected close error: %q", tp.closeErr)
+	err := srv.SetupConn(conn, flags, dialDest)
+	_ = conn.Close()
+	if !errors.Is(err, DiscTooManyPeers) {
+		t.Fatalf("expected DiscTooManyPeers, but got error: %q", err)
 	}
-	conn.Close()
 
 	srv.AddTrustedPeer(clientnode)
 
 	// Check that server allows a trusted peer despite being full.
 	conn, _ = net.Pipe()
-	srv.SetupConn(conn, flags, dialDest)
-	if tp.closeErr == DiscTooManyPeers {
-		t.Errorf("failed to bypass MaxPeers with trusted node: %q", tp.closeErr)
+	err = srv.SetupConn(conn, flags, dialDest)
+	_ = conn.Close()
+	if err != nil {
+		t.Fatalf("failed to bypass MaxPeers with trusted node: %q", err)
 	}
-
-	if tp.closeErr != DiscUselessPeer {
-		t.Errorf("unexpected close error: %q", tp.closeErr)
-	}
-	conn.Close()
 
 	srv.RemoveTrustedPeer(clientnode)
 
 	// Check that server is full again.
 	conn, _ = net.Pipe()
-	srv.SetupConn(conn, flags, dialDest)
-	if tp.closeErr != DiscTooManyPeers {
-		t.Errorf("unexpected close error: %q", tp.closeErr)
+	err = srv.SetupConn(conn, flags, dialDest)
+	_ = conn.Close()
+	if !errors.Is(err, DiscTooManyPeers) {
+		t.Fatalf("expected DiscTooManyPeers, but got error: %q", err)
 	}
-	conn.Close()
 }
 
 func TestServerSetupConn(t *testing.T) {
@@ -423,7 +432,7 @@ func TestServerSetupConn(t *testing.T) {
 		{
 			tt:           &setupTransport{pubkey: srvpub, phs: protoHandshake{Pubkey: crypto.MarshalPubkey(srvpub)}},
 			flags:        inboundConn,
-			wantCalls:    "doEncHandshake,close,",
+			wantCalls:    "doEncHandshake,doProtoHandshake,close,",
 			wantCloseErr: DiscSelf,
 		},
 		{
@@ -490,6 +499,7 @@ func (c *setupTransport) doProtoHandshake(our *protoHandshake) (*protoHandshake,
 	}
 	return &c.phs, nil
 }
+
 func (c *setupTransport) close(err error) {
 	c.calls += "close,"
 	c.closeErr = err
@@ -497,10 +507,11 @@ func (c *setupTransport) close(err error) {
 
 // setupConn shouldn't write to/read from the connection.
 func (c *setupTransport) WriteMsg(Msg) error {
-	panic("WriteMsg called on setupTransport")
+	return errors.New("WriteMsg called on setupTransport")
 }
+
 func (c *setupTransport) ReadMsg() (Msg, error) {
-	panic("ReadMsg called on setupTransport")
+	return Msg{}, errors.New("ReadMsg called on setupTransport")
 }
 
 func newkey() *ecdsa.PrivateKey {
