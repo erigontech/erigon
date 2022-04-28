@@ -96,43 +96,32 @@ func allSegmentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
-// BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (ok bool, err error) {
-	f, err := snapshotsync.ParseFileName(root.Path, originalFileName)
+// BuildTorrentAndAdd - create .torrent files from .seg files (big IO) - if .seg files were added manually
+func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) error {
+	f, err := snapshotsync.ParseFileName(snapshotDir.Path, originalFileName)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if f.To-f.From != snapshotsync.DEFAULT_SEGMENT_SIZE {
-		return false, nil
-	}
-	torrentFilePath := filepath.Join(root.Path, originalFileName+".torrent")
-	if _, err := os.Stat(torrentFilePath); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return false, err
-		}
-		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
-		if err := info.BuildFromFilePath(filepath.Join(root.Path, originalFileName)); err != nil {
-			return false, err
-		}
-		if err != nil {
-			return false, err
-		}
-		if err := CreateTorrentFile(root, info, nil); err != nil {
-			return false, err
-		}
-	}
-	return true, nil
-}
-
-func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) error {
-	ok, err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir)
-	if err != nil {
-		return fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
-	}
-	if !ok {
 		return nil
 	}
 	torrentFilePath := filepath.Join(snapshotDir.Path, originalFileName+".torrent")
+	if _, err := os.Stat(torrentFilePath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
+		if err := info.BuildFromFilePath(filepath.Join(snapshotDir.Path, originalFileName)); err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		if err := CreateTorrentFile(snapshotDir, info, nil); err != nil {
+			return err
+		}
+	}
+
 	_, err = AddTorrentFile(ctx, torrentFilePath, client)
 	if err != nil {
 		return fmt.Errorf("AddTorrentFile: %w", err)
