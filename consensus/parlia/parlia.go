@@ -508,8 +508,10 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					break
 				}
 			}
+		}
+		if number%p.config.Epoch == 0 {
 			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
-				log.Info("Constructing checkpoint", "number", number, "checkpointInterval", checkpointInterval, "blocksAvailble", p.snapshots.BlocksAvailable())
+				log.Info("Constructing checkpoint", "number", number, "epoch", p.config.Epoch, "blocksAvailble", p.snapshots.BlocksAvailable())
 				// Headers included into the snapshots have to be trusted as checkpoints
 				checkpoint := chain.GetHeader(hash, number)
 				if checkpoint != nil {
