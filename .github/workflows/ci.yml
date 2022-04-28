@@ -41,8 +41,6 @@ jobs:
         uses: golangci/golangci-lint-action@v3
         with:
           version: v1.45
-          skip-pkg-cache: true
-          skip-build-cache: true
       - name: Install deps
         if: matrix.os == 'windows-2019'
         run: choco upgrade mingw cmake -y --no-progress

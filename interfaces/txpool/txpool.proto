@@ -32,13 +32,13 @@ message OnAddReply {
 
 message AllRequest {}
 message AllReply {
-  enum Type {
+  enum TxnType {
     PENDING = 0; // All currently processable transactions
     QUEUED = 1;  // Queued but non-processable transactions
     BASE_FEE = 2;  // BaseFee not enough baseFee non-processable transactions
   }
   message Tx {
-    Type type = 1;
+    TxnType txnType = 1;
     bytes sender = 2;
     bytes rlpTx = 3;
   }

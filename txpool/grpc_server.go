@@ -113,7 +113,7 @@ func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, chainID uint2
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*types2.VersionReply, error) {
 	return TxPoolAPIVersion, nil
 }
-func convertSubPoolType(t SubPoolType) txpool_proto.AllReply_Type {
+func convertSubPoolType(t SubPoolType) txpool_proto.AllReply_TxnType {
 	switch t {
 	case PendingSubPool:
 		return txpool_proto.AllReply_PENDING
@@ -135,9 +135,9 @@ func (s *GrpcServer) All(ctx context.Context, _ *txpool_proto.AllRequest) (*txpo
 	reply.Txs = make([]*txpool_proto.AllReply_Tx, 0, 32)
 	s.txPool.deprecatedForEach(ctx, func(rlp, sender []byte, t SubPoolType) {
 		reply.Txs = append(reply.Txs, &txpool_proto.AllReply_Tx{
-			Sender: sender,
-			Type:   convertSubPoolType(t),
-			RlpTx:  common.Copy(rlp),
+			Sender:  sender,
+			TxnType: convertSubPoolType(t),
+			RlpTx:   common.Copy(rlp),
 		})
 	}, tx)
 	return reply, nil
