@@ -97,43 +97,47 @@ func allSegmentFiles(dir string) ([]string, error) {
 }
 
 // BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (err error) {
+func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (ok bool, err error) {
 	f, err := snapshotsync.ParseFileName(root.Path, originalFileName)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if f.To-f.From != snapshotsync.DEFAULT_SEGMENT_SIZE {
-		return nil
+		return false, nil
 	}
 	torrentFilePath := filepath.Join(root.Path, originalFileName+".torrent")
 	if _, err := os.Stat(torrentFilePath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return err
+			return false, err
 		}
 		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
 		if err := info.BuildFromFilePath(filepath.Join(root.Path, originalFileName)); err != nil {
-			return err
+			return false, err
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := CreateTorrentFile(root, info, nil); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return true, nil
 }
 
-func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) (*torrent.Torrent, error) {
-	if err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir); err != nil {
-		return nil, fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
+func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) error {
+	ok, err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir)
+	if err != nil {
+		return fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
+	}
+	if !ok {
+		return nil
 	}
 	torrentFilePath := filepath.Join(snapshotDir.Path, originalFileName+".torrent")
-	t, err := AddTorrentFile(ctx, torrentFilePath, client)
+	_, err = AddTorrentFile(ctx, torrentFilePath, client)
 	if err != nil {
-		return nil, fmt.Errorf("AddTorrentFile: %w", err)
+		return fmt.Errorf("AddTorrentFile: %w", err)
 	}
-	return t, nil
+	return nil
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
@@ -151,7 +155,10 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir *dir.Rw) error {
 		wg.Add(1)
 		go func(f string, i int) {
 			defer wg.Done()
-			errs <- BuildTorrentFileIfNeed(ctx, f, snapshotDir)
+			_, err = BuildTorrentFileIfNeed(ctx, f, snapshotDir)
+			if err != nil {
+				errs <- err
+			}
 
 			select {
 			default:
@@ -203,9 +210,7 @@ func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torre
 				errs <- ctx.Err()
 			default:
 			}
-
-			_, err := BuildTorrentAndAdd(ctx, f, snapshotDir, client)
-			errs <- err
+			errs <- BuildTorrentAndAdd(ctx, f, snapshotDir, client)
 		}(f, i)
 	}
 	go func() {
