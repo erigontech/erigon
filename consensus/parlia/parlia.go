@@ -396,7 +396,7 @@ func (p *Parlia) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		return consensus.ErrUnknownAncestor
 	}
 
-	snap, err := p.snapshot(chain, number-1, header.ParentHash, parents)
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, parents, true /* verify */)
 	if err != nil {
 		return err
 	}
@@ -442,7 +442,7 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 		return errUnknownBlock
 	}
 	// Retrieve the snapshot needed to verify this header and cache it
-	snap, err := p.snapshot(chain, number-1, header.ParentHash, parents)
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, parents, true /* verify */)
 	if err != nil {
 		return err
 	}
@@ -485,7 +485,7 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
-func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header) (*Snapshot, error) {
+func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header, verify bool) (*Snapshot, error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header
@@ -504,12 +504,12 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
-				if snap != nil {
+				if !verify || snap != nil {
 					break
 				}
 			}
 		}
-		if number%p.config.Epoch == 0 {
+		if (verify && number%p.config.Epoch == 0) || number == 0 {
 			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
 				// Headers included into the snapshots have to be trusted as checkpoints
 				checkpoint := chain.GetHeader(hash, number)
@@ -588,7 +588,7 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
-	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil, false /* verify */)
 	if err != nil {
 		return err
 	}
@@ -683,7 +683,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	txs = userTxs
 	// warn if not in majority fork
 	number := header.Number.Uint64()
-	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil, false /* verify */)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -803,7 +803,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	val, signFn := p.val, p.signFn
 	p.lock.RUnlock()
 
-	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil, false /* verify */)
 	if err != nil {
 		return err
 	}
@@ -873,7 +873,7 @@ func (p *Parlia) SealHash(header *types.Header) common.Hash {
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have.
 func (p *Parlia) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
-	snap, err := p.snapshot(chain, parentNumber, parentHash, nil)
+	snap, err := p.snapshot(chain, parentNumber, parentHash, nil, false /* verify */)
 	if err != nil {
 		return nil
 	}
@@ -948,7 +948,7 @@ func (p *Parlia) shouldWaitForCurrentBlockProcess(chain consensus.ChainHeaderRea
 }
 
 func (p *Parlia) EnoughDistance(chain consensus.ChainReader, header *types.Header) bool {
-	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
+	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil, false /* verify */)
 	if err != nil {
 		return true
 	}
@@ -960,7 +960,7 @@ func (p *Parlia) IsLocalBlock(header *types.Header) bool {
 }
 
 func (p *Parlia) AllowLightProcess(chain consensus.ChainReader, currentHeader *types.Header) bool {
-	snap, err := p.snapshot(chain, currentHeader.Number.Uint64()-1, currentHeader.ParentHash, nil)
+	snap, err := p.snapshot(chain, currentHeader.Number.Uint64()-1, currentHeader.ParentHash, nil, false /* verify */)
 	if err != nil {
 		return true
 	}
