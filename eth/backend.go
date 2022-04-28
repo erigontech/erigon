@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"google.golang.org/protobuf/types/known/emptypb"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -29,6 +28,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -324,10 +325,11 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			if err != nil {
 				return nil, err
 			}
-			if err = downloader.CreateTorrentFilesAndAdd(ctx, config.SnapshotDir, backend.downloadProtocols.TorrentClient); err != nil {
-				return nil, fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
+			if err := backend.downloadProtocols.Start(ctx, true); err != nil {
+				return nil, err
 			}
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir, false)
+
+			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir)
 			if err != nil {
 				return nil, fmt.Errorf("new server: %w", err)
 			}
