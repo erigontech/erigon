@@ -575,13 +575,10 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
 		txnId := reader.Lookup(txnHash[:])
 		offset := sn.IdxTxnHash.Lookup2(txnId)
-		fmt.Printf("alex1: %d-%d\n", sn.From, sn.To)
-		fmt.Printf("alex2: %d, %d, %x\n", txnId, offset, txnHash)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		buf, _ = gg.Next(buf[:0])
-		fmt.Printf("alex3: %d\n", len(buf))
-		if len(buf) == 0 {
+		if len(buf) == 0 { // system-txn
 			continue
 		}
 
@@ -594,6 +591,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 
 		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
 		blockNum = reader2.Lookup(txnHash[:])
+		fmt.Printf("blockNum: %d\n", blockNum)
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {
 			return
