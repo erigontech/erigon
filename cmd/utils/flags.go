@@ -134,6 +134,10 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
+	OverrideTerminalTotalDifficulty = BigFlag{
+		Name:  "override.terminaltotaldifficulty",
+		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
 		Name:  "ethash.cachesinmem",
@@ -1491,6 +1495,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
+	}
+
+	if ctx.GlobalIsSet(OverrideTerminalTotalDifficulty.Name) {
+		cfg.Genesis.Config.TerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
 	}
 }
 
