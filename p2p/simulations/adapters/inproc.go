@@ -96,6 +96,7 @@ func (s *SimAdapter) NewNode(config *NodeConfig) (Node, error) {
 		P2P: p2p.Config{
 			PrivateKey:      config.PrivateKey,
 			MaxPeers:        math.MaxInt32,
+			MaxPendingPeers: 50,
 			NoDiscovery:     true,
 			Dialer:          s,
 			EnableMsgEvents: config.EnableMsgEvents,
