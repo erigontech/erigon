@@ -206,17 +206,16 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	}()
 
 	var blockReader interfaces.FullBlockReader
-	var snapshotBlocks uint64
+	var allSnapshots *snapshotsync.RoSnapshots
 	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
 	if syncMode == ethconfig.SnapSync {
-		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
-		snapshotBlocks = allSnapshots.BlocksAvailable()
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	engine := initConsensusEngine(chainConfig, logger, snapshotBlocks)
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 
 	for !interrupt {
 		blockNum++
@@ -600,23 +599,23 @@ func (ww *WriterWrapper) CreateContract(address common.Address) error {
 	return nil
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshotBlocks uint64) (engine consensus.Engine) {
+func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	switch {
 	case chainConfig.Clique != nil:
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshotBlocks)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Aura != nil:
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshotBlocks)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Parlia != nil:
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshotBlocks)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshotBlocks)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshots)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}
