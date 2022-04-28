@@ -150,7 +150,7 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db, torrentDownloadSlots)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, db, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}

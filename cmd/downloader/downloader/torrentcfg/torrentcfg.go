@@ -45,15 +45,17 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, maxPeers, connsPerFile int, db kv.RwDB, downloadSlots int) (*Cfg, error) {
+func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, db kv.RwDB, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
-	torrentConfig.EstablishedConnsPerTorrent = connsPerFile       // default: 50
-	torrentConfig.HalfOpenConnsPerTorrent = min(25, connsPerFile) // default: 25
-	torrentConfig.TotalHalfOpenConns = 50                         // default: 100
+	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
 
-	torrentConfig.TorrentPeersHighWater = maxPeers         // default: 500
-	torrentConfig.TorrentPeersLowWater = min(50, maxPeers) // default: 50
+	// see: https://en.wikipedia.org/wiki/TCP_half-open
+	torrentConfig.TotalHalfOpenConns = 100     // default: 100
+	torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
+
+	torrentConfig.TorrentPeersHighWater = 500 // default: 500
+	torrentConfig.TorrentPeersLowWater = 50   // default: 50
 
 	torrentConfig.ListenPort = port
 	torrentConfig.Seed = true
@@ -103,11 +105,4 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
 	torrentConfig.DefaultStorage = m
 	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m, DownloadSlots: downloadSlots}, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

@@ -661,7 +661,7 @@ var (
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
 		Value: 100,
-		Usage: "limit amount of torrent peers",
+		Usage: "unused parameter (reserved for future use)",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
@@ -1399,7 +1399,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
-			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
 			db,
 			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
