@@ -138,6 +138,9 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
 		return err
 	}
+	if err := tx.ClearBucket(kv.BorReceipt); err != nil {
+		return err
+	}
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
