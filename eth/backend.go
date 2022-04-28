@@ -326,7 +326,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 				return nil, err
 			}
 			if err := backend.downloadProtocols.Start(ctx, true); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("downloadProtocols start: %w", err)
 			}
 
 			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols.DB, backend.downloadProtocols, config.SnapshotDir)
