@@ -126,12 +126,12 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *
 
 func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) (*torrent.Torrent, error) {
 	if err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
 	}
 	torrentFilePath := filepath.Join(snapshotDir.Path, originalFileName+".torrent")
 	t, err := AddTorrentFile(ctx, torrentFilePath, client)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("AddTorrentFile: %w", err)
 	}
 	return t, nil
 }
@@ -180,7 +180,7 @@ func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torre
 	defer logEvery.Stop()
 	files, err := allSegmentFiles(snapshotDir.Path)
 	if err != nil {
-		return err
+		return fmt.Errorf("allSegmentFiles: %w", err)
 	}
 	errs := make(chan error, len(files)*2)
 	wg := &sync.WaitGroup{}
