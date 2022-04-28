@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 const (
@@ -232,16 +233,16 @@ type Parlia struct {
 	slashABI        abi.ABI
 
 	// The fields below are for testing only
-	fakeDiff       bool     // Skip difficulty verifications
-	forks          []uint64 // Forks extracted from the chainConfig
-	snapshotBlocks uint64   // Number of blocks available via snapshots
+	fakeDiff  bool     // Skip difficulty verifications
+	forks     []uint64 // Forks extracted from the chainConfig
+	snapshots *snapshotsync.RoSnapshots
 }
 
 // New creates a Parlia consensus engine.
 func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
-	snapshotBlocks uint64,
+	snapshots *snapshotsync.RoSnapshots,
 ) *Parlia {
 	// get parlia config
 	parliaConfig := chainConfig.Parlia
@@ -278,7 +279,7 @@ func New(
 		slashABI:        sABI,
 		signer:          types.LatestSigner(chainConfig),
 		forks:           forkid.GatherForks(chainConfig),
-		snapshotBlocks:  snapshotBlocks,
+		snapshots:       snapshots,
 	}
 
 	return c
@@ -507,7 +508,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					break
 				}
 			}
-			if number <= p.snapshotBlocks || number == 0 {
+			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
 				// Headers included into the snapshots have to be trusted as checkpoints
 				checkpoint := chain.GetHeaderByNumber(number)
 				if checkpoint != nil {
