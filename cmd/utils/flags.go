@@ -1065,14 +1065,12 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 
-	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
-			panic(err)
-		}
-		sz := cfg.MdbxPageSize.Bytes()
-		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
-		}
+	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+		panic(err)
+	}
+	sz := cfg.MdbxPageSize.Bytes()
+	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
 	}
 }
 
