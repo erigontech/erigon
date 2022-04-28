@@ -503,7 +503,9 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
-				break
+				if snap != nil {
+					break
+				}
 			}
 			if number <= p.snapshotBlocks || number == 0 {
 				// Headers included into the snapshots have to be trusted as checkpoints
