@@ -1149,24 +1149,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	vmConfig := &vm.Config{}
 
-	genesis, chainConfig := byChain(chain)
-	var engine consensus.Engine
-	config := &ethconfig.Defaults
-	if chainConfig.Clique != nil {
-		c := params.CliqueSnapshot
-		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
-	} else if chainConfig.Aura != nil {
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
-	} else if chainConfig.Parlia != nil {
-		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
-	} else if chainConfig.Bor != nil {
-		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir)
-	} else { //ethash
-		engine = ethash.NewFaker()
-	}
+	genesis, _ := byChain(chain)
 
 	events := privateapi.NewEvents()
 
@@ -1184,13 +1167,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	br := getBlockReader(chainConfig)
-	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
-	if err != nil {
-		panic(err)
-	}
-
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
@@ -1205,6 +1181,30 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if cfg.Snapshot.Enabled {
 		snDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
 		cfg.SnapshotDir = snDir
+	}
+	var engine consensus.Engine
+	config := &ethconfig.Defaults
+	if chainConfig.Clique != nil {
+		c := params.CliqueSnapshot
+		c.DBPath = filepath.Join(datadir, "clique", "db")
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, allSn)
+	} else if chainConfig.Aura != nil {
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, allSn)
+	} else if chainConfig.Parlia != nil {
+		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, allSn)
+	} else if chainConfig.Bor != nil {
+		consensusConfig := &config.Bor
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, allSn)
+	} else { //ethash
+		engine = ethash.NewFaker()
+	}
+
+	br := getBlockReader(chainConfig)
+	blockDownloaderWindow := 65536
+	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
+	if err != nil {
+		panic(err)
 	}
 
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
