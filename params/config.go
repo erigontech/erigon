@@ -66,6 +66,8 @@ var (
 )
 
 var (
+	shadowTTD, _ = new(big.Int).SetString("50759031004925600000000", 10)
+
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
 		ChainName:           networkname.MainnetChainName,
@@ -86,6 +88,8 @@ var (
 		BerlinBlock:         big.NewInt(12_244_000),
 		LondonBlock:         big.NewInt(12_965_000),
 		ArrowGlacierBlock:   big.NewInt(13_773_000),
+		MergeForkBlock:      big.NewInt(15_675_026),
+		TerminalTotalDifficulty: shadowTTD,
 		Ethash:              new(EthashConfig),
 	}
 
