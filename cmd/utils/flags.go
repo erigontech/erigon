@@ -138,6 +138,10 @@ var (
 		Name:  "override.terminaltotaldifficulty",
 		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
 	}
+	OverrideMergeForkBlock = BigFlag{
+		Name:  "override.mergeForkBlock",
+		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
 		Name:  "ethash.cachesinmem",
@@ -1499,6 +1503,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 
 	if ctx.GlobalIsSet(OverrideTerminalTotalDifficulty.Name) {
 		cfg.Genesis.Config.TerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
+	}
+	if ctx.GlobalIsSet(OverrideMergeForkBlock.Name) {
+		cfg.Genesis.Config.MergeForkBlock = GlobalBig(ctx, OverrideMergeForkBlock.Name)
 	}
 }
 
