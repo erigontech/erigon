@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -44,6 +43,7 @@ var (
 	natSetting                     string
 	torrentVerbosity               string
 	downloadRateStr, uploadRateStr string
+	torrentDownloadSlots           int
 	torrentPort                    int
 	torrentMaxPeers                int
 	torrentConnsPerFile            int
@@ -64,6 +64,7 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -149,7 +150,7 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile, db)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, db, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
@@ -161,13 +162,11 @@ func Downloader(ctx context.Context) error {
 	}
 	defer protocols.Close()
 	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.TorrentClient.PeerID()))
-	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
-		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
+	if err := protocols.Start(ctx, false); err != nil {
+		return err
 	}
 
-	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
-
-	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, true)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
@@ -238,7 +237,7 @@ var printTorrentHashes = &cobra.Command{
 			return nil
 		}
 
-		oldContent, err := ioutil.ReadFile(targetFile)
+		oldContent, err := os.ReadFile(targetFile)
 		if err != nil {
 			return err
 		}
@@ -250,7 +249,7 @@ var printTorrentHashes = &cobra.Command{
 			log.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 			return nil
 		}
-		if err := ioutil.WriteFile(targetFile, serialized, 0644); err != nil {
+		if err := os.WriteFile(targetFile, serialized, 0644); err != nil {
 			return err
 		}
 		return nil

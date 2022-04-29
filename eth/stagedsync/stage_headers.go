@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -139,77 +138,6 @@ func SpawnStageHeaders(
 	}
 }
 
-func finishHandlingForkChoice(
-	forkChoice *engineapi.ForkChoiceMessage,
-	headHeight uint64,
-	s *StageState,
-	tx kv.RwTx,
-	cfg HeadersCfg,
-	useExternalTx bool,
-) error {
-	log.Info(fmt.Sprintf("[%s] Unsettled forkchoice after unwind", s.LogPrefix()), "height", headHeight, "forkchoice", forkChoice)
-
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
-	if err := fixCanonicalChain(s.LogPrefix(), logEvery, headHeight, forkChoice.HeadBlockHash, tx, cfg.blockReader); err != nil {
-		return err
-	}
-
-	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
-		return err
-	}
-	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-
-	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
-
-	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
-	if err != nil {
-		return err
-	}
-	if safeIsCanonical {
-		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
-	} else {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("safe block is not an ancestor of head block"),
-			}
-			cfg.hd.ClearPendingPayloadStatus()
-			sendErrResponse = false
-		}
-	}
-
-	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
-	if err != nil {
-		return err
-	}
-	if finalizedIsCanonical {
-		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
-	} else {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("finalized block is not an ancestor of head block"),
-			}
-			cfg.hd.ClearPendingPayloadStatus()
-		}
-	}
-
-	if err := s.Update(tx, headHeight); err != nil {
-		return err
-	}
-
-	if !useExternalTx {
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
-	cfg.hd.ClearUnsettledForkChoice()
-	return nil
-}
-
 // HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated)
 func HeadersPOS(
 	s *StageState,
@@ -253,7 +181,9 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter)
+		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter); err != nil {
+			return err
+		}
 	} else {
 		if err := handleNewPayload(payloadMessage, status, requestId, s, ctx, tx, cfg, headerInserter); err != nil {
 			return err
@@ -266,8 +196,46 @@ func HeadersPOS(
 	return nil
 }
 
+func safeAndFinalizedBlocksAreCanonical(
+	forkChoice *engineapi.ForkChoiceMessage,
+	s *StageState,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	sendErrResponse bool,
+) (bool, error) {
+	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+	if err != nil {
+		return false, err
+	}
+	if !safeIsCanonical {
+		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+		if sendErrResponse {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: errors.New("safe block is not an ancestor of head block"),
+			}
+		}
+		return false, nil
+	}
+
+	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+	if err != nil {
+		return false, err
+	}
+	if !finalizedIsCanonical {
+		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+		if sendErrResponse {
+			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+				CriticalError: errors.New("finalized block is not an ancestor of head block"),
+			}
+		}
+		return false, nil
+	}
+
+	return true, nil
+}
+
 func startHandlingForkChoice(
-	forkChoiceMessage *engineapi.ForkChoiceMessage,
+	forkChoice *engineapi.ForkChoiceMessage,
 	requestStatus engineapi.RequestStatus,
 	requestId int,
 	s *StageState,
@@ -277,14 +245,22 @@ func startHandlingForkChoice(
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
 ) error {
-	headerHash := forkChoiceMessage.HeadBlockHash
+	headerHash := forkChoice.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 	if currentHeadHash == headerHash { // no-op
 		log.Info(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		if requestStatus == engineapi.New {
+		canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, requestStatus == engineapi.New)
+		if err != nil {
+			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			if requestStatus == engineapi.New {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			}
+			return err
+		}
+		if canonical && requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
 				LatestValidHash: currentHeadHash,
@@ -359,8 +335,52 @@ func startHandlingForkChoice(
 	u.UnwindTo(forkingPoint, common.Hash{})
 	log.Trace(fmt.Sprintf("[%s] Fork choice unwind finished", s.LogPrefix()))
 
-	cfg.hd.SetUnsettledForkChoice(forkChoiceMessage, headerNumber)
+	cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 
+	return nil
+}
+
+func finishHandlingForkChoice(
+	forkChoice *engineapi.ForkChoiceMessage,
+	headHeight uint64,
+	s *StageState,
+	tx kv.RwTx,
+	cfg HeadersCfg,
+	useExternalTx bool,
+) error {
+	log.Info(fmt.Sprintf("[%s] Unsettled forkchoice after unwind", s.LogPrefix()), "height", headHeight, "forkchoice", forkChoice)
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	if err := fixCanonicalChain(s.LogPrefix(), logEvery, headHeight, forkChoice.HeadBlockHash, tx, cfg.blockReader); err != nil {
+		return err
+	}
+
+	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
+		return err
+	}
+
+	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
+	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, sendErrResponse)
+	if err != nil {
+		return err
+	}
+	if !canonical {
+		cfg.hd.ClearPendingPayloadStatus()
+	}
+
+	if err := s.Update(tx, headHeight); err != nil {
+		return err
+	}
+
+	if !useExternalTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+
+	cfg.hd.ClearUnsettledForkChoice()
 	return nil
 }
 
@@ -584,7 +604,7 @@ func schedulePoSDownload(
 	cfg.hd.SetPosStatus(headerdownload.Syncing)
 }
 
-func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) error {
+func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter) {
 	var lastValidHash common.Hash
 
 	headerLoadFunc := func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
@@ -617,8 +637,6 @@ func verifyAndSaveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserte
 	cfg.hd.HeadersCollector().Close()
 	cfg.hd.SetHeadersCollector(nil)
 	cfg.hd.SetPosStatus(headerdownload.Idle)
-
-	return err
 }
 
 // HeadersPOW progresses Headers stage for Proof-of-Work headers
@@ -852,11 +870,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		defer tx.Rollback()
 	}
 	// Delete canonical hashes that are being unwound
-	var headerProgress uint64
-	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return err
-	}
 	badBlock := u.BadBlock != (common.Hash{})
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
@@ -880,10 +893,8 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
 	}
-	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
-		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
-			return err
-		}
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1); err != nil {
+		return err
 	}
 	if badBlock {
 		var maxTd big.Int
@@ -956,8 +967,8 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc),
+		"sys", libcommon.ByteCount(m.Sys))
 
 	return now
 }
@@ -1105,7 +1116,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if s.BlockNumber == 0 {
+	if s.BlockNumber < 2 { // allow genesis
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
@@ -1179,10 +1190,10 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	preverified := snapshotsCfg.Preverified
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
 	i := 0
-	for filePath, infoHashStr := range preverified {
+	for _, p := range preverified {
 		req.Items[i] = &proto_downloader.DownloadItem{
-			TorrentHash: downloadergrpc.String2Proto(infoHashStr),
-			Path:        filePath,
+			TorrentHash: downloadergrpc.String2Proto(p.Hash),
+			Path:        p.Name,
 		}
 		i++
 	}
@@ -1194,14 +1205,13 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		default:
 		}
 		if _, err := cfg.snapshotDownloader.Download(ctx, req); err != nil {
-			log.Error("[Snapshots] Can't call downloader", "err", err)
+			log.Error("[Snapshots] call downloader", "err", err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
 		break
 	}
-	var prevBytesCompleted uint64
-	logEvery := time.NewTicker(logInterval)
+	logEvery := time.NewTicker(logInterval / 3)
 	defer logEvery.Stop()
 
 	// Print download progress until all segments are available
@@ -1211,23 +1221,24 @@ Loop:
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			if reply, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
 				log.Warn("Error while waiting for snapshots progress", "err", err)
-			} else if int(reply.Torrents) < len(snapshotsCfg.Preverified) {
-				log.Warn("Downloader has not enough snapshots (yet)")
-			} else if reply.Completed {
+			} else if stats.Completed {
 				break Loop
 			} else {
-				readBytesPerSec := (reply.BytesCompleted - prevBytesCompleted) / uint64(logInterval.Seconds())
-				// writeBytesPerSec += (reply.BytesWritten - prevBytesWritten) / int64(logInterval.Seconds())
+				if stats.MetadataReady < stats.FilesTotal {
+					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
+					continue
+				}
 
-				readiness := 100 * (float64(reply.BytesCompleted) / float64(reply.BytesTotal))
-				log.Info("[Snapshots] download", "progress", fmt.Sprintf("%.2f%%", readiness),
-					"download", libcommon.ByteCount(readBytesPerSec)+"/s",
-					"torrent_peers", reply.Peers,
-					// "upload", libcommon.ByteCount(writeBytesPerSec)+"/s",
+				log.Info("[Snapshots] download",
+					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
+					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
+					"upload", libcommon.ByteCount(stats.UploadRate)+"/s",
+					"peers", stats.PeersUnique,
+					"connections", stats.ConnectionsTotal,
+					"files", stats.FilesTotal,
 				)
-				prevBytesCompleted = reply.BytesCompleted
 			}
 		}
 	}

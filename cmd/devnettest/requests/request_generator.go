@@ -3,7 +3,7 @@ package requests
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"time"
 
@@ -56,7 +56,7 @@ func (req *RequestGenerator) Get() rpctest.CallResult {
 		return res
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err

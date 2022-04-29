@@ -180,6 +180,7 @@ const (
 	TooFarFuturePenalty
 	TooFarPastPenalty
 	AbandonedAnchorPenalty
+	NewBlockGossipAfterMergePenalty
 )
 
 type PeerPenalty struct {
@@ -355,6 +356,8 @@ func (p Penalty) String() string {
 		return "TooFarFuture"
 	case TooFarPastPenalty:
 		return "TooFarPast"
+	case NewBlockGossipAfterMergePenalty:
+		return "NewBlockGossipAfterMerge"
 	default:
 		return fmt.Sprintf("Unknown(%d)", p)
 	}

@@ -42,12 +42,12 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-For a full archive node we recommend >=3TB storage space on a single partition: 1.8TB state (as of March 2022),
-200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk).
+For an Archive node of Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
+200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Mainnet Full node (see `--prune*` flags): 400Gb (April 2022), BSC Archive: 7Tb. BSC Full: 1Tb. Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
 Bear in mind that SSD performance deteriorates when close to capacity.
 
-RAM: >=16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install), GCC 10+
+RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
 
 <code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
 
@@ -63,7 +63,7 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=fast`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
+Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=full`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
 
 Use `--datadir` to choose where to store data.
 
@@ -96,8 +96,8 @@ Support only remote-miners.
 * To enable, add `--mine --miner.etherbase=...` or `--mine --miner.miner.sigkey=...` flags.
 * Other supported options: `--miner.extradata`, `--miner.notify`, `--miner.gaslimit`, `--miner.gasprice`
   , `--miner.gastarget`
-* RPCDaemon supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
-* RPCDaemon supports websocket methods: newPendingTransaction
+* JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
+* JSON-RPC supports websocket methods: newPendingTransaction
 * TODO:
     + we don't broadcast mined blocks to p2p-network
       yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
@@ -118,7 +118,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.16
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.18
     * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
@@ -153,13 +153,13 @@ Erigon can be used as an execution-layer for beacon chain consensus clients (Eth
 relies on availability of receipts - don't prune them: don't add character `r` to `--prune` flag. However, old receipts
  are not needed for Eth2 and you can safely prune them with `--prune.r.before=11184524` in combination with `--prune htc`.
 
-You must run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon.
+You must enable JSON-RPC by `--http` and add `engine` to `--http.api` list. (Or run the [JSON-RPC daemon](#json-rpc-daemon) in addition to the Erigon)
 
-If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC daemon listen on localhost by default)
+If beacon chain client on a different device: add `--http.addr 0.0.0.0` (JSON-RPC listen on localhost by default)
 .
 
-Once the JSON-RPC daemon is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
-where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC daemon.
+Once the JSON-RPC is running, all you need to do is point your beacon chain client to `<ip address>:8545`,
+where `<ip address>` is either localhost or the IP address of the device running the JSON-RPC.
 
 Erigon has been tested with Lighthouse however all other clients that support JSON-RPC should also work.
 
@@ -241,7 +241,7 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components can work inside Erigon and as independent process. 
+Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process. 
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
@@ -361,6 +361,16 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
     
 ### How to run local devnet?
 <code> 🔬 Detailed explanation is [here](/DEV_CHAIN.md).</code>
+
+### Docker permissions error
+
+Docker uses user erigon with UID/GID 1000 (for security reasons). You can see this user being created in the Dockerfile.
+Can fix by giving a host's user ownership of the folder, where the host's user UID/GID is the same as the docker's user UID/GID (1000).
+More details in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-filesystem-owner-matching-problem)
+
+### Run RaspberyPI
+
+https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 Getting in touch
 ================

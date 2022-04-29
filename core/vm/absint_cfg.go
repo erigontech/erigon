@@ -5,7 +5,7 @@ import (
 	"compress/zlib"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"strconv"
 	"strings"
@@ -350,7 +350,7 @@ func DecompressProof(in []byte) []byte {
 		log.Fatal("cannot read")
 	}
 
-	res, err := ioutil.ReadAll(breader)
+	res, err := io.ReadAll(breader)
 	if err != nil {
 		log.Fatal("cannot read")
 	}

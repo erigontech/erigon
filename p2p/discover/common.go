@@ -19,7 +19,9 @@ package discover
 import (
 	"context"
 	"crypto/ecdsa"
+	"github.com/ledgerwatch/erigon/crypto"
 	"net"
+	"time"
 
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -48,6 +50,9 @@ type Config struct {
 	Log          log.Logger         // if set, log messages go here
 	ValidSchemes enr.IdentityScheme // allowed identity schemes
 	Clock        mclock.Clock
+	ReplyTimeout time.Duration
+
+	PrivateKeyGenerator func() (*ecdsa.PrivateKey, error)
 }
 
 func (cfg Config) withDefaults() Config {
@@ -59,6 +64,12 @@ func (cfg Config) withDefaults() Config {
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = mclock.System{}
+	}
+	if cfg.ReplyTimeout == 0 {
+		cfg.ReplyTimeout = respTimeout
+	}
+	if cfg.PrivateKeyGenerator == nil {
+		cfg.PrivateKeyGenerator = crypto.GenerateKey
 	}
 	return cfg
 }

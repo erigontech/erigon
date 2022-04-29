@@ -503,6 +503,9 @@ func (s *Service) reportBlock(conn *connWrapper, block *types.Block) error {
 		if err != nil {
 			return err
 		}
+		if block == nil {
+			return nil
+		}
 	}
 
 	td, err := rawdb.ReadTd(roTx, block.Hash(), block.NumberU64())

@@ -46,18 +46,26 @@ func TestUDPv5_lookupE2E(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
+
+	bootNode := startLocalhostV5(t, Config{})
+	bootNodeRec := bootNode.Self()
+
 	const N = 5
-	var nodes []*UDPv5
-	for i := 0; i < N; i++ {
-		var cfg Config
-		if len(nodes) > 0 {
-			bn := nodes[0].Self()
-			cfg.Bootnodes = []*enode.Node{bn}
+	nodes := []*UDPv5{bootNode}
+	for len(nodes) < N {
+		cfg := Config{
+			Bootnodes: []*enode.Node{bootNodeRec},
 		}
 		node := startLocalhostV5(t, cfg)
 		nodes = append(nodes, node)
-		defer node.Close()
 	}
+
+	defer func() {
+		for _, node := range nodes {
+			node.Close()
+		}
+	}()
+
 	last := nodes[N-1]
 	target := nodes[rand.Intn(N-2)].Self()
 
@@ -102,7 +110,7 @@ func startLocalhostV5(t *testing.T, cfg Config) *UDPv5 {
 	}
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
-	ln.Set(enr.UDP(realaddr.Port))
+	ln.SetFallbackUDP(realaddr.Port)
 	ctx := context.Background()
 	ctx = disableLookupSlowdown(ctx)
 	udp, err := ListenV5(ctx, socket, ln, cfg)

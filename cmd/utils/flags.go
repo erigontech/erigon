@@ -134,6 +134,14 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
+	OverrideTerminalTotalDifficulty = BigFlag{
+		Name:  "override.terminaltotaldifficulty",
+		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+	}
+	OverrideMergeForkBlock = BigFlag{
+		Name:  "override.mergeForkBlock",
+		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
 		Name:  "ethash.cachesinmem",
@@ -155,7 +163,7 @@ var (
 	}
 	SyncModeFlag = cli.StringFlag{
 		Name:  "syncmode",
-		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "fast" in all other cases`,
+		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "full" in all other cases`,
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
@@ -491,7 +499,7 @@ var (
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of pending connection attempts (defaults used if set to 0)",
+		Usage: "Maximum number of TCP connections pending to become connected peers",
 		Value: node.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
@@ -648,6 +656,11 @@ var (
 		Value: "4mb",
 		Usage: "bytes per second, example: 32mb",
 	}
+	TorrentDownloadSlotsFlag = cli.IntFlag{
+		Name:  "torrent.download.slots",
+		Value: 3,
+		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
@@ -656,7 +669,7 @@ var (
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
 		Value: 100,
-		Usage: "limit amount of torrent peers",
+		Usage: "unused parameter (reserved for future use)",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
@@ -805,7 +818,19 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 
 // NewP2PConfig
 //  - doesn't setup bootnodes - they will set when genesisHash will know
-func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, trustedPeers []string, port, protocol uint) (*p2p.Config, error) {
+func NewP2PConfig(
+	nodiscover bool,
+	datadir string,
+	netRestrict string,
+	natSetting string,
+	maxPeers int,
+	maxPendPeers int,
+	nodeName string,
+	staticPeers []string,
+	trustedPeers []string,
+	port,
+	protocol uint,
+) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
@@ -820,14 +845,15 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:   fmt.Sprintf(":%d", port),
-		MaxPeers:     100,
-		NAT:          nat.Any(),
-		NoDiscovery:  nodiscover,
-		PrivateKey:   serverKey,
-		Name:         nodeName,
-		Log:          log.New(),
-		NodeDatabase: enodeDBPath,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		Log:             log.New(),
+		NodeDatabase:    enodeDBPath,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1047,14 +1073,12 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 
-	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
-			panic(err)
-		}
-		sz := cfg.MdbxPageSize.Bytes()
-		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
-		}
+	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+		panic(err)
+	}
+	sz := cfg.MdbxPageSize.Bytes()
+	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
 	}
 }
 
@@ -1383,9 +1407,9 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
-			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
 			db,
+			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
 		)
 		if err != nil {
 			panic(err)
@@ -1475,6 +1499,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
+	}
+
+	if ctx.GlobalIsSet(OverrideTerminalTotalDifficulty.Name) {
+		cfg.Genesis.Config.TerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
+	}
+	if ctx.GlobalIsSet(OverrideMergeForkBlock.Name) {
+		cfg.Genesis.Config.MergeForkBlock = GlobalBig(ctx, OverrideMergeForkBlock.Name)
 	}
 }
 

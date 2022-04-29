@@ -376,6 +376,9 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		gg := seg.seg.MakeGetter()
 		gg.Reset(headerOffset)
 		buf, _ = gg.Next(buf[:0])
+		if len(buf) == 0 {
+			return nil
+		}
 		h = &types.Header{}
 		if err = rlp.DecodeBytes(buf[1:], h); err != nil {
 			return err
@@ -392,6 +395,9 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			gg := seg.seg.MakeGetter()
 			gg.Reset(bodyOffset)
 			buf, _ = gg.Next(buf[:0])
+			if len(buf) == 0 {
+				return nil
+			}
 			b = &types.BodyForStorage{}
 			reader := bytes.NewReader(buf)
 			if err = rlp.Decode(reader, b); err != nil {
@@ -473,6 +479,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
+	if len(buf) == 0 {
+		return nil, nil
+	}
 	h := &types.Header{}
 	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
 		return nil, err
@@ -491,7 +500,7 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
-	if hash[0] != buf[0] {
+	if len(buf) > 1 && hash[0] != buf[0] {
 		return nil, nil
 	}
 
@@ -511,6 +520,9 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 	gg := sn.seg.MakeGetter()
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
+	if len(buf) == 0 {
+		return nil, 0, 0, nil
+	}
 	b := &types.BodyForStorage{}
 	reader := bytes.NewReader(buf)
 	if err := rlp.Decode(reader, b); err != nil {
@@ -553,6 +565,7 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 }
 
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
@@ -565,14 +578,19 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		buf, _ = gg.Next(buf[:0])
-		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
-		if txnHash[0] != buf[0] {
+		if len(buf) == 0 { // system-txn
 			continue
 		}
 
+		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
+		if len(buf) > 1 && txnHash[0] != buf[0] {
+			continue
+		}
+
+		sender := buf[1 : 1+20]
+
 		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
 		blockNum = reader2.Lookup(txnHash[:])
-		sender := buf[1 : 1+20]
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
 		if err != nil {
 			return
