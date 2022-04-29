@@ -29,7 +29,7 @@ go-version:
 		exit 1 ;\
 	fi
 
-docker: git-submodules
+docker:
 	DOCKER_BUILDKIT=1 docker build -t erigon:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
 
 xdg_data_home :=  ~/.local/share
@@ -74,7 +74,7 @@ $(COMMANDS): %: %.cmd
 
 all: erigon $(COMMANDS)
 
-db-tools:
+db-tools: git-submodules
 	@echo "Building db-tools"
 
 	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
