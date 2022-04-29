@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -871,11 +870,6 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		defer tx.Rollback()
 	}
 	// Delete canonical hashes that are being unwound
-	var headerProgress uint64
-	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return err
-	}
 	badBlock := u.BadBlock != (common.Hash{})
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
@@ -899,10 +893,8 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 			return fmt.Errorf("iterate over headers to mark bad headers: %w", err)
 		}
 	}
-	for blockHeight := headerProgress; blockHeight > u.UnwindPoint; blockHeight-- {
-		if err = rawdb.DeleteCanonicalHash(tx, blockHeight); err != nil {
-			return err
-		}
+	if err := rawdb.TruncateCanonicalHash(tx, u.UnwindPoint+1); err != nil {
+		return err
 	}
 	if badBlock {
 		var maxTd big.Int
