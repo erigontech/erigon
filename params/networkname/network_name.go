@@ -17,3 +17,21 @@ const (
 	MumbaiChainName     = "mumbai"
 	BorMainnetChainName = "bor-mainnet"
 )
+
+var All = []string{
+	MainnetChainName,
+	SepoliaChainName,
+	RopstenChainName,
+	RinkebyChainName,
+	GoerliChainName,
+	KilnDevnetChainName,
+	//DevChainName,
+	ErigonMineName,
+	SokolChainName,
+	FermionChainName,
+	BSCChainName,
+	ChapelChainName,
+	//RialtoChainName,
+	MumbaiChainName,
+	BorMainnetChainName,
+}

@@ -519,7 +519,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		return err
 	}
 
-	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
+	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("walking receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {

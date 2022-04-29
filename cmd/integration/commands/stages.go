@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -483,7 +482,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			return fmt.Errorf("re-read Bodies progress: %w", err)
 		}
 		{ // hard-unwind stage_body also
-			if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
+			if err := rawdb.TruncateBlocks(tx, progress+1); err != nil {
 				return err
 			}
 			progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
@@ -497,14 +496,10 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}
 		}
 		// remove all canonical markers from this point
-		if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-			return tx.Delete(kv.HeaderCanonical, k, nil)
-		}); err != nil {
+		if err = rawdb.TruncateCanonicalHash(tx, progress+1); err != nil {
 			return err
 		}
-		if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-			return tx.Delete(kv.HeaderTD, k, nil)
-		}); err != nil {
+		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
 		hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
