@@ -41,8 +41,8 @@ func TestTxsBeginEnd(t *testing.T) {
 			return err
 		}
 
+		err = rawdb.TruncateCanonicalHash(tx, 7)
 		for i := uint64(7); i < 10; i++ {
-			err = rawdb.DeleteCanonicalHash(tx, i)
 			require.NoError(err)
 			hash := common.Hash{0xa, byte(i)}
 			err = writeRawBodyDeprecated(tx, hash, i, b)
