@@ -137,7 +137,7 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
-	@[ -d ".git2" ] || (echo "Not a git repository" && exit 1)
+	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
 	@git submodule update --quiet --init --recursive --force || true
