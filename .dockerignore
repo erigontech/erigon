@@ -4,6 +4,7 @@
 **/*.o
 **/*.dSYM
 
+.git
 build
 tests/testdata
 tests/.git
