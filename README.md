@@ -368,6 +368,10 @@ Docker uses user erigon with UID/GID 1000 (for security reasons). You can see th
 Can fix by giving a host's user ownership of the folder, where the host's user UID/GID is the same as the docker's user UID/GID (1000).
 More details in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-filesystem-owner-matching-problem)
 
+### Run RaspberyPI
+
+https://github.com/mathMakesArt/Erigon-on-RPi-4
+
 Getting in touch
 ================
 
