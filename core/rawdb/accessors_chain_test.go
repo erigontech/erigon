@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -158,7 +159,7 @@ func TestBlockStorage(t *testing.T) {
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
 	}
-	if err := TruncateBlocks(tx, 2); err != nil {
+	if err := TruncateBlocks(context.Background(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
 	if entry := ReadCanonicalBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry == nil {
@@ -167,7 +168,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
-	if err := TruncateBlocks(tx, block.NumberU64()); err != nil {
+	if err := TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
 		t.Fatal(err)
 	}
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
