@@ -96,7 +96,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	fmt.Printf("WriteAccountStorage [%x] hashed [%x],loc [%x] hashed [%x]\n", address, crypto.Keccak256(address[:]), *key, crypto.Keccak256((*key)[:]))
+	fmt.Printf("WriteAccountStorage [%x] hashed [%x],loc [%x] hashed [%x], val [%x]\n", address, crypto.Keccak256(address[:]), *key, crypto.Keccak256((*key)[:]), value.Bytes())
 	if w.csw != nil {
 		if err := w.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 			return err
