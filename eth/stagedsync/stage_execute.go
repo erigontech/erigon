@@ -520,10 +520,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 	}
 
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking receipts: %w", err)
+		return fmt.Errorf("truncate receipts: %w", err)
+	}
+	if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate bor receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking epoch: %w", err)
+		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 
 	// Truncate CallTraceSet
