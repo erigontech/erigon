@@ -100,7 +100,7 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 					sem.Release(1)
 				}(t)
 			}
-			time.Sleep(330 * time.Second)
+			time.Sleep(30 * time.Second)
 		}
 	}()
 
