@@ -1120,10 +1120,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
-		//tx.ClearBucket(kv.HeaderCanonical)
-		//tx.ClearBucket(kv.HeaderTD)
-		//tx.ClearBucket(kv.HeaderNumber)
-
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
 		td := big.NewInt(0)
@@ -1164,6 +1160,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		if !ok {
 			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
+		}
+		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+			return err
+		}
+		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, cfg.snapshots.BlocksAvailable())
+		if err != nil {
+			return err
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+			return err
 		}
 	}
 

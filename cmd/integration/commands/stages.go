@@ -506,7 +506,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
+		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
 		}
 
