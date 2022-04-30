@@ -1116,7 +1116,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if s.BlockNumber < 2 && cfg.snapshots.BlocksAvailable() > 0 { // allow genesis
+	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
@@ -1171,10 +1171,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 			return err
 		}
-	}
-
-	// Add last headers from snapshots to HeaderDownloader (as persistent links)
-	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
 		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 			return err
 		}
