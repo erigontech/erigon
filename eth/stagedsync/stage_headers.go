@@ -1116,13 +1116,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 	}
 
-	if s.BlockNumber < 2 { // allow genesis
+	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
-
-		//tx.ClearBucket(kv.HeaderCanonical)
-		//tx.ClearBucket(kv.HeaderTD)
-		//tx.ClearBucket(kv.HeaderNumber)
 
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
@@ -1165,10 +1161,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if !ok {
 			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
 		}
-	}
-
-	// Add last headers from snapshots to HeaderDownloader (as persistent links)
-	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+			return err
+		}
+		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, cfg.snapshots.BlocksAvailable())
+		if err != nil {
+			return err
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+			return err
+		}
 		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 			return err
 		}
