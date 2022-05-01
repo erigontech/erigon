@@ -114,7 +114,7 @@ func ExecuteBlockEphemerallyForBSC(
 	gp.AddGas(block.GasLimit())
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, false /* isBor */); err != nil {
 			return nil, err
 		}
 	}
@@ -175,7 +175,7 @@ func ExecuteBlockEphemerallyForBSC(
 		// otherwise it causes block verification error.
 		header.GasUsed = *usedGas
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *chainConfig, ibs, header, engine)
+			return SysCallContract(contract, data, *chainConfig, ibs, header, engine, false /* isBor */)
 		}
 		outTxs, outReceipts, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, epochReader, chainReader, syscall)
 		if err != nil {
@@ -239,9 +239,10 @@ func ExecuteBlockEphemerally(
 	usedGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
+	isBor := chainConfig.Bor != nil
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, isBor); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -301,7 +302,7 @@ func ExecuteBlockEphemerally(
 	}
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false); err != nil {
+		if _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, epochReader, chainReader, false, isBor); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -334,7 +335,7 @@ func ExecuteBlockEphemerally(
 	return receipts, stateSyncReceipt, nil
 }
 
-func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine) (result []byte, err error) {
+func SysCallContract(contract common.Address, data []byte, chainConfig params.ChainConfig, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine, isBor bool) (result []byte, err error) {
 	gp := new(GasPool).AddGas(50_000_000)
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
@@ -351,7 +352,13 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
+	var author *common.Address
+	if isBor {
+		author = &header.Coinbase
+	} else {
+		author = &state.SystemAddress
+	}
+	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
 	if chainConfig.Bor != nil {
 		ret, _, err := evm.Call(
@@ -412,10 +419,10 @@ func CallContractTx(contract common.Address, data []byte, ibs *state.IntraBlockS
 
 func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateReader, header *types.Header,
 	txs types.Transactions, uncles []*types.Header, stateWriter state.WriterWithChangeSets, cc *params.ChainConfig, ibs *state.IntraBlockState,
-	receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool,
+	receipts types.Receipts, e consensus.EpochReader, headerReader consensus.ChainHeaderReader, isMining bool, isBor bool,
 ) (newBlock *types.Block, err error) {
 	syscall := func(contract common.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine)
+		return SysCallContract(contract, data, *cc, ibs, header, engine, isBor)
 	}
 	if isMining {
 		newBlock, _, _, err = engine.FinalizeAndAssemble(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall, nil)
@@ -456,10 +463,10 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 	return newBlock, nil
 }
 
-func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState) error {
+func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, epochReader consensus.EpochReader, header *types.Header, txs types.Transactions, uncles []*types.Header, cc *params.ChainConfig, ibs *state.IntraBlockState, isBor bool) error {
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	engine.Initialize(cc, chain, epochReader, header, txs, uncles, func(contract common.Address, data []byte) ([]byte, error) {
-		return SysCallContract(contract, data, *cc, ibs, header, engine)
+		return SysCallContract(contract, data, *cc, ibs, header, engine, isBor)
 	})
 	return nil
 }
