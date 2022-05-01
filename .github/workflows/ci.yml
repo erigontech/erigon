@@ -76,4 +76,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
+
+      # In this step, this action saves a list of existing images,
+      # the cache is created without them in the post run.
+      # It also restores the cache if it exists.
+      - uses: satackey/action-docker-layer-caching@v0.0.11
+        continue-on-error: false
+
       - run: docker build .
