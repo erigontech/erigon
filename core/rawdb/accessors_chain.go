@@ -1234,6 +1234,13 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 	}
 
+	// ensure no grabage records left (it may happen if db is inconsistent)
+	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+		return tx.Delete(kv.BlockBody, k, nil)
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
