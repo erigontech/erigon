@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1
 FROM docker.io/library/golang:1.18-alpine3.15 AS builder
 
+RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
+
 WORKDIR /app
 
-# Get dependancies - will also be cached if we won't change go.mod/go.sum
+# Get dependencies - will also be cached if we won't change go.mod/go.sum
 COPY go.mod .
 COPY go.sum .
 RUN go mod download
 
-RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
 ADD . .
 
