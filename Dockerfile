@@ -4,6 +4,13 @@ FROM docker.io/library/golang:1.18-alpine3.15 AS builder
 RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgcc libstdc++
 
 WORKDIR /app
+
+# Get dependencies - will also be cached if we won't change go.mod/go.sum
+COPY go.mod .
+COPY go.sum .
+RUN go mod download
+
+
 ADD . .
 
 RUN make erigon rpcdaemon integration sentry txpool downloader hack observer db-tools
