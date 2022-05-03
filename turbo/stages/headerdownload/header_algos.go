@@ -805,9 +805,11 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				}
 			}
 
-			if link.blockHeight >= hd.highestInDb {
+			if link.blockHeight > hd.highestInDb {
+				if hd.trace {
+					log.Info("Highest in DB change", "number", link.blockHeight, "hash", link.hash)
+				}
 				hd.highestInDb = link.blockHeight
-				log.Info("Highest in DB change", "number", link.blockHeight, "hash", link.hash)
 			}
 			link.persisted = true
 			link.header = nil // Drop header reference to free memory, as we won't need it anymore
