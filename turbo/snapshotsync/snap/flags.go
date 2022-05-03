@@ -1,4 +1,4 @@
-package snapshotsynccli
+package snap
 
 import (
 	"fmt"

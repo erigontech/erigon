@@ -6,8 +6,7 @@ RUN apk --no-cache add make gcc g++ linux-headers git bash ca-certificates libgc
 WORKDIR /app
 ADD . .
 
-# expect that host run `git submodule update --init`
-RUN make erigon rpcdaemon integration sentry txpool downloader hack db-tools
+RUN make erigon rpcdaemon integration sentry txpool downloader hack observer db-tools
 
 FROM docker.io/library/alpine:3.15
 

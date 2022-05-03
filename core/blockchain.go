@@ -351,9 +351,16 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
+	isBor := chainConfig.Bor != nil
+	var author *common.Address
+	if isBor {
+		author = &header.Coinbase
+	} else {
+		author = &state.SystemAddress
+	}
+	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	if chainConfig.Bor != nil {
+	if isBor {
 		ret, _, err := evm.Call(
 			vm.AccountRef(msg.From()),
 			*msg.To(),

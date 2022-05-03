@@ -368,18 +368,18 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
-		"blk/s", speed,
-		"tx/s", speedTx,
-		"Mgas/s", speedMgas,
-		"gasState", gasState,
+		"blk/s", fmt.Sprintf("%.1f", speed),
+		"tx/s", fmt.Sprintf("%.1f", speedTx),
+		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
+		"gasState", fmt.Sprintf("%.2f", gasState),
 	}
 	if estimatedTime > 0 {
 		logpairs = append(logpairs, "estimated duration", estimatedTime)
 	}
 	if batch != nil {
-		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
+		logpairs = append(logpairs, "batch", libcommon.ByteCount(uint64(batch.BatchSize())))
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	logpairs = append(logpairs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime
@@ -519,11 +519,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		return err
 	}
 
-	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking receipts: %w", err)
+	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate receipts: %w", err)
+	}
+	if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate bor receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking epoch: %w", err)
+		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 
 	// Truncate CallTraceSet
@@ -587,11 +590,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = PruneTable(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxInt32); err != nil {
+		if err = PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
 		// LogIndex.Prune will read everything what not pruned here
-		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxInt32); err != nil {
+		if err = PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
 	}

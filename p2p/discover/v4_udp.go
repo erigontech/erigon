@@ -77,8 +77,11 @@ type UDPv4 struct {
 
 	addReplyMatcher chan *replyMatcher
 	gotreply        chan reply
+	replyTimeout    time.Duration
 	closeCtx        context.Context
 	cancelCloseCtx  context.CancelFunc
+
+	privateKeyGenerator func() (*ecdsa.PrivateKey, error)
 }
 
 // replyMatcher represents a pending reply.
@@ -137,9 +140,12 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 		db:              ln.Database(),
 		gotreply:        make(chan reply),
 		addReplyMatcher: make(chan *replyMatcher),
+		replyTimeout:    cfg.ReplyTimeout,
 		closeCtx:        closeCtx,
 		cancelCloseCtx:  cancel,
 		log:             cfg.Log,
+
+		privateKeyGenerator: cfg.PrivateKeyGenerator,
 	}
 
 	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, t.log)
@@ -282,7 +288,7 @@ func (t *UDPv4) lookupSelf() []*enode.Node {
 }
 
 func (t *UDPv4) newRandomLookup(ctx context.Context) *lookup {
-	key, err := crypto.GenerateKey()
+	key, err := t.privateKeyGenerator()
 	if err != nil {
 		t.log.Warn("Failed to generate a random node key for newRandomLookup", "err", err)
 		key = t.priv
@@ -447,7 +453,7 @@ func (t *UDPv4) loop() {
 		now := time.Now()
 		for el := plist.Front(); el != nil; el = el.Next() {
 			nextTimeout = el.Value.(*replyMatcher)
-			if dist := nextTimeout.deadline.Sub(now); dist < 2*respTimeout {
+			if dist := nextTimeout.deadline.Sub(now); dist < 2*t.replyTimeout {
 				timeout.Reset(dist)
 				return
 			}
@@ -472,7 +478,7 @@ func (t *UDPv4) loop() {
 			return
 
 		case p := <-t.addReplyMatcher:
-			p.deadline = time.Now().Add(respTimeout)
+			p.deadline = time.Now().Add(t.replyTimeout)
 			plist.PushBack(p)
 
 		case r := <-t.gotreply:
@@ -595,7 +601,7 @@ func (t *UDPv4) ensureBond(toid enode.ID, toaddr *net.UDPAddr) {
 		rm := t.sendPing(toid, toaddr, nil)
 		<-rm.errc
 		// Wait for them to ping back and process our pong.
-		time.Sleep(respTimeout)
+		time.Sleep(t.replyTimeout)
 	}
 }
 

@@ -26,6 +26,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -1019,7 +1020,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	accountMap := make(map[string]*accounts.Account)
 
@@ -1047,7 +1048,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account map", "size", len(accountMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	storageMap := make(map[string][]byte)
 	if err := changeset.ForRange(tx, kv.StorageChangeSet, block+1, *headNumber+1, func(blockN uint64, address, v []byte) error {
 		var addrHash, err = common.HashData(address)
@@ -1064,7 +1065,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed storage map", "size", len(storageMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
@@ -1109,7 +1110,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	sort.Strings(unfurlList)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	loader := trie.NewFlatDBTrieLoader("checkRoots")
 	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
@@ -1128,13 +1129,13 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(tx, hash, block)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed trie",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
 	return nil
 }

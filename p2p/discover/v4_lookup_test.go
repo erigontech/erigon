@@ -17,6 +17,7 @@
 package discover
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"net"
@@ -74,7 +75,18 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
-	test := newUDPTest(t)
+
+	// Set up RandomNodes() to use expected keys instead of generating random ones.
+	testNetPrivateKeys := lookupTestnet.privateKeys()
+	testNetPrivateKeyIndex := -1
+	privateKeyGenerator := func() (*ecdsa.PrivateKey, error) {
+		testNetPrivateKeyIndex = (testNetPrivateKeyIndex + 1) % len(testNetPrivateKeys)
+		return testNetPrivateKeys[testNetPrivateKeyIndex], nil
+	}
+	ctx := context.Background()
+	ctx = contextWithPrivateKeyGenerator(ctx, privateKeyGenerator)
+
+	test := newUDPTestContext(ctx, t)
 	defer test.close()
 
 	// Seed table with initial nodes.
@@ -314,6 +326,16 @@ func (tn *preminedTestnet) closest(n int) (nodes []*enode.Node) {
 		return enode.DistCmp(tn.target.ID(), nodes[i].ID(), nodes[j].ID()) < 0
 	})
 	return nodes[:n]
+}
+
+func (tn *preminedTestnet) privateKeys() []*ecdsa.PrivateKey {
+	var keys []*ecdsa.PrivateKey
+	for d := range tn.dists {
+		for _, key := range tn.dists[d] {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 var _ = (*preminedTestnet).mine // avoid linter warning about mine being dead code.

@@ -166,7 +166,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 	var h types.Header
 	h.Number = big.NewInt(5)
 	headerRaw, _ := rlp.EncodeToBytes(h)
-	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(headerRaw, &h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(headerRaw, &h, false /* penalizePoSBlocks */); err == nil {
 		if penalty != NoPenalty {
 			t.Errorf("unexpected penalty: %s", penalty)
 		}
@@ -185,7 +185,7 @@ func TestSingleHeaderAsSegment(t *testing.T) {
 
 	// Same header with a bad hash
 	hd.ReportBadHeader(h.Hash())
-	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(headerRaw, &h); err == nil {
+	if chainSegments, penalty, err := hd.SingleHeaderAsSegment(headerRaw, &h, false /* penalizePoSBlocks */); err == nil {
 		if penalty != BadBlockPenalty {
 			t.Errorf("expected BadBlock penalty, got %s", penalty)
 		}
