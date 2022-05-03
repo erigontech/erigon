@@ -910,7 +910,7 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter, 
 		header := segmentFragment.Header
 		if header.Hash() != hd.posAnchor.parentHash {
 			log.Warn("Unexpected header", "hash", header.Hash(), "expected", hd.posAnchor.parentHash)
-			return []PenaltyItem{PenaltyItem{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
+			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
 
 		headerNumber := header.Number.Uint64()
