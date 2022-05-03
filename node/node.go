@@ -522,12 +522,12 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
-		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity).MapSize(6 * datasize.TB)
+		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity).MapSize(2 * datasize.TB)
 		if exclusive {
 			opts = opts.Exclusive()
 		}
 		if label == kv.ChainDB {
-			opts = opts.PageSize(config.MdbxPageSize.Bytes())
+			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
 		}
 		return opts.Open()
 	}
