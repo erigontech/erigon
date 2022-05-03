@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -147,6 +148,18 @@ func HeadersPOS(
 	cfg HeadersCfg,
 	useExternalTx bool,
 ) error {
+	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	// We prevent pos reverse downloading from happening concurrently with an interrupted sync.
+	if s.BlockNumber > executionProgress {
+		log.Info(fmt.Sprintf("[%s] Previous sync was not completed", s.LogPrefix()))
+		if !useExternalTx {
+			return tx.Commit()
+		}
+		return nil
+	}
 	log.Info(fmt.Sprintf("[%s] Waiting for Beacon Chain...", s.LogPrefix()))
 
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
