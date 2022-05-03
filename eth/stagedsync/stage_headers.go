@@ -138,7 +138,8 @@ func SpawnStageHeaders(
 	}
 }
 
-// HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated)
+// HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated).
+// It also saves PoS headers downloaded by (*HeaderDownload)StartPoSDownloader into the DB.
 func HeadersPOS(
 	s *StageState,
 	u Unwinder,
