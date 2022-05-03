@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/internal/debug"
 	"net"
 	"net/http"
 	"os"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -55,6 +55,7 @@ var rootCmd = &cobra.Command{
 const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
+	//utils2.DebugFlags[0] = utils2.VerbosityFlag
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}

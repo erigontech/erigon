@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"net/http"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ func GetBalance(reqId int, address common.Address, blockNum string) error {
 		return fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -67,7 +68,7 @@ func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
 		return nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -84,7 +85,7 @@ func TxpoolContent(reqId int) error {
 		return fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -101,7 +102,7 @@ func ParityList(reqId int, account common.Address, quantity int, offset []byte, 
 		return fmt.Errorf("failed to fetch storage keys: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -118,7 +119,7 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 		return fmt.Errorf("error fetching logs: %v\n", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -139,7 +140,7 @@ func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) 
 		return fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}

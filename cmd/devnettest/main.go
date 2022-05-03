@@ -1,7 +1,11 @@
 package main
 
-import "github.com/ledgerwatch/erigon/cmd/devnettest/commands"
+import "github.com/ledgerwatch/erigon/cmd/devnettest/shell"
 
 func main() {
-	commands.Execute()
+	//err := commands.Execute()
+	//if err != nil {
+	//	panic(err)
+	//}
+	shell.Execute()
 }

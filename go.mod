@@ -8,6 +8,7 @@ require (
 	github.com/RoaringBitmap/roaring v0.9.4
 	github.com/VictoriaMetrics/fastcache v1.9.0
 	github.com/VictoriaMetrics/metrics v1.18.1
+	github.com/abiosoft/ishell/v2 v2.0.2 // indirect
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.10.1-0.20220123034749-3920702c17f8
 	github.com/anacrolix/torrent v1.41.0

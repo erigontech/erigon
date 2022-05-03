@@ -1,4 +1,4 @@
-package requests
+package utils
 
 import (
 	"encoding/json"
@@ -16,8 +16,8 @@ func HexToInt(hexStr string) uint64 {
 	return result
 }
 
-// parseResponse converts any of the rpctest interfaces to a string for readability
-func parseResponse(resp interface{}) (string, error) {
+// ParseResponse converts any of the rpctest interfaces to a string for readability
+func ParseResponse(resp interface{}) (string, error) {
 	result, err := json.Marshal(resp)
 	if err != nil {
 		return "", fmt.Errorf("error trying to marshal response: %v", err)

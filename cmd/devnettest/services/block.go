@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"math/big"
 	"time"
 
@@ -133,7 +134,7 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (uin
 			fmt.Println()
 			fmt.Printf("Block with number: %v was mined and included transaction with hash: %v ==> %+v\n", blockNumber, hash, currentBlock)
 			fmt.Println()
-			return requests.HexToInt(blockNumber), true, nil
+			return utils.HexToInt(blockNumber), true, nil
 		}
 	}
 

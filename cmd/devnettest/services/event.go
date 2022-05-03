@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -18,7 +18,7 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 		splitErr  error
 	)
 
-	namespace, subMethod, splitErr = requests.NamespaceAndSubMethodFromMethod(method)
+	namespace, subMethod, splitErr = utils.NamespaceAndSubMethodFromMethod(method)
 	if splitErr != nil {
 		return nil, nil, fmt.Errorf("cannot get namespace and method from method: %v", splitErr)
 	}
