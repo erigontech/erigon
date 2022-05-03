@@ -237,12 +237,12 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) MarkPreverified(link *Link) {
 	// Go through all parent links that are not preverified and mark them too
-	for link != nil && !link.persisted {
-		if !link.verified {
+	for link != nil && !link.verified {
+		if !link.persisted {
 			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
+			link = hd.links[link.header.ParentHash]
 		}
-		link = hd.links[link.header.ParentHash]
 	}
 }
 
@@ -275,13 +275,11 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 	prevLink := attachmentLink
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		if prevLink.persisted {
-			// If we are attching to already persisted link, schedule for insertion (persistence)
-			if link.verified {
-				hd.moveLinkToQueue(link, InsertQueueID)
-			} else {
-				hd.moveLinkToQueue(link, VerifyQueueID)
-			}
+		// If we are attching to already persisted link, schedule for insertion (persistence)
+		if link.verified {
+			hd.moveLinkToQueue(link, InsertQueueID)
+		} else {
+			hd.moveLinkToQueue(link, VerifyQueueID)
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -365,12 +363,10 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		// If we attach to already persisted link, mark this one for insertion
-		if prevLink.persisted {
-			if link.verified {
-				hd.moveLinkToQueue(link, InsertQueueID)
-			} else {
-				hd.moveLinkToQueue(link, VerifyQueueID)
-			}
+		if link.verified {
+			hd.moveLinkToQueue(link, InsertQueueID)
+		} else {
+			hd.moveLinkToQueue(link, VerifyQueueID)
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -760,6 +756,18 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 
 	checkInsert := true
 
+	if hd.trace {
+		var iStrs []string
+		for i := 0; i < hd.insertQueue.Len(); i++ {
+			iStrs = append(iStrs, fmt.Sprintf("%d=>%x", hd.insertQueue[i].blockHeight, hd.insertQueue[i].hash))
+		}
+		var vStrs []string
+		for i := 0; i < hd.verifyQueue.Len(); i++ {
+			vStrs = append(vStrs, fmt.Sprintf("%d=>%x", hd.verifyQueue[i].blockHeight, hd.verifyQueue[i].hash))
+		}
+		log.Info("InsertHeaders", "highestInDb", hd.highestInDb, "insertQueue", strings.Join(iStrs, ", "), "verifyQueue", strings.Join(vStrs, ", "))
+	}
+
 	for checkInsert {
 		checkInsert = false
 		// Check what we can insert without verification
@@ -797,8 +805,9 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				}
 			}
 
-			if link.blockHeight > hd.highestInDb {
+			if link.blockHeight >= hd.highestInDb {
 				hd.highestInDb = link.blockHeight
+				log.Info("Highest in DB change", "number", link.blockHeight, "hash", link.hash)
 			}
 			link.persisted = true
 			link.header = nil // Drop header reference to free memory, as we won't need it anymore
