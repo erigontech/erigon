@@ -35,14 +35,14 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220426111915-6745c226947e
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220503202246-be98ee4a0a53
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pelletier/go-toml/v2 v2.0.0-beta.8
 	github.com/quasilyte/go-ruleguard/dsl v0.3.19
 	github.com/rs/cors v1.8.2
-	github.com/shirou/gopsutil/v3 v3.22.2
+	github.com/shirou/gopsutil/v3 v3.22.3
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.7.1
@@ -61,12 +61,12 @@ require (
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20220422013727-9388b58f7150
 	golang.org/x/time v0.0.0-20220411224347-583f2d630306
-	google.golang.org/grpc v1.45.0
+	google.golang.org/grpc v1.46.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
 	google.golang.org/protobuf v1.28.0
 	gopkg.in/check.v1 v1.0.0-20200902074654-038fdea0a05b
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
-	modernc.org/sqlite v1.14.2-0.20211125151325-d4ed92c0a70f
+	modernc.org/sqlite v1.17.0
 	pgregory.net/rapid v0.4.7
 )
 
@@ -150,26 +150,26 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
 	github.com/syndtr/goleveldb v1.0.0 // indirect
 	github.com/tidwall/btree v0.7.2-0.20211211132910-4215444137fc // indirect
-	github.com/tklauser/go-sysconf v0.3.9 // indirect
-	github.com/tklauser/numcpus v0.3.0 // indirect
+	github.com/tklauser/go-sysconf v0.3.10 // indirect
+	github.com/tklauser/numcpus v0.4.0 // indirect
 	github.com/valyala/fastrand v1.1.0 // indirect
 	github.com/valyala/histogram v1.2.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	golang.org/x/image v0.0.0-20200927104501-e162460cd6b5 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
-	golang.org/x/net v0.0.0-20220127200216-cd36cc0744dd // indirect
+	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/tools v0.1.10 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto v0.0.0-20200825200019-8632dd797987 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
 	lukechampine.com/uint128 v1.1.1 // indirect
-	modernc.org/cc/v3 v3.35.18 // indirect
-	modernc.org/ccgo/v3 v3.12.73 // indirect
-	modernc.org/libc v1.11.82 // indirect
+	modernc.org/cc/v3 v3.35.26 // indirect
+	modernc.org/ccgo/v3 v3.16.2 // indirect
+	modernc.org/libc v1.15.0 // indirect
 	modernc.org/mathutil v1.4.1 // indirect
-	modernc.org/memory v1.0.5 // indirect
+	modernc.org/memory v1.0.7 // indirect
 	modernc.org/opt v0.1.1 // indirect
 	modernc.org/strutil v1.1.1 // indirect
 	modernc.org/token v1.0.0 // indirect

@@ -19,7 +19,7 @@ GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2 -tags $(BUILD_TAGS),integration
 
 default: all
 
@@ -29,7 +29,7 @@ go-version:
 		exit 1 ;\
 	fi
 
-docker:
+docker: git-submodules
 	DOCKER_BUILDKIT=1 docker build -t erigon:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
 
 xdg_data_home :=  ~/.local/share
@@ -74,7 +74,7 @@ $(COMMANDS): %: %.cmd
 
 all: erigon $(COMMANDS)
 
-db-tools:
+db-tools: git-submodules
 	@echo "Building db-tools"
 
 	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
@@ -137,6 +137,7 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
+	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
 	@git submodule update --quiet --init --recursive --force || true

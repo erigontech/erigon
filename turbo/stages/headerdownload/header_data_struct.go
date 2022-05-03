@@ -180,6 +180,7 @@ const (
 	TooFarFuturePenalty
 	TooFarPastPenalty
 	AbandonedAnchorPenalty
+	NewBlockGossipAfterMergePenalty
 )
 
 type PeerPenalty struct {
@@ -278,6 +279,7 @@ type HeaderDownload struct {
 	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetchingNew        bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
+	trace              bool
 
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          interfaces.HeaderReader
@@ -355,6 +357,8 @@ func (p Penalty) String() string {
 		return "TooFarFuture"
 	case TooFarPastPenalty:
 		return "TooFarPast"
+	case NewBlockGossipAfterMergePenalty:
+		return "NewBlockGossipAfterMerge"
 	default:
 		return fmt.Sprintf("Unknown(%d)", p)
 	}

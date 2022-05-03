@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -56,8 +57,8 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		if err != nil {
 			return nil, err
 		}
-		addr := common.BytesToAddress(reply.Txs[i].Sender)
-		switch reply.Txs[i].Type {
+		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
+		switch reply.Txs[i].TxnType {
 		case proto_txpool.AllReply_PENDING:
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)

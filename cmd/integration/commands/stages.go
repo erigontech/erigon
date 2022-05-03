@@ -15,14 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshotsynccli"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -30,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -39,7 +34,11 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
 )
 
 var cmdStageHeaders = &cobra.Command{
@@ -296,7 +295,7 @@ var cmdSetSnapshto = &cobra.Command{
 			snCfg = allSnapshots(chainConfig).Cfg()
 		}
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return snapshotsynccli.ForceSetFlags(tx, snCfg)
+			return snap.ForceSetFlags(tx, snCfg)
 		}); err != nil {
 			return err
 		}
@@ -483,7 +482,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			return fmt.Errorf("re-read Bodies progress: %w", err)
 		}
 		{ // hard-unwind stage_body also
-			if err := rawdb.DeleteNewBlocks(tx, progress+1); err != nil {
+			if err := rawdb.TruncateBlocks(ctx, tx, progress+1); err != nil {
 				return err
 			}
 			progressBodies, err := stages.GetStageProgress(tx, stages.Bodies)
@@ -497,21 +496,17 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			}
 		}
 		// remove all canonical markers from this point
-		if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-			return tx.Delete(kv.HeaderCanonical, k, nil)
-		}); err != nil {
+		if err = rawdb.TruncateCanonicalHash(tx, progress+1); err != nil {
 			return err
 		}
-		if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(progress+1), func(k, v []byte) error {
-			return tx.Delete(kv.HeaderTD, k, nil)
-		}); err != nil {
+		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
 		hash, err := rawdb.ReadCanonicalHash(tx, progress-1)
 		if err != nil {
 			return err
 		}
-		if err = tx.Put(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey), hash[:]); err != nil {
+		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
 		}
 
@@ -1149,24 +1144,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 	vmConfig := &vm.Config{}
 
-	genesis, chainConfig := byChain(chain)
-	var engine consensus.Engine
-	config := &ethconfig.Defaults
-	if chainConfig.Clique != nil {
-		c := params.CliqueSnapshot
-		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
-	} else if chainConfig.Aura != nil {
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
-	} else if chainConfig.Parlia != nil {
-		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
-	} else if chainConfig.Bor != nil {
-		consensusConfig := &config.Bor
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir)
-	} else { //ethash
-		engine = ethash.NewFaker()
-	}
+	genesis, _ := byChain(chain)
 
 	events := privateapi.NewEvents()
 
@@ -1184,13 +1162,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	br := getBlockReader(chainConfig)
-	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
-	if err != nil {
-		panic(err)
-	}
-
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
@@ -1205,6 +1176,30 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if cfg.Snapshot.Enabled {
 		snDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
 		cfg.SnapshotDir = snDir
+	}
+	var engine consensus.Engine
+	config := &ethconfig.Defaults
+	if chainConfig.Clique != nil {
+		c := params.CliqueSnapshot
+		c.DBPath = filepath.Join(datadir, "clique", "db")
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, allSn)
+	} else if chainConfig.Aura != nil {
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, allSn)
+	} else if chainConfig.Parlia != nil {
+		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, allSn)
+	} else if chainConfig.Bor != nil {
+		consensusConfig := &config.Bor
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, allSn)
+	} else { //ethash
+		engine = ethash.NewFaker()
+	}
+
+	br := getBlockReader(chainConfig)
+	blockDownloaderWindow := 65536
+	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
+	if err != nil {
+		panic(err)
 	}
 
 	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,

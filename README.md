@@ -43,7 +43,7 @@ System Requirements
 ===================
 
 For an Archive node of Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
-200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Mainnet Full node (see `--prune*` flags): 400Gb (April 2022), BSC Archive: 7Tb. BSC Full: 1Tb
+200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Mainnet Full node (see `--prune*` flags): 400Gb (April 2022), BSC Archive: 7Tb. BSC Full: 1Tb. Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
 Bear in mind that SSD performance deteriorates when close to capacity.
 
@@ -367,6 +367,10 @@ Reserved for future use: **gRPC ports**: `9092` consensus engine, `9093` snapsho
 Docker uses user erigon with UID/GID 1000 (for security reasons). You can see this user being created in the Dockerfile.
 Can fix by giving a host's user ownership of the folder, where the host's user UID/GID is the same as the docker's user UID/GID (1000).
 More details in [post](https://www.fullstaq.com/knowledge-hub/blogs/docker-and-the-host-filesystem-owner-matching-problem)
+
+### Run RaspberyPI
+
+https://github.com/mathMakesArt/Erigon-on-RPi-4
 
 Getting in touch
 ================
