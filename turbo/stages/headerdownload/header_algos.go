@@ -889,38 +889,45 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	}
 }
 
-func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
+func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
 	if len(segment) == 0 {
-		return nil
+		return nil, nil
+	}
+	// We may have received answer from old request so not enough evidence for penalizing.
+	if segment[0].Number != hd.posAnchor.blockHeight-1 {
+		return nil, nil
+	}
+
+	// Handle request after closing collectors
+	if hd.headersCollector == nil {
+		return nil, nil
 	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	// Handle request after closing collectors
-	if hd.headersCollector == nil {
-		return nil
-	}
+
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
 		if header.Hash() != hd.posAnchor.parentHash {
-			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.posAnchor.parentHash)
+			log.Warn("Unexpected header", "hash", header.Hash(), "expected", hd.posAnchor.parentHash)
+			return []PenaltyItem{PenaltyItem{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
 
 		headerNumber := header.Number.Uint64()
 		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, header.Hash()), segmentFragment.HeaderRaw); err != nil {
-			return err
+			return nil, err
 		}
 
 		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if hh != nil {
 			log.Trace("Synced", "requestId", hd.requestId)
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
-			return nil
+			return nil, nil
 		}
 
 		hd.posAnchor = &Anchor{
@@ -929,10 +936,10 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 		}
 
 		if headerNumber <= 1 {
-			return errors.New("wrong genesis in PoS sync")
+			return nil, errors.New("wrong genesis in PoS sync")
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // GrabAnnounces - returns all available announces and forget them
