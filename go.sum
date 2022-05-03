@@ -454,8 +454,8 @@ github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3P
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758/go.mod h1:B69LEHPfb2qLo0BaaOLcbitczOKLWTsrBG9LczfCD4k=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220428081615-a38867fd26d9 h1:2z418bsPbSZvak1iReN0grVYub4b0TNcWVldcLs9xTA=
-github.com/ledgerwatch/erigon-lib v0.0.0-20220428081615-a38867fd26d9/go.mod h1:Z6hOzGMPdbzDcCs+EV5CEl/a6zOpgXqXL0K5956iXUc=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220503202246-be98ee4a0a53 h1:9lOxYT4CPvefJe73NOxhWqHCWW/he+bNM3Yj01CThYU=
+github.com/ledgerwatch/erigon-lib v0.0.0-20220503202246-be98ee4a0a53/go.mod h1:Z6hOzGMPdbzDcCs+EV5CEl/a6zOpgXqXL0K5956iXUc=
 github.com/ledgerwatch/log/v3 v3.4.1 h1:/xGwlVulXnsO9Uq+tzaExc8OWmXXHU0dnLalpbnY5Bc=
 github.com/ledgerwatch/log/v3 v3.4.1/go.mod h1:VXcz6Ssn6XEeU92dCMc39/g1F0OYAjw1Mt+dGP5DjXY=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
@@ -1165,7 +1165,6 @@ modernc.org/cc/v3 v3.35.10/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g
 modernc.org/cc/v3 v3.35.15/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g=
 modernc.org/cc/v3 v3.35.16/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g=
 modernc.org/cc/v3 v3.35.17/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g=
-modernc.org/cc/v3 v3.35.18 h1:rMZhRcWrba0y3nVmdiQ7kxAgOOSq2m2f2VzjHLgEs6U=
 modernc.org/cc/v3 v3.35.18/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g=
 modernc.org/cc/v3 v3.35.20/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g=
 modernc.org/cc/v3 v3.35.22/go.mod h1:iPJg1pkwXqAV16SNgFBVYmggfMg6xhs+2oiO0vclK3g=
@@ -1204,7 +1203,6 @@ modernc.org/ccgo/v3 v3.12.57/go.mod h1:hNSF4DNVgBl8wYHpMvPqQWDQx8luqxDnNGCMM4NFN
 modernc.org/ccgo/v3 v3.12.60/go.mod h1:k/Nn0zdO1xHVWjPYVshDeWKqbRWIfif5dtsIOCUVMqM=
 modernc.org/ccgo/v3 v3.12.66/go.mod h1:jUuxlCFZTUZLMV08s7B1ekHX5+LIAurKTTaugUr/EhQ=
 modernc.org/ccgo/v3 v3.12.67/go.mod h1:Bll3KwKvGROizP2Xj17GEGOTrlvB1XcVaBrC90ORO84=
-modernc.org/ccgo/v3 v3.12.73 h1:AMk4wEpzWjpODXohKvvnlwLob4Xk8tq3we6CwYh88mA=
 modernc.org/ccgo/v3 v3.12.73/go.mod h1:hngkB+nUUqzOf3iqsM48Gf1FZhY599qzVg1iX+BT3cQ=
 modernc.org/ccgo/v3 v3.12.81/go.mod h1:p2A1duHoBBg1mFtYvnhAnQyI6vL0uw5PGYLSIgF6rYY=
 modernc.org/ccgo/v3 v3.12.84/go.mod h1:ApbflUfa5BKadjHynCficldU1ghjen84tuM5jRynB7w=
