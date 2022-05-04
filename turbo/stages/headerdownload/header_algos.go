@@ -237,9 +237,9 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 
 func (hd *HeaderDownload) MarkPreverified(link *Link) {
 	// Go through all parent links that are not preverified and mark them too
-	for link != nil && !link.verified {
-		link.verified = true
-		if !link.persisted {
+	for link != nil && !link.persisted {
+		if !link.verified {
+			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
 		}
 		link = hd.links[link.header.ParentHash]
