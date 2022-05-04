@@ -8,6 +8,8 @@ on:
       - ciint1
     types:
       - closed
+  schedule:
+    - cron: '20 16 * * *' # daily at 16:20 UTC
 jobs:
   tests:
     if: github.event.schedule || github.event.pull_request.merged
