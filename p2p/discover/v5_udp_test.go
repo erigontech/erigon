@@ -127,6 +127,7 @@ func TestUDPv5_pingHandling(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	test.packetIn(&v5wire.Ping{ReqID: []byte("foo")})
 	test.waitPacketOut(func(p *v5wire.Pong, addr *net.UDPAddr, _ v5wire.Nonce) {
@@ -146,6 +147,7 @@ func TestUDPv5_unknownPacket(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	nonce := v5wire.Nonce{1, 2, 3}
 	check := func(p *v5wire.Whoareyou, wantSeq uint64) {
@@ -184,6 +186,7 @@ func TestUDPv5_findnodeHandling(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	// Create test nodes and insert them into the table.
 	nodes253 := nodesAtDistance(test.table.self().ID(), 253, 10)
@@ -270,6 +273,7 @@ func TestUDPv5_pingCall(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 1)
@@ -318,6 +322,7 @@ func TestUDPv5_findnodeCall(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	// Launch the request:
 	var (
@@ -369,6 +374,7 @@ func TestUDPv5_callResend(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 2)
@@ -408,6 +414,7 @@ func TestUDPv5_multipleHandshakeRounds(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 1)
@@ -436,6 +443,7 @@ func TestUDPv5_callTimeoutReset(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	// Launch the request:
 	var (
@@ -477,6 +485,7 @@ func TestUDPv5_talkHandling(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	var recvMessage []byte
 	test.udp.RegisterTalkHandler("test", func(id enode.ID, addr *net.UDPAddr, message []byte) []byte {
@@ -529,6 +538,7 @@ func TestUDPv5_talkRequest(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	remote := test.getNode(test.remotekey, test.remoteaddr).Node()
 	done := make(chan error, 1)
@@ -572,6 +582,7 @@ func TestUDPv5_lookup(t *testing.T) {
 	}
 	t.Parallel()
 	test := newUDPV5Test(t)
+	t.Cleanup(test.close)
 
 	// Lookup on empty table returns no nodes.
 	if results := test.udp.Lookup(lookupTestnet.target.ID()); len(results) > 0 {
