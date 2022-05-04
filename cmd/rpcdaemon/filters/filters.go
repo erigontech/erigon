@@ -198,7 +198,7 @@ func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool tx
 	for {
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Info("rpcdaemon: the subscription channel was closed")
+			log.Debug("rpcdaemon: the subscription to pending transactions channel was closed")
 			break
 		}
 		if err != nil {
@@ -224,7 +224,7 @@ func (ff *Filters) subscribeToPendingBlocks(ctx context.Context, mining txpool.M
 
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Info("rpcdaemon: the subscription channel was closed")
+			log.Debug("rpcdaemon: the subscription to pending blocks channel was closed")
 			break
 		}
 		if err != nil {
@@ -268,7 +268,7 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
-			log.Info("rpcdaemon: the subscription channel was closed")
+			log.Debug("rpcdaemon: the subscription to pending logs channel was closed")
 			break
 		}
 		if err != nil {
