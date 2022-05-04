@@ -285,6 +285,7 @@ func NewStagedSync(
 				blockReader,
 				tmpdir,
 				cfg.SnapshotDir,
+				notifications.Events,
 			),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),

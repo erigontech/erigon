@@ -55,6 +55,7 @@ type HeadersCfg struct {
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
+	dbEventNotifier    snapshotsync.DBEventNotifier
 }
 
 func StageHeadersCfg(
@@ -72,6 +73,7 @@ func StageHeadersCfg(
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
 	snapshotDir *dir.Rw,
+	dbEventNotifier snapshotsync.DBEventNotifier,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
@@ -89,6 +91,7 @@ func StageHeadersCfg(
 		blockReader:        blockReader,
 		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
 		snapshotDir:        snapshotDir,
+		dbEventNotifier:    dbEventNotifier,
 	}
 }
 
@@ -1102,8 +1105,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				if workers < 1 {
 					workers = 1
 				}
-				if workers > 4 {
-					workers = 4
+				if workers > 2 {
+					workers = 2 // 4 workers get killed on 16Gb RAM
 				}
 				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
@@ -1114,15 +1117,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return fmt.Errorf("ReopenIndices: %w", err)
 			}
 		}
+		if cfg.dbEventNotifier != nil {
+			cfg.dbEventNotifier.OnNewSnapshot()
+		}
 	}
 
-	if s.BlockNumber < 2 { // allow genesis
+	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
-
-		//tx.ClearBucket(kv.HeaderCanonical)
-		//tx.ClearBucket(kv.HeaderTD)
-		//tx.ClearBucket(kv.HeaderNumber)
 
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
@@ -1165,10 +1167,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if !ok {
 			return fmt.Errorf("snapshot not found for block: %d", cfg.snapshots.BlocksAvailable())
 		}
-	}
-
-	// Add last headers from snapshots to HeaderDownloader (as persistent links)
-	if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
+			return err
+		}
+		canonicalHash, err := cfg.blockReader.CanonicalHash(ctx, tx, cfg.snapshots.BlocksAvailable())
+		if err != nil {
+			return err
+		}
+		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+			return err
+		}
 		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 			return err
 		}
@@ -1188,13 +1196,13 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
-		req.Items[i] = &proto_downloader.DownloadItem{
+		req.Items = append(req.Items, &proto_downloader.DownloadItem{
 			TorrentHash: downloadergrpc.String2Proto(p.Hash),
 			Path:        p.Name,
-		}
+		})
 		i++
 	}
 	log.Info("[Snapshots] Fetching torrent files metadata")

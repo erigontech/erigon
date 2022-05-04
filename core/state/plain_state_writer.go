@@ -42,6 +42,7 @@ func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *Plai
 }
 
 func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	//fmt.Printf("UpdateAccount [%x] hashed [%x]\n", address, crypto.Keccak256(address[:]))
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(address, original, account); err != nil {
 			return err
@@ -93,6 +94,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	//fmt.Printf("WriteAccountStorage [%x] hashed [%x],loc [%x] hashed [%x], val [%x]\n", address, crypto.Keccak256(address[:]), *key, crypto.Keccak256((*key)[:]), value.Bytes())
 	if w.csw != nil {
 		if err := w.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 			return err
