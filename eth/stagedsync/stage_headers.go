@@ -55,6 +55,7 @@ type HeadersCfg struct {
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
+	dbEventNotifier    snapshotsync.DBEventNotifier
 }
 
 func StageHeadersCfg(
@@ -72,6 +73,7 @@ func StageHeadersCfg(
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
 	snapshotDir *dir.Rw,
+	dbEventNotifier snapshotsync.DBEventNotifier,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
@@ -89,6 +91,7 @@ func StageHeadersCfg(
 		blockReader:        blockReader,
 		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
 		snapshotDir:        snapshotDir,
+		dbEventNotifier:    dbEventNotifier,
 	}
 }
 
@@ -1113,6 +1116,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if err := cfg.snapshots.Reopen(); err != nil {
 				return fmt.Errorf("ReopenIndices: %w", err)
 			}
+		}
+		if cfg.dbEventNotifier != nil {
+			cfg.dbEventNotifier.OnNewSnapshot()
 		}
 	}
 
