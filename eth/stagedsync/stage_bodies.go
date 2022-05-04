@@ -10,7 +10,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
@@ -258,10 +257,11 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	runtime.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
 		"block_num", committed,
-		"delivery/sec", common.StorageSize(speed),
-		"wasted/sec", common.StorageSize(wastedSpeed),
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys))
+		"delivery/sec", libcommon.ByteCount(uint64(speed)),
+		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
+		"alloc", libcommon.ByteCount(m.Alloc),
+		"sys", libcommon.ByteCount(m.Sys),
+	)
 }
 
 func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {

@@ -17,12 +17,14 @@
 package discover
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"net"
 	"runtime"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
@@ -34,9 +36,13 @@ func TestUDPv4_Lookup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-
 	t.Parallel()
-	test := newUDPTest(t)
+
+	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, 100*time.Millisecond)
+
+	test := newUDPTestContext(ctx, t)
+	defer test.close()
 
 	// Lookup on empty table returns no nodes.
 	targetKey, _ := v4wire.DecodePubkey(crypto.S256(), v4wire.Pubkey(lookupTestnet.target))
@@ -47,18 +53,13 @@ func TestUDPv4_Lookup(t *testing.T) {
 	// Seed table with initial node.
 	fillTable(test.table, []*node{wrapNode(lookupTestnet.node(256, 0))})
 
-	// Start the lookup.
-	resultC := make(chan []*enode.Node, 1)
-	go func() {
-		resultC <- test.udp.LookupPubkey(targetKey)
-		test.close()
-	}()
-
 	// Answer lookup packets.
-	serveTestnet(test, lookupTestnet)
+	go serveTestnet(test, lookupTestnet)
+
+	// Start the lookup.
+	results := test.udp.LookupPubkey(targetKey)
 
 	// Verify result nodes.
-	results := <-resultC
 	t.Logf("results:")
 	for _, e := range results {
 		t.Logf("  ld=%d, %x", enode.LogDist(lookupTestnet.target.ID(), e.ID()), e.ID().Bytes())
@@ -74,7 +75,19 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
-	test := newUDPTest(t)
+
+	// Set up RandomNodes() to use expected keys instead of generating random ones.
+	testNetPrivateKeys := lookupTestnet.privateKeys()
+	testNetPrivateKeyIndex := -1
+	privateKeyGenerator := func() (*ecdsa.PrivateKey, error) {
+		testNetPrivateKeyIndex = (testNetPrivateKeyIndex + 1) % len(testNetPrivateKeys)
+		return testNetPrivateKeys[testNetPrivateKeyIndex], nil
+	}
+	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, 100*time.Millisecond)
+	ctx = contextWithPrivateKeyGenerator(ctx, privateKeyGenerator)
+
+	test := newUDPTestContext(ctx, t)
 	defer test.close()
 
 	// Seed table with initial nodes.
@@ -314,6 +327,16 @@ func (tn *preminedTestnet) closest(n int) (nodes []*enode.Node) {
 		return enode.DistCmp(tn.target.ID(), nodes[i].ID(), nodes[j].ID()) < 0
 	})
 	return nodes[:n]
+}
+
+func (tn *preminedTestnet) privateKeys() []*ecdsa.PrivateKey {
+	var keys []*ecdsa.PrivateKey
+	for d := range tn.dists {
+		for _, key := range tn.dists[d] {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }
 
 var _ = (*preminedTestnet).mine // avoid linter warning about mine being dead code.

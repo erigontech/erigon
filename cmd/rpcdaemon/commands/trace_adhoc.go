@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -1034,7 +1033,13 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err != nil {
 		return nil, err
 	}
-	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
+
+	// TODO: can read here only parent header
+	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	parentHeader := parentBlock.Header()
 	if parentHeader == nil {
 		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}
@@ -1085,7 +1090,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
-	parentHeader := rawdb.ReadHeader(dbtx, hash, blockNumber)
+	// TODO: can read here only parent header
+	parentBlock, err := api.blockWithSenders(dbtx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	parentHeader := parentBlock.Header()
 	if parentHeader == nil {
 		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
 	}

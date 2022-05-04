@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type TxLookupCfg struct {
@@ -68,7 +69,8 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 				return err
 			}
 		}
-	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+	}
+	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
 		if cfg.snapshots.BlocksAvailable() > startBlock {
 			// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
 			startBlock = cfg.snapshots.BlocksAvailable()
@@ -210,6 +212,10 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
+			if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled && blocknum <= cfg.snapshots.BlocksAvailable() {
+				log.Warn("TxLookup pruning, empty block body", "height", blocknum)
+				return nil
+			}
 			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
 		}
 

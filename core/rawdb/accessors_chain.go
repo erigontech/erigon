@@ -26,8 +26,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -35,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
@@ -57,10 +56,12 @@ func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
 	return nil
 }
 
-// DeleteCanonicalHash removes the number to hash canonical mapping.
-func DeleteCanonicalHash(db kv.Deleter, number uint64) error {
-	if err := db.Delete(kv.HeaderCanonical, dbutils.EncodeBlockNumber(number), nil); err != nil {
-		return fmt.Errorf("failed to delete number to hash mapping: %w", err)
+// TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
+func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64) error {
+	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+		return tx.Delete(kv.HeaderCanonical, k, nil)
+	}); err != nil {
+		return fmt.Errorf("TruncateCanonicalHash: %w", err)
 	}
 	return nil
 }
@@ -254,8 +255,8 @@ func WriteHeader(db kv.Putter, header *types.Header) {
 	}
 }
 
-// DeleteHeader removes all block header data associated with a hash.
-func DeleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
+// deleteHeader - dangerous, use DeleteAncientBlocks/TruncateBlocks methods
+func deleteHeader(db kv.Deleter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.Headers, dbutils.HeaderKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete header", "err", err)
 	}
@@ -498,18 +499,6 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 
 // ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 func ResetSequence(tx kv.RwTx, bucket string, newValue uint64) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	k, _, err := c.Last()
-	if err != nil {
-		return err
-	}
-	if k != nil && binary.BigEndian.Uint64(k) >= newValue {
-		panic(fmt.Sprintf("must not happen. ResetSequence: %s, %d < lastInDB: %d\n", bucket, newValue, binary.BigEndian.Uint64(k)))
-	}
-
 	newVBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(newVBytes, newValue)
 	if err := tx.Put(kv.Sequence, []byte(bucket), newVBytes); err != nil {
@@ -629,8 +618,8 @@ func WriteSenders(db kv.Putter, hash common.Hash, number uint64, senders []commo
 	return nil
 }
 
-// DeleteBody removes all block body data associated with a hash.
-func DeleteBody(db kv.Deleter, hash common.Hash, number uint64) {
+// deleteBody removes all block body data associated with a hash.
+func deleteBody(db kv.Deleter, hash common.Hash, number uint64) {
 	if err := db.Delete(kv.BlockBody, dbutils.BlockBodyKey(number, hash), nil); err != nil {
 		log.Crit("Failed to delete block body", "err", err)
 	}
@@ -763,7 +752,7 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPre
 			return err
 		}
 		if k != nil && binary.BigEndian.Uint64(k) >= firstMovedTxnID {
-			panic(fmt.Sprintf("must not happen, ResetSequence: %d, lastInDB: %d\n", firstMovedTxnID, binary.BigEndian.Uint64(k)))
+			panic(fmt.Sprintf("must not happen, ResetSequence: %d, lastInDB: %d", firstMovedTxnID, binary.BigEndian.Uint64(k)))
 		}
 
 		if err := ResetSequence(tx, kv.EthTx, firstMovedTxnID); err != nil {
@@ -809,10 +798,12 @@ func WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
 	return nil
 }
 
-// DeleteTd removes all block total difficulty data associated with a hash.
-func DeleteTd(db kv.Deleter, hash common.Hash, number uint64) error {
-	if err := db.Delete(kv.HeaderTD, dbutils.HeaderKey(number, hash), nil); err != nil {
-		return fmt.Errorf("failed to delete block total difficulty: %w", err)
+// TruncateTd removes all block total difficulty from block number N
+func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
+	if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+		return tx.Delete(kv.HeaderTD, k, nil)
+	}); err != nil {
+		return fmt.Errorf("TruncateTd: %w", err)
 	}
 	return nil
 }
@@ -972,25 +963,9 @@ func AppendReceipts(tx kv.StatelessWriteTx, blockNumber uint64, receipts types.R
 	return nil
 }
 
-// DeleteReceipts removes all receipt data associated with a block hash.
-func DeleteReceipts(db kv.RwTx, number uint64) error {
-	if err := db.Delete(kv.Receipts, dbutils.EncodeBlockNumber(number), nil); err != nil {
-		return fmt.Errorf("receipts delete failed: %d, %w", number, err)
-	}
-
-	prefix := make([]byte, 8)
-	binary.BigEndian.PutUint64(prefix, number)
-	if err := db.ForPrefix(kv.Log, prefix, func(k, v []byte) error {
-		return db.Delete(kv.Log, k, nil)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteNewerReceipts removes all receipt for given block number or newer
-func DeleteNewerReceipts(db kv.RwTx, number uint64) error {
-	if err := db.ForEach(kv.Receipts, dbutils.EncodeBlockNumber(number), func(k, v []byte) error {
+// TruncateReceipts removes all receipt for given block number or newer
+func TruncateReceipts(db kv.RwTx, number uint64) error {
+	if err := db.ForEach(kv.Receipts, dbutils.EncodeBlockNumber(number), func(k, _ []byte) error {
 		return db.Delete(kv.Receipts, k, nil)
 	}); err != nil {
 		return err
@@ -998,7 +973,7 @@ func DeleteNewerReceipts(db kv.RwTx, number uint64) error {
 
 	from := make([]byte, 8)
 	binary.BigEndian.PutUint64(from, number)
-	if err := db.ForEach(kv.Log, from, func(k, v []byte) error {
+	if err := db.ForEach(kv.Log, from, func(k, _ []byte) error {
 		return db.Delete(kv.Log, k, nil)
 	}); err != nil {
 		return err
@@ -1100,10 +1075,10 @@ func min(a, b uint64) uint64 {
 	return b
 }
 
-// DeleteAncientBlocks - delete old block after moving it to snapshots.
+// DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
-// doesn't delete Reciepts
-// doesn't delete Canonical markers
+// doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
 func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	c, err := db.Cursor(kv.Headers)
 	if err != nil {
@@ -1111,29 +1086,24 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	}
 	defer c.Close()
 
-	var stopAtBlock uint64
-	{
-		k, _, err := c.First()
-		if err != nil {
-			return err
-		}
-		firstBlock := binary.BigEndian.Uint64(k)
-		if firstBlock == 0 { // keep genesis in DB
-			k, _, err := c.Next()
-			if err != nil {
-				return err
-			}
-			firstBlock = binary.BigEndian.Uint64(k)
-		}
-		stopAtBlock = min(blockTo, firstBlock+uint64(blocksDeleteLimit))
+	// find first non-genesis block
+	k, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
+	if err != nil {
+		return err
 	}
+	if k == nil { //nothing to delete
+		return nil
+	}
+	blockFrom := binary.BigEndian.Uint64(k)
+	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
+
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return err
 		}
 
 		n := binary.BigEndian.Uint64(k)
-		if n > stopAtBlock {
+		if n >= stopAtBlock { // [from, to)
 			break
 		}
 
@@ -1167,74 +1137,110 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		if err := db.Delete(kv.BlockBody, k, nil); err != nil {
 			return err
 		}
-		if err := db.Delete(kv.Senders, k, nil); err != nil {
-			return err
-		}
 	}
 
 	return nil
 }
 
-func DeleteNewBlocks(db kv.RwTx, blockFrom uint64) error {
-	c, err := db.Cursor(kv.Headers)
+func LastKey(tx kv.Tx, table string) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	k, _, err := c.Last()
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+func FirstKey(tx kv.Tx, table string) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	k, _, err := c.First()
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+// TruncateBlocks - delete block >= blockFrom
+// does decrement sequnces of kv.EthTx and kv.NonCanonicalTxs
+// doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
+func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
-
-	for k, _, err := c.Seek(dbutils.EncodeBlockNumber(blockFrom)); k != nil; k, _, err = c.Next() {
+	if blockFrom < 1 { //protect genesis
+		blockFrom = 1
+	}
+	for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
 		if err != nil {
 			return err
 		}
 		n := binary.BigEndian.Uint64(k)
-
-		canonicalHash, err := ReadCanonicalHash(db, n)
+		if n < blockFrom { // [from, to)
+			break
+		}
+		canonicalHash, err := ReadCanonicalHash(tx, n)
 		if err != nil {
 			return err
 		}
 		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
 
-		b, err := ReadBodyForStorageByKey(db, k)
+		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
 			return err
 		}
-		if b != nil { // b == nil means body were marked as non-canonical already
-			txIDBytes := make([]byte, 8)
-			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
-				binary.BigEndian.PutUint64(txIDBytes, txID)
-				bucket := kv.EthTx
-				if !isCanonical {
-					bucket = kv.NonCanonicalTxs
-				}
-				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+		if b != nil {
+			bucket := kv.EthTx
+			if !isCanonical {
+				bucket = kv.NonCanonicalTxs
+			}
+			if err := tx.ForEach(bucket, dbutils.EncodeBlockNumber(b.BaseTxId), func(k, _ []byte) error {
+				if err := tx.Delete(bucket, k, nil); err != nil {
 					return err
 				}
+				return nil
+			}); err != nil {
+				return err
+			}
+			if err := ResetSequence(tx, bucket, b.BaseTxId); err != nil {
+				return err
 			}
 		}
-		if err := db.Delete(kv.Headers, k, nil); err != nil {
+		if err := tx.Delete(kv.Headers, k, nil); err != nil {
 			return err
 		}
-		if err := db.Delete(kv.BlockBody, k, nil); err != nil {
+		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
 			return err
 		}
-		if err := db.Delete(kv.Senders, k, nil); err != nil {
-			return err
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info("TruncateBlocks", "block", n)
+		default:
 		}
 	}
 
-	return nil
-}
+	// ensure no grabage records left (it may happen if db is inconsistent)
+	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+		return tx.Delete(kv.BlockBody, k, nil)
+	}); err != nil {
+		return err
+	}
 
-// DeleteBlock removes all block data associated with a hash.
-func DeleteBlock(db kv.RwTx, hash common.Hash, number uint64) error {
-	if err := DeleteReceipts(db, number); err != nil {
-		return err
-	}
-	DeleteHeader(db, hash, number)
-	DeleteBody(db, hash, number)
-	if err := DeleteTd(db, hash, number); err != nil {
-		return err
-	}
 	return nil
 }
 
