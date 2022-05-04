@@ -275,11 +275,13 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 	prevLink := attachmentLink
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		// If we are attching to already persisted link, schedule for insertion (persistence)
-		if link.verified {
-			hd.moveLinkToQueue(link, InsertQueueID)
-		} else {
-			hd.moveLinkToQueue(link, VerifyQueueID)
+		if prevLink.persisted {
+			// If we are attching to already persisted link, schedule for insertion (persistence)
+			if link.verified {
+				hd.moveLinkToQueue(link, InsertQueueID)
+			} else {
+				hd.moveLinkToQueue(link, VerifyQueueID)
+			}
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -363,10 +365,12 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		// If we attach to already persisted link, mark this one for insertion
-		if link.verified {
-			hd.moveLinkToQueue(link, InsertQueueID)
-		} else {
-			hd.moveLinkToQueue(link, VerifyQueueID)
+		if prevLink.persisted {
+			if link.verified {
+				hd.moveLinkToQueue(link, InsertQueueID)
+			} else {
+				hd.moveLinkToQueue(link, VerifyQueueID)
+			}
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
