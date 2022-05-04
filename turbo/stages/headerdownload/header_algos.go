@@ -912,13 +912,14 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter, 
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
-		if header.Hash() != hd.posAnchor.parentHash {
-			log.Warn("Unexpected header", "hash", header.Hash(), "expected", hd.posAnchor.parentHash)
+		headerHash := segmentFragment.Hash
+		if headerHash != hd.posAnchor.parentHash {
+			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
 			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
 
 		headerNumber := header.Number.Uint64()
-		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, header.Hash()), segmentFragment.HeaderRaw); err != nil {
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, headerHash), segmentFragment.HeaderRaw); err != nil {
 			return nil, err
 		}
 
