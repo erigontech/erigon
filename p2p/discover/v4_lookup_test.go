@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
@@ -35,9 +36,13 @@ func TestUDPv4_Lookup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-
 	t.Parallel()
-	test := newUDPTest(t)
+
+	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, 100*time.Millisecond)
+
+	test := newUDPTestContext(ctx, t)
+	defer test.close()
 
 	// Lookup on empty table returns no nodes.
 	targetKey, _ := v4wire.DecodePubkey(crypto.S256(), v4wire.Pubkey(lookupTestnet.target))
@@ -48,18 +53,13 @@ func TestUDPv4_Lookup(t *testing.T) {
 	// Seed table with initial node.
 	fillTable(test.table, []*node{wrapNode(lookupTestnet.node(256, 0))})
 
-	// Start the lookup.
-	resultC := make(chan []*enode.Node, 1)
-	go func() {
-		resultC <- test.udp.LookupPubkey(targetKey)
-		test.close()
-	}()
-
 	// Answer lookup packets.
-	serveTestnet(test, lookupTestnet)
+	go serveTestnet(test, lookupTestnet)
+
+	// Start the lookup.
+	results := test.udp.LookupPubkey(targetKey)
 
 	// Verify result nodes.
-	results := <-resultC
 	t.Logf("results:")
 	for _, e := range results {
 		t.Logf("  ld=%d, %x", enode.LogDist(lookupTestnet.target.ID(), e.ID()), e.ID().Bytes())
@@ -84,6 +84,7 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		return testNetPrivateKeys[testNetPrivateKeyIndex], nil
 	}
 	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, 100*time.Millisecond)
 	ctx = contextWithPrivateKeyGenerator(ctx, privateKeyGenerator)
 
 	test := newUDPTestContext(ctx, t)

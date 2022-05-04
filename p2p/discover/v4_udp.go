@@ -78,6 +78,7 @@ type UDPv4 struct {
 	addReplyMatcher chan *replyMatcher
 	gotreply        chan reply
 	replyTimeout    time.Duration
+	pingBackDelay   time.Duration
 	closeCtx        context.Context
 	cancelCloseCtx  context.CancelFunc
 
@@ -141,6 +142,7 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 		gotreply:        make(chan reply),
 		addReplyMatcher: make(chan *replyMatcher),
 		replyTimeout:    cfg.ReplyTimeout,
+		pingBackDelay:   cfg.PingBackDelay,
 		closeCtx:        closeCtx,
 		cancelCloseCtx:  cancel,
 		log:             cfg.Log,
@@ -601,7 +603,7 @@ func (t *UDPv4) ensureBond(toid enode.ID, toaddr *net.UDPAddr) {
 		rm := t.sendPing(toid, toaddr, nil)
 		<-rm.errc
 		// Wait for them to ping back and process our pong.
-		time.Sleep(t.replyTimeout)
+		time.Sleep(t.pingBackDelay)
 	}
 }
 

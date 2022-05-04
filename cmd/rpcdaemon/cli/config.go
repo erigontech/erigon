@@ -342,7 +342,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.SingleNodeMode {
 		if cfg.Snapshot.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
-			allSnapshots.AsyncOpenAll(ctx)
+			// don't reopen it right here, because snapshots may be not ready yet
 			onNewSnapshot = func() {
 				allSnapshots.Reopen()
 			}
