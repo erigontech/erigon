@@ -6,20 +6,10 @@ on:
       - alpha
       - stable
       - ciint1
-  pull_request:
-    branches:
-      - devel
-      - alpha
-      - stable
-      - ciint1
-    types:
-      - closed
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
 jobs:
   tests:
-    if: github.event.schedule || github.event.pull_request.merged
-
     runs-on: ubuntu-20.04
 
     steps:
