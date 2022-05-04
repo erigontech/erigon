@@ -17,7 +17,7 @@ jobs:
   tests:
     strategy:
       matrix:
-        os: [ ubuntu-20.04, macos-11, windows-2019 ] # list of os: https://github.com/actions/virtual-environments
+        os: [ ubuntu-20.04, macos-11, windows-2022 ] # list of os: https://github.com/actions/virtual-environments
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -26,23 +26,28 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - name: Install dependencies
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt update && sudo apt install build-essential
-          fi
-        shell: bash
       - uses: actions/cache@v3
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+
+      - name: Install deps
+        if: matrix.os == 'ubuntu-20.04'
+        run: sudo apt update && sudo apt install build-essential
+        shell: bash
+      - name: Install deps
+        if: matrix.os == 'windows-2022'
+        run: choco upgrade mingw cmake -y --no-progress
+
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v3
         with:
           version: v1.45
-      - name: Install deps
-        if: matrix.os == 'windows-2019'
-        run: choco upgrade mingw cmake -y --no-progress
-      - name: Test
+          
+      - name: Test win
+        if: matrix.os == 'windows-2022'
         run: go test ./...
+      - name: Test
+        if: matrix.os != 'windows-2022'
+        run: go test -tags gofuzzbeta ./...
