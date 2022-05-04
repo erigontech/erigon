@@ -10,7 +10,7 @@ on:
       - closed
 jobs:
   tests:
-    if: github.event.pull_request.merged
+    if: github.event.schedule || github.event.pull_request.merged
 
     runs-on: ubuntu-20.04
 
