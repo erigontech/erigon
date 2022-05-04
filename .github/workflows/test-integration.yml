@@ -1,6 +1,11 @@
 name: Integration tests 123
 on:
   pull_request:
+    branches:
+      - devel
+      - alpha
+      - stable
+      - ciint1
     types:
       - closed
 jobs:
