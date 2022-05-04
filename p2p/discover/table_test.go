@@ -189,31 +189,35 @@ func checkIPLimitInvariant(t *testing.T, tab *Table) {
 	}
 }
 
-func TestTable_findnodeByID(t *testing.T) {
-	t.Parallel()
-
-	test := func(test *closeTest) bool {
+func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGen byte, rand *rand.Rand) bool {
+	if !t.Skipped() {
 		// for any node table, Target and N
 		transport := newPingRecorder()
 		tab, db := newTestTable(transport)
 		defer db.Close()
 		defer tab.close()
-		fillTable(tab, test.All)
+
+		nodesCount := int(nodesCountGen) % (bucketSize*nBuckets + 1)
+		testNodes := generateNodes(rand, nodesCount)
+		fillTable(tab, testNodes)
+
+		target := enode.ID{}
+		resultsCount := int(resultsCountGen) % (bucketSize + 1)
 
 		// check that closest(Target, N) returns nodes
-		result := tab.findnodeByID(test.Target, test.N, false).entries
+		result := tab.findnodeByID(target, resultsCount, false).entries
 		if hasDuplicates(result) {
 			t.Errorf("result contains duplicates")
 			return false
 		}
-		if !sortedByDistanceTo(test.Target, result) {
+		if !sortedByDistanceTo(target, result) {
 			t.Errorf("result is not sorted by distance to target")
 			return false
 		}
 
 		// check that the number of results is min(N, tablen)
-		wantN := test.N
-		if tlen := tab.len(); tlen < test.N {
+		wantN := resultsCount
+		if tlen := tab.len(); tlen < resultsCount {
 			wantN = tlen
 		}
 		if len(result) != wantN {
@@ -230,9 +234,9 @@ func TestTable_findnodeByID(t *testing.T) {
 					continue // don't run the check below for nodes in result
 				}
 				farthestResult := result[len(result)-1].ID()
-				if enode.DistCmp(test.Target, n.ID(), farthestResult) < 0 {
+				if enode.DistCmp(target, n.ID(), farthestResult) < 0 {
 					t.Errorf("table contains node that is closer to target but it's not in result")
-					t.Logf("  Target:          %v", test.Target)
+					t.Logf("  Target:          %v", target)
 					t.Logf("  Farthest Result: %v", farthestResult)
 					t.Logf("  ID:              %v", n.ID())
 					return false
@@ -241,9 +245,50 @@ func TestTable_findnodeByID(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(test, quickcfg()); err != nil {
-		t.Error(err)
-	}
+	return true
+}
+
+func TestTable_findNodeByID_examples(t *testing.T) {
+	t.Parallel()
+
+	randGen := rand.New(rand.NewSource(time.Now().Unix()))
+
+	t.Run("n0r1", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, 0, 1, randGen)
+	})
+	t.Run("n1r1", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, 1, 1, randGen)
+	})
+	t.Run("n16r1", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, bucketSize, 1, randGen)
+	})
+	t.Run("nMr1", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, uint16(bucketSize*nBuckets), 1, randGen)
+	})
+	t.Run("n0r2", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, 0, 2, randGen)
+	})
+	t.Run("n1r2", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, 1, 2, randGen)
+	})
+	t.Run("n16r2", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, bucketSize, 2, randGen)
+	})
+	t.Run("nMr2", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, uint16(bucketSize*nBuckets), 2, randGen)
+	})
+	t.Run("n0rM", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, 0, bucketSize, randGen)
+	})
+	t.Run("n1rM", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, 1, bucketSize, randGen)
+	})
+	t.Run("n16rM", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, bucketSize, bucketSize, randGen)
+	})
+	t.Run("nMrM", func(t *testing.T) {
+		testTableFindNodeByIDRun(t, uint16(bucketSize*nBuckets), bucketSize, randGen)
+	})
 }
 
 func TestTable_ReadRandomNodesGetAll(t *testing.T) {
@@ -281,27 +326,24 @@ func TestTable_ReadRandomNodesGetAll(t *testing.T) {
 	}
 }
 
-type closeTest struct {
-	Self   enode.ID
-	Target enode.ID
-	All    []*node
-	N      int
+func generateNodes(rand *rand.Rand, count int) []*node {
+	nodes := make([]*node, 0, count)
+	for i := 0; i < count; i++ {
+		nodes = append(nodes, generateNode(rand))
+	}
+	return nodes
 }
 
-func (*closeTest) Generate(rand *rand.Rand, size int) reflect.Value {
-	t := &closeTest{
-		Self:   gen(enode.ID{}, rand).(enode.ID),
-		Target: gen(enode.ID{}, rand).(enode.ID),
-		N:      rand.Intn(bucketSize),
-	}
-	for _, id := range gen([]enode.ID{}, rand).([]enode.ID) {
-		r := new(enr.Record)
-		r.Set(enr.IP(genIP(rand)))
-		n := wrapNode(enode.SignNull(r, id))
-		n.livenessChecks = 1
-		t.All = append(t.All, n)
-	}
-	return reflect.ValueOf(t)
+func generateNode(rand *rand.Rand) *node {
+	var id enode.ID
+	rand.Read(id[:])
+
+	r := new(enr.Record)
+	r.Set(enr.IP(genIP(rand)))
+
+	n := wrapNode(enode.SignNull(r, id))
+	n.livenessChecks = 1
+	return n
 }
 
 func TestTable_addVerifiedNode(t *testing.T) {
@@ -395,27 +437,10 @@ func TestTable_revalidateSyncRecord(t *testing.T) {
 	}
 }
 
-// gen wraps quick.Value so it's easier to use.
-// it generates a random value of the given value's type.
-func gen(typ interface{}, rand *rand.Rand) interface{} {
-	v, ok := quick.Value(reflect.TypeOf(typ), rand)
-	if !ok {
-		panic(fmt.Sprintf("couldn't generate random value of type %T", typ))
-	}
-	return v.Interface()
-}
-
 func genIP(rand *rand.Rand) net.IP {
 	ip := make(net.IP, 4)
 	rand.Read(ip)
 	return ip
-}
-
-func quickcfg() *quick.Config {
-	return &quick.Config{
-		MaxCount: 1000,
-		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
-	}
 }
 
 func newkey() *ecdsa.PrivateKey {

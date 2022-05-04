@@ -91,7 +91,10 @@ db-tools: git-submodules
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test:
-	$(GOTEST) --timeout 30m
+	$(GOTEST) --timeout 30s
+
+test-integration:
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml

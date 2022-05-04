@@ -208,6 +208,8 @@ func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torre
 			select {
 			case <-ctx.Done():
 				errs <- ctx.Err()
+			case <-logEvery.C:
+				log.Info("[Snapshots] Verify snapshots", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
 			default:
 			}
 			errs <- BuildTorrentAndAdd(ctx, f, snapshotDir, client)

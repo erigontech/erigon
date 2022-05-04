@@ -138,6 +138,33 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	}
 }
 
+func (s *StateSuite) TestTouchDelete(c *checker.C) {
+	s.state.GetOrNewStateObject(common.Address{})
+
+	err := s.state.FinalizeTx(params.Rules{}, s.w)
+	if err != nil {
+		c.Fatal("error while finalize", err)
+	}
+
+	err = s.state.CommitBlock(params.Rules{}, s.w)
+	if err != nil {
+		c.Fatal("error while commit", err)
+	}
+
+	s.state.Reset()
+
+	snapshot := s.state.Snapshot()
+	s.state.AddBalance(common.Address{}, new(uint256.Int))
+
+	if len(s.state.journal.dirties) != 1 {
+		c.Fatal("expected one dirty state object")
+	}
+	s.state.RevertToSnapshot(snapshot)
+	if len(s.state.journal.dirties) != 0 {
+		c.Fatal("expected no dirty state object")
+	}
+}
+
 func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
 	var storageaddr common.Hash
