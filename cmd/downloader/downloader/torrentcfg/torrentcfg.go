@@ -21,6 +21,11 @@ import (
 // see https://wiki.theory.org/BitTorrentSpecification#Metainfo_File_Structure
 const DefaultPieceSize = 2 * 1024 * 1024
 
+// DefaultNetworkChunkSize - how much data request per 1 network call to peer.
+// default: 16Kb
+// There is another hard-coded limit now int torrent lib: PeerConn.mainReadLoop -> MaxLength: 256 * 1024
+const DefaultNetworkChunkSize = 128 * 1024
+
 type Cfg struct {
 	*torrent.ClientConfig
 	DB               kv.RwDB

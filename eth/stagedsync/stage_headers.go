@@ -1222,6 +1222,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	logEvery := time.NewTicker(logInterval / 3)
 	defer logEvery.Stop()
 
+	var m runtime.MemStats
 	// Print download progress until all segments are available
 Loop:
 	for {
@@ -1238,7 +1239,7 @@ Loop:
 					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
-
+				runtime.ReadMemStats(&m)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
@@ -1246,6 +1247,7 @@ Loop:
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
+					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
 			}
 		}

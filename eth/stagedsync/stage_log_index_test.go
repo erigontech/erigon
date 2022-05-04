@@ -94,7 +94,7 @@ func TestLogIndex(t *testing.T) {
 	require, tmpDir, ctx := require.New(t), t.TempDir(), context.Background()
 	_, tx := memdb.NewTestTx(t)
 
-	expectAddrs, expectTopics := genReceipts(t, tx, 10000)
+	expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
 	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
 	cfgCopy := cfg
@@ -116,13 +116,13 @@ func TestLogIndex(t *testing.T) {
 	}
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 500, ctx)
+	err = pruneLogIndex("", tx, tmpDir, 50, ctx)
 	require.NoError(err)
 
 	{
 		total := 0
 		err = tx.ForEach(kv.LogAddressIndex, nil, func(k, v []byte) error {
-			require.True(binary.BigEndian.Uint32(k[length.Addr:]) >= 500)
+			require.True(binary.BigEndian.Uint32(k[length.Addr:]) >= 50)
 			total++
 			return nil
 		})
@@ -132,7 +132,7 @@ func TestLogIndex(t *testing.T) {
 	{
 		total := 0
 		err = tx.ForEach(kv.LogTopicIndex, nil, func(k, v []byte) error {
-			require.True(binary.BigEndian.Uint32(k[length.Hash:]) >= 500)
+			require.True(binary.BigEndian.Uint32(k[length.Hash:]) >= 50)
 			total++
 			return nil
 		})
@@ -141,7 +141,7 @@ func TestLogIndex(t *testing.T) {
 	}
 
 	// Unwind test
-	err = unwindLogIndex("logPrefix", tx, 700, cfg, nil)
+	err = unwindLogIndex("logPrefix", tx, 70, cfg, nil)
 	require.NoError(err)
 
 	for addr := range expectAddrs {

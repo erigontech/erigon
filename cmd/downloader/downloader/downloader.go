@@ -136,7 +136,7 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 		logEvery := time.NewTicker(20 * time.Second)
 		defer logEvery.Stop()
 
-		interval := 5 * time.Second
+		interval := 10 * time.Second
 		statEvery := time.NewTicker(interval)
 		defer statEvery.Stop()
 		for {
@@ -186,6 +186,7 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 			}
 		}
 	}()
+
 	return nil
 }
 
@@ -199,8 +200,8 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 	connStats := cli.TorrentClient.ConnStats()
 
 	stats.Completed = true
-	stats.BytesRead = uint64(connStats.BytesReadUsefulIntendedData.Int64())
-	stats.BytesWritten = uint64(connStats.BytesWrittenData.Int64())
+	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
+	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 
 	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = 0, 0, 0, 0
 	for _, t := range torrents {
@@ -219,8 +220,8 @@ func (cli *Protocols) ReCalcStats(interval time.Duration) {
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
 
-	stats.DownloadRate = (stats.BytesRead - prevStats.BytesRead) / uint64(interval.Seconds())
-	stats.UploadRate = (stats.BytesWritten - prevStats.BytesWritten) / uint64(interval.Seconds())
+	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
+	stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
 
 	if stats.BytesTotal == 0 {
 		stats.Progress = 0
@@ -289,10 +290,8 @@ type AggStats struct {
 
 	BytesCompleted, BytesTotal uint64
 
-	UploadRate, DownloadRate uint64
-
-	BytesRead    uint64
-	BytesWritten uint64
+	BytesDownload, BytesUpload uint64
+	UploadRate, DownloadRate   uint64
 }
 
 // AddTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
@@ -305,7 +304,12 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 		return nil, err
 	}
 	mi.AnnounceList = Trackers
-	t, err := torrentClient.AddTorrent(mi)
+	ts, err := torrent.TorrentSpecFromMetaInfoErr(mi)
+	if err != nil {
+		return nil, err
+	}
+	ts.ChunkSize = torrentcfg.DefaultNetworkChunkSize
+	t, _, err := torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return nil, err
 	}

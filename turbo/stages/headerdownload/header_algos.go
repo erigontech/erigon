@@ -238,11 +238,11 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 func (hd *HeaderDownload) MarkPreverified(link *Link) {
 	// Go through all parent links that are not preverified and mark them too
 	for link != nil && !link.verified {
+		link.verified = true
 		if !link.persisted {
-			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
-			link = hd.links[link.header.ParentHash]
 		}
+		link = hd.links[link.header.ParentHash]
 	}
 }
 
@@ -275,11 +275,13 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 	prevLink := attachmentLink
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		// If we are attching to already persisted link, schedule for insertion (persistence)
-		if link.verified {
-			hd.moveLinkToQueue(link, InsertQueueID)
-		} else {
-			hd.moveLinkToQueue(link, VerifyQueueID)
+		if prevLink.persisted {
+			// If we are attching to already persisted link, schedule for insertion (persistence)
+			if link.verified {
+				hd.moveLinkToQueue(link, InsertQueueID)
+			} else {
+				hd.moveLinkToQueue(link, VerifyQueueID)
+			}
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -363,10 +365,12 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 	for i := len(segment) - 1; i >= 0; i-- {
 		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
 		// If we attach to already persisted link, mark this one for insertion
-		if link.verified {
-			hd.moveLinkToQueue(link, InsertQueueID)
-		} else {
-			hd.moveLinkToQueue(link, VerifyQueueID)
+		if prevLink.persisted {
+			if link.verified {
+				hd.moveLinkToQueue(link, InsertQueueID)
+			} else {
+				hd.moveLinkToQueue(link, VerifyQueueID)
+			}
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
@@ -889,38 +893,46 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	}
 }
 
-func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) error {
+func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
 	if len(segment) == 0 {
-		return nil
+		return nil, nil
+	}
+	// We may have received answer from old request so not enough evidence for penalizing.
+	if segment[0].Number != hd.posAnchor.blockHeight-1 {
+		return nil, nil
+	}
+
+	// Handle request after closing collectors
+	if hd.headersCollector == nil {
+		return nil, nil
 	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	// Handle request after closing collectors
-	if hd.headersCollector == nil {
-		return nil
-	}
+
 	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
 	for _, segmentFragment := range segment {
 		header := segmentFragment.Header
-		if header.Hash() != hd.posAnchor.parentHash {
-			return fmt.Errorf("unexpected hash %x (expected %x)", header.Hash(), hd.posAnchor.parentHash)
+		headerHash := segmentFragment.Hash
+		if headerHash != hd.posAnchor.parentHash {
+			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
+			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
 
 		headerNumber := header.Number.Uint64()
-		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, header.Hash()), segmentFragment.HeaderRaw); err != nil {
-			return err
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, headerHash), segmentFragment.HeaderRaw); err != nil {
+			return nil, err
 		}
 
 		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if hh != nil {
 			log.Trace("Synced", "requestId", hd.requestId)
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
-			return nil
+			return nil, nil
 		}
 
 		hd.posAnchor = &Anchor{
@@ -929,10 +941,10 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter) 
 		}
 
 		if headerNumber <= 1 {
-			return errors.New("wrong genesis in PoS sync")
+			return nil, errors.New("wrong genesis in PoS sync")
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // GrabAnnounces - returns all available announces and forget them
