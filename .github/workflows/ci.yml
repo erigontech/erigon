@@ -23,17 +23,15 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - name: Install dependencies
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt update && sudo apt install build-essential
-          fi
-        shell: bash
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
       - uses: actions/cache@v3
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
-      - run: make all
+      - name: Build
+        run: make all
       - name: Reproducible build test
         run: |
           make erigon
@@ -44,19 +42,17 @@ jobs:
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
       - name: Lint
-        if: matrix.os == 'ubuntu-20.04'
+        if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
           version: v1.45
           skip-pkg-cache: true
           skip-build-cache: true
-      - run: make test
+      - name: Test
+        run: make test
 
-  win:
-    strategy:
-      matrix:
-        os: [ windows-2019 ]
-    runs-on: ${{ matrix.os }}
+  tests-windows:
+    runs-on: windows-2019
 
     steps:
       - uses: actions/checkout@v3
@@ -65,11 +61,8 @@ jobs:
         with:
           go-version: 1.18.x
       - run: choco upgrade mingw cmake -y --no-progress
-      - name: Build
-        run: |
-          .\wmake.ps1
-          make test
-        shell: powershell
+      - name: Test
+        run: .\wmake.ps1 && make test
 
   docker:
     runs-on: ubuntu-20.04

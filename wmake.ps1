@@ -71,14 +71,18 @@ $gitErrorText = @"
 
 "@
 
+$goMinMinorVersion = 18
 
 $goErrorText = @"
 
  Requirement Error.
  You need to have Go Programming Language (aka golang) installed.
- Minimum required version is 1.16
+ Minimum required version is 1.$goMinMinorVersion
  Please visit https://golang.org/dl/ and download the appropriate
  installer.
+ Ensure that go.exe installation
+ directory is properly inserted into your PATH
+ environment variable. 
 
 "@
 
@@ -183,20 +187,14 @@ function Get-Uninstall-Item {
 # Returns       : $true / $false
 # -----------------------------------------------------------------------------
 function Test-GO-Installed {
+	$versionStr = go.exe version
+	if (!($?)) {
+		return $false
+	}
 
-    $Private:item   = Get-Uninstall-Item "^Go\ Programming\ Language"
-    $Private:result = $false
-
-    if ($Private:item) {
-        $Private:versionMajor = [int]$item.VersionMajor
-        $Private:versionMinor = [int]$item.VersionMinor
-        if ($Private:versionMajor -ge 1 -and $Private:versionMinor -ge 16) {
-            Write-Host " Found GO version $($Private:item.DisplayVersion)"
-            $Private:result = $true
-        }
-    }
-
-    Write-Output $Private:result
+	$minorVersionStr = $versionStr.Substring(15, 2)
+	$minorVersion = [int]$minorVersionStr
+	return ($minorVersion -ge $goMinMinorVersion)
 }
 
 # -----------------------------------------------------------------------------
@@ -337,19 +335,6 @@ if (!($?)) {
 ## GO language is installed
 if(!(Test-GO-Installed)) {
     Write-Host $goErrorText
-    exit 1
-}
-Get-Command go.exe | Out-Null
-if (!($?)) {
-    Write-Host @"
-    
- Error !
- Though GO installation is found I could not get
- the GO binary executable. Ensure GO installation
- directory is properly inserted into your PATH
- environment variable.
-
-"@
     exit 1
 }
 
