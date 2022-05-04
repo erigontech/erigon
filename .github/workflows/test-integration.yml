@@ -5,19 +5,10 @@ on:
       - devel
       - alpha
       - stable
-  pull_request:
-    branches:
-      - devel
-      - alpha
-      - stable
-    types:
-      - closed
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
 jobs:
   tests:
-    if: github.event.schedule || github.event.pull_request.merged
-
     strategy:
       matrix:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
