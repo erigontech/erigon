@@ -66,7 +66,7 @@ var (
 )
 
 var (
-	shadowTTD, _ = new(big.Int).SetString("50759031004925600000000", 10)
+	shadowTTD, _ = new(big.Int).SetString("48144711970238236721152", 10)
 
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
 	MainnetChainConfig = &ChainConfig{
