@@ -173,6 +173,11 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 			log.Warn("subscription to newHeaders closed")
 		}
 	}()
+	if s.events.OnNewSnapshotHappened() {
+		if err = subscribeServer.Send(&remote.SubscribeReply{Type: remote.Event_NEW_SNAPSHOT}); err != nil {
+			return err
+		}
+	}
 	for {
 		select {
 		case <-s.ctx.Done():

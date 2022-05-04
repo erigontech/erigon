@@ -19,7 +19,7 @@ GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2 -tags $(BUILD_TAGS),integration
+GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
 
@@ -91,7 +91,10 @@ db-tools: git-submodules
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test:
-	$(GOTEST) --timeout 30m
+	$(GOTEST) --timeout 30s
+
+test-integration:
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml

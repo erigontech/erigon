@@ -55,6 +55,7 @@ type HeadersCfg struct {
 	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
+	dbEventNotifier    snapshotsync.DBEventNotifier
 }
 
 func StageHeadersCfg(
@@ -72,6 +73,7 @@ func StageHeadersCfg(
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
 	snapshotDir *dir.Rw,
+	dbEventNotifier snapshotsync.DBEventNotifier,
 ) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
@@ -89,6 +91,7 @@ func StageHeadersCfg(
 		blockReader:        blockReader,
 		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
 		snapshotDir:        snapshotDir,
+		dbEventNotifier:    dbEventNotifier,
 	}
 }
 
@@ -1114,6 +1117,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return fmt.Errorf("ReopenIndices: %w", err)
 			}
 		}
+		if cfg.dbEventNotifier != nil {
+			cfg.dbEventNotifier.OnNewSnapshot()
+		}
 	}
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
@@ -1190,13 +1196,13 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
-		req.Items[i] = &proto_downloader.DownloadItem{
+		req.Items = append(req.Items, &proto_downloader.DownloadItem{
 			TorrentHash: downloadergrpc.String2Proto(p.Hash),
 			Path:        p.Name,
-		}
+		})
 		i++
 	}
 	log.Info("[Snapshots] Fetching torrent files metadata")

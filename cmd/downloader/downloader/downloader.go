@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"net"
 	"runtime"
 	"sync"
 	"time"
@@ -27,7 +28,33 @@ type Protocols struct {
 	snapshotDir *dir.Rw
 }
 
+func portMustBeTCPAndUDPOpen(port int) error {
+	tcpAddr := &net.TCPAddr{
+		Port: port,
+		IP:   net.ParseIP("127.0.0.1"),
+	}
+	ln, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		return fmt.Errorf("please open port %d for TCP and UDP. %w", port, err)
+	}
+	_ = ln.Close()
+	udpAddr := &net.UDPAddr{
+		Port: port,
+		IP:   net.ParseIP("127.0.0.1"),
+	}
+	ser, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return fmt.Errorf("please open port %d for UDP. %w", port, err)
+	}
+	_ = ser.Close()
+	return nil
+}
+
 func New(cfg *torrentcfg.Cfg, snapshotDir *dir.Rw) (*Protocols, error) {
+	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
+		return nil, err
+	}
+
 	peerID, err := readPeerID(cfg.DB)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)

@@ -92,6 +92,8 @@ func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
 
 		ReplyTimeout: replyTimeout,
 
+		PingBackDelay: time.Nanosecond,
+
 		PrivateKeyGenerator: contextGetPrivateKeyGenerator(ctx),
 	})
 	if err != nil {
@@ -124,7 +126,11 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr *
 		test.t.Errorf("%s encode error: %v", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
-	if err = test.udp.handlePacket(addr, enc); err != wantError {
+
+	err = test.udp.handlePacket(addr, enc)
+	if (wantError == nil) && (err != nil) {
+		test.t.Errorf("handlePacket error: %q", err)
+	} else if (wantError != nil) && (err != wantError) {
 		test.t.Errorf("error mismatch: got %q, want %q", err, wantError)
 	}
 }
