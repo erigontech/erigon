@@ -39,7 +39,7 @@ func TestUDPv4_Lookup(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	ctx = contextWithReplyTimeout(ctx, 100*time.Millisecond)
+	ctx = contextWithReplyTimeout(ctx, 200*time.Millisecond)
 
 	test := newUDPTestContext(ctx, t)
 	defer test.close()
@@ -84,7 +84,7 @@ func TestUDPv4_LookupIterator(t *testing.T) {
 		return testNetPrivateKeys[testNetPrivateKeyIndex], nil
 	}
 	ctx := context.Background()
-	ctx = contextWithReplyTimeout(ctx, 100*time.Millisecond)
+	ctx = contextWithReplyTimeout(ctx, 200*time.Millisecond)
 	ctx = contextWithPrivateKeyGenerator(ctx, privateKeyGenerator)
 
 	test := newUDPTestContext(ctx, t)
