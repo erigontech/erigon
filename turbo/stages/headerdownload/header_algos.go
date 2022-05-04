@@ -241,8 +241,8 @@ func (hd *HeaderDownload) MarkPreverified(link *Link) {
 		if !link.persisted {
 			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
-			link = hd.links[link.header.ParentHash]
 		}
+		link = hd.links[link.header.ParentHash]
 	}
 }
 
