@@ -1190,13 +1190,13 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 
 	// send all hashes to the Downloader service
 	preverified := snapshotsCfg.Preverified
-	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, len(preverified))}
+	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
-		req.Items[i] = &proto_downloader.DownloadItem{
+		req.Items = append(req.Items, &proto_downloader.DownloadItem{
 			TorrentHash: downloadergrpc.String2Proto(p.Hash),
 			Path:        p.Name,
-		}
+		})
 		i++
 	}
 	log.Info("[Snapshots] Fetching torrent files metadata")
