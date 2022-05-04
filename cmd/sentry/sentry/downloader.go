@@ -480,8 +480,12 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 					return err
 				}
 				for _, segment := range segments {
-					if err := cs.Hd.ProcessSegmentPOS(segment, tx); err != nil {
+					penalties, err := cs.Hd.ProcessSegmentPOS(segment, tx, ConvertH512ToPeerID(peerID))
+					if err != nil {
 						return err
+					}
+					if len(penalties) > 0 {
+						cs.Penalize(ctx, penalties)
 					}
 				}
 			} else {
