@@ -316,6 +316,10 @@ func (g *Getter) nextPos(clean bool) uint64 {
 
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
+	if table == nil {
+		fmt.Printf("file %q dataP=%d data_size=%d nil table pattern dict\n", g.fName, g.dataP, len(g.data))
+		return []byte{}
+	}
 	if table.bitLen == 0 {
 		return table.patterns[0]
 	}
@@ -367,7 +371,7 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	savePos := g.dataP
 	l := g.nextPos(true)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
-	if l == 0 {
+	if l == 0 || l == 1<<64-1 {
 		if g.dataBit > 0 {
 			g.dataP++
 			g.dataBit = 0
@@ -381,13 +385,23 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		copy(newBuf, buf)
 		buf = newBuf
 	} else {
+		if len(buf)+int(l) < 0 {
+			buf = make([]byte, 0)
+		} else {
+			buf = buf[:len(buf)+int(l)]
+		}
 		// Expand buffer
-		buf = buf[:len(buf)+int(l)]
 	}
 	// Loop below fills in the patterns
 	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
-		copy(buf[bufPos:], g.nextPattern())
+		if bufPos > len(buf) {
+			p := g.nextPattern()
+			buf = append(buf, make([]byte, bufPos-len(buf))...)
+			buf = append(buf, p...)
+		} else {
+			copy(buf[bufPos:], g.nextPattern())
+		}
 	}
 	if g.dataBit > 0 {
 		g.dataP++

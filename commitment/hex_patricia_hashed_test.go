@@ -25,7 +25,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -180,7 +179,7 @@ func (ms *MockState) applyBranchNodeUpdates(updates map[string][]byte) {
 	for key, update := range updates {
 		if pre, ok := ms.cm[key]; ok {
 			// Merge
-			merged, err := MergeBranches(pre, update, nil)
+			merged, err := MergeHexBranches(pre, update, nil)
 			if err != nil {
 				panic(err)
 			}
@@ -382,12 +381,23 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 				u.Flags |= CODE_UPDATE
 				copy(u.CodeHashOrStorage[:], codeHash[:])
 			}
+			if _, del := ub.deletes[string(key)]; del {
+				u.Flags = DELETE_UPDATE
+				continue
+			}
 		} else {
+			if dm, ok1 := ub.deletes2[string(key)]; ok1 {
+				if _, ok2 := dm[string(key2)]; ok2 {
+					u.Flags = DELETE_UPDATE
+					continue
+				}
+			}
 			if sm, ok1 := ub.storages[string(key)]; ok1 {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= STORAGE_UPDATE
 					u.CodeHashOrStorage = [32]byte{}
-					copy(u.CodeHashOrStorage[32-len(storage):], storage)
+					u.ValLength = len(storage)
+					copy(u.CodeHashOrStorage[:], storage)
 				}
 			}
 		}

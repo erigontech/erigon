@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 )
@@ -79,7 +81,8 @@ func TestSimpleAggregator(t *testing.T) {
 	}
 	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
+	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +123,8 @@ func TestLoopAggregator(t *testing.T) {
 	}
 	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
+	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +170,9 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 	}
 	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
+
+	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +280,8 @@ func TestChangeCode(t *testing.T) {
 	}
 	defer rwTx.Rollback()
 	tmpDir := t.TempDir()
-	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, rwTx)
+	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
+	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
 	if err != nil {
 		t.Fatal(err)
 	}
