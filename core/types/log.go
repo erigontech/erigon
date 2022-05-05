@@ -100,6 +100,30 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
+// Copy creates a deep copy of the Log.
+func (l *Log) Copy() *Log {
+	topics := make([]common.Hash, 0, len(l.Topics))
+	for _, topic := range l.Topics {
+		topicCopy := common.BytesToHash(topic.Bytes())
+		topics = append(topics, topicCopy)
+	}
+
+	data := make([]byte, len(l.Data))
+	copy(data, l.Data)
+
+	return &Log{
+		Address:     common.BytesToAddress(l.Address.Bytes()),
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: l.BlockNumber,
+		TxHash:      common.BytesToHash(l.TxHash.Bytes()),
+		TxIndex:     l.TxIndex,
+		BlockHash:   common.BytesToHash(l.BlockHash.Bytes()),
+		Index:       l.Index,
+		Removed:     l.Removed,
+	}
+}
+
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of
 // a log including non-consensus fields.
 type LogForStorage Log
