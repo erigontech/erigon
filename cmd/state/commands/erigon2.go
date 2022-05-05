@@ -17,6 +17,7 @@ import (
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -52,6 +53,7 @@ var (
 	commitmentFrequency int // How many blocks to skip between calculating commitment
 	changesets          bool
 	commitments         bool
+	commitmentTrie      string
 )
 
 var blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
@@ -65,6 +67,7 @@ func init() {
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon2Cmd.Flags().StringVar(&commitmentTrie, "commitments.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	erigon2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	rootCmd.AddCommand(erigon2Cmd)
 }
@@ -142,7 +145,25 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, rwTx)
+	var blockRootMismatchExpected bool
+	var trieVariant commitment.TrieVariant
+	switch commitmentTrie {
+	case "bin":
+		logger.Info("using Binary Patricia Hashed Trie for commitments")
+		trieVariant = commitment.VariantReducedHexPatriciaTrie
+		blockRootMismatchExpected = true
+	case "bin-slow":
+		logger.Info("using slow Binary Patricia Hashed Trie for commitments")
+		trieVariant = commitment.VariantBinPatriciaTrie
+		blockRootMismatchExpected = true
+	case "hex":
+		fallthrough
+	default:
+		logger.Info("using Hex Patricia Hashed Trie for commitments")
+		trieVariant = commitment.VariantHexPatriciaTrie
+	}
+
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, commitment.InitializeTrie(trieVariant), rwTx)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -173,7 +194,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if err = w.Aggregate(false); err != nil {
 			return err
 		}
-		if commitments {
+		if commitments && !blockRootMismatchExpected {
 			if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
 				return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 			}
@@ -211,6 +232,9 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	if syncMode == ethconfig.SnapSync {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
+		if err := allSnapshots.Reopen(); err != nil {
+			return fmt.Errorf("reopen snapshot segments: %w", err)
+		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
@@ -281,8 +305,10 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
 			}
-			if !bytes.Equal(rootHash, block.Header().Root[:]) {
-				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, block.Header().Root[:], rootHash)
+			if !blockRootMismatchExpected {
+				if !bytes.Equal(rootHash, block.Header().Root[:]) {
+					return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, block.Header().Root[:], rootHash)
+				}
 			}
 		}
 		if err = w.Aggregate(trace); err != nil {
