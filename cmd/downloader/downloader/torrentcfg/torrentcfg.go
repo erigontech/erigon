@@ -24,7 +24,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
 // There is another hard-coded limit now int torrent lib: PeerConn.mainReadLoop -> MaxLength: 256 * 1024
-const DefaultNetworkChunkSize = 128 * 1024
+const DefaultNetworkChunkSize = 2 * DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
@@ -46,6 +46,8 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
 	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
+
+	torrentConfig.MaxResponseLength = 2 * DefaultNetworkChunkSize // default: 256 * 1024
 
 	return torrentConfig
 }
@@ -100,14 +102,15 @@ func New(snapshotsDir *dir.Rw, verbosity lg.Level, natif nat.Interface, download
 	if lg.Debug == verbosity {
 		torrentConfig.Debug = true
 	}
-	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
+	torrentConfig.Logger = lg.Default.FilterLevel(lg.Debug)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
 	c, err := NewMdbxPieceCompletion(db)
 	if err != nil {
 		return nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
 	}
-	m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
+	//m := storage.NewMMapWithCompletion(snapshotsDir.Path, c)
+	m := storage.NewFileWithCompletion(snapshotsDir.Path, c)
 	torrentConfig.DefaultStorage = m
 	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m, DownloadSlots: downloadSlots}, nil
 }

@@ -121,6 +121,7 @@ func (cli *Protocols) Start(ctx context.Context, silent bool) error {
 				t.DownloadAll()
 				go func(t *torrent.Torrent) {
 					//r := t.NewReader()
+					//r.SetReadahead(t.Length())
 					//_, _ = io.Copy(io.Discard, r) // enable streaming - it will prioritize sequential download
 
 					<-t.Complete.On()

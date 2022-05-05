@@ -673,7 +673,7 @@ var (
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
-		Value: 20,
+		Value: 10,
 		Usage: "connections per file",
 	}
 	DbPageSizeFlag = cli.StringFlag{

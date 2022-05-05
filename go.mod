@@ -2,7 +2,10 @@ module github.com/ledgerwatch/erigon
 
 go 1.18
 
-replace github.com/etcd-io/bbolt => go.etcd.io/bbolt v1.3.5
+replace (
+	github.com/anacrolix/torrent => github.com/askalexsharov/torrent v1.40.2-0.20220505062459-d7ffba4d7e6c
+	github.com/etcd-io/bbolt => go.etcd.io/bbolt v1.3.5
+)
 
 require (
 	github.com/RoaringBitmap/roaring v0.9.4
@@ -79,7 +82,7 @@ require (
 	github.com/anacrolix/generics v0.0.0-20220217222028-44932cf46edd // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.5.4-0.20220317032254-8c5ea4947a0b // indirect
+	github.com/anacrolix/missinggo/v2 v2.7.0 // indirect
 	github.com/anacrolix/mmsg v1.0.0 // indirect
 	github.com/anacrolix/multiless v0.2.1-0.20211218050420-533661eef5dc // indirect
 	github.com/anacrolix/stm v0.3.0 // indirect
