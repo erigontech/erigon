@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
@@ -235,18 +234,7 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 	}
 }
 
-func (hd *HeaderDownload) MarkPreverified(link *Link) {
-	// Go through all parent links that are not preverified and mark them too
-	for link != nil && !link.persisted {
-		if !link.verified {
-			link.verified = true
-			hd.moveLinkToQueue(link, InsertQueueID)
-		}
-		link = hd.links[link.header.ParentHash]
-	}
-}
-
-func (hd *HeaderDownload) MarkAllPreverified() {
+func (hd *HeaderDownload) MarkAllVerified() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	for hd.verifyQueue.Len() > 0 {
@@ -285,9 +273,6 @@ func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
-		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.MarkPreverified(link)
-		}
 	}
 }
 
@@ -297,13 +282,6 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool 
 	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
 		hd.invalidateAnchor(anchor, "anchor below preverified")
 		return false
-	}
-	anchorPreverified := false
-	for _, link := range anchor.links {
-		if link.verified {
-			anchorPreverified = true
-			break
-		}
 	}
 	newAnchorH := segment[len(segment)-1]
 	newAnchorHeader := newAnchorH.Header
@@ -332,16 +310,9 @@ func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool 
 			prevLink.next = append(prevLink.next, link)
 		}
 		prevLink = link
-		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.MarkPreverified(link)
-		}
 	}
 	prevLink.next = anchor.links
 	anchor.links = nil
-	if anchorPreverified {
-		// Mark the entire segment as preverified
-		hd.MarkPreverified(prevLink)
-	}
 	return !preExisting
 }
 
@@ -351,13 +322,6 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
 		hd.invalidateAnchor(anchor, "anchor below preverified")
 		return penalties
-	}
-	anchorPreverified := false
-	for _, link := range anchor.links {
-		if link.verified {
-			anchorPreverified = true
-			break
-		}
 	}
 	hd.removeAnchor(anchor)
 	// Iterate over headers backwards (from parents towards children)
@@ -374,16 +338,9 @@ func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, an
 		}
 		prevLink.next = append(prevLink.next, link)
 		prevLink = link
-		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.MarkPreverified(link)
-		}
 	}
 	prevLink.next = anchor.links
 	anchor.links = nil
-	if anchorPreverified {
-		// Mark the entire segment as preverified
-		hd.MarkPreverified(prevLink)
-	}
 	if _, bad := hd.badHeaders[attachmentLink.hash]; bad {
 		hd.invalidateAnchor(anchor, "descendant of a known bad block")
 		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
@@ -433,9 +390,6 @@ func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID [64]byte) bool 
 			prevLink.next = append(prevLink.next, link)
 		}
 		prevLink = link
-		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.MarkPreverified(link)
-		}
 	}
 	return !preExisting
 }
@@ -534,46 +488,6 @@ func (hd *HeaderDownload) anchorState() string {
 	}
 	sort.Strings(ss)
 	return strings.Join(ss, "\n")
-}
-
-func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
-	var encodings []string
-	var height uint64
-	switch chain {
-	case networkname.MainnetChainName:
-		encodings = mainnetPreverifiedHashes
-		height = mainnetPreverifiedHeight
-	case networkname.RopstenChainName:
-		encodings = ropstenPreverifiedHashes
-		height = ropstenPreverifiedHeight
-	case networkname.SepoliaChainName:
-		encodings = sepoliaPreverifiedHashes
-		height = sepoliaPreverifiedHeight
-	case networkname.GoerliChainName:
-		encodings = goerliPreverifiedHashes
-		height = goerliPreverifiedHeight
-	default:
-		log.Debug("Preverified hashes not found for", "chain", chain)
-		return nil, 0
-	}
-	return DecodeHashes(encodings), height
-}
-
-func DecodeHashes(encodings []string) map[common.Hash]struct{} {
-	hashes := make(map[common.Hash]struct{}, len(encodings))
-
-	for _, encoding := range encodings {
-		hashes[common.HexToHash(encoding)] = struct{}{}
-	}
-
-	return hashes
-}
-
-func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash]struct{}, preverifiedHeight uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.preverifiedHashes = preverifiedHashes
-	hd.preverifiedHeight = preverifiedHeight
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
@@ -1398,10 +1312,6 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces.FullBlockReader) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	addPreVerifiedHashes := len(hd.preverifiedHashes) == 0
-	if addPreVerifiedHashes && hd.preverifiedHashes == nil {
-		hd.preverifiedHashes = map[common.Hash]struct{}{}
-	}
 
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
 		header, err := r.HeaderByNumber(context.Background(), tx, i)
@@ -1423,9 +1333,6 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 		}
 		link := hd.addHeaderAsLink(h, true /* persisted */)
 		link.verified = true
-		if addPreVerifiedHashes {
-			hd.preverifiedHashes[h.Hash] = struct{}{}
-		}
 	}
 	if hd.highestInDb < n {
 		hd.highestInDb = n
