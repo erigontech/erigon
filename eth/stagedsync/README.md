@@ -58,6 +58,11 @@ So, when we are generating indexes or hashed state, we do a multi-step process.
 
 This optimization sometimes leads to dramatic (orders of magnitude) write speed improvements.
 
+## What happens after the Merge?
+
+In the Proof-of-Stake world staged sync becomes somewhat more complicated, as the following diagram shows.
+![](/docs/pos_downloader.png)
+
 ## Stages (for the up to date list see [`stagedsync.go`](/eth/stagedsync/stagedsync.go) and [`stagebuilder.go`](/eth/stagedsync/stagebuilder.go)):
 
 Each stage consists of 2 functions `ExecFunc` that progesses the stage forward and `UnwindFunc` that unwinds the stage backwards.
