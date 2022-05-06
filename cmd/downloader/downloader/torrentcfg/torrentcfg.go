@@ -23,8 +23,8 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-// TODO: need investigate can we increase this value together with --torrent.upload.rate
-const DefaultNetworkChunkSize = DefaultPieceSize
+// TODO: can we increase this value together with --torrent.upload.rate ?
+const DefaultNetworkChunkSize = 2 * DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
@@ -39,7 +39,7 @@ func Default() *torrent.ClientConfig {
 	// enable dht
 	torrentConfig.NoDHT = true
 	//torrentConfig.DisableTrackers = true
-	torrentConfig.DisableWebtorrent = true
+	//torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
 	// Reduce defaults - to avoid peers with very bad geography
