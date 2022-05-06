@@ -26,12 +26,19 @@ jobs:
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
+
       - uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
       - name: Build
         run: make all
+
       - name: Reproducible build test
         run: |
           make erigon
@@ -41,6 +48,7 @@ jobs:
           if ! cmp -s erigon1.sha256 erigon2.sha256; then
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
+
       - name: Lint
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
@@ -48,6 +56,7 @@ jobs:
           version: v1.45
           skip-pkg-cache: true
           skip-build-cache: true
+
       - name: Test
         run: make test
 
@@ -60,7 +69,26 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - run: choco upgrade mingw cmake -y --no-progress
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            C:\ProgramData\chocolatey\lib\mingw
+            C:\ProgramData\chocolatey\lib\cmake
+          key: chocolatey
+      - name: Install dependencies
+        run: |
+          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
+          choco install cmake -y --no-progress --version 3.23.1
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
       - name: Test
         run: .\wmake.ps1 && make test
 

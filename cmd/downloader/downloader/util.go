@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,7 +19,9 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/edsrzf/mmap-go"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
@@ -316,4 +319,124 @@ func verifyTorrent(info *metainfo.Info, root string, consumer func(i int, good b
 		}
 	}
 	return nil
+}
+
+// AddTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
+// added first time - pieces verification process will start (disk IO heavy) - Progress
+// kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
+// Don't need call torrent.VerifyData manually
+func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *torrent.Client) (*torrent.Torrent, error) {
+	mi, err := metainfo.LoadFromFile(torrentFilePath)
+	if err != nil {
+		return nil, err
+	}
+	mi.AnnounceList = Trackers
+	ts, err := torrent.TorrentSpecFromMetaInfoErr(mi)
+	if err != nil {
+		return nil, err
+	}
+	ts.ChunkSize = torrentcfg.DefaultNetworkChunkSize
+	t, _, err := torrentClient.AddTorrentSpec(ts)
+	if err != nil {
+		return nil, err
+	}
+	t.DisallowDataDownload()
+	t.AllowDataUpload()
+	return t, nil
+}
+
+func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
+	logEvery := time.NewTicker(5 * time.Second)
+	defer logEvery.Stop()
+	files, err := AllTorrentPaths(snapshotDir)
+	if err != nil {
+		return err
+	}
+	totalPieces := 0
+	for _, f := range files {
+		metaInfo, err := metainfo.LoadFromFile(f)
+		if err != nil {
+			return err
+		}
+		info, err := metaInfo.UnmarshalInfo()
+		if err != nil {
+			return err
+		}
+		totalPieces += info.NumPieces()
+	}
+
+	j := 0
+	for _, f := range files {
+		metaInfo, err := metainfo.LoadFromFile(f)
+		if err != nil {
+			return err
+		}
+		info, err := metaInfo.UnmarshalInfo()
+		if err != nil {
+			return err
+		}
+
+		err = verifyTorrent(&info, snapshotDir, func(i int, good bool) error {
+			j++
+			if !good {
+				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", f)
+				return fmt.Errorf("invalid file")
+			}
+			select {
+			case <-logEvery.C:
+				log.Info("[Snapshots] Verify", "Progress", fmt.Sprintf("%.2f%%", 100*float64(j)/float64(totalPieces)))
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	log.Info("[Snapshots] Verify succeed")
+	return nil
+}
+
+func portMustBeTCPAndUDPOpen(port int) error {
+	tcpAddr := &net.TCPAddr{
+		Port: port,
+		IP:   net.ParseIP("127.0.0.1"),
+	}
+	ln, err := net.ListenTCP("tcp", tcpAddr)
+	if err != nil {
+		return fmt.Errorf("please open port %d for TCP and UDP. %w", port, err)
+	}
+	_ = ln.Close()
+	udpAddr := &net.UDPAddr{
+		Port: port,
+		IP:   net.ParseIP("127.0.0.1"),
+	}
+	ser, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return fmt.Errorf("please open port %d for UDP. %w", port, err)
+	}
+	_ = ser.Close()
+	return nil
+}
+
+func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
+	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		return tx.Put(kv.BittorrentInfo, []byte(kv.BittorrentPeerID), peerID[:])
+	})
+}
+
+func readPeerID(db kv.RoDB) (peerID []byte, err error) {
+	if err = db.View(context.Background(), func(tx kv.Tx) error {
+		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
+		if err != nil {
+			return fmt.Errorf("get peer id: %w", err)
+		}
+		peerID = common2.Copy(peerIDFromDB)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return peerID, nil
 }
