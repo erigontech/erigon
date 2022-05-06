@@ -2,30 +2,23 @@ package downloader
 
 import (
 	"context"
-	"errors"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
-	ErrNotSupportedNetworkID = errors.New("not supported network id")
-	ErrNotSupportedSnapshot  = errors.New("not supported snapshot for this network id")
-)
-var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(db kv.RwDB, client *Downloader, snapshotDir *dir.Rw) (*GrpcServer, error) {
+func NewGrpcServer(client *Downloader, snapshotDir *dir.Rw) (*GrpcServer, error) {
 	sn := &GrpcServer{
-		db:          db,
-		t:           client,
+		d:           client,
 		snapshotDir: snapshotDir,
 	}
 	return sn, nil
@@ -33,13 +26,12 @@ func NewGrpcServer(db kv.RwDB, client *Downloader, snapshotDir *dir.Rw) (*GrpcSe
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	t           *Downloader
-	db          kv.RwDB
+	d           *Downloader
 	snapshotDir *dir.Rw
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
-	torrentClient := s.t.Torrent()
+	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
 		if it.TorrentHash == nil {
@@ -77,7 +69,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 }
 
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-	stats := s.t.Stats()
+	stats := s.d.Stats()
 	return &proto_downloader.StatsReply{
 		MetadataReady: stats.MetadataReady,
 		FilesTotal:    stats.FilesTotal,

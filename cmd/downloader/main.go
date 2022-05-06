@@ -166,7 +166,7 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	bittorrentServer, err := downloader.NewGrpcServer(cfg.DB, protocols, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(protocols, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
