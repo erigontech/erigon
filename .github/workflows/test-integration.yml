@@ -26,8 +26,12 @@ jobs:
 
       - uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
 
       - name: test-integration
         run: make test-integration
@@ -41,13 +45,25 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - name: Install dependencies
-        run: choco upgrade mingw cmake -y --no-progress
 
       - uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
+          path: |
+            C:\ProgramData\chocolatey\lib\mingw
+            C:\ProgramData\chocolatey\lib\cmake
+          key: chocolatey
+      - name: Install dependencies
+        run: |
+          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
+          choco install cmake -y --no-progress --version 3.23.1
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
 
       - name: test-integration
         run: .\wmake.ps1 && make test-integration
