@@ -22,7 +22,7 @@ var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir *dir.Rw) (*GrpcServer, error) {
+func NewGrpcServer(db kv.RwDB, client *Downloader, snapshotDir *dir.Rw) (*GrpcServer, error) {
 	sn := &GrpcServer{
 		db:          db,
 		t:           client,
@@ -33,17 +33,17 @@ func NewGrpcServer(db kv.RwDB, client *Protocols, snapshotDir *dir.Rw) (*GrpcSer
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
-	t           *Protocols
+	t           *Downloader
 	db          kv.RwDB
 	snapshotDir *dir.Rw
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {
-	torrentClient := s.t.TorrentClient
+	torrentClient := s.t.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
 		if it.TorrentHash == nil {
-			err := BuildTorrentAndAdd(ctx, it.Path, s.snapshotDir, s.t.TorrentClient)
+			err := BuildTorrentAndAdd(ctx, it.Path, s.snapshotDir, torrentClient)
 			if err != nil {
 				return nil, err
 			}
