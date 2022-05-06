@@ -16,12 +16,8 @@ var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(client *Downloader, snapshotDir *dir.Rw) (*GrpcServer, error) {
-	sn := &GrpcServer{
-		d:           client,
-		snapshotDir: snapshotDir,
-	}
-	return sn, nil
+func NewGrpcServer(d *Downloader, snapshotDir *dir.Rw) (*GrpcServer, error) {
+	return &GrpcServer{d: d, snapshotDir: snapshotDir}, nil
 }
 
 type GrpcServer struct {

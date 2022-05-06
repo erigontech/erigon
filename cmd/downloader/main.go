@@ -156,17 +156,17 @@ func Downloader(ctx context.Context) error {
 	}
 	defer cfg.CompletionCloser.Close()
 
-	protocols, err := downloader.New(cfg, snapshotDir)
+	d, err := downloader.New(cfg, snapshotDir)
 	if err != nil {
 		return err
 	}
-	defer protocols.Close()
-	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.torrentClient.PeerID()))
-	if err := protocols.Start(ctx, false); err != nil {
+	defer d.Close()
+	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
+	if err := d.Start(ctx, false); err != nil {
 		return err
 	}
 
-	bittorrentServer, err := downloader.NewGrpcServer(protocols, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(d, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
