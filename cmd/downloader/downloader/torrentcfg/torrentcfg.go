@@ -23,8 +23,8 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-// There is another hard-coded limit now int torrent lib: PeerConn.mainReadLoop -> MaxLength: 256 * 1024
-const DefaultNetworkChunkSize = 2 * DefaultPieceSize
+// TODO: need investigate can we increase this value together with --torrent.upload.rate
+const DefaultNetworkChunkSize = DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
@@ -47,7 +47,7 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
 
-	torrentConfig.MaxResponseLength = 2 * DefaultNetworkChunkSize // default: 256 * 1024
+	torrentConfig.PeerMessageDecoderMaxLength = 2 * DefaultNetworkChunkSize // default: 256 * 1024
 
 	return torrentConfig
 }
