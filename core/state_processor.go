@@ -143,10 +143,6 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config, contractHasTEVM func(contractHash common.Hash) (bool, error)) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
-	// Add addresses to access list if applicable
-	// about the transaction and calling mechanisms.
-	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
-
 	var vmenv vm.VMInterface
 
 	if tx.IsStarkNet() {
@@ -155,6 +151,10 @@ func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Has
 		blockContext := NewEVMBlockContext(header, getHeader, engine, author, contractHasTEVM)
 		vmenv = vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
 	}
+
+	// Add addresses to access list if applicable
+	// about the transaction and calling mechanisms.
+	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }
