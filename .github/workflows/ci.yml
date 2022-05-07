@@ -23,17 +23,22 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - name: Install dependencies
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt update && sudo apt install build-essential
-          fi
-        shell: bash
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
       - uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
-      - run: make all
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Build
+        run: make all
+
       - name: Reproducible build test
         run: |
           make erigon
@@ -43,20 +48,20 @@ jobs:
           if ! cmp -s erigon1.sha256 erigon2.sha256; then
             echo >&2 "Reproducible build broken"; cat erigon1.sha256; cat erigon2.sha256; exit 1
           fi
+
       - name: Lint
-        if: matrix.os == 'ubuntu-20.04'
+        if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
           version: v1.45
           skip-pkg-cache: true
           skip-build-cache: true
-      - run: make test
 
-  win:
-    strategy:
-      matrix:
-        os: [ windows-2019 ]
-    runs-on: ${{ matrix.os }}
+      - name: Test
+        run: make test
+
+  tests-windows:
+    runs-on: windows-2019
 
     steps:
       - uses: actions/checkout@v3
@@ -64,12 +69,28 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - run: choco upgrade mingw cmake -y --no-progress
-      - name: Build
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            C:\ProgramData\chocolatey\lib\mingw
+            C:\ProgramData\chocolatey\lib\cmake
+          key: chocolatey
+      - name: Install dependencies
         run: |
-          .\wmake.ps1
-          make test
-        shell: powershell
+          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
+          choco install cmake -y --no-progress --version 3.23.1
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Test
+        run: .\wmake.ps1 && make test
 
   docker:
     runs-on: ubuntu-20.04

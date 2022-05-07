@@ -5,19 +5,10 @@ on:
       - devel
       - alpha
       - stable
-  pull_request:
-    branches:
-      - devel
-      - alpha
-      - stable
-    types:
-      - closed
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
 jobs:
   tests:
-    if: github.event.schedule || github.event.pull_request.merged
-
     strategy:
       matrix:
         os: [ ubuntu-20.04, macos-11 ] # list of os: https://github.com/actions/virtual-environments
@@ -29,14 +20,50 @@ jobs:
       - uses: actions/setup-go@v3
         with:
           go-version: 1.18.x
-      - name: Install dependencies
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt update && sudo apt install build-essential
-          fi
-        shell: bash
+      - name: Install dependencies on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt update && sudo apt install build-essential
+
       - uses: actions/cache@v3
         with:
-          path: ~/go/pkg/mod
-          key: ${{ matrix.os }}-go-${{ hashFiles('**/go.sum') }}
-      - run: make test-integration
+          path: |
+            ~/.cache/go-build
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: test-integration
+        run: make test-integration
+
+  tests-windows:
+    runs-on: windows-2019
+
+    steps:
+      - uses: actions/checkout@v3
+      - run: git submodule update --init --recursive --force
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.18.x
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            C:\ProgramData\chocolatey\lib\mingw
+            C:\ProgramData\chocolatey\lib\cmake
+          key: chocolatey
+      - name: Install dependencies
+        run: |
+          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
+          choco install cmake -y --no-progress --version 3.23.1
+
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: test-integration
+        run: .\wmake.ps1 && make test-integration
