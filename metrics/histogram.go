@@ -17,32 +17,12 @@ type Histogram interface {
 	Variance() float64
 }
 
-// GetOrRegisterHistogram returns an existing Histogram or constructs and
-// registers a new StandardHistogram.
-func GetOrRegisterHistogram(name string, r Registry, s Sample) Histogram {
-	if nil == r {
-		r = DefaultRegistry
-	}
-	return r.GetOrRegister(name, func() Histogram { return NewHistogram(s) }).(Histogram)
-}
-
 // NewHistogram constructs a new StandardHistogram from a Sample.
 func NewHistogram(s Sample) Histogram {
 	if !Enabled {
 		return NilHistogram{}
 	}
 	return &StandardHistogram{sample: s}
-}
-
-// NewRegisteredHistogram constructs and registers a new StandardHistogram from
-// a Sample.
-func NewRegisteredHistogram(name string, r Registry, s Sample) Histogram {
-	c := NewHistogram(s)
-	if nil == r {
-		r = DefaultRegistry
-	}
-	r.Register(name, c)
-	return c
 }
 
 // HistogramSnapshot is a read-only copy of another Histogram.

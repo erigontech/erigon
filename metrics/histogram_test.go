@@ -10,15 +10,6 @@ func BenchmarkHistogram(b *testing.B) {
 	}
 }
 
-func TestGetOrRegisterHistogram(t *testing.T) {
-	r := NewRegistry()
-	s := NewUniformSample(100)
-	NewRegisteredHistogram("foo", r, s).Update(47)
-	if h := GetOrRegisterHistogram("foo", r, s); h.Count() != 1 {
-		t.Fatal(h)
-	}
-}
-
 func TestHistogram10000(t *testing.T) {
 	h := NewHistogram(NewUniformSample(100000))
 	for i := 1; i <= 10000; i++ {
