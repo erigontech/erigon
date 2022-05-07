@@ -4,9 +4,6 @@ import (
 	"time"
 )
 
-// Initial slice capacity for the values stored in a ResettingTimer
-const InitialResettingTimerSliceCap = 10
-
 // ResettingTimer is used for storing aggregated values for timers, which are reset on every flush interval.
 type ResettingTimer interface {
 	Values() []int64
