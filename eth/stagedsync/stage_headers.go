@@ -1219,7 +1219,7 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		break
 	}
-	logEvery := time.NewTicker(logInterval / 3)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	var m runtime.MemStats
