@@ -20,7 +20,6 @@ import (
 	"github.com/anacrolix/torrent/mmap_span"
 	"github.com/edsrzf/mmap-go"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/downloader/trackers"
@@ -100,21 +99,21 @@ func allSegmentFiles(dir string) ([]string, error) {
 }
 
 // BuildTorrentFileIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *dir.Rw) (ok bool, err error) {
-	f, err := snap.ParseFileName(root.Path, originalFileName)
+func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) (ok bool, err error) {
+	f, err := snap.ParseFileName(root, originalFileName)
 	if err != nil {
 		return false, err
 	}
 	if f.To-f.From != snap.DEFAULT_SEGMENT_SIZE {
 		return false, nil
 	}
-	torrentFilePath := filepath.Join(root.Path, originalFileName+".torrent")
+	torrentFilePath := filepath.Join(root, originalFileName+".torrent")
 	if _, err := os.Stat(torrentFilePath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return false, err
 		}
 		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
-		if err := info.BuildFromFilePath(filepath.Join(root.Path, originalFileName)); err != nil {
+		if err := info.BuildFromFilePath(filepath.Join(root, originalFileName)); err != nil {
 			return false, err
 		}
 		if err != nil {
@@ -127,7 +126,7 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName string, root *
 	return true, nil
 }
 
-func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDir *dir.Rw, client *torrent.Client) error {
+func BuildTorrentAndAdd(ctx context.Context, originalFileName, snapshotDir string, client *torrent.Client) error {
 	ok, err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir)
 	if err != nil {
 		return fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
@@ -135,7 +134,7 @@ func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDi
 	if !ok {
 		return nil
 	}
-	torrentFilePath := filepath.Join(snapshotDir.Path, originalFileName+".torrent")
+	torrentFilePath := filepath.Join(snapshotDir, originalFileName+".torrent")
 	_, err = AddTorrentFile(ctx, torrentFilePath, client)
 	if err != nil {
 		return fmt.Errorf("AddTorrentFile: %w", err)
@@ -144,11 +143,11 @@ func BuildTorrentAndAdd(ctx context.Context, originalFileName string, snapshotDi
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir *dir.Rw) error {
+func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := allSegmentFiles(snapshotDir.Path)
+	files, err := allSegmentFiles(snapshotDir)
 	if err != nil {
 		return err
 	}
@@ -185,10 +184,10 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir *dir.Rw) error {
 }
 
 // BuildTorrentsAndAdd - create .torrent files from .seg files (big IO) - if .seg files were placed manually to snapshotDir
-func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torrent.Client) error {
+func BuildTorrentsAndAdd(ctx context.Context, snapshotDir string, client *torrent.Client) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	files, err := allSegmentFiles(snapshotDir.Path)
+	files, err := allSegmentFiles(snapshotDir)
 	if err != nil {
 		return fmt.Errorf("allSegmentFiles: %w", err)
 	}
@@ -230,8 +229,8 @@ func BuildTorrentsAndAdd(ctx context.Context, snapshotDir *dir.Rw, client *torre
 	return nil
 }
 
-func CreateTorrentFileIfNotExists(root *dir.Rw, info *metainfo.Info, mi *metainfo.MetaInfo) error {
-	torrentFileName := filepath.Join(root.Path, info.Name+".torrent")
+func CreateTorrentFileIfNotExists(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
+	torrentFileName := filepath.Join(root, info.Name+".torrent")
 	if _, err := os.Stat(torrentFileName); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return CreateTorrentFile(root, info, mi)
@@ -241,7 +240,7 @@ func CreateTorrentFileIfNotExists(root *dir.Rw, info *metainfo.Info, mi *metainf
 	return nil
 }
 
-func CreateTorrentFile(root *dir.Rw, info *metainfo.Info, mi *metainfo.MetaInfo) error {
+func CreateTorrentFile(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
 	if mi == nil {
 		infoBytes, err := bencode.Marshal(info)
 		if err != nil {
@@ -256,7 +255,7 @@ func CreateTorrentFile(root *dir.Rw, info *metainfo.Info, mi *metainfo.MetaInfo)
 	} else {
 		mi.AnnounceList = Trackers
 	}
-	torrentFileName := filepath.Join(root.Path, info.Name+".torrent")
+	torrentFileName := filepath.Join(root, info.Name+".torrent")
 
 	file, err := os.Create(torrentFileName)
 	if err != nil {

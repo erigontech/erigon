@@ -130,8 +130,6 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		cfg := ethconfig.NewSnapshotCfg(true, true)
-		rwSnapshotDir := &dir.Rw{Path: snapshotDir}
-		defer rwSnapshotDir.Close()
 		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
@@ -139,7 +137,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		if workers > 4 {
 			workers = 4
 		}
-		if err := rebuildIndices(ctx, chainDB, cfg, rwSnapshotDir, tmpDir, from, workers); err != nil {
+		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -249,8 +247,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapshotCfg(true, true)
-	rwSnapshotDir := &dir.Rw{Path: snapshotDir}
-	defer rwSnapshotDir.Close()
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
@@ -260,7 +256,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if workers < 1 {
 		workers = 1
 	}
-	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, rwSnapshotDir, chainDB, nil, nil)
+	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, snapshotDir, chainDB, nil, nil)
 
 	for i := from; i < to; i += every {
 		br.RetireBlocksInBackground(ctx, i, i+every, *chainID, log.LvlInfo)
@@ -296,11 +292,11 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir *dir.Rw, tmpDir string, from uint64, workers int) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string, from uint64, workers int) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir.Path)
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
 	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
