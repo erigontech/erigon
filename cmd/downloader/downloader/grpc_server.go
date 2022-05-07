@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -16,14 +15,14 @@ var (
 	_ proto_downloader.DownloaderServer = &GrpcServer{}
 )
 
-func NewGrpcServer(d *Downloader, snapshotDir *dir.Rw) (*GrpcServer, error) {
+func NewGrpcServer(d *Downloader, snapshotDir string) (*GrpcServer, error) {
 	return &GrpcServer{d: d, snapshotDir: snapshotDir}, nil
 }
 
 type GrpcServer struct {
 	proto_downloader.UnimplementedDownloaderServer
 	d           *Downloader
-	snapshotDir *dir.Rw
+	snapshotDir string
 }
 
 func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.DownloadRequest) (*emptypb.Empty, error) {

@@ -10,7 +10,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/log/v3"
@@ -24,7 +23,7 @@ type Downloader struct {
 
 	statsLock   *sync.RWMutex
 	stats       AggStats
-	snapshotDir *dir.Rw
+	snapshotDir string
 }
 
 type AggStats struct {
@@ -41,7 +40,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(cfg *torrentcfg.Cfg, snapshotDir *dir.Rw) (*Downloader, error) {
+func New(cfg *torrentcfg.Cfg, snapshotDir string) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}

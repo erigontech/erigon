@@ -7,7 +7,6 @@ import (
 	"testing/fstest"
 
 	"github.com/holiman/uint256"
-	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -79,7 +78,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()}, false)
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
 	}
 
@@ -94,7 +93,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, uint256.Int{}, nil)
 		ranges := merger.FindMergeRanges(s)
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, &dir2.Rw{Path: s.Dir()}, false)
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false)
 		require.NoError(err)
 	}
 

@@ -607,12 +607,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	var br *snapshotsync.BlockRetire
 	snapshots := allSnapshots(chainConfig)
 	if snapshots != nil {
-		d := &dir.Rw{Path: snapshots.Dir()}
 		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
 		}
-		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, d, db, nil, nil)
+		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, snapshots.Dir(), db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
@@ -1173,10 +1172,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if allSn != nil {
 		cfg.Snapshot = allSn.Cfg()
 	}
-	if cfg.Snapshot.Enabled {
-		snDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
-		cfg.SnapshotDir = snDir
-	}
+	cfg.SnapshotDir = filepath.Join(datadir, "snapshots")
 	var engine consensus.Engine
 	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
