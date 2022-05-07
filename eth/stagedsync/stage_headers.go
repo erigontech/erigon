@@ -12,7 +12,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -49,7 +48,7 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	snapshotDir       *dir.Rw
+	snapshotDir       string
 
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
@@ -72,7 +71,7 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
-	snapshotDir *dir.Rw,
+	snapshotDir string,
 	dbEventNotifier snapshotsync.DBEventNotifier,
 ) HeadersCfg {
 	return HeadersCfg{
