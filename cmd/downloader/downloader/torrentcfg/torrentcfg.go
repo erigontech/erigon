@@ -106,8 +106,8 @@ func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadR
 	if err != nil {
 		return nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
 	}
-	//m := storage.NewMMapWithCompletion(snapshotsDir, c)
-	m := storage.NewFileWithCompletion(snapshotsDir.Path, c)
+	m := storage.NewMMapWithCompletion(snapshotsDir, c)
+	//m := storage.NewFileWithCompletion(snapshotsDir, c)
 	torrentConfig.DefaultStorage = m
 	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m, DownloadSlots: downloadSlots}, nil
 }
