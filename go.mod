@@ -2,7 +2,6 @@ module github.com/ledgerwatch/erigon
 
 go 1.18
 
-//github.com/anacrolix/torrent => github.com/askalexsharov/torrent v1.40.2-0.20220506023926-36d2289aee5b
 replace github.com/etcd-io/bbolt => go.etcd.io/bbolt v1.3.5
 
 require (
