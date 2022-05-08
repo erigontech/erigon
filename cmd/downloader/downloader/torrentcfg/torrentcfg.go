@@ -47,8 +47,6 @@ func Default() *torrent.ClientConfig {
 	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
 	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
 
-	torrentConfig.PeerMessageDecoderMaxLength = 2 * DefaultNetworkChunkSize // default: 256 * 1024
-
 	return torrentConfig
 }
 
