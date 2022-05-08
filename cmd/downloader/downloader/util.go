@@ -345,6 +345,7 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 }
 
 func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
+	defer func(t time.Time) { fmt.Printf("util.go:348: %s\n", time.Since(t)) }(time.Now())
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 	files, err := AllTorrentPaths(snapshotDir)

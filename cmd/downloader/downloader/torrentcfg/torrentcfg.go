@@ -23,7 +23,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
 // TODO: can we increase this value together with --torrent.upload.rate ?
-const DefaultNetworkChunkSize = 2 * DefaultPieceSize
+const DefaultNetworkChunkSize = DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
