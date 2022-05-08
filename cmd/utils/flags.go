@@ -32,7 +32,6 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -1380,8 +1379,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
 	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
-	snDir := &dir.Rw{Path: filepath.Join(nodeConfig.DataDir, "snapshots")}
-	cfg.SnapshotDir = snDir
+	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
@@ -1399,7 +1397,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			Label(kv.DownloaderDB).
 			WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 			SyncPeriod(15 * time.Second).
-			Path(filepath.Join(cfg.SnapshotDir.Path, "db")).
+			Path(filepath.Join(cfg.SnapshotDir, "db")).
 			MustOpen()
 		var err error
 		cfg.Torrent, err = torrentcfg.New(cfg.SnapshotDir,

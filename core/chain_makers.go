@@ -238,6 +238,38 @@ func (cp ChainPack) Slice(i, j int) *ChainPack {
 	}
 }
 
+// Copy creates a deep copy of the ChainPack.
+func (cp *ChainPack) Copy() *ChainPack {
+	headers := make([]*types.Header, 0, len(cp.Headers))
+	for _, header := range cp.Headers {
+		headers = append(headers, types.CopyHeader(header))
+	}
+
+	blocks := make([]*types.Block, 0, len(cp.Blocks))
+	for _, block := range cp.Blocks {
+		blocks = append(blocks, block.Copy())
+	}
+
+	receipts := make([]types.Receipts, 0, len(cp.Receipts))
+	for _, receiptList := range cp.Receipts {
+		receiptListCopy := make(types.Receipts, 0, len(receiptList))
+		for _, receipt := range receiptList {
+			receiptListCopy = append(receiptListCopy, receipt.Copy())
+		}
+		receipts = append(receipts, receiptListCopy)
+	}
+
+	topBlock := cp.TopBlock.Copy()
+
+	return &ChainPack{
+		Length:   cp.Length,
+		Headers:  headers,
+		Blocks:   blocks,
+		Receipts: receipts,
+		TopBlock: topBlock,
+	}
+}
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.

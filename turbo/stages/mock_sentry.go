@@ -12,7 +12,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -58,7 +57,7 @@ type MockSentry struct {
 	cancel        context.CancelFunc
 	DB            kv.RwDB
 	tmpdir        string
-	snapshotDir   *dir.Rw
+	snapshotDir   string
 	Engine        consensus.Engine
 	ChainConfig   *params.ChainConfig
 	Sync          *stagedsync.Sync
@@ -93,7 +92,6 @@ func (ms *MockSentry) Close() {
 		ms.txPoolDB.Close()
 	}
 	ms.DB.Close()
-	ms.snapshotDir.Close()
 }
 
 // Stream returns stream, waiting if necessary
@@ -178,7 +176,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	snapshotDir := &dir.Rw{Path: filepath.Join(tmpdir, "snapshots")} // we don't really lock here, to allow parallel tests
+	snapshotDir := filepath.Join(tmpdir, "snapshots")
 	var err error
 
 	db := memdb.New()

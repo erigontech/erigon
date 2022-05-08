@@ -211,7 +211,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 		sentryControlServer.Bd.AddMinedBlock(b)
 	}
 
-	sentryControlServer.Hd.MarkAllPreverified()
+	sentryControlServer.Hd.MarkAllVerified()
 
 	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.StagedSync(), highestSeenHeader, ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead, nil)
 	if err != nil {

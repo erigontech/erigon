@@ -356,9 +356,6 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	preverifiedHashes, preverifiedHeight := headerdownload.InitPreverifiedHashes(chainConfig.ChainName)
-
-	hd.SetPreverifiedHashes(preverifiedHashes, preverifiedHeight)
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */, engine)
 
 	cs := &ControlServerImpl{

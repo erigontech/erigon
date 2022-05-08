@@ -257,9 +257,8 @@ const ( // SyncStatus values
 
 type HeaderDownload struct {
 	badHeaders         map[common.Hash]struct{}
-	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
-	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
-	links              map[common.Hash]*Link    // Links by header hash
+	anchors            map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
+	links              map[common.Hash]*Link   // Links by header hash
 	engine             consensus.Engine
 	verifyQueue        InsertQueue    // Priority queue of non-peristed links ready for verification
 	insertQueue        InsertQueue    // Priority queue of non-persisted links that are verified and can be inserted
@@ -320,7 +319,6 @@ func NewHeaderDownload(
 		linkLimit:          linkLimit - persistentLinkLimit,
 		anchorLimit:        anchorLimit,
 		engine:             engine,
-		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
