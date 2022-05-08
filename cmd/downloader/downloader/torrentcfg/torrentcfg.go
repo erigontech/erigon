@@ -99,7 +99,7 @@ func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadR
 	if lg.Debug == verbosity {
 		torrentConfig.Debug = true
 	}
-	torrentConfig.Logger = lg.Default.FilterLevel(lg.Debug)
+	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
 	c, err := NewMdbxPieceCompletion(db)
