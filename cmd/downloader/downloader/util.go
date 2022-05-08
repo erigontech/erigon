@@ -102,7 +102,7 @@ func allSegmentFiles(dir string) ([]string, error) {
 func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) (ok bool, err error) {
 	f, err := snap.ParseFileName(root, originalFileName)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("ParseFileName: %w", err)
 	}
 	if f.To-f.From != snap.DEFAULT_SEGMENT_SIZE {
 		return false, nil
@@ -110,17 +110,14 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) 
 	torrentFilePath := filepath.Join(root, originalFileName+".torrent")
 	if _, err := os.Stat(torrentFilePath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			return false, err
+			return false, fmt.Errorf("os.Stat: %w", err)
 		}
 		info := &metainfo.Info{PieceLength: torrentcfg.DefaultPieceSize}
 		if err := info.BuildFromFilePath(filepath.Join(root, originalFileName)); err != nil {
-			return false, err
-		}
-		if err != nil {
-			return false, err
+			return false, fmt.Errorf("BuildFromFilePath: %w", err)
 		}
 		if err := CreateTorrentFile(root, info, nil); err != nil {
-			return false, err
+			return false, fmt.Errorf("CreateTorrentFile: %w", err)
 		}
 	}
 	return true, nil
