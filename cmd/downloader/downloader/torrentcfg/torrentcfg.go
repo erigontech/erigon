@@ -22,8 +22,8 @@ const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
 // default: 16Kb
-// There is another hard-coded limit now int torrent lib: PeerConn.mainReadLoop -> MaxLength: 256 * 1024
-const DefaultNetworkChunkSize = 128 * 1024
+// TODO: can we increase this value together with --torrent.upload.rate ?
+const DefaultNetworkChunkSize = DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
@@ -38,7 +38,7 @@ func Default() *torrent.ClientConfig {
 	// enable dht
 	torrentConfig.NoDHT = true
 	//torrentConfig.DisableTrackers = true
-	torrentConfig.DisableWebtorrent = true
+	//torrentConfig.DisableWebtorrent = true
 	//torrentConfig.DisableWebseeds = true
 
 	// Reduce defaults - to avoid peers with very bad geography
@@ -107,6 +107,7 @@ func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadR
 		return nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
 	}
 	m := storage.NewMMapWithCompletion(snapshotsDir, c)
+	//m := storage.NewFileWithCompletion(snapshotsDir, c)
 	torrentConfig.DefaultStorage = m
 	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m, DownloadSlots: downloadSlots}, nil
 }
