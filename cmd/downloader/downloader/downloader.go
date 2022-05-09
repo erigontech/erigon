@@ -99,7 +99,6 @@ func openClient(snapshotDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c st
 		return nil, nil, nil, nil, err
 	}
 	m = storage.NewMMapWithCompletion(snapshotDir, c)
-	//m := storage.NewFileWithCompletion(snapshotsDir, pieceCompletionDB)
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
