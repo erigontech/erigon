@@ -149,6 +149,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
+// onComplete - only once - after download of all files fully done:
+// - closing torrent client, closing downloader db
+// - removing _tmp suffix from snapshotDir
+// - open new torrentClient and db
 func (d *Downloader) onComplete() {
 	if !strings.HasSuffix(d.cfg.DataDir, "_tmp") {
 		return
