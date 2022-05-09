@@ -50,7 +50,6 @@ type HeadersCfg struct {
 	tmpdir            string
 
 	snapshots          *snapshotsync.RoSnapshots
-	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
@@ -85,7 +84,6 @@ func StageHeadersCfg(
 		snapshots:          snapshots,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
-		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
 		dbEventNotifier:    dbEventNotifier,
 	}
 }
@@ -1065,7 +1063,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
-		expect := cfg.snapshotHashesCfg.ExpectBlocks
+
+		expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
 		if cfg.snapshots.SegmentsAvailable() < expect {
 			c, err := tx.Cursor(kv.Headers)
 			if err != nil {

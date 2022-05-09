@@ -297,7 +297,6 @@ func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Lo
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
 }
-
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())

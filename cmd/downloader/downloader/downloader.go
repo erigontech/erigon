@@ -142,6 +142,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 }
 
 func (d *Downloader) onComplete() {
+	if !strings.HasSuffix(d.cfg.DataDir, "_tmp") {
+		return
+	}
+
 	d.clientLock.Lock()
 	defer d.clientLock.Unlock()
 
@@ -151,13 +155,11 @@ func (d *Downloader) onComplete() {
 	d.db.Close()
 
 	// rename _tmp folder
-	if strings.HasSuffix(d.cfg.DataDir, "_tmp") && common.FileExist(filepath.Join(d.cfg.DataDir, "db")) {
-		snapshotDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
-		if err := os.Rename(d.cfg.DataDir, snapshotDir); err != nil {
-			panic(err)
-		}
-		d.cfg.DataDir = snapshotDir
+	snapshotDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
+	if err := os.Rename(d.cfg.DataDir, snapshotDir); err != nil {
+		panic(err)
 	}
+	d.cfg.DataDir = snapshotDir
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
