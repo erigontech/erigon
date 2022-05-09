@@ -277,14 +277,13 @@ func (d *Downloader) Stats() AggStats {
 
 func (d *Downloader) Close() {
 	d.torrentClient.Close()
-	d.folder.Close()
-	d.pieceCompletionDB.Close()
-	d.db.Close()
-	if d.folder != nil {
-		if err := d.folder.Close(); err != nil {
-			log.Warn("[Snapshots] CompletionCloser", "err", err)
-		}
+	if err := d.folder.Close(); err != nil {
+		log.Warn("[Snapshots] folder.close", "err", err)
 	}
+	if err := d.pieceCompletionDB.Close(); err != nil {
+		log.Warn("[Snapshots] pieceCompletionDB.close", "err", err)
+	}
+	d.db.Close()
 }
 
 func (d *Downloader) PeerID() []byte {
