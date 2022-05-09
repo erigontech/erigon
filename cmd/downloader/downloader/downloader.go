@@ -3,27 +3,36 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/anacrolix/torrent/storage"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/log/v3"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
 )
 
 type Downloader struct {
-	torrentClient *torrent.Client
-	db            kv.RwDB
-	cfg           *torrentcfg.Cfg
+	db                kv.RwDB
+	pieceCompletionDB storage.PieceCompletion
+	torrentClient     *torrent.Client
+	clientLock        *sync.RWMutex
+
+	cfg *torrentcfg.Cfg
 
 	statsLock   *sync.RWMutex
 	stats       AggStats
 	snapshotDir string
+
+	folder storage.ClientImplCloser
 }
 
 type AggStats struct {
@@ -45,28 +54,57 @@ func New(cfg *torrentcfg.Cfg, snapshotDir string) (*Downloader, error) {
 		return nil, err
 	}
 
-	peerID, err := readPeerID(cfg.DB)
+	db, c, m, torrentClient, err := openClient(snapshotDir, cfg.ClientConfig)
+	if err != nil {
+		return nil, fmt.Errorf("openClient: %w", err)
+	}
+
+	peerID, err := readPeerID(db)
 	if err != nil {
 		return nil, fmt.Errorf("get peer id: %w", err)
 	}
 	cfg.PeerID = string(peerID)
-	torrentClient, err := torrent.NewClient(cfg.ClientConfig)
-	if err != nil {
-		return nil, fmt.Errorf("fail to start torrent client: %w", err)
-	}
 	if len(peerID) == 0 {
-		if err = savePeerID(cfg.DB, torrentClient.PeerID()); err != nil {
+		if err = savePeerID(db, torrentClient.PeerID()); err != nil {
 			return nil, fmt.Errorf("save peer id: %w", err)
 		}
 	}
 
 	return &Downloader{
-		cfg:           cfg,
-		torrentClient: torrentClient,
-		db:            cfg.DB,
-		statsLock:     &sync.RWMutex{},
-		snapshotDir:   snapshotDir,
+		cfg:               cfg,
+		db:                db,
+		pieceCompletionDB: c,
+		folder:            m,
+		torrentClient:     torrentClient,
+		clientLock:        &sync.RWMutex{},
+
+		statsLock:   &sync.RWMutex{},
+		snapshotDir: snapshotDir,
 	}, nil
+}
+
+func openClient(snapshotDir string, cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+	db, err = mdbx.NewMDBX(log.New()).
+		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
+		Label(kv.DownloaderDB).
+		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
+		SyncPeriod(15 * time.Second).
+		Path(filepath.Join(snapshotDir, "db")).
+		Open()
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	c, err = torrentcfg.NewMdbxPieceCompletion(db)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	m = storage.NewMMapWithCompletion(snapshotDir, c)
+	//m := storage.NewFileWithCompletion(snapshotsDir, pieceCompletionDB)
+	torrentClient, err = torrent.NewClient(cfg)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return db, c, m, torrentClient, nil
 }
 
 func (d *Downloader) Start(ctx context.Context, silent bool) error {
@@ -205,7 +243,30 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
+	if prevStats.Completed == false && stats.Completed == true {
+		d.onComplete()
+	}
+
 	d.stats = stats
+}
+
+func (d *Downloader) onComplete() {
+	d.clientLock.Lock()
+	defer d.clientLock.Unlock()
+
+	d.torrentClient.Close()
+	d.folder.Close()
+	d.pieceCompletionDB.Close()
+	d.db.Close()
+
+	db, c, m, torrentClient, err := openClient(d.snapshotDir, d.cfg.ClientConfig)
+	if err != nil {
+		panic(err)
+	}
+	d.db = db
+	d.pieceCompletionDB = c
+	d.folder = m
+	d.torrentClient = torrentClient
 }
 
 func (d *Downloader) Stats() AggStats {
@@ -216,9 +277,11 @@ func (d *Downloader) Stats() AggStats {
 
 func (d *Downloader) Close() {
 	d.torrentClient.Close()
+	d.folder.Close()
+	d.pieceCompletionDB.Close()
 	d.db.Close()
-	if d.cfg.CompletionCloser != nil {
-		if err := d.cfg.CompletionCloser.Close(); err != nil {
+	if d.folder != nil {
+		if err := d.folder.Close(); err != nil {
 			log.Warn("[Snapshots] CompletionCloser", "err", err)
 		}
 	}
@@ -241,5 +304,7 @@ func (d *Downloader) StopSeeding(hash metainfo.Hash) error {
 }
 
 func (d *Downloader) Torrent() *torrent.Client {
+	d.clientLock.RLock()
+	defer d.clientLock.RUnlock()
 	return d.torrentClient
 }
