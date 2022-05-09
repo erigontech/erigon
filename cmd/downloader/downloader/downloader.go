@@ -54,7 +54,6 @@ func New(cfg *torrentcfg.Cfg, snapshotDir string) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
-
 	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -144,6 +143,15 @@ func (d *Downloader) onComplete() {
 	d.pieceCompletionDB.Close()
 	d.db.Close()
 
+	// rename _tmp folder
+	//if strings.HasSuffix(d.cfg.DataDir, "_tmp") && common.FileExist(filepath.Join(d.cfg.DataDir, "db")) {
+	//	snapshotDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
+	//	if err := os.Rename(d.cfg.DataDir, snapshotDir); err != nil {
+	//		panic(err)
+	//	}
+	//	d.cfg.DataDir = snapshotDir
+	//}
+
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
 		panic(err)
@@ -197,6 +205,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	snapshotDir := cfg.DataDir
 	//if !common.FileExist(filepath.Join(snapshotDir, "db")) {
 	//	snapshotDir += "_tmp"
+	//  cfg.DataDir = snapshotDir
 	//}
 
 	db, err = mdbx.NewMDBX(log.New()).
