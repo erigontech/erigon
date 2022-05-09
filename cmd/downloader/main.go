@@ -143,9 +143,7 @@ func Downloader(ctx context.Context) error {
 	}
 	defer d.Close()
 	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
-	if err := d.Start(ctx, false); err != nil {
-		return err
-	}
+	go downloader.MainLoop(ctx, d, false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d, snapshotDir)
 	if err != nil {
@@ -175,7 +173,6 @@ var printTorrentHashes = &cobra.Command{
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 			removePieceCompletionStorage(snapshotDir)
-
 			files, err := downloader.AllTorrentPaths(snapshotDir)
 			if err != nil {
 				return err
