@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
@@ -195,33 +196,6 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastVal
 	defer hd.lock.RUnlock()
 	lastValidAncestor, bad = hd.badPoSHeaders[tipHash]
 	return
-}
-
-// findAnchor attempts to find anchor to which given chain segment can be attached to
-func (hd *HeaderDownload) findAnchor(segment ChainSegment) (found bool, anchor *Anchor, start int) {
-	// Walk the segment from children towards parents
-	for i, h := range segment {
-		// Check if the header can be attached to an anchor of a working tree
-		if anchor, attaching := hd.anchors[h.Hash]; attaching {
-			return true, anchor, i
-		}
-	}
-	return false, nil, 0
-}
-
-// FindLink attempts to find a non-persisted link that given chain segment can be attached to.
-func (hd *HeaderDownload) findLink(segment ChainSegment, start int) (found bool, link *Link, end int) {
-	if _, duplicate := hd.getLink(segment[start].Hash); duplicate {
-		return false, nil, 0
-	}
-	// Walk the segment from children towards parents
-	for i, h := range segment[start:] {
-		// Check if the header can be attached to any links
-		if link, attaching := hd.getLink(h.Header.ParentHash); attaching {
-			return true, link, start + i + 1
-		}
-	}
-	return false, nil, len(segment)
 }
 
 func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
@@ -947,7 +921,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 				}
 			}
 		} else {
-			if sh.Number < hd.highestInDb {
+			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
 				log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
 				return false
 			}
@@ -956,7 +930,6 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 			if anchor, found := hd.anchors[sh.Hash]; found {
 				link = hd.addHeaderAsLink(sh, false /* persisted */)
 				link.next = anchor.links
-				hd.recursiveLinked(link)
 				hd.removeAnchor(anchor)
 			}
 			if len(hd.anchors) >= hd.anchorLimit {
