@@ -3,8 +3,10 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/semaphore"
@@ -148,13 +151,13 @@ func (d *Downloader) onComplete() {
 	d.db.Close()
 
 	// rename _tmp folder
-	//if strings.HasSuffix(d.cfg.DataDir, "_tmp") && common.FileExist(filepath.Join(d.cfg.DataDir, "db")) {
-	//	snapshotDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
-	//	if err := os.Rename(d.cfg.DataDir, snapshotDir); err != nil {
-	//		panic(err)
-	//	}
-	//	d.cfg.DataDir = snapshotDir
-	//}
+	if strings.HasSuffix(d.cfg.DataDir, "_tmp") && common.FileExist(filepath.Join(d.cfg.DataDir, "db")) {
+		snapshotDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
+		if err := os.Rename(d.cfg.DataDir, snapshotDir); err != nil {
+			panic(err)
+		}
+		d.cfg.DataDir = snapshotDir
+	}
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
@@ -207,10 +210,10 @@ func (d *Downloader) Torrent() *torrent.Client {
 
 func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	snapshotDir := cfg.DataDir
-	//if !common.FileExist(filepath.Join(snapshotDir, "db")) {
-	//	snapshotDir += "_tmp"
-	//	cfg.DataDir = snapshotDir
-	//}
+	if !common.FileExist(filepath.Join(snapshotDir, "db")) {
+		snapshotDir += "_tmp"
+		cfg.DataDir = snapshotDir
+	}
 
 	db, err = mdbx.NewMDBX(log.New()).
 		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
@@ -231,13 +234,17 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+
+	if err := BuildTorrentsAndAdd(context.Background(), snapshotDir, torrentClient); err != nil {
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("BuildTorrentsAndAdd: %w", err)
+		}
+	}
+
 	return db, c, m, torrentClient, nil
 }
 
 func MainLoop(ctx context.Context, d *Downloader, silent bool) {
-	if err := BuildTorrentsAndAdd(ctx, d.cfg.DataDir, d.torrentClient); err != nil {
-		panic(fmt.Errorf("BuildTorrentsAndAdd: %w", err))
-	}
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
 	go func() {
