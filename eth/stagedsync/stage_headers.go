@@ -704,6 +704,8 @@ func HeadersPOW(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
+	var noProgressCounter int
+	var wasProgress bool
 Loop:
 	for !stopped {
 
@@ -767,6 +769,8 @@ Loop:
 			cfg.announceNewHashes(ctx, announces)
 		}
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
+			noProgressCounter = 0
+			wasProgress = true
 			if !initialCycle {
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
 				break
@@ -786,6 +790,12 @@ Loop:
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress)
+			if prevProgress == progress {
+				noProgressCounter++
+				if noProgressCounter >= 5 && cfg.hd.TopSeenHeight() == 0 && wasProgress {
+					log.Warn("Looks like chain is not progressing, moving to the next stage")
+				}
+			}
 			prevProgress = progress
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")

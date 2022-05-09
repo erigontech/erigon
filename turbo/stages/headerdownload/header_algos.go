@@ -399,7 +399,7 @@ func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 }
 
 func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
-	log.Warn("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
+	log.Debug("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
 	hd.removeAnchor(anchor)
 	hd.removeUpwards(anchor.links)
 }
@@ -481,16 +481,16 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeo
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
+	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	strideHeight := hd.highestInDb + stride
 	lowestAnchorHeight := hd.topSeenHeightPoW + 1 // Inclusive upper bound
-	if lowestAnchorHeight <= strideHeight {
+	if lowestAnchorHeight > 1 && lowestAnchorHeight <= strideHeight {
 		return nil
 	}
 	// Determine the query range as the height of lowest anchor
 	for _, anchor := range hd.anchors {
-		if anchor.blockHeight > strideHeight && anchor.blockHeight < lowestAnchorHeight {
+		if anchor.blockHeight > strideHeight && (lowestAnchorHeight == 1 || anchor.blockHeight < lowestAnchorHeight) {
 			lowestAnchorHeight = anchor.blockHeight // Exclusive upper bound
 		}
 	}
@@ -545,7 +545,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 						log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
 						break // prevent removal of the link from the hd.linkQueue
 					} else {
-						log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
+						log.Debug("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 						hd.moveLinkToQueue(link, NoQueue)
 						delete(hd.links, link.hash)
 						continue
@@ -902,44 +902,54 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	requestMore := false
-	for _, sh := range segment {
+	for i := len(segment); i > 0; i-- {
+		sh := segment[i-1]
+		if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
+			hd.topSeenHeightPoW = sh.Number
+		}
 		if _, ok := hd.links[sh.Hash]; ok {
 			// Duplicate
 			continue
 		}
-		if parent, ok := hd.links[sh.Header.ParentHash]; ok {
-			link := hd.addHeaderAsLink(sh, false /* persisted */)
+		parent, foundParent := hd.links[sh.Header.ParentHash]
+		anchor, foundAnchor := hd.anchors[sh.Hash]
+		//fmt.Printf("sh = %d %x, foundParent=%t, foundAnchor=%t\n", sh.Number, sh.Hash, foundParent, foundAnchor)
+		if !foundParent && !foundAnchor {
+			if sh.Number < hd.highestInDb {
+				log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
+				return false
+			}
+			if len(hd.anchors) >= hd.anchorLimit {
+				log.Debug(fmt.Sprintf("too many anchors: %d, limit %d, state: %s", len(hd.anchors), hd.anchorLimit, hd.anchorState()))
+				return false
+			}
+		}
+		link := hd.addHeaderAsLink(sh, false /* persisted */)
+		if foundAnchor {
+			link.next = anchor.links
+			hd.removeAnchor(anchor)
+			//fmt.Printf("removed anchor %d %x\n", anchor.blockHeight, anchor.parentHash)
+		}
+		if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
+			parentAnchor.links = append(parentAnchor.links, link)
+		}
+		if foundParent {
+			//fmt.Printf("sh = %d %x, found parent\n", sh.Number, sh.Hash)
 			parent.next = append(parent.next, link)
 			if parent.linked {
 				link.linked = true
 				hd.moveLinkToQueue(link, InsertQueueID)
-				// See if it links existing anchor
-				if anchor, found := hd.anchors[sh.Hash]; found {
-					link.next = anchor.links
-					hd.recursiveLinked(link)
-					hd.removeAnchor(anchor)
-				}
+				hd.recursiveLinked(link)
 			}
-		} else {
+		} else if !foundAnchor {
 			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
-				log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
+				log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
+				hd.removeUpwards([]*Link{link})
 				return false
 			}
+			//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
 			// See if it links existing anchor
-			var link *Link
-			if anchor, found := hd.anchors[sh.Hash]; found {
-				link = hd.addHeaderAsLink(sh, false /* persisted */)
-				link.next = anchor.links
-				hd.removeAnchor(anchor)
-			}
-			if len(hd.anchors) >= hd.anchorLimit {
-				log.Debug(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
-				return false
-			}
-			if link == nil {
-				link = hd.addHeaderAsLink(sh, false /* persisted */)
-			}
-			anchor := &Anchor{
+			anchor = &Anchor{
 				parentHash:    sh.Header.ParentHash,
 				nextRetryTime: 0, // Will ensure this anchor will be top priority
 				peerID:        peerID,
@@ -949,9 +959,6 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 			hd.anchors[anchor.parentHash] = anchor
 			heap.Push(hd.anchorQueue, anchor)
 			requestMore = true
-		}
-		if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
-			hd.topSeenHeightPoW = sh.Number
 		}
 	}
 	log.Trace("Link queue", "size", hd.linkQueue.Len())
