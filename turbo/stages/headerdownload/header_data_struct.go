@@ -247,38 +247,6 @@ func (iq *InsertQueue) Pop() interface{} {
 	return x
 }
 
-type VerifyQueue []*Link
-
-func (vq VerifyQueue) Len() int {
-	return len(vq)
-}
-
-func (vq VerifyQueue) Less(i, j int) bool {
-	return vq[i].blockHeight < vq[j].blockHeight
-}
-
-func (vq VerifyQueue) Swap(i, j int) {
-	vq[i], vq[j] = vq[j], vq[i]
-	vq[i].idx, vq[j].idx = i, j // Restore indices after the swap
-}
-
-func (vq *VerifyQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	x.(*Link).idx = len(*vq)
-	*vq = append(*vq, x.(*Link))
-}
-
-func (vq *VerifyQueue) Pop() interface{} {
-	old := *vq
-	n := len(old)
-	x := old[n-1]
-	*vq = old[0 : n-1]
-	x.idx = -1
-	x.queueId = NoQueue
-	return x
-}
-
 type SyncStatus int
 
 const ( // SyncStatus values
@@ -292,7 +260,7 @@ type HeaderDownload struct {
 	anchors            map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links              map[common.Hash]*Link   // Links by header hash
 	engine             consensus.Engine
-	insertQueue        VerifyQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
+	insertQueue        InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	persistedLinkQueue LinkQueue      // Priority queue of persisted links used to limit their number
 	linkQueue          LinkQueue      // Priority queue of non-persisted links used to limit their number
