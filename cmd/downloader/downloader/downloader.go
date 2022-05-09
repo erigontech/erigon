@@ -134,9 +134,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.PeersUnique = int32(len(peers))
 	stats.FilesTotal = int32(len(torrents))
 
-	//if prevStats.Completed == false && stats.Completed == true {
-	//	d.onComplete()
-	//}
+	if prevStats.Completed == false && stats.Completed == true {
+		d.onComplete()
+	}
 
 	d.stats = stats
 }
