@@ -56,6 +56,14 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
+
+	// Application must never see partially-downloaded files
+	// To provide such consistent view - downloader does:
+	// add suffix _tmp to <datadir>/snapshots - then method .onComplete will remove this suffix
+	// and App only work with <datadir>/snapshots folder
+	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) {
+		cfg.DataDir += "_tmp"
+	}
 	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -212,11 +220,6 @@ func (d *Downloader) Torrent() *torrent.Client {
 
 func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	snapshotDir := cfg.DataDir
-	if !common.FileExist(filepath.Join(snapshotDir, "db")) {
-		snapshotDir += "_tmp"
-		cfg.DataDir = snapshotDir
-	}
-
 	db, err = mdbx.NewMDBX(log.New()).
 		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
 		Label(kv.DownloaderDB).
