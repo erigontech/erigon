@@ -436,7 +436,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			creds,
 			stack.Config().HealthCheck)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("private api: %w", err)
 		}
 	}
 
