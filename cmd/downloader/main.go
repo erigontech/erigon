@@ -137,7 +137,7 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	d, err := downloader.New(cfg, snapshotDir)
+	d, err := downloader.New(cfg)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func Downloader(ctx context.Context) error {
 	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
 	go downloader.MainLoop(ctx, d, false)
 
-	bittorrentServer, err := downloader.NewGrpcServer(d, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

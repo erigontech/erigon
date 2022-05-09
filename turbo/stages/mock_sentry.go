@@ -283,23 +283,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageHeadersCfg(
-				mock.DB,
-				mock.downloader.Hd,
-				mock.downloader.Bd,
-				*mock.ChainConfig,
-				sendHeaderRequest,
-				propagateNewBlockHashes,
-				penalize,
-				cfg.BatchSize,
-				false,
-				allSnapshots,
-				snapshotsDownloader,
-				blockReader,
-				mock.tmpdir,
-				mock.snapshotDir,
-				mock.Notifications.Events,
-			),
+			stagedsync.StageHeadersCfg(mock.DB, mock.downloader.Hd, mock.downloader.Bd, *mock.ChainConfig, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, allSnapshots, snapshotsDownloader, blockReader, mock.tmpdir, mock.Notifications.Events),
 			stagedsync.StageCumulativeIndexCfg(mock.DB),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.tmpdir, mock.ChainConfig),
 			stagedsync.StageBodiesCfg(
@@ -315,7 +299,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				blockReader,
 			),
 			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, snapshotDir, mock.DB, snapshotsDownloader, mock.Notifications.Events)),
+			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, mock.tmpdir, prune, snapshotsync.NewBlockRetire(1, mock.tmpdir, allSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				prune,

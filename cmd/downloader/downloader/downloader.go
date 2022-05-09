@@ -29,9 +29,8 @@ type Downloader struct {
 
 	cfg *torrentcfg.Cfg
 
-	statsLock   *sync.RWMutex
-	stats       AggStats
-	snapshotDir string
+	statsLock *sync.RWMutex
+	stats     AggStats
 
 	folder storage.ClientImplCloser
 }
@@ -50,7 +49,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(cfg *torrentcfg.Cfg, snapshotDir string) (*Downloader, error) {
+func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
@@ -78,9 +77,14 @@ func New(cfg *torrentcfg.Cfg, snapshotDir string) (*Downloader, error) {
 		torrentClient:     torrentClient,
 		clientLock:        &sync.RWMutex{},
 
-		statsLock:   &sync.RWMutex{},
-		snapshotDir: snapshotDir,
+		statsLock: &sync.RWMutex{},
 	}, nil
+}
+
+func (d *Downloader) SnapshotsDir() string {
+	d.clientLock.RLock()
+	defer d.clientLock.RUnlock()
+	return d.cfg.DataDir
 }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
@@ -205,7 +209,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	snapshotDir := cfg.DataDir
 	//if !common.FileExist(filepath.Join(snapshotDir, "db")) {
 	//	snapshotDir += "_tmp"
-	//  cfg.DataDir = snapshotDir
+	//	cfg.DataDir = snapshotDir
 	//}
 
 	db, err = mdbx.NewMDBX(log.New()).
@@ -231,7 +235,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 }
 
 func MainLoop(ctx context.Context, d *Downloader, silent bool) {
-	if err := BuildTorrentsAndAdd(ctx, d.snapshotDir, d.torrentClient); err != nil {
+	if err := BuildTorrentsAndAdd(ctx, d.cfg.DataDir, d.torrentClient); err != nil {
 		panic(fmt.Errorf("BuildTorrentsAndAdd: %w", err))
 	}
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))

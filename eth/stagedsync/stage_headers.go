@@ -48,7 +48,6 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	snapshotDir       string
 
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotHashesCfg  *snapshothashes.Config
@@ -71,9 +70,7 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
-	snapshotDir string,
-	dbEventNotifier snapshotsync.DBEventNotifier,
-) HeadersCfg {
+	dbEventNotifier snapshotsync.DBEventNotifier) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
@@ -89,7 +86,6 @@ func StageHeadersCfg(
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
 		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
-		snapshotDir:        snapshotDir,
 		dbEventNotifier:    dbEventNotifier,
 	}
 }
@@ -1108,7 +1104,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				if workers > 2 {
 					workers = 2 // 4 workers get killed on 16Gb RAM
 				}
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
 				}
 			}

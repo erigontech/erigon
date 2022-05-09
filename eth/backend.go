@@ -284,12 +284,12 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			backend.downloader, err = downloader.New(config.Torrent, config.SnapshotDir)
+			backend.downloader, err = downloader.New(config.Torrent)
 			if err != nil {
 				return nil, err
 			}
 			go downloader.MainLoop(ctx, backend.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloader, config.SnapshotDir)
+			bittorrentServer, err := downloader.NewGrpcServer(backend.downloader)
 			if err != nil {
 				return nil, fmt.Errorf("new server: %w", err)
 			}
