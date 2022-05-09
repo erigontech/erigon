@@ -488,11 +488,8 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 			} else {
 				var canRequestMore bool
 				for _, segment := range segments {
-					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
+					requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
 					canRequestMore = canRequestMore || requestMore
-					if len(penalties) > 0 {
-						cs.Penalize(ctx, penalties)
-					}
 				}
 
 				if canRequestMore {
