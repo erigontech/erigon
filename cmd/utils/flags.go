@@ -136,7 +136,7 @@ var (
 	}
 	OverrideMergeForkBlock = BigFlag{
 		Name:  "override.mergeForkBlock",
-		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+		Usage: "Manually specify FORK_NEXT_VALUE (see EIP-3675), overriding the bundled setting",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
