@@ -22,7 +22,6 @@ type QueueID uint8
 const (
 	NoQueue QueueID = iota
 	EntryQueueID
-	VerifyQueueID
 	InsertQueueID
 	PersistedQueueID
 )
@@ -40,6 +39,7 @@ type Link struct {
 	blockHeight uint64
 	persisted   bool    // Whether this link comes from the database record
 	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
+	linked      bool    // Whether this link is connected (via chain of ParentHash to one of the persisted links)
 	idx         int     // Index in the heap
 	queueId     QueueID // which queue this link belongs to
 }
@@ -260,8 +260,7 @@ type HeaderDownload struct {
 	anchors            map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links              map[common.Hash]*Link   // Links by header hash
 	engine             consensus.Engine
-	verifyQueue        InsertQueue    // Priority queue of non-peristed links ready for verification
-	insertQueue        InsertQueue    // Priority queue of non-persisted links that are verified and can be inserted
+	insertQueue        InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	persistedLinkQueue LinkQueue      // Priority queue of persisted links used to limit their number
 	linkQueue          LinkQueue      // Priority queue of non-persisted links used to limit their number
@@ -332,7 +331,6 @@ func NewHeaderDownload(
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
 	heap.Init(hd.anchorQueue)
-	heap.Init(&hd.verifyQueue)
 	heap.Init(&hd.insertQueue)
 	return hd
 }
@@ -375,8 +373,6 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 	case NoQueue:
 	case EntryQueueID:
 		heap.Remove(&hd.linkQueue, link.idx)
-	case VerifyQueueID:
-		heap.Remove(&hd.verifyQueue, link.idx)
 	case InsertQueueID:
 		heap.Remove(&hd.insertQueue, link.idx)
 	case PersistedQueueID:
@@ -387,8 +383,6 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 	case NoQueue:
 	case EntryQueueID:
 		heap.Push(&hd.linkQueue, link)
-	case VerifyQueueID:
-		heap.Push(&hd.verifyQueue, link)
 	case InsertQueueID:
 		heap.Push(&hd.insertQueue, link)
 	case PersistedQueueID:

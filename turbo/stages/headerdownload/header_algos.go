@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
@@ -197,33 +198,6 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastVal
 	return
 }
 
-// findAnchor attempts to find anchor to which given chain segment can be attached to
-func (hd *HeaderDownload) findAnchor(segment ChainSegment) (found bool, anchor *Anchor, start int) {
-	// Walk the segment from children towards parents
-	for i, h := range segment {
-		// Check if the header can be attached to an anchor of a working tree
-		if anchor, attaching := hd.anchors[h.Hash]; attaching {
-			return true, anchor, i
-		}
-	}
-	return false, nil, 0
-}
-
-// FindLink attempts to find a non-persisted link that given chain segment can be attached to.
-func (hd *HeaderDownload) findLink(segment ChainSegment, start int) (found bool, link *Link, end int) {
-	if _, duplicate := hd.getLink(segment[start].Hash); duplicate {
-		return false, nil, 0
-	}
-	// Walk the segment from children towards parents
-	for i, h := range segment[start:] {
-		// Check if the header can be attached to any links
-		if link, attaching := hd.getLink(h.Header.ParentHash); attaching {
-			return true, link, start + i + 1
-		}
-	}
-	return false, nil, len(segment)
-}
-
 func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
@@ -237,115 +211,21 @@ func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
 func (hd *HeaderDownload) MarkAllVerified() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	for hd.verifyQueue.Len() > 0 {
-		link := hd.verifyQueue[0]
+	for hd.insertQueue.Len() > 0 {
+		link := hd.insertQueue[0]
 		if !link.verified {
+			link.linked = true
 			link.verified = true
-			hd.moveLinkToQueue(link, InsertQueueID)
-		} else {
-			panic("verified link in verifyQueue")
 		}
 	}
 	for hd.linkQueue.Len() > 0 {
 		link := hd.linkQueue[0]
 		if !link.verified {
+			link.linked = true
 			link.verified = true
 			hd.moveLinkToQueue(link, InsertQueueID)
-		} else {
-			panic("verified link in linkQueue")
 		}
 	}
-}
-
-// ExtendUp extends a working tree up from the link, using given chain segment
-func (hd *HeaderDownload) extendUp(segment ChainSegment, attachmentLink *Link) {
-	// Iterate over headers backwards (from parents towards children)
-	prevLink := attachmentLink
-	for i := len(segment) - 1; i >= 0; i-- {
-		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		if prevLink.persisted {
-			// If we are attching to already persisted link, schedule for insertion (persistence)
-			if link.verified {
-				hd.moveLinkToQueue(link, InsertQueueID)
-			} else {
-				hd.moveLinkToQueue(link, VerifyQueueID)
-			}
-		}
-		prevLink.next = append(prevLink.next, link)
-		prevLink = link
-	}
-}
-
-// ExtendDown extends some working trees down from the anchor, using given chain segment
-// it creates a new anchor and collects all the links from the attached anchors to it
-func (hd *HeaderDownload) extendDown(segment ChainSegment, anchor *Anchor) bool {
-	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
-		hd.invalidateAnchor(anchor, "anchor below preverified")
-		return false
-	}
-	newAnchorH := segment[len(segment)-1]
-	newAnchorHeader := newAnchorH.Header
-	var newAnchor *Anchor
-	newAnchor, preExisting := hd.anchors[newAnchorHeader.ParentHash]
-	if !preExisting {
-		newAnchor = &Anchor{
-			parentHash:    newAnchorHeader.ParentHash,
-			nextRetryTime: 0, // Will ensure this anchor will be top priority
-			peerID:        anchor.peerID,
-			blockHeight:   newAnchorH.Number,
-		}
-		if newAnchor.blockHeight > 0 {
-			hd.anchors[newAnchorHeader.ParentHash] = newAnchor
-			heap.Push(hd.anchorQueue, newAnchor)
-		}
-	}
-	hd.removeAnchor(anchor)
-	// Add all headers in the segments as links to this anchor
-	var prevLink *Link
-	for i := len(segment) - 1; i >= 0; i-- {
-		link := hd.addHeaderAsLink(segment[i], false /* pesisted */)
-		if prevLink == nil {
-			newAnchor.links = append(newAnchor.links, link)
-		} else {
-			prevLink.next = append(prevLink.next, link)
-		}
-		prevLink = link
-	}
-	prevLink.next = anchor.links
-	anchor.links = nil
-	return !preExisting
-}
-
-// Connect connects some working trees using anchors of some, and a link of another
-func (hd *HeaderDownload) connect(segment ChainSegment, attachmentLink *Link, anchor *Anchor) []PenaltyItem {
-	var penalties []PenaltyItem
-	if anchor.blockHeight <= hd.preverifiedHeight && hd.highestInDb >= hd.preverifiedHeight {
-		hd.invalidateAnchor(anchor, "anchor below preverified")
-		return penalties
-	}
-	hd.removeAnchor(anchor)
-	// Iterate over headers backwards (from parents towards children)
-	prevLink := attachmentLink
-	for i := len(segment) - 1; i >= 0; i-- {
-		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		// If we attach to already persisted link, mark this one for insertion
-		if prevLink.persisted {
-			if link.verified {
-				hd.moveLinkToQueue(link, InsertQueueID)
-			} else {
-				hd.moveLinkToQueue(link, VerifyQueueID)
-			}
-		}
-		prevLink.next = append(prevLink.next, link)
-		prevLink = link
-	}
-	prevLink.next = anchor.links
-	anchor.links = nil
-	if _, bad := hd.badHeaders[attachmentLink.hash]; bad {
-		hd.invalidateAnchor(anchor, "descendant of a known bad block")
-		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
-	}
-	return penalties
 }
 
 func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
@@ -353,45 +233,6 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 	delete(hd.anchors, anchor.parentHash)
 	heap.Remove(hd.anchorQueue, anchor.idx)
 	anchor.idx = -1
-}
-
-// if anchor will be abandoned - given peerID will get Penalty
-func (hd *HeaderDownload) newAnchor(segment ChainSegment, peerID [64]byte) bool {
-	anchorH := segment[len(segment)-1]
-	anchorHeader := anchorH.Header
-
-	var anchor *Anchor
-	anchor, preExisting := hd.anchors[anchorHeader.ParentHash]
-	if !preExisting {
-		if anchorH.Number < hd.highestInDb {
-			log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", anchorH.Number, hd.highestInDb))
-			return false
-		}
-		if len(hd.anchors) >= hd.anchorLimit {
-			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
-			return false
-		}
-		anchor = &Anchor{
-			parentHash:    anchorHeader.ParentHash,
-			peerID:        peerID,
-			nextRetryTime: 0, // Will ensure this anchor will be top priority
-			blockHeight:   anchorH.Number,
-		}
-		hd.anchors[anchorHeader.ParentHash] = anchor
-		heap.Push(hd.anchorQueue, anchor)
-	}
-	// Iterate over headers backwards (from parents towards children)
-	var prevLink *Link
-	for i := len(segment) - 1; i >= 0; i-- {
-		link := hd.addHeaderAsLink(segment[i], false /* persisted */)
-		if prevLink == nil {
-			anchor.links = append(anchor.links, link)
-		} else {
-			prevLink.next = append(prevLink.next, link)
-		}
-		prevLink = link
-	}
-	return !preExisting
 }
 
 func (hd *HeaderDownload) pruneLinkQueue() {
@@ -558,7 +399,7 @@ func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 }
 
 func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
-	log.Warn("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
+	log.Debug("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
 	hd.removeAnchor(anchor)
 	hd.removeUpwards(anchor.links)
 }
@@ -640,16 +481,16 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeo
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Trace("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
+	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	strideHeight := hd.highestInDb + stride
 	lowestAnchorHeight := hd.topSeenHeightPoW + 1 // Inclusive upper bound
-	if lowestAnchorHeight <= strideHeight {
+	if lowestAnchorHeight > 1 && lowestAnchorHeight <= strideHeight {
 		return nil
 	}
 	// Determine the query range as the height of lowest anchor
 	for _, anchor := range hd.anchors {
-		if anchor.blockHeight > strideHeight && anchor.blockHeight < lowestAnchorHeight {
+		if anchor.blockHeight > strideHeight && (lowestAnchorHeight == 1 || anchor.blockHeight < lowestAnchorHeight) {
 			lowestAnchorHeight = anchor.blockHeight // Exclusive upper bound
 		}
 	}
@@ -679,11 +520,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		for i := 0; i < hd.insertQueue.Len(); i++ {
 			iStrs = append(iStrs, fmt.Sprintf("%d=>%x", hd.insertQueue[i].blockHeight, hd.insertQueue[i].hash))
 		}
-		var vStrs []string
-		for i := 0; i < hd.verifyQueue.Len(); i++ {
-			vStrs = append(vStrs, fmt.Sprintf("%d=>%x", hd.verifyQueue[i].blockHeight, hd.verifyQueue[i].hash))
-		}
-		log.Info("InsertHeaders", "highestInDb", hd.highestInDb, "insertQueue", strings.Join(iStrs, ", "), "verifyQueue", strings.Join(vStrs, ", "))
+		log.Info("InsertHeaders", "highestInDb", hd.highestInDb, "insertQueue", strings.Join(iStrs, ", "))
 	}
 
 	for checkInsert {
@@ -701,6 +538,21 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 				delete(hd.links, link.hash)
 				continue
 			}
+			if !link.verified {
+				if err := hd.VerifyHeader(link.header); err != nil {
+					if errors.Is(err, consensus.ErrFutureBlock) {
+						// This may become valid later
+						log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
+						break // prevent removal of the link from the hd.linkQueue
+					} else {
+						log.Debug("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
+						hd.moveLinkToQueue(link, NoQueue)
+						delete(hd.links, link.hash)
+						continue
+					}
+				}
+			}
+			link.verified = true
 			// Make sure long insertions do not appear as a stuck stage 1
 			select {
 			case <-logChannel:
@@ -733,65 +585,10 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			link.header = nil // Drop header reference to free memory, as we won't need it anymore
 			link.headerRaw = nil
 			hd.moveLinkToQueue(link, PersistedQueueID)
-			for _, nextLink := range link.next {
-				if nextLink.persisted {
-					continue
-				}
-				if nextLink.verified {
-					hd.moveLinkToQueue(nextLink, InsertQueueID)
-				} else {
-					hd.moveLinkToQueue(nextLink, VerifyQueueID)
-				}
-			}
 		}
 		for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
 			link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 			delete(hd.links, link.hash)
-		}
-		// Perform verification if needed
-		for hd.verifyQueue.Len() > 0 {
-			link := hd.verifyQueue[0]
-			select {
-			case <-logChannel:
-				log.Info(fmt.Sprintf("[%s] Verifying headers", logPrefix), "progress", hd.highestInDb)
-			default:
-			}
-			skip := false
-			if link.blockHeight <= hd.preverifiedHeight {
-				if link.blockHeight <= hd.highestInDb {
-					// There was preverified alternative to this link, drop
-					skip = true
-				} else {
-					break // Wait to be mark as pre-verified or an alternative to be inserted
-				}
-			}
-			if !skip {
-				_, skip = hd.badHeaders[link.hash]
-			}
-			if !skip && !link.persisted {
-				_, skip = hd.badHeaders[link.header.ParentHash]
-			}
-			if !skip {
-				if err := hd.VerifyHeader(link.header); err != nil {
-					if errors.Is(err, consensus.ErrFutureBlock) {
-						// This may become valid later
-						log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
-						break // prevent removal of the link from the hd.linkQueue
-					} else {
-						log.Warn("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
-						skip = true
-					}
-				}
-			}
-			if skip {
-				hd.moveLinkToQueue(link, NoQueue)
-				delete(hd.links, link.hash)
-			} else {
-				link.verified = true
-				hd.moveLinkToQueue(link, InsertQueueID)
-				checkInsert = true
-				break
-			}
 		}
 	}
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
@@ -914,6 +711,8 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 		persisted:   persisted,
 	}
 	if persisted {
+		link.linked = true
+		link.verified = true
 		link.header = nil // Drop header reference to free memory, as we won't need it anymore
 		link.headerRaw = nil
 	}
@@ -1091,62 +890,80 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 	return hi.newCanonical
 }
 
-// ProcessSegment - handling single segment.
-// If segment were processed by extendDown or newAnchor method, then it returns `requestMore=true`
-// it allows higher-level algo immediately request more headers without waiting all stages precessing,
-// speeds up visibility of new blocks
-// It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
-func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID [64]byte) (requestMore bool, penalties []PenaltyItem) {
-	lowestNum := segment[0].Number
-	highest := segment[len(segment)-1]
-	highestNum := highest.Number
-	log.Trace("processSegment", "from", lowestNum, "to", highestNum)
+func (hd *HeaderDownload) recursiveLinked(link *Link) {
+	for _, n := range link.next {
+		n.linked = true
+		hd.moveLinkToQueue(n, InsertQueueID)
+		hd.recursiveLinked(n)
+	}
+}
+
+func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	foundAnchor, anchor, start := hd.findAnchor(segment)
-	foundTip, link, end := hd.findLink(segment, start)
-	if end == 0 {
-		log.Trace("Duplicate segment")
+	requestMore := false
+	for i := len(segment); i > 0; i-- {
+		sh := segment[i-1]
+		if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
+			hd.topSeenHeightPoW = sh.Number
+		}
+		if _, ok := hd.links[sh.Hash]; ok {
+			// Duplicate
+			continue
+		}
+		parent, foundParent := hd.links[sh.Header.ParentHash]
+		anchor, foundAnchor := hd.anchors[sh.Hash]
+		//fmt.Printf("sh = %d %x, foundParent=%t, foundAnchor=%t\n", sh.Number, sh.Hash, foundParent, foundAnchor)
+		if !foundParent && !foundAnchor {
+			if sh.Number < hd.highestInDb {
+				log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
+				return false
+			}
+			if len(hd.anchors) >= hd.anchorLimit {
+				log.Debug(fmt.Sprintf("too many anchors: %d, limit %d, state: %s", len(hd.anchors), hd.anchorLimit, hd.anchorState()))
+				return false
+			}
+		}
+		link := hd.addHeaderAsLink(sh, false /* persisted */)
 		if foundAnchor {
-			// If duplicate segment is extending from the anchor, the anchor needs to be deleted,
-			// otherwise it will keep producing requests that will be found duplicate
+			link.next = anchor.links
 			hd.removeAnchor(anchor)
+			//fmt.Printf("removed anchor %d %x\n", anchor.blockHeight, anchor.parentHash)
 		}
-		return
-	}
-	if highestNum > hd.topSeenHeightPoW {
-		if newBlock || hd.seenAnnounces.Seen(highest.Hash) {
-			hd.topSeenHeightPoW = highestNum
+		if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
+			parentAnchor.links = append(parentAnchor.links, link)
+		}
+		if foundParent {
+			//fmt.Printf("sh = %d %x, found parent\n", sh.Number, sh.Hash)
+			parent.next = append(parent.next, link)
+			if parent.linked {
+				link.linked = true
+				hd.moveLinkToQueue(link, InsertQueueID)
+				hd.recursiveLinked(link)
+			}
+		} else if !foundAnchor {
+			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
+				log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
+				hd.removeUpwards([]*Link{link})
+				return false
+			}
+			//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
+			// See if it links existing anchor
+			anchor = &Anchor{
+				parentHash:    sh.Header.ParentHash,
+				nextRetryTime: 0, // Will ensure this anchor will be top priority
+				peerID:        peerID,
+				blockHeight:   sh.Number,
+			}
+			anchor.links = append(anchor.links, link)
+			hd.anchors[anchor.parentHash] = anchor
+			heap.Push(hd.anchorQueue, anchor)
+			requestMore = true
 		}
 	}
-
-	subSegment := segment[start:end]
-	startNum := subSegment[0].Number
-	endNum := subSegment[len(subSegment)-1].Number
-	// There are 4 cases
-	if foundAnchor {
-		if foundTip {
-			// Connect
-			penalties = hd.connect(subSegment, link, anchor)
-			log.Trace("Connected", "start", startNum, "end", endNum)
-		} else {
-			// ExtendDown
-			requestMore = hd.extendDown(subSegment, anchor)
-			log.Trace("Extended Down", "start", startNum, "end", endNum)
-		}
-	} else if foundTip {
-		// ExtendUp
-		hd.extendUp(subSegment, link)
-		log.Trace("Extended Up", "start", startNum, "end", endNum)
-	} else {
-		// NewAnchor
-		requestMore = hd.newAnchor(subSegment, peerID)
-		log.Trace("NewAnchor", "start", startNum, "end", endNum)
-	}
-	//log.Info(hd.anchorState())
 	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
-		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(subSegment), "limit", hd.linkLimit)
+		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(segment), "limit", hd.linkLimit)
 		hd.pruneLinkQueue()
 	}
 	select {
@@ -1154,7 +971,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 	default:
 	}
 
-	return hd.requestChaining && requestMore, penalties
+	return hd.requestChaining && requestMore
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
@@ -1304,7 +1121,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	peerID := [64]byte{'m', 'i', 'n', 'e', 'r'} // "miner"
 
 	for _, segment := range segments {
-		_, _ = hd.ProcessSegment(segment, false /* newBlock */, peerID)
+		_ = hd.ProcessSegment(segment, false /* newBlock */, peerID)
 	}
 	return nil
 }

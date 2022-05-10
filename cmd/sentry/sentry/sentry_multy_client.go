@@ -492,11 +492,8 @@ func (cs *MultyClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			} else {
 				var canRequestMore bool
 				for _, segment := range segments {
-					requestMore, penalties := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
+					requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
 					canRequestMore = canRequestMore || requestMore
-					if len(penalties) > 0 {
-						cs.Penalize(ctx, penalties)
-					}
 				}
 
 				if canRequestMore {
