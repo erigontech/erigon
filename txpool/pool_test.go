@@ -26,6 +26,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -68,10 +69,10 @@ func BenchmarkName2(b *testing.B) {
 	var r uint64
 
 	for i := 0; i < b.N; i++ {
-		min1 = min(min1, a)
-		min2 = min(min2, c)
+		min1 = cmp.Min(min1, a)
+		min2 = cmp.Min(min2, c)
 		if d <= min1 {
-			r = min(min1-d, min2)
+			r = cmp.Min(min1-d, min2)
 		} else {
 			r = 0
 		}

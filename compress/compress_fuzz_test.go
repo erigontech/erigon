@@ -23,15 +23,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/log/v3"
 )
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 func FuzzCompress(f *testing.F) {
 	f.Fuzz(func(t *testing.T, x []byte, pos []byte, workers int8) {
@@ -47,7 +41,7 @@ func FuzzCompress(f *testing.F) {
 			if pos[i] == 0 {
 				continue
 			}
-			next := min(j+int(pos[i]*10), len(x)-1)
+			next := cmp.Min(j+int(pos[i]*10), len(x)-1)
 			bbb := x[j:next]
 			a = append(a, bbb)
 			j = next

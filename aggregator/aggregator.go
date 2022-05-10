@@ -1518,7 +1518,7 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 				} else {
 					if j == 1 {
 						markKeyNotFound(hex.EncodeToString(spkBuf))
-						hist, _ := replaceHistory[hex.EncodeToString(spkBuf)]
+						hist := replaceHistory[hex.EncodeToString(spkBuf)]
 						var str string
 						str = "{ "
 						for _, v := range hist {

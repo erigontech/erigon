@@ -36,6 +36,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -606,7 +607,7 @@ func (p *TxPool) Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
 
-	txs.Resize(uint(min(uint64(n), uint64(len(p.pending.best.ms)))))
+	txs.Resize(uint(cmp.Min(int(n), len(p.pending.best.ms))))
 
 	best := p.pending.best
 	for i, j := 0, 0; j < int(n) && i < len(best.ms); i++ {
@@ -1160,9 +1161,9 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 			toDel = append(toDel, mt)
 			return true
 		}
-		minFeeCap = min(minFeeCap, mt.Tx.FeeCap)
+		minFeeCap = cmp.Min(minFeeCap, mt.Tx.FeeCap)
 		mt.minFeeCap = minFeeCap
-		minTip = min(minTip, mt.Tx.Tip)
+		minTip = cmp.Min(minTip, mt.Tx.Tip)
 		mt.minTip = minTip
 
 		mt.nonceDistance = 0
@@ -2188,10 +2189,10 @@ func (mt *metaTx) better(than *metaTx, pendingBaseFee uint64) bool {
 	case PendingSubPool:
 		var effectiveTip, thanEffectiveTip uint64
 		if pendingBaseFee <= mt.minFeeCap {
-			effectiveTip = min(mt.minFeeCap-pendingBaseFee, mt.minTip)
+			effectiveTip = cmp.Min(mt.minFeeCap-pendingBaseFee, mt.minTip)
 		}
 		if pendingBaseFee <= than.minFeeCap {
-			thanEffectiveTip = min(than.minFeeCap-pendingBaseFee, than.minTip)
+			thanEffectiveTip = cmp.Min(than.minFeeCap-pendingBaseFee, than.minTip)
 		}
 		if effectiveTip != thanEffectiveTip {
 			return effectiveTip > thanEffectiveTip
@@ -2298,11 +2299,4 @@ func (p *WorstQueue) Pop() interface{} {
 	item.currentSubPool = 0 // for safety
 	p.ms = old[0 : n-1]
 	return item
-}
-
-func min(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
 }
