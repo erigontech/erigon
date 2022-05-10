@@ -297,6 +297,39 @@ func (r *Receipt) Size() common.StorageSize {
 	return size
 }
 
+// Copy creates a deep copy of the Receipt.
+func (r *Receipt) Copy() *Receipt {
+	postState := make([]byte, len(r.PostState))
+	copy(postState, r.PostState)
+
+	bloom := BytesToBloom(r.Bloom.Bytes())
+
+	logs := make(Logs, 0, len(r.Logs))
+	for _, log := range r.Logs {
+		logs = append(logs, log.Copy())
+	}
+
+	txHash := common.BytesToHash(r.TxHash.Bytes())
+	contractAddress := common.BytesToAddress(r.ContractAddress.Bytes())
+	blockHash := common.BytesToHash(r.BlockHash.Bytes())
+	blockNumber := big.NewInt(0).Set(r.BlockNumber)
+
+	return &Receipt{
+		Type:              r.Type,
+		PostState:         postState,
+		Status:            r.Status,
+		CumulativeGasUsed: r.CumulativeGasUsed,
+		Bloom:             bloom,
+		Logs:              logs,
+		TxHash:            txHash,
+		ContractAddress:   contractAddress,
+		GasUsed:           r.GasUsed,
+		BlockHash:         blockHash,
+		BlockNumber:       blockNumber,
+		TransactionIndex:  r.TransactionIndex,
+	}
+}
+
 type ReceiptsForStorage []*ReceiptForStorage
 
 // ReceiptForStorage is a wrapper around a Receipt that flattens and parses the

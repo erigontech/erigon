@@ -18,7 +18,7 @@ import (
 
 // Methods of sentry called by Core
 
-func (cs *ControlServerImpl) UpdateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
+func (cs *MultyClient) UpdateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 	cs.headHeight = height
@@ -36,7 +36,7 @@ func (cs *ControlServerImpl) UpdateHead(ctx context.Context, height uint64, hash
 	}
 }
 
-func (cs *ControlServerImpl) SendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) (peerID [64]byte, ok bool) {
+func (cs *MultyClient) SendBodyRequest(ctx context.Context, req *bodydownload.BodyRequest) (peerID [64]byte, ok bool) {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
 		if !cs.sentries[i].Ready() {
@@ -78,7 +78,7 @@ func (cs *ControlServerImpl) SendBodyRequest(ctx context.Context, req *bodydownl
 	return [64]byte{}, false
 }
 
-func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) (peerID [64]byte, ok bool) {
+func (cs *MultyClient) SendHeaderRequest(ctx context.Context, req *headerdownload.HeaderRequest) (peerID [64]byte, ok bool) {
 	// if sentry not found peers to send such message, try next one. stop if found.
 	for i, ok, next := cs.randSentryIndex(); ok; i, ok = next() {
 		if !cs.sentries[i].Ready() {
@@ -130,7 +130,7 @@ func (cs *ControlServerImpl) SendHeaderRequest(ctx context.Context, req *headerd
 	return [64]byte{}, false
 }
 
-func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
+func (cs *MultyClient) randSentryIndex() (int, bool, func() (int, bool)) {
 	var i int
 	if len(cs.sentries) > 1 {
 		i = rand.Intn(len(cs.sentries) - 1)
@@ -143,7 +143,7 @@ func (cs *ControlServerImpl) randSentryIndex() (int, bool, func() (int, bool)) {
 }
 
 // sending list of penalties to all sentries
-func (cs *ControlServerImpl) Penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
+func (cs *MultyClient) Penalize(ctx context.Context, penalties []headerdownload.PenaltyItem) {
 	for i := range penalties {
 		outreq := proto_sentry.PenalizePeerRequest{
 			PeerId:  gointerfaces.ConvertHashToH512(penalties[i].PeerID),

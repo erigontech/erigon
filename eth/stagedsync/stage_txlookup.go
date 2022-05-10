@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -57,7 +58,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return err
 	}
 	if toBlock > 0 {
-		endBlock = min(endBlock, toBlock)
+		endBlock = libcommon.Min(endBlock, toBlock)
 	}
 
 	startBlock := s.BlockNumber

@@ -998,9 +998,10 @@ func (p *Parlia) getCurrentValidators(header *types.Header, ibs *state.IntraBloc
 		return nil, err
 	}
 	valz := make([]common.Address, len(*ret0))
-	for i, a := range *ret0 {
-		valz[i] = a
-	}
+	copy(valz, *ret0)
+	//for i, a := range *ret0 {
+	//	valz[i] = a
+	//}
 	return valz, nil
 }
 
@@ -1146,7 +1147,7 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 			return nil, nil, nil, err
 		}
 	} else {
-		if systemTxs == nil || len(systemTxs) == 0 || systemTxs[0] == nil {
+		if len(systemTxs) == 0 || systemTxs[0] == nil {
 			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get none")
 		}
 		actualTx := systemTxs[0]

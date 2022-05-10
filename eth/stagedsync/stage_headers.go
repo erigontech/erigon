@@ -12,7 +12,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -49,10 +49,8 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	snapshotDir       *dir.Rw
 
 	snapshots          *snapshotsync.RoSnapshots
-	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
@@ -72,9 +70,7 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
-	snapshotDir *dir.Rw,
-	dbEventNotifier snapshotsync.DBEventNotifier,
-) HeadersCfg {
+	dbEventNotifier snapshotsync.DBEventNotifier) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
@@ -89,8 +85,6 @@ func StageHeadersCfg(
 		snapshots:          snapshots,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
-		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
-		snapshotDir:        snapshotDir,
 		dbEventNotifier:    dbEventNotifier,
 	}
 }
@@ -141,7 +135,8 @@ func SpawnStageHeaders(
 	}
 }
 
-// HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated)
+// HeadersPOS processes Proof-of-Stake requests (newPayload, forkchoiceUpdated).
+// It also saves PoS headers downloaded by (*HeaderDownload)StartPoSDownloader into the DB.
 func HeadersPOS(
 	s *StageState,
 	u Unwinder,
@@ -704,6 +699,8 @@ func HeadersPOW(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
+	var noProgressCounter int
+	var wasProgress bool
 Loop:
 	for !stopped {
 
@@ -767,6 +764,8 @@ Loop:
 			cfg.announceNewHashes(ctx, announces)
 		}
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
+			noProgressCounter = 0
+			wasProgress = true
 			if !initialCycle {
 				// if this is not an initial cycle, we need to react quickly when new headers are coming in
 				break
@@ -786,6 +785,13 @@ Loop:
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress)
+			if prevProgress == progress {
+				noProgressCounter++
+				if noProgressCounter >= 5 && wasProgress {
+					log.Warn("Looks like chain is not progressing, moving to the next stage")
+					break Loop
+				}
+			}
 			prevProgress = progress
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
@@ -1069,8 +1075,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
-		expect := cfg.snapshotHashesCfg.ExpectBlocks
-		if cfg.snapshots.SegmentsAvailable() < expect {
+
+		expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
+		if cfg.snapshots.SegmentsMax() < expect {
 			c, err := tx.Cursor(kv.Headers)
 			if err != nil {
 				return err
@@ -1082,10 +1089,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 			c.Close()
 			hasInDB := binary.BigEndian.Uint64(firstK)
-			if cfg.snapshots.SegmentsAvailable() < hasInDB {
-				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsAvailable(), hasInDB, expect)
+			if cfg.snapshots.SegmentsMax() < hasInDB {
+				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
 			} else {
-				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsAvailable(), expect, hasInDB))
+				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
 			}
 		}
 		if err := cfg.snapshots.Reopen(); err != nil {
@@ -1093,22 +1100,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		// Create .idx files
-		if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
+		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 			if !cfg.snapshots.SegmentsReady() {
 				return fmt.Errorf("not all snapshot segments are available")
 			}
 
 			// wait for Downloader service to download all expected snapshots
-			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
+			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := runtime.GOMAXPROCS(-1) - 1
-				if workers < 1 {
-					workers = 1
-				}
-				if workers > 2 {
-					workers = 2 // 4 workers get killed on 16Gb RAM
-				}
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
+				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
 					return err
 				}
 			}
@@ -1219,9 +1220,10 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 		}
 		break
 	}
-	logEvery := time.NewTicker(logInterval / 3)
+	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
+	var m runtime.MemStats
 	// Print download progress until all segments are available
 Loop:
 	for {
@@ -1238,7 +1240,7 @@ Loop:
 					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
-
+				runtime.ReadMemStats(&m)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",
@@ -1246,6 +1248,7 @@ Loop:
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
 					"files", stats.FilesTotal,
+					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys),
 				)
 			}
 		}

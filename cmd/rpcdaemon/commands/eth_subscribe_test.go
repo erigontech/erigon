@@ -20,7 +20,7 @@ import (
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 42, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 21, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)

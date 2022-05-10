@@ -40,7 +40,7 @@ func ReadBorReceiptRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVal
 func ReadRawBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 	// Retrieve the flattened receipt slice
 	data := ReadBorReceiptRLP(db, hash, number)
-	if data == nil || len(data) == 0 {
+	if len(data) == 0 {
 		return nil
 	}
 
