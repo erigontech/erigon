@@ -256,7 +256,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if workers < 1 {
 		workers = 1
 	}
-	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, snapshotDir, chainDB, nil, nil)
+	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, chainDB, nil, nil)
 
 	for i := from; i < to; i += every {
 		br.RetireBlocksInBackground(ctx, i, i+every, *chainID, log.LvlInfo)
@@ -300,7 +300,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
-	if err := snapshotsync.BuildIndices(ctx, allSnapshots, snapshotDir, *chainID, tmpDir, from, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.BuildIndices(ctx, allSnapshots, *chainID, tmpDir, from, workers, log.LvlInfo); err != nil {
 		return err
 	}
 	return nil

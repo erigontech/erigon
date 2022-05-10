@@ -297,7 +297,6 @@ func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Lo
 func (s *RoSnapshots) BlocksAvailable() uint64 {
 	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
 }
-
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -597,7 +596,7 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
-func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir string, chainID uint256.Int, tmpDir string, from uint64, workers int, lvl log.Lvl) error {
+func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpDir string, from uint64, workers int, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Build indices", "from", from)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -618,7 +617,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir string, chain
 					<-workersCh
 				}()
 
-				f := filepath.Join(snapshotDir, snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
+				f := filepath.Join(s.Dir(), snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
 				errs <- HeadersIdx(ctx, f, blockFrom, tmpDir, lvl)
 				select {
 				case <-ctx.Done():
@@ -665,7 +664,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir string, chain
 					<-workersCh
 				}()
 
-				f := filepath.Join(snapshotDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+				f := filepath.Join(s.Dir(), snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
 				errs <- BodiesIdx(ctx, f, blockFrom, tmpDir, lvl)
 				select {
 				case <-ctx.Done():
@@ -720,7 +719,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir string, chain
 						wg.Done()
 						<-workersCh
 					}()
-					errs <- TransactionsIdx(ctx, chainID, blockFrom, blockTo, snapshotDir, tmpDir, lvl)
+					errs <- TransactionsIdx(ctx, chainID, blockFrom, blockTo, s.Dir(), tmpDir, lvl)
 					select {
 					case <-ctx.Done():
 						errs <- ctx.Err()
@@ -846,11 +845,10 @@ type BlockRetire struct {
 	wg      *sync.WaitGroup
 	result  *BlockRetireResult
 
-	workers     int
-	tmpDir      string
-	snapshots   *RoSnapshots
-	snapshotDir string
-	db          kv.RoDB
+	workers   int
+	tmpDir    string
+	snapshots *RoSnapshots
+	db        kv.RoDB
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
@@ -861,8 +859,8 @@ type BlockRetireResult struct {
 	Err                error
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, snapshotDir string, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, snapshotDir: snapshotDir, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
@@ -919,7 +917,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		defer br.working.Store(false)
 		defer br.wg.Done()
 
-		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.snapshotDir, br.db, br.workers, br.downloader, lvl, br.notifier)
+		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -932,7 +930,7 @@ type DBEventNotifier interface {
 	OnNewSnapshot()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, snapshotDir string, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
@@ -945,7 +943,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if idxWorkers > 4 {
 		idxWorkers = 4
 	}
-	if err := BuildIndices(ctx, snapshots, snapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), idxWorkers, log.LvlInfo); err != nil {
+	if err := BuildIndices(ctx, snapshots, chainID, tmpDir, snapshots.IndicesAvailable(), idxWorkers, log.LvlInfo); err != nil {
 		return err
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
@@ -953,7 +951,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, ranges, snapshotDir, true)
+	err := merger.Merge(ctx, snapshots, ranges, snapshots.Dir(), true)
 	if err != nil {
 		return err
 	}

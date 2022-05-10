@@ -139,7 +139,7 @@ type Ethereum struct {
 	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 
-	downloadProtocols *downloader.Downloader
+	downloader *downloader.Downloader
 }
 
 // New creates a new Ethereum object (including the
@@ -284,15 +284,12 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			backend.downloadProtocols, err = downloader.New(config.Torrent, config.SnapshotDir)
+			backend.downloader, err = downloader.New(config.Torrent)
 			if err != nil {
 				return nil, err
 			}
-			if err := backend.downloadProtocols.Start(ctx, true); err != nil {
-				return nil, fmt.Errorf("downloadProtocols start: %w", err)
-			}
-
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloadProtocols, config.SnapshotDir)
+			go downloader.MainLoop(ctx, backend.downloader, true)
+			bittorrentServer, err := downloader.NewGrpcServer(backend.downloader)
 			if err != nil {
 				return nil, fmt.Errorf("new server: %w", err)
 			}
@@ -439,7 +436,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			creds,
 			stack.Config().HealthCheck)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("private api: %w", err)
 		}
 	}
 
@@ -822,8 +819,8 @@ func (s *Ethereum) Start() error {
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.sentryCancel()
-	if s.downloadProtocols != nil {
-		s.downloadProtocols.Close()
+	if s.downloader != nil {
+		s.downloader.Close()
 	}
 	if s.privateAPI != nil {
 		shutdownDone := make(chan bool)

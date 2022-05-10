@@ -611,7 +611,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 		if workers < 1 {
 			workers = 1
 		}
-		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, snapshots.Dir(), db, nil, nil)
+		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
