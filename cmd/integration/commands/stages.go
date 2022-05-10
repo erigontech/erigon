@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -441,14 +442,6 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
-// max is a helper function which returns the larger of the two given integers.
-func max(a, b uint64) uint64 { //nolint:unparam
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if !(unwind > 0 || reset) {
@@ -471,7 +464,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		if unwind > progress {
 			unwindTo = 1 // keep genesis
 		} else {
-			unwindTo = max(1, progress-unwind)
+			unwindTo = cmp.Max(1, progress-unwind)
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -1096,13 +1097,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := runtime.GOMAXPROCS(-1) - 1
-				if workers < 1 {
-					workers = 1
-				}
-				if workers > 2 {
-					workers = 2 // 4 workers get killed on 16Gb RAM
-				}
+				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
 				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
 				}

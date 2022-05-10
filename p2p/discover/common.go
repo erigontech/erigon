@@ -19,9 +19,10 @@ package discover
 import (
 	"context"
 	"crypto/ecdsa"
-	"github.com/ledgerwatch/erigon/crypto"
 	"net"
 	"time"
+
+	"github.com/ledgerwatch/erigon/crypto"
 
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -89,11 +90,4 @@ func ListenUDP(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) 
 type ReadPacket struct {
 	Data []byte
 	Addr *net.UDPAddr
-}
-
-func min(x, y int) int {
-	if x > y {
-		return y
-	}
-	return x
 }

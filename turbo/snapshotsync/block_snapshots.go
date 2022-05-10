@@ -17,6 +17,7 @@ import (
 
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -295,7 +296,7 @@ func (s *RoSnapshots) IndicesReady() bool        { return s.indicesReady.Load() 
 func (s *RoSnapshots) IndicesAvailable() uint64  { return s.idxAvailable.Load() }
 func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Load() }
 func (s *RoSnapshots) BlocksAvailable() uint64 {
-	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
+	return cmp.Min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
 }
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
@@ -331,7 +332,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		txs = seg.To - 1
 		break
 	}
-	return min(headers, min(bodies, txs))
+	return cmp.Min(headers, cmp.Min(bodies, txs))
 }
 
 func (s *RoSnapshots) ReopenIndices() error {
@@ -829,15 +830,8 @@ func segments2(dir string) (res []snap.FileInfo, err error) {
 
 func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 	next := (from/blocksPerFile + 1) * blocksPerFile
-	to = min(next, to)
+	to = cmp.Min(next, to)
 	return to - (to % snap.MIN_SEGMENT_SIZE) // round down to the nearest 1k
-}
-
-func min(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 type BlockRetire struct {
@@ -886,7 +880,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 		maxJump = 10_000
 	}
 	//roundedTo1K := (to / 1_000) * 1_000
-	jump := min(maxJump, roundedTo1K-blockFrom)
+	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= 500_000:
 		blockTo = blockFrom + 500_000
@@ -903,7 +897,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 }
 func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
-	return min(hardLimit, snapshots.BlocksAvailable()+1)
+	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil

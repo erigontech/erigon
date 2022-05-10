@@ -154,9 +154,7 @@ func (tn *preminedTestnet) closest(n int) (nodes []*enode.Node) {
 func (tn *preminedTestnet) privateKeys() []*ecdsa.PrivateKey {
 	var keys []*ecdsa.PrivateKey
 	for d := range tn.dists {
-		for _, key := range tn.dists[d] {
-			keys = append(keys, key)
-		}
+		keys = append(keys, tn.dists[d]...)
 	}
 	return keys
 }
