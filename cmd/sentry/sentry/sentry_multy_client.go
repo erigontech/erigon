@@ -41,7 +41,7 @@ import (
 
 func RecvUploadMessageLoop(ctx context.Context,
 	sentry direct.SentryClient,
-	cs *ControlServerImpl,
+	cs *MultyClient,
 	wg *sync.WaitGroup,
 ) {
 	for {
@@ -129,7 +129,7 @@ func RecvUploadMessage(ctx context.Context,
 
 func RecvUploadHeadersMessageLoop(ctx context.Context,
 	sentry direct.SentryClient,
-	cs *ControlServerImpl,
+	cs *MultyClient,
 	wg *sync.WaitGroup,
 ) {
 	for {
@@ -215,7 +215,7 @@ func RecvUploadHeadersMessage(ctx context.Context,
 
 func RecvMessageLoop(ctx context.Context,
 	sentry direct.SentryClient,
-	cs *ControlServerImpl,
+	cs *MultyClient,
 	wg *sync.WaitGroup,
 ) {
 	for {
@@ -320,12 +320,14 @@ func RecvMessage(
 	}
 }
 
-func SentrySetStatus(ctx context.Context, sentry direct.SentryClient, controlServer *ControlServerImpl) error {
+func SentrySetStatus(ctx context.Context, sentry direct.SentryClient, controlServer *MultyClient) error {
 	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer))
 	return err
 }
 
-type ControlServerImpl struct {
+// MultyClient - does handle request/response/subscriptions to multiple sentries
+// each sentry may support same or different p2p protocol
+type MultyClient struct {
 	lock        sync.RWMutex
 	Hd          *headerdownload.HeaderDownload
 	Bd          *bodydownload.BodyDownload
@@ -343,9 +345,9 @@ type ControlServerImpl struct {
 	blockReader interfaces.HeaderAndCanonicalReader
 }
 
-func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig,
+func NewMultyClient(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig,
 	genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient,
-	window int, blockReader interfaces.HeaderAndCanonicalReader) (*ControlServerImpl, error) {
+	window int, blockReader interfaces.HeaderAndCanonicalReader) (*MultyClient, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -358,7 +360,7 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 	}
 	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */, engine)
 
-	cs := &ControlServerImpl{
+	cs := &MultyClient{
 		nodeName:    nodeName,
 		Hd:          hd,
 		Bd:          bd,
@@ -379,7 +381,9 @@ func NewControlServer(db kv.RwDB, nodeName string, chainConfig *params.ChainConf
 	return cs, err
 }
 
-func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) Sentries() []direct.SentryClient { return cs.sentries }
+
+func (cs *MultyClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	if !cs.Hd.RequestChaining() && !cs.Hd.FetchingNew() {
 		return nil
 	}
@@ -424,7 +428,7 @@ func (cs *ControlServerImpl) newBlockHashes66(ctx context.Context, req *proto_se
 	return nil
 }
 
-func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) blockHeaders66(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Parse the entire packet from scratch
 	var pkt eth.BlockHeadersPacket66
 	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
@@ -444,7 +448,7 @@ func (cs *ControlServerImpl) blockHeaders66(ctx context.Context, in *proto_sentr
 	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
 }
 
-func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
+func (cs *MultyClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
@@ -529,7 +533,7 @@ func (cs *ControlServerImpl) blockHeaders(ctx context.Context, pkt eth.BlockHead
 	return nil
 }
 
-func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) newBlock66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	// Extract header from the block
 	rlpStream := rlp.NewStream(bytes.NewReader(inreq.Data), uint64(len(inreq.Data)))
 	_, err := rlpStream.List() // Now stream is at the beginning of the block record
@@ -585,7 +589,7 @@ func (cs *ControlServerImpl) newBlock66(ctx context.Context, inreq *proto_sentry
 	return nil
 }
 
-func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) blockBodies66(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
@@ -595,11 +599,11 @@ func (cs *ControlServerImpl) blockBodies66(inreq *proto_sentry.InboundMessage, s
 	return nil
 }
 
-func (cs *ControlServerImpl) receipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) receipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) getBlockHeaders66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockHeadersPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockHeaders66: %w, data: %x", err, inreq.Data)
@@ -640,7 +644,7 @@ func (cs *ControlServerImpl) getBlockHeaders66(ctx context.Context, inreq *proto
 	return nil
 }
 
-func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) getBlockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetBlockBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockBodies66: %w, data: %x", err, inreq.Data)
@@ -677,7 +681,7 @@ func (cs *ControlServerImpl) getBlockBodies66(ctx context.Context, inreq *proto_
 	return nil
 }
 
-func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) getReceipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var query eth.GetReceiptsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getReceipts66: %w, data: %x", err, inreq.Data)
@@ -717,7 +721,7 @@ func (cs *ControlServerImpl) getReceipts66(ctx context.Context, inreq *proto_sen
 	return nil
 }
 
-func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultyClient) HandleInboundMessage(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	switch inreq.Id {
 	// ========= eth 66 ==========
 
@@ -742,7 +746,7 @@ func (cs *ControlServerImpl) HandleInboundMessage(ctx context.Context, inreq *pr
 	}
 }
 
-func makeStatusData(s *ControlServerImpl) *proto_sentry.StatusData {
+func makeStatusData(s *MultyClient) *proto_sentry.StatusData {
 	return &proto_sentry.StatusData{
 		NetworkId:       s.networkId,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(s.headTd),

@@ -28,13 +28,11 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
-	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/log/v3"
@@ -59,7 +57,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 )
 
 func init() {
@@ -139,7 +136,7 @@ var (
 	}
 	OverrideMergeForkBlock = BigFlag{
 		Name:  "override.mergeForkBlock",
-		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+		Usage: "Manually specify FORK_NEXT_VALUE (see EIP-3675), overriding the bundled setting",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -1392,13 +1389,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			panic(err)
 		}
 
-		db := mdbx.NewMDBX(log.New()).
-			Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
-			Label(kv.DownloaderDB).
-			WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
-			SyncPeriod(15 * time.Second).
-			Path(filepath.Join(cfg.SnapshotDir, "db")).
-			MustOpen()
 		var err error
 		cfg.Torrent, err = torrentcfg.New(cfg.SnapshotDir,
 			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
@@ -1406,7 +1396,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
-			db,
 			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
 		)
 		if err != nil {

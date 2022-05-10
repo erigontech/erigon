@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	mapset "github.com/deckarep/golang-set"
+	common2 "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -56,14 +57,6 @@ const (
 	// above some healthy uncle limit, so use that.
 	maxQueuedBlockAnns = 4
 )
-
-// max is a helper function which returns the larger of the two given integers.
-func max(a, b int) int { //nolint:unparam
-	if a > b {
-		return a
-	}
-	return b
-}
 
 // Peer is a collection of relevant information we have about a `eth` peer.
 type Peer struct {
@@ -170,7 +163,7 @@ func (p *Peer) KnownTransaction(hash common.Hash) bool {
 // tests that directly send messages without having to do the asyn queueing.
 func (p *Peer) SendTransactions(txs types.Transactions) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(txs)) {
+	for p.knownTxs.Cardinality() > common2.Max(0, maxKnownTxs-len(txs)) {
 		p.knownTxs.Pop()
 	}
 	for _, tx := range txs {
@@ -186,7 +179,7 @@ func (p *Peer) AsyncSendTransactions(hashes []common.Hash) {
 	select {
 	case p.txBroadcast <- hashes:
 		// Mark all the transactions as known, but ensure we don't overflow our limits
-		for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
+		for p.knownTxs.Cardinality() > common2.Max(0, maxKnownTxs-len(hashes)) {
 			p.knownTxs.Pop()
 		}
 		for _, hash := range hashes {
@@ -205,7 +198,7 @@ func (p *Peer) AsyncSendTransactions(hashes []common.Hash) {
 // not be managed directly.
 func (p *Peer) sendPooledTransactionHashes(hashes []common.Hash) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
+	for p.knownTxs.Cardinality() > common2.Max(0, maxKnownTxs-len(hashes)) {
 		p.knownTxs.Pop()
 	}
 	for _, hash := range hashes {
@@ -221,7 +214,7 @@ func (p *Peer) AsyncSendPooledTransactionHashes(hashes []common.Hash) {
 	select {
 	case p.txAnnounce <- hashes:
 		// Mark all the transactions as known, but ensure we don't overflow our limits
-		for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
+		for p.knownTxs.Cardinality() > common2.Max(0, maxKnownTxs-len(hashes)) {
 			p.knownTxs.Pop()
 		}
 		for _, hash := range hashes {
@@ -239,7 +232,7 @@ func (p *Peer) AsyncSendPooledTransactionHashes(hashes []common.Hash) {
 // transactions being sent.
 func (p *Peer) SendPooledTransactionsRLP(hashes []common.Hash, txs []rlp.RawValue) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
+	for p.knownTxs.Cardinality() > common2.Max(0, maxKnownTxs-len(hashes)) {
 		p.knownTxs.Pop()
 	}
 	for _, hash := range hashes {
@@ -251,7 +244,7 @@ func (p *Peer) SendPooledTransactionsRLP(hashes []common.Hash, txs []rlp.RawValu
 // ReplyPooledTransactionsRLP is the eth/66 version of SendPooledTransactionsRLP.
 func (p *Peer) ReplyPooledTransactionsRLP(id uint64, hashes []common.Hash, txs []rlp.RawValue) error {
 	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
+	for p.knownTxs.Cardinality() > common2.Max(0, maxKnownTxs-len(hashes)) {
 		p.knownTxs.Pop()
 	}
 	for _, hash := range hashes {
@@ -268,7 +261,7 @@ func (p *Peer) ReplyPooledTransactionsRLP(id uint64, hashes []common.Hash, txs [
 // a hash notification.
 func (p *Peer) SendNewBlockHashes(hashes []common.Hash, numbers []uint64) error {
 	// Mark all the block hashes as known, but ensure we don't overflow our limits
-	for p.knownBlocks.Cardinality() > max(0, maxKnownBlocks-len(hashes)) {
+	for p.knownBlocks.Cardinality() > common2.Max(0, maxKnownBlocks-len(hashes)) {
 		p.knownBlocks.Pop()
 	}
 	for _, hash := range hashes {

@@ -84,7 +84,7 @@ func StageLoop(
 
 			log.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downloader", "err", recoveryErr)
+				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
@@ -247,7 +247,7 @@ func NewStagedSync(
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
 	terminalTotalDifficulty *big.Int,
-	controlServer *sentry.ControlServerImpl,
+	controlServer *sentry.MultyClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -261,7 +261,7 @@ func NewStagedSync(
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, snapshotDir, db, snapshotDownloader, notifications.Events)
+	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapshotDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
 	// Hence we run it in the test mode.
@@ -269,23 +269,7 @@ func NewStagedSync(
 	isBor := controlServer.ChainConfig.Bor != nil
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
-			stagedsync.StageHeadersCfg(
-				db,
-				controlServer.Hd,
-				controlServer.Bd,
-				*controlServer.ChainConfig,
-				controlServer.SendHeaderRequest,
-				controlServer.PropagateNewBlockHashes,
-				controlServer.Penalize,
-				cfg.BatchSize,
-				p2pCfg.NoDiscovery,
-				snapshots,
-				snapshotDownloader,
-				blockReader,
-				tmpdir,
-				cfg.SnapshotDir,
-				notifications.Events,
-			),
+			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, snapshots, snapshotDownloader, blockReader, tmpdir, notifications.Events),
 			stagedsync.StageCumulativeIndexCfg(db),
 			stagedsync.StageBlockHashesCfg(db, tmpdir, controlServer.ChainConfig),
 			stagedsync.StageBodiesCfg(

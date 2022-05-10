@@ -12,6 +12,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -48,10 +49,8 @@ type HeadersCfg struct {
 	batchSize         datasize.ByteSize
 	noP2PDiscovery    bool
 	tmpdir            string
-	snapshotDir       string
 
 	snapshots          *snapshotsync.RoSnapshots
-	snapshotHashesCfg  *snapshothashes.Config
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        interfaces.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
@@ -71,9 +70,7 @@ func StageHeadersCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader interfaces.FullBlockReader,
 	tmpdir string,
-	snapshotDir string,
-	dbEventNotifier snapshotsync.DBEventNotifier,
-) HeadersCfg {
+	dbEventNotifier snapshotsync.DBEventNotifier) HeadersCfg {
 	return HeadersCfg{
 		db:                 db,
 		hd:                 headerDownload,
@@ -88,8 +85,6 @@ func StageHeadersCfg(
 		snapshots:          snapshots,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
-		snapshotHashesCfg:  snapshothashes.KnownConfig(chainConfig.ChainName),
-		snapshotDir:        snapshotDir,
 		dbEventNotifier:    dbEventNotifier,
 	}
 }
@@ -1079,7 +1074,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
-		expect := cfg.snapshotHashesCfg.ExpectBlocks
+
+		expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
 		if cfg.snapshots.SegmentsAvailable() < expect {
 			c, err := tx.Cursor(kv.Headers)
 			if err != nil {
@@ -1111,14 +1107,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := runtime.GOMAXPROCS(-1) - 1
-				if workers < 1 {
-					workers = 1
-				}
-				if workers > 2 {
-					workers = 2 // 4 workers get killed on 16Gb RAM
-				}
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, cfg.snapshotDir, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
+				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
 				}
 			}

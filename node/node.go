@@ -472,13 +472,7 @@ func (n *Node) Server() *p2p.Server {
 }
 
 // DataDir retrieves the current datadir used by the protocol stack.
-// Deprecated: No files should be stored in this directory, use InstanceDir instead.
 func (n *Node) DataDir() string {
-	return n.config.DataDir
-}
-
-// InstanceDir retrieves the instance directory used by the protocol stack.
-func (n *Node) InstanceDir() string {
 	return n.config.DataDir
 }
 

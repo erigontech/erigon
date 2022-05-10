@@ -53,7 +53,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.45
+          version: v1.46
           skip-pkg-cache: true
           skip-build-cache: true
 
@@ -89,8 +89,11 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-go-
 
+      - name: Build
+        run: .\wmake.ps1 all
+
       - name: Test
-        run: .\wmake.ps1 && make test
+        run: .\wmake.ps1 test
 
   docker:
     runs-on: ubuntu-20.04

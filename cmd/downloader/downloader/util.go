@@ -331,7 +331,13 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	if err != nil {
 		return nil, err
 	}
-	ts.ChunkSize = torrentcfg.DefaultNetworkChunkSize
+
+	if _, ok := torrentClient.Torrent(ts.InfoHash); !ok { // can set ChunkSize only for new torrents
+		ts.ChunkSize = torrentcfg.DefaultNetworkChunkSize
+	} else {
+		ts.ChunkSize = 0
+	}
+
 	t, _, err := torrentClient.AddTorrentSpec(ts)
 	if err != nil {
 		return nil, err

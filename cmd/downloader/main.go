@@ -14,8 +14,6 @@ import (
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -25,7 +23,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -135,36 +132,20 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	db, err := mdbx.NewMDBX(log.New()).
-		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
-		Label(kv.DownloaderDB).
-		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-			return kv.DownloaderTablesCfg
-		}).
-		SyncPeriod(15 * time.Second).
-		Path(filepath.Join(snapshotDir, "db")).
-		Open()
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, db, torrentDownloadSlots)
-	if err != nil {
-		return err
-	}
-	defer cfg.CompletionCloser.Close()
-
-	d, err := downloader.New(cfg, snapshotDir)
+	d, err := downloader.New(cfg)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
-	if err := d.Start(ctx, false); err != nil {
-		return err
-	}
+	go downloader.MainLoop(ctx, d, false)
 
-	bittorrentServer, err := downloader.NewGrpcServer(d, snapshotDir)
+	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
@@ -192,7 +173,6 @@ var printTorrentHashes = &cobra.Command{
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 			removePieceCompletionStorage(snapshotDir)
-
 			files, err := downloader.AllTorrentPaths(snapshotDir)
 			if err != nil {
 				return err

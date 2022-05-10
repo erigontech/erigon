@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -1068,13 +1069,6 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 	return nil
 }
 
-func min(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // DeleteAncientBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
@@ -1095,7 +1089,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 		return nil
 	}
 	blockFrom := binary.BigEndian.Uint64(k)
-	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
+	stopAtBlock := libcommon.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {

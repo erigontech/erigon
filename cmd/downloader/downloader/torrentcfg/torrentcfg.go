@@ -1,15 +1,11 @@
 package torrentcfg
 
 import (
-	"fmt"
-	"io"
 	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
-	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
@@ -27,9 +23,9 @@ const DefaultNetworkChunkSize = DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
-	DB               kv.RwDB
-	CompletionCloser io.Closer
-	DownloadSlots    int
+	//DB kv.RwDB
+	//CompletionCloser io.Closer
+	DownloadSlots int
 }
 
 func Default() *torrent.ClientConfig {
@@ -49,7 +45,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, db kv.RwDB, downloadSlots int) (*Cfg, error) {
+func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
@@ -102,12 +98,5 @@ func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadR
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
-	c, err := NewMdbxPieceCompletion(db)
-	if err != nil {
-		return nil, fmt.Errorf("NewBoltPieceCompletion: %w", err)
-	}
-	m := storage.NewMMapWithCompletion(snapshotsDir, c)
-	//m := storage.NewFileWithCompletion(snapshotsDir, c)
-	torrentConfig.DefaultStorage = m
-	return &Cfg{ClientConfig: torrentConfig, DB: db, CompletionCloser: m, DownloadSlots: downloadSlots}, nil
+	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots}, nil
 }
