@@ -52,7 +52,7 @@ const (
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
 type Service struct {
-	servers   []*sentry.SentryServerImpl // Peer-to-peer server to retrieve networking infos
+	servers   []*sentry.GrpcServer // Peer-to-peer server to retrieve networking infos
 	chaindb   kv.RoDB
 	networkid uint64
 	engine    consensus.Engine // Consensus engine to retrieve variadic block fields
@@ -118,7 +118,7 @@ func (w *connWrapper) Close() error {
 }
 
 // New returns a monitoring service ready for stats reporting.
-func New(node *node.Node, servers []*sentry.SentryServerImpl, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan *types.Block) error {
+func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, engine consensus.Engine, url string, networkid uint64, quitCh <-chan struct{}, headCh chan *types.Block) error {
 	// Parse the netstats connection url
 	re := regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 	parts := re.FindStringSubmatch(url)

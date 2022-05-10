@@ -1186,7 +1186,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	br := getBlockReader(chainConfig)
 	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
+	sentryControlServer, err := sentry.NewMultyClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
 	if err != nil {
 		panic(err)
 	}

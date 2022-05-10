@@ -84,7 +84,7 @@ func StageLoop(
 
 			log.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-				log.Error("Failed to recover header downloader", "err", recoveryErr)
+				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
@@ -247,7 +247,7 @@ func NewStagedSync(
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
 	terminalTotalDifficulty *big.Int,
-	controlServer *sentry.ControlServerImpl,
+	controlServer *sentry.MultyClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,

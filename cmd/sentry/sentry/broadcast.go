@@ -28,7 +28,7 @@ const (
 	maxTxPacketSize = 100 * 1024
 )
 
-func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
+func (cs *MultyClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
 	typedRequest := make(eth.NewBlockHashesPacket, len(announces))
@@ -72,7 +72,7 @@ func (cs *ControlServerImpl) PropagateNewBlockHashes(ctx context.Context, announ
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types.Block, td *big.Int) {
+func (cs *MultyClient) BroadcastNewBlock(ctx context.Context, block *types.Block, td *big.Int) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
@@ -116,7 +116,7 @@ func (cs *ControlServerImpl) BroadcastNewBlock(ctx context.Context, block *types
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *MultyClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -179,7 +179,7 @@ func (cs *ControlServerImpl) BroadcastLocalPooledTxs(ctx context.Context, txs []
 	}
 }
 
-func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *MultyClient) BroadcastRemotePooledTxs(ctx context.Context, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -235,7 +235,7 @@ func (cs *ControlServerImpl) BroadcastRemotePooledTxs(ctx context.Context, txs [
 	}
 }
 
-func (cs *ControlServerImpl) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []common.Hash) {
+func (cs *MultyClient) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []common.Hash) {
 	if len(txs) == 0 {
 		return
 	}

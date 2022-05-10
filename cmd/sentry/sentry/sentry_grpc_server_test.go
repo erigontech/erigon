@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Hash) *SentryServerImpl {
-	s := &SentryServerImpl{
+func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Hash) *GrpcServer {
+	s := &GrpcServer{
 		ctx: context.Background(),
 	}
 
@@ -74,7 +74,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		genesisProFork = gspecProFork.MustCommit(dbProFork)
 	)
 
-	var s1, s2 *SentryServerImpl
+	var s1, s2 *GrpcServer
 
 	err := dbNoFork.Update(context.Background(), func(tx kv.RwTx) error {
 		s1 = testSentryServer(tx, gspecNoFork, genesisNoFork.Hash())
@@ -160,7 +160,7 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 	dbNoFork := memdb.NewTestDB(t)
 	gspecNoFork := &core.Genesis{Config: configNoFork}
 	genesisNoFork := gspecNoFork.MustCommit(dbNoFork)
-	ss := &SentryServerImpl{p2p: &p2p.Config{}}
+	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
 		ForkData: &proto_sentry.Forks{Genesis: gointerfaces.ConvertHashToH256(genesisNoFork.Hash())},
