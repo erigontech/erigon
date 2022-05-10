@@ -44,6 +44,19 @@ type HeaderSegment struct {
 	From, To      uint64
 }
 
+type BodySegment struct {
+	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
+	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
+	From, To      uint64
+}
+
+type TxnSegment struct {
+	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + sender_address + transaction_rlp
+	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
+	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
+	From, To            uint64
+}
+
 func (sn *HeaderSegment) close() {
 	if sn.seg != nil {
 		sn.seg.Close()
@@ -54,6 +67,7 @@ func (sn *HeaderSegment) close() {
 		sn.idxHeaderHash = nil
 	}
 }
+
 func (sn *HeaderSegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.From, sn.To, snap.Headers)
@@ -68,12 +82,6 @@ func (sn *HeaderSegment) reopen(dir string) (err error) {
 	return nil
 }
 
-type BodySegment struct {
-	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
-	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	From, To      uint64
-}
-
 func (sn *BodySegment) close() {
 	if sn.seg != nil {
 		sn.seg.Close()
@@ -84,6 +92,7 @@ func (sn *BodySegment) close() {
 		sn.idxBodyNumber = nil
 	}
 }
+
 func (sn *BodySegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.From, sn.To, snap.Bodies)
@@ -96,13 +105,6 @@ func (sn *BodySegment) reopen(dir string) (err error) {
 		return err
 	}
 	return nil
-}
-
-type TxnSegment struct {
-	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
-	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
-	From, To            uint64
 }
 
 func (sn *TxnSegment) close() {
