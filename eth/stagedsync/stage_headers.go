@@ -1077,7 +1077,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
-		if cfg.snapshots.SegmentsAvailable() < expect {
+		if cfg.snapshots.SegmentsMax() < expect {
 			c, err := tx.Cursor(kv.Headers)
 			if err != nil {
 				return err
@@ -1089,10 +1089,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 			c.Close()
 			hasInDB := binary.BigEndian.Uint64(firstK)
-			if cfg.snapshots.SegmentsAvailable() < hasInDB {
-				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsAvailable(), hasInDB, expect)
+			if cfg.snapshots.SegmentsMax() < hasInDB {
+				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
 			} else {
-				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsAvailable(), expect, hasInDB))
+				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
 			}
 		}
 		if err := cfg.snapshots.Reopen(); err != nil {
@@ -1100,16 +1100,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 
 		// Create .idx files
-		if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
+		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 			if !cfg.snapshots.SegmentsReady() {
 				return fmt.Errorf("not all snapshot segments are available")
 			}
 
 			// wait for Downloader service to download all expected snapshots
-			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
+			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
+				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
 					return err
 				}
 			}
