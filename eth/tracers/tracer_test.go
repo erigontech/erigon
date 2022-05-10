@@ -105,7 +105,7 @@ func TestTracer(t *testing.T) {
 	}{
 		{ // tests that we don't panic on bad arguments to memory access
 			code: "{depths: [], step: function(log) { this.depths.push(log.memory.slice(-1,-2)); }, fault: function() {}, result: function() { return this.depths; }}",
-			want: `[{},{},{}]`,
+			want: `[[],[],[]]`,
 		}, { // tests that we don't panic on bad arguments to stack peeks
 			code: "{depths: [], step: function(log) { this.depths.push(log.stack.peek(-1)); }, fault: function() {}, result: function() { return this.depths; }}",
 			want: `["0","0","0"]`,
@@ -124,9 +124,6 @@ func TestTracer(t *testing.T) {
 		}, { // tests intrinsic gas
 			code: "{depths: [], step: function() {}, fault: function() {}, result: function(ctx) { return ctx.gasPrice+'.'+ctx.gasUsed+'.'+ctx.intrinsicGas; }}",
 			want: `"100000.6.21000"`,
-		}, { // tests too deep object / serialization crash
-			code: "{step: function() {}, fault: function() {}, result: function() { var o={}; var x=o; for (var i=0; i<1000; i++){	o.foo={}; o=o.foo; } return x; }}",
-			fail: "RangeError: json encode recursion limit    in server-side tracer function 'result'",
 		},
 	} {
 		if have, err := execTracer(tt.code); tt.want != string(have) || tt.fail != err {
