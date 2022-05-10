@@ -38,21 +38,6 @@ import (
 	"go.uber.org/atomic"
 )
 
-type BlocksSnapshot struct {
-	Bodies              *compress.Decompressor // value: rlp(types.BodyForStorage)
-	Headers             *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
-	Transactions        *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
-	BodyNumberIdx       *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	HeaderHashIdx       *recsplit.Index        // header_hash       -> headers_segment_offset
-	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	TxnIdsIdx           *recsplit.Index        // transaction_id    -> transactions_segment_offset
-	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
-
-	From, To uint64 // [from,to)
-}
-
-func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
-
 type HeaderSegment struct {
 	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
 	idxHeaderHash *recsplit.Index        // header_hash       -> headers_segment_offset
@@ -1821,26 +1806,6 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir string) error {
 		_ = os.Remove(f)
 	}
 	return nil
-}
-
-//nolint
-func assertAllSegments(blocks []*BlocksSnapshot, root string) {
-	wg := sync.WaitGroup{}
-	for _, sn := range blocks {
-		wg.Add(1)
-		go func(sn *BlocksSnapshot) {
-			defer wg.Done()
-			f := filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Headers))
-			assertSegment(f)
-			f = filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Bodies))
-			assertSegment(f)
-			f = filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Transactions))
-			assertSegment(f)
-			fmt.Printf("done:%s\n", f)
-		}(sn)
-	}
-	wg.Wait()
-	panic("success")
 }
 
 //nolint
