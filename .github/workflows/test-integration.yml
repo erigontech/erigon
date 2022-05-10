@@ -66,4 +66,4 @@ jobs:
           restore-keys: ${{ runner.os }}-go-
 
       - name: test-integration
-        run: .\wmake.ps1 && make test-integration
+        run: .\wmake.ps1 test-integration
