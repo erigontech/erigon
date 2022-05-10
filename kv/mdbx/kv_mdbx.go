@@ -376,8 +376,6 @@ func (db *MdbxKV) Close() {
 		if err := os.RemoveAll(db.opts.path); err != nil {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
-	} else {
-		log.Info("database closed", "label", db.opts.label)
 	}
 }
 
