@@ -792,7 +792,7 @@ Loop:
 			logProgressHeaders(logPrefix, prevProgress, progress)
 			if prevProgress == progress {
 				noProgressCounter++
-				if noProgressCounter >= 5 && cfg.hd.TopSeenHeight() == 0 && wasProgress {
+				if noProgressCounter >= 5 && wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
 				}
 			}
