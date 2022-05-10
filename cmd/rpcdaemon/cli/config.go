@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -106,8 +107,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		cfg.SingleNodeMode = cfg.DataDir != "" || cfg.Chaindata != ""
-		if cfg.SingleNodeMode {
+		cfg.WithDatadir = cfg.DataDir != "" || cfg.Chaindata != ""
+		if cfg.WithDatadir {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
@@ -234,20 +235,20 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 }
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
-// `cfg.SingleNodeMode` (mode when it on 1 machine with Erigon)
+// `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, borDb kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet *services.StarknetService,
 	stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
 	ff *filters.Filters, err error) {
-	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
+	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
 	}
 
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
-	if cfg.SingleNodeMode {
+	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		log.Trace("Creating chain db", "path", cfg.Chaindata)
 		limiter := make(chan struct{}, cfg.DBReadConcurrency)
@@ -300,6 +301,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if err != nil {
 				return err
 			}
+			cfg.Snapshot.Enabled, err = snap.Enabled(tx)
+			if err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
@@ -308,11 +313,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
 
-		cfg.SyncMode = ethconfig.SyncModeByChainName(cc.ChainName, cfg.SyncModeCli)
-		cfg.Snapshot.Enabled = cfg.SyncMode == ethconfig.SnapSync
-		fmt.Printf("a: %t\n", cfg.Snapshot.Enabled)
-		if cfg.SingleNodeMode {
-			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
+		if cfg.Snapshot.Enabled {
+			cfg.SyncMode = ethconfig.SnapSync
+		} else {
+			cfg.SyncMode = ethconfig.FullSync
 		}
 
 		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
@@ -339,18 +343,22 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 	}
 
-	var onNewSnapshot func()
-	if cfg.SingleNodeMode {
+	onNewSnapshot := func() {}
+	if cfg.WithDatadir {
 		if cfg.Snapshot.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
+			if err := allSnapshots.Reopen(); err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
+			}
+			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			// don't reopen it right here, because snapshots may be not ready yet
 			onNewSnapshot = func() {
 				allSnapshots.Reopen()
+				log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
-			blockReader = snapshotsync.NewBlockReader()
-			onNewSnapshot = func() {}
+			log.Info("Use --syncmode=full")
 		}
 	}
 
@@ -371,7 +379,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	if !cfg.SingleNodeMode {
+	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
 	}
 	remoteEth := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
