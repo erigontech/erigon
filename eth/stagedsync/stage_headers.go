@@ -789,6 +789,7 @@ Loop:
 				noProgressCounter++
 				if noProgressCounter >= 5 && wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
+					break Loop
 				}
 			}
 			prevProgress = progress
