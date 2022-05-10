@@ -323,11 +323,10 @@ internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 |  Port |  Protocol |      Purpose       |  Expose |
 |:-----:|:---------:|:------------------:|:-------:|
 |  8545 |    TCP    | HTTP & WebSockets  | Private |
-|  8550 |    TCP    |       HTTP         | Private |
-|  8551 |    TCP    | HTTP with JWS auth | Private |
+|  8551 |    TCP    | HTTP with JWT auth | Private |
 
 Typically 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically 8550 (unauthenticated) and 8551 (authenticated) are exposed only internally for the Engine API JSON-RPC queries.
+Typically 8551 (JWT authenticated) is exposed only internally for the Engine API JSON-RPC queries.
 
 #### `sentry` ports
 
