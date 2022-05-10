@@ -38,25 +38,23 @@ import (
 	"go.uber.org/atomic"
 )
 
-type BlocksSnapshot struct {
-	Bodies              *compress.Decompressor // value: rlp(types.BodyForStorage)
-	Headers             *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
-	Transactions        *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
-	BodyNumberIdx       *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	HeaderHashIdx       *recsplit.Index        // header_hash       -> headers_segment_offset
-	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	TxnIdsIdx           *recsplit.Index        // transaction_id    -> transactions_segment_offset
-	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
-
-	From, To uint64 // [from,to)
-}
-
-func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
-
 type HeaderSegment struct {
 	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
 	idxHeaderHash *recsplit.Index        // header_hash       -> headers_segment_offset
 	From, To      uint64
+}
+
+type BodySegment struct {
+	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
+	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
+	From, To      uint64
+}
+
+type TxnSegment struct {
+	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + sender_address + transaction_rlp
+	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
+	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
+	From, To            uint64
 }
 
 func (sn *HeaderSegment) close() {
@@ -69,6 +67,7 @@ func (sn *HeaderSegment) close() {
 		sn.idxHeaderHash = nil
 	}
 }
+
 func (sn *HeaderSegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.From, sn.To, snap.Headers)
@@ -83,12 +82,6 @@ func (sn *HeaderSegment) reopen(dir string) (err error) {
 	return nil
 }
 
-type BodySegment struct {
-	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
-	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	From, To      uint64
-}
-
 func (sn *BodySegment) close() {
 	if sn.seg != nil {
 		sn.seg.Close()
@@ -99,6 +92,7 @@ func (sn *BodySegment) close() {
 		sn.idxBodyNumber = nil
 	}
 }
+
 func (sn *BodySegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.From, sn.To, snap.Bodies)
@@ -111,13 +105,6 @@ func (sn *BodySegment) reopen(dir string) (err error) {
 		return err
 	}
 	return nil
-}
-
-type TxnSegment struct {
-	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
-	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
-	From, To            uint64
 }
 
 func (sn *TxnSegment) close() {
@@ -274,10 +261,10 @@ type RoSnapshots struct {
 	Bodies  *bodySegments
 	Txs     *txnSegments
 
-	dir               string
-	segmentsAvailable atomic.Uint64 // all types of .seg files are available - up to this number
-	idxAvailable      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg               ethconfig.Snapshot
+	dir         string
+	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
+	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
+	cfg         ethconfig.Snapshot
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -289,15 +276,14 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapshotDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.Snapshot   { return s.cfg }
-func (s *RoSnapshots) Dir() string               { return s.dir }
-func (s *RoSnapshots) SegmentsReady() bool       { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesReady() bool        { return s.indicesReady.Load() }
-func (s *RoSnapshots) IndicesAvailable() uint64  { return s.idxAvailable.Load() }
-func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64 {
-	return cmp.Min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
-}
+func (s *RoSnapshots) Cfg() ethconfig.Snapshot { return s.cfg }
+func (s *RoSnapshots) Dir() string             { return s.dir }
+func (s *RoSnapshots) SegmentsReady() bool     { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesReady() bool      { return s.indicesReady.Load() }
+func (s *RoSnapshots) IndicesMax() uint64      { return s.idxMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64     { return s.segmentsMax.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
+
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -366,7 +352,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...snap.Type) (err error) {
 		}
 	}
 
-	s.idxAvailable.Store(s.idxAvailability())
+	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return nil
 }
@@ -438,9 +424,9 @@ func (s *RoSnapshots) Reopen() error {
 		}
 
 		if f.To > 0 {
-			s.segmentsAvailable.Store(f.To - 1)
+			s.segmentsMax.Store(f.To - 1)
 		} else {
-			s.segmentsAvailable.Store(0)
+			s.segmentsMax.Store(0)
 		}
 	}
 	s.segmentsReady.Store(true)
@@ -468,7 +454,7 @@ func (s *RoSnapshots) Reopen() error {
 		}
 	}
 
-	s.idxAvailable.Store(s.idxAvailability())
+	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 
 	return nil
@@ -525,9 +511,9 @@ func (s *RoSnapshots) ReopenSegments() error {
 		}
 
 		if f.To > 0 {
-			s.segmentsAvailable.Store(f.To - 1)
+			s.segmentsMax.Store(f.To - 1)
 		} else {
-			s.segmentsAvailable.Store(0)
+			s.segmentsMax.Store(0)
 		}
 	}
 	s.segmentsReady.Store(true)
@@ -564,7 +550,7 @@ func (s *RoSnapshots) PrintDebug() {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	fmt.Printf("sn: %d, %d\n", s.segmentsAvailable.Load(), s.idxAvailable.Load())
+	fmt.Printf("sn: %d, %d\n", s.segmentsMax.Load(), s.idxMax.Load())
 	fmt.Println("    == Snapshots, Header")
 	for _, sn := range s.Headers.segments {
 		fmt.Printf("%d,  %t\n", sn.From, sn.idxHeaderHash == nil)
@@ -937,7 +923,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if idxWorkers > 4 {
 		idxWorkers = 4
 	}
-	if err := BuildIndices(ctx, snapshots, chainID, tmpDir, snapshots.IndicesAvailable(), idxWorkers, log.LvlInfo); err != nil {
+	if err := BuildIndices(ctx, snapshots, chainID, tmpDir, snapshots.IndicesMax(), idxWorkers, log.LvlInfo); err != nil {
 		return err
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
@@ -1822,26 +1808,6 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir string) error {
 		_ = os.Remove(f)
 	}
 	return nil
-}
-
-//nolint
-func assertAllSegments(blocks []*BlocksSnapshot, root string) {
-	wg := sync.WaitGroup{}
-	for _, sn := range blocks {
-		wg.Add(1)
-		go func(sn *BlocksSnapshot) {
-			defer wg.Done()
-			f := filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Headers))
-			assertSegment(f)
-			f = filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Bodies))
-			assertSegment(f)
-			f = filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Transactions))
-			assertSegment(f)
-			fmt.Printf("done:%s\n", f)
-		}(sn)
-	}
-	wg.Wait()
-	panic("success")
 }
 
 //nolint

@@ -17,7 +17,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool txpool.T
 	starknet starknet.CAIROVMClient, filters *filters.Filters, stateCache kvcache.Cache,
 	blockReader interfaces.BlockAndTxnReader, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.SingleNodeMode)
+	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
 	if cfg.TevmEnabled {
 		base.EnableTevmExperiment()
 	}
