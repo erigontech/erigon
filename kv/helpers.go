@@ -1,7 +1,6 @@
 package kv
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"time"
@@ -68,13 +67,10 @@ var (
 )
 
 func bytes2bool(in []byte) bool {
-	if bytes.Equal(in, bytesTrue) {
-		return true
-	}
-	if bytes.Equal(in, bytesFalse) {
+	if len(in) < 1 {
 		return false
 	}
-	panic("db must have snapshot cfg record")
+	return in[0] == 1
 }
 
 var ErrChanged = fmt.Errorf("key must not change")
@@ -98,6 +94,14 @@ func EnsureNotChangedBool(tx GetPut, bucket string, k []byte, value bool) (ok, e
 
 	enabled = bytes2bool(vBytes)
 	return value == enabled, enabled, nil
+}
+
+func GetBool(tx Getter, bucket string, k []byte) (enabled bool, err error) {
+	vBytes, err := tx.GetOne(bucket, k)
+	if err != nil {
+		return false, err
+	}
+	return bytes2bool(vBytes), nil
 }
 
 func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) {
