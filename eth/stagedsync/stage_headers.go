@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/generics"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -1097,7 +1096,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			// wait for Downloader service to download all expected snapshots
 			if cfg.snapshots.IndicesAvailable() < cfg.snapshots.SegmentsAvailable() {
 				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := generics.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+				workers := libcommon.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
 				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesAvailable(), workers, log.LvlInfo); err != nil {
 					return err
 				}
