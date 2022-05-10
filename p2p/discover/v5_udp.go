@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
@@ -388,7 +389,7 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 				nodes = append(nodes, node)
 			}
 			if total == -1 {
-				total = min(int(response.Total), totalNodesResponseLimit)
+				total = common2.Min(int(response.Total), totalNodesResponseLimit)
 			}
 			if received++; received == total {
 				return nodes, nil
@@ -831,7 +832,7 @@ func packNodes(reqid []byte, nodes []*enode.Node) []*v5wire.Nodes {
 	var resp []*v5wire.Nodes
 	for len(nodes) > 0 {
 		p := &v5wire.Nodes{ReqID: reqid, Total: total}
-		items := min(nodesResponseItemLimit, len(nodes))
+		items := common2.Min(nodesResponseItemLimit, len(nodes))
 		for i := 0; i < items; i++ {
 			p.Nodes = append(p.Nodes, nodes[i].Record())
 		}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -58,7 +59,7 @@ func SpawnTranspileStage(s *StageState, tx kv.RwTx, toBlock uint64, cfg Transpil
 
 	var to = prevStageProgress
 	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
+		to = cmp.Min(prevStageProgress, toBlock)
 	}
 
 	if to <= s.BlockNumber {
