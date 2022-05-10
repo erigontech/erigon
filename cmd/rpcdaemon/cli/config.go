@@ -431,7 +431,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
-	var engineListenerAuth *http.Server
 	var engineSrv *rpc.Server
 	var engineHttpEndpoint string
 
@@ -496,7 +495,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
 	if len(engineAPI) > 0 {
-		engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
+		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api for engine: %w", err)
 		}
@@ -536,11 +535,6 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 
 		if engineListener != nil {
 			_ = engineListener.Shutdown(shutdownCtx)
-			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
-		}
-
-		if engineListenerAuth != nil {
-			_ = engineListenerAuth.Shutdown(shutdownCtx)
 			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
 		}
 
@@ -614,60 +608,45 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 	return handler, nil
 }
 
-func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
-	engineHttpEndpointAuth := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort+1)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, "", err
 	}
 	engineSrv.SetAllowList(allowListForRPC)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true); err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
+		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
 	jwtSecret, err := obtainJWTSecret(cfg)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, "", err
 	}
 
-	var wsHandlerNonAuth http.Handler
-	var wsHandlerAuth http.Handler
-
+	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
-		wsHandlerNonAuth = engineSrv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
-		wsHandlerAuth = engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
+		wsHandler = engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
 	}
 
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandlerNonAuth, nil)
-	if err != nil {
-		return nil, nil, nil, "", err
-	}
 
-	engineApiHandlerAuth, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandlerAuth, jwtSecret)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, jwtSecret)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, "", err
 	}
 
 	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
 	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
-	}
-
-	engineListenerAuth, _, err := node.StartHTTPEndpoint(engineHttpEndpointAuth, rpc.DefaultHTTPTimeouts, engineApiHandlerAuth)
-	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
+		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
 	engineInfo := []interface{}{"url", engineHttpEndpoint, "ws", cfg.WebsocketEnabled}
-	log.Info("HTTP endpoint opened for engine", engineInfo...)
-	engineInfoAuth := []interface{}{"url", engineHttpEndpointAuth, "ws", cfg.WebsocketEnabled}
-	log.Info("HTTP endpoint opened for auth engine", engineInfoAuth...)
+	log.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
-	return engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, nil
+	return engineListener, engineSrv, engineHttpEndpoint, nil
 }
