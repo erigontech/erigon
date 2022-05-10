@@ -310,6 +310,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 		cfg.SyncMode = ethconfig.SyncModeByChainName(cc.ChainName, cfg.SyncModeCli)
 		cfg.Snapshot.Enabled = cfg.SyncMode == ethconfig.SnapSync
+		fmt.Printf("a: %t\n", cfg.Snapshot.Enabled)
 		if cfg.SingleNodeMode {
 			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
 		}
