@@ -12,6 +12,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -441,14 +442,6 @@ func init() {
 	rootCmd.AddCommand(cmdSetPrune)
 }
 
-// max is a helper function which returns the larger of the two given integers.
-func max(a, b uint64) uint64 { //nolint:unparam
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if !(unwind > 0 || reset) {
@@ -471,7 +464,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		if unwind > progress {
 			unwindTo = 1 // keep genesis
 		} else {
-			unwindTo = max(1, progress-unwind)
+			unwindTo = cmp.Max(1, progress-unwind)
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
@@ -607,12 +600,11 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	var br *snapshotsync.BlockRetire
 	snapshots := allSnapshots(chainConfig)
 	if snapshots != nil {
-		d := &dir.Rw{Path: snapshots.Dir()}
 		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
 		}
-		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, d, db, nil, nil)
+		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
@@ -1173,10 +1165,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if allSn != nil {
 		cfg.Snapshot = allSn.Cfg()
 	}
-	if cfg.Snapshot.Enabled {
-		snDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
-		cfg.SnapshotDir = snDir
-	}
+	cfg.SnapshotDir = filepath.Join(datadir, "snapshots")
 	var engine consensus.Engine
 	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
@@ -1197,7 +1186,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	br := getBlockReader(chainConfig)
 	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewControlServer(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
+	sentryControlServer, err := sentry.NewMultyClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
 	if err != nil {
 		panic(err)
 	}

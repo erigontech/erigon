@@ -187,19 +187,10 @@ type BlockReaderWithSnapshots struct {
 func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapshots {
 	return &BlockReaderWithSnapshots{sn: snapshots}
 }
+
 func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
-		if segment.idxHeaderHash == nil {
-			fmt.Printf("why? %d, %d, %d, %d, %d\n", blockHeight, segment.From, segment.To, back.sn.segmentsAvailable.Load(), back.sn.idxAvailable.Load())
-			back.sn.PrintDebug()
-			for _, sn := range back.sn.Headers.segments {
-				if sn.idxHeaderHash == nil {
-					fmt.Printf("seg with nil idx: %d,%d\n", segment.From, segment.To)
-				}
-			}
-			fmt.Printf("==== end debug print ====\n")
-		}
-		h, err = back.headerFromSnapshot(blockHeight, segment, nil)
+		h, _, err = back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
 			return err
 		}
@@ -245,7 +236,7 @@ func (back *BlockReaderWithSnapshots) HeaderByHash(ctx context.Context, tx kv.Ge
 
 func (back *BlockReaderWithSnapshots) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (h common.Hash, err error) {
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
-		header, err := back.headerFromSnapshot(blockHeight, segment, nil)
+		header, _, err := back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
 			return err
 		}
@@ -267,7 +258,7 @@ func (back *BlockReaderWithSnapshots) CanonicalHash(ctx context.Context, tx kv.G
 
 func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
-		h, err = back.headerFromSnapshot(blockHeight, segment, nil)
+		h, _, err = back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
 			return err
 		}
@@ -283,7 +274,7 @@ func (back *BlockReaderWithSnapshots) Header(ctx context.Context, tx kv.Getter, 
 
 func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
-		h, err = back.headerFromSnapshot(blockHeight, segment, nil)
+		h, _, err = back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
 			return err
 		}
@@ -303,8 +294,9 @@ func (back *BlockReaderWithSnapshots) ReadHeaderByNumber(ctx context.Context, tx
 func (back *BlockReaderWithSnapshots) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	var baseTxnID uint64
 	var txsAmount uint32
+	var buf []byte
 	ok, err := back.sn.ViewBodies(blockHeight, func(seg *BodySegment) error {
-		body, baseTxnID, txsAmount, err = back.bodyFromSnapshot(blockHeight, seg, nil)
+		body, baseTxnID, txsAmount, buf, err = back.bodyFromSnapshot(blockHeight, seg, buf)
 		if err != nil {
 			return err
 		}
@@ -315,9 +307,12 @@ func (back *BlockReaderWithSnapshots) BodyWithTransactions(ctx context.Context, 
 	}
 	if ok {
 		ok, err = back.sn.ViewTxs(blockHeight, func(seg *TxnSegment) error {
-			txs, senders, err := back.txsFromSnapshot(baseTxnID, txsAmount, seg, nil)
+			txs, senders, err := back.txsFromSnapshot(baseTxnID, txsAmount, seg, buf)
 			if err != nil {
 				return err
+			}
+			if txs == nil {
+				return nil
 			}
 			body.Transactions = txs
 			body.SendersToTxs(senders)
@@ -352,7 +347,7 @@ func (back *BlockReaderWithSnapshots) BodyRlp(ctx context.Context, tx kv.Getter,
 
 func (back *BlockReaderWithSnapshots) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	ok, err := back.sn.ViewBodies(blockHeight, func(seg *BodySegment) error {
-		body, _, _, err = back.bodyFromSnapshot(blockHeight, seg, nil)
+		body, _, _, _, err = back.bodyFromSnapshot(blockHeight, seg, nil)
 		if err != nil {
 			return err
 		}
@@ -372,15 +367,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	var buf []byte
 	var h *types.Header
 	ok, err := back.sn.ViewHeaders(blockHeight, func(seg *HeaderSegment) error {
-		headerOffset := seg.idxHeaderHash.Lookup2(blockHeight - seg.idxHeaderHash.BaseDataID())
-		gg := seg.seg.MakeGetter()
-		gg.Reset(headerOffset)
-		buf, _ = gg.Next(buf[:0])
-		if len(buf) == 0 {
-			return nil
-		}
-		h = &types.Header{}
-		if err = rlp.DecodeBytes(buf[1:], h); err != nil {
+		h, buf, err = back.headerFromSnapshot(blockHeight, seg, buf)
+		if err != nil {
 			return err
 		}
 		return nil
@@ -388,19 +376,13 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	if err != nil {
 		return
 	}
-	if ok {
-		var b *types.BodyForStorage
+	if ok && h != nil {
+		var b *types.Body
+		var baseTxnId uint64
+		var txsAmount uint32
 		ok, err = back.sn.ViewBodies(blockHeight, func(seg *BodySegment) error {
-			bodyOffset := seg.idxBodyNumber.Lookup2(blockHeight - seg.idxBodyNumber.BaseDataID())
-			gg := seg.seg.MakeGetter()
-			gg.Reset(bodyOffset)
-			buf, _ = gg.Next(buf[:0])
-			if len(buf) == 0 {
-				return nil
-			}
-			b = &types.BodyForStorage{}
-			reader := bytes.NewReader(buf)
-			if err = rlp.Decode(reader, b); err != nil {
+			b, baseTxnId, txsAmount, buf, err = back.bodyFromSnapshot(blockHeight, seg, buf)
+			if err != nil {
 				return err
 			}
 			return nil
@@ -408,8 +390,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		if err != nil {
 			return
 		}
-		if ok {
-			if b.TxAmount <= 2 {
+		if ok && b != nil {
+			if txsAmount == 0 {
 				block = types.NewBlockFromStorage(hash, h, nil, b.Uncles)
 				if len(senders) != block.Transactions().Len() {
 					return block, senders, nil // no senders is fine - will recover them on the fly
@@ -417,33 +399,12 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 				block.SendersToTxs(senders)
 				return block, senders, nil
 			}
-			reader := bytes.NewReader(nil)
-			txs := make([]types.Transaction, b.TxAmount-2)
-			senders = make([]common.Address, b.TxAmount-2)
+			var txs []types.Transaction
+			var senders []common.Address
 			ok, err = back.sn.ViewTxs(blockHeight, func(seg *TxnSegment) error {
-				if b.BaseTxId < seg.IdxTxnHash.BaseDataID() {
-					return fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, seg.IdxTxnHash.BaseDataID(), seg.Seg.FilePath())
-				}
-
-				txnOffset := seg.IdxTxnHash.Lookup2(b.BaseTxId - seg.IdxTxnHash.BaseDataID())
-				gg := seg.Seg.MakeGetter()
-				gg.Reset(txnOffset)
-				stream := rlp.NewStream(reader, 0)
-				buf, _ = gg.Next(buf[:0]) //first system-tx
-				for i := uint32(0); i < b.TxAmount-2; i++ {
-					buf, _ = gg.Next(buf[:0])
-					if len(buf) < 1+20 {
-						return fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", seg.Seg.FilePath(), len(buf))
-					}
-					senders[i].SetBytes(buf[1 : 1+20])
-					txRlp := buf[1+20:]
-					reader.Reset(txRlp)
-					stream.Reset(reader, 0)
-					txs[i], err = types.DecodeTransaction(stream)
-					if err != nil {
-						return err
-					}
-					txs[i].SetSender(senders[i])
+				txs, senders, err = back.txsFromSnapshot(baseTxnId, txsAmount, seg, buf)
+				if err != nil {
+					return err
 				}
 				return nil
 			})
@@ -474,19 +435,22 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 }
 
-func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn *HeaderSegment, buf []byte) (*types.Header, error) {
+func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn *HeaderSegment, buf []byte) (*types.Header, []byte, error) {
+	if sn.idxHeaderHash == nil {
+		return nil, buf, nil
+	}
 	headerOffset := sn.idxHeaderHash.Lookup2(blockHeight - sn.idxHeaderHash.BaseDataID())
 	gg := sn.seg.MakeGetter()
 	gg.Reset(headerOffset)
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
-		return nil, nil
+		return nil, buf, nil
 	}
 	h := &types.Header{}
 	if err := rlp.DecodeBytes(buf[1:], h); err != nil {
-		return nil, err
+		return nil, buf, err
 	}
-	return h, nil
+	return h, buf, nil
 }
 
 // headerFromSnapshotByHash - getting header by hash AND ensure that it has correct hash
@@ -494,6 +458,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshot(blockHeight uint64, sn 
 // but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
 // to make sure is to fetch it and compare hash
 func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegment, buf []byte) (*types.Header, error) {
+	if sn.idxHeaderHash == nil {
+		return nil, nil
+	}
 	reader := recsplit.NewIndexReader(sn.idxHeaderHash)
 	localID := reader.Lookup(hash[:])
 	headerOffset := sn.idxHeaderHash.Lookup2(localID)
@@ -514,58 +481,75 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 	return h, nil
 }
 
-func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.Body, uint64, uint32, error) {
+func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.Body, uint64, uint32, []byte, error) {
+	if sn.idxBodyNumber == nil {
+		return nil, 0, 0, buf, nil
+	}
 	bodyOffset := sn.idxBodyNumber.Lookup2(blockHeight - sn.idxBodyNumber.BaseDataID())
 
 	gg := sn.seg.MakeGetter()
 	gg.Reset(bodyOffset)
 	buf, _ = gg.Next(buf[:0])
 	if len(buf) == 0 {
-		return nil, 0, 0, nil
+		return nil, 0, 0, buf, nil
 	}
 	b := &types.BodyForStorage{}
 	reader := bytes.NewReader(buf)
 	if err := rlp.Decode(reader, b); err != nil {
-		return nil, 0, 0, err
+		return nil, 0, 0, buf, err
 	}
 
 	if b.BaseTxId < sn.idxBodyNumber.BaseDataID() {
-		return nil, 0, 0, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.idxBodyNumber.BaseDataID(), sn.seg.FilePath())
+		return nil, 0, 0, buf, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.idxBodyNumber.BaseDataID(), sn.seg.FilePath())
 	}
 
 	body := new(types.Body)
 	body.Uncles = b.Uncles
-	return body, b.BaseTxId + 1, b.TxAmount - 2, nil // empty txs in the beginning and end of block
+	var txsAmount uint32
+	if b.TxAmount >= 2 {
+		txsAmount = b.TxAmount - 2
+	}
+	return body, b.BaseTxId + 1, txsAmount, buf, nil // empty txs in the beginning and end of block
 }
 
-func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) ([]types.Transaction, []common.Address, error) {
-	txs := make([]types.Transaction, txsAmount)
-	senders := make([]common.Address, txsAmount)
+func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+	if txsSeg.IdxTxnHash == nil {
+		return nil, nil, nil
+	}
+	if baseTxnID < txsSeg.IdxTxnHash.BaseDataID() {
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, txsSeg.IdxTxnHash.BaseDataID(), txsSeg.Seg.FilePath())
+	}
+
+	txs = make([]types.Transaction, txsAmount)
+	senders = make([]common.Address, txsAmount)
 	reader := bytes.NewReader(buf)
-	if txsAmount > 0 {
-		txnOffset := txsSeg.IdxTxnHash.Lookup2(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
-		gg := txsSeg.Seg.MakeGetter()
-		gg.Reset(txnOffset)
-		stream := rlp.NewStream(reader, 0)
-		for i := uint32(0); i < txsAmount; i++ {
-			buf, _ = gg.Next(buf[:0])
-			senders[i].SetBytes(buf[1 : 1+20])
-			txRlp := buf[1+20:]
-			reader.Reset(txRlp)
-			stream.Reset(reader, 0)
-			var err error
-			txs[i], err = types.DecodeTransaction(stream)
-			if err != nil {
-				return nil, nil, err
-			}
+	if txsAmount == 0 {
+		return txs, senders, nil
+	}
+	txnOffset := txsSeg.IdxTxnHash.Lookup2(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
+	gg := txsSeg.Seg.MakeGetter()
+	gg.Reset(txnOffset)
+	stream := rlp.NewStream(reader, 0)
+	for i := uint32(0); i < txsAmount; i++ {
+		buf, _ = gg.Next(buf[:0])
+		if len(buf) < 1+20 {
+			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Seg.FilePath(), len(buf))
 		}
+		senders[i].SetBytes(buf[1 : 1+20])
+		txRlp := buf[1+20:]
+		reader.Reset(txRlp)
+		stream.Reset(reader, 0)
+		txs[i], err = types.DecodeTransaction(stream)
+		if err != nil {
+			return nil, nil, err
+		}
+		txs[i].SetSender(senders[i])
 	}
 
 	return txs, senders, nil
 }
 
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
-
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {

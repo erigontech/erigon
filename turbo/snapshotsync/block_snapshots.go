@@ -17,7 +17,7 @@ import (
 
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -38,25 +38,23 @@ import (
 	"go.uber.org/atomic"
 )
 
-type BlocksSnapshot struct {
-	Bodies              *compress.Decompressor // value: rlp(types.BodyForStorage)
-	Headers             *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
-	Transactions        *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
-	BodyNumberIdx       *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	HeaderHashIdx       *recsplit.Index        // header_hash       -> headers_segment_offset
-	TxnHashIdx          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	TxnIdsIdx           *recsplit.Index        // transaction_id    -> transactions_segment_offset
-	TxnHash2BlockNumIdx *recsplit.Index        // transaction_hash  -> block_number
-
-	From, To uint64 // [from,to)
-}
-
-func (s BlocksSnapshot) Has(block uint64) bool { return block >= s.From && block < s.To }
-
 type HeaderSegment struct {
 	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
 	idxHeaderHash *recsplit.Index        // header_hash       -> headers_segment_offset
 	From, To      uint64
+}
+
+type BodySegment struct {
+	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
+	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
+	From, To      uint64
+}
+
+type TxnSegment struct {
+	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + sender_address + transaction_rlp
+	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
+	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
+	From, To            uint64
 }
 
 func (sn *HeaderSegment) close() {
@@ -69,6 +67,7 @@ func (sn *HeaderSegment) close() {
 		sn.idxHeaderHash = nil
 	}
 }
+
 func (sn *HeaderSegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.From, sn.To, snap.Headers)
@@ -83,12 +82,6 @@ func (sn *HeaderSegment) reopen(dir string) (err error) {
 	return nil
 }
 
-type BodySegment struct {
-	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
-	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	From, To      uint64
-}
-
 func (sn *BodySegment) close() {
 	if sn.seg != nil {
 		sn.seg.Close()
@@ -99,6 +92,7 @@ func (sn *BodySegment) close() {
 		sn.idxBodyNumber = nil
 	}
 }
+
 func (sn *BodySegment) reopen(dir string) (err error) {
 	sn.close()
 	fileName := snap.SegmentFileName(sn.From, sn.To, snap.Bodies)
@@ -111,13 +105,6 @@ func (sn *BodySegment) reopen(dir string) (err error) {
 		return err
 	}
 	return nil
-}
-
-type TxnSegment struct {
-	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + transaction_rlp
-	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
-	From, To            uint64
 }
 
 func (sn *TxnSegment) close() {
@@ -274,10 +261,10 @@ type RoSnapshots struct {
 	Bodies  *bodySegments
 	Txs     *txnSegments
 
-	dir               string
-	segmentsAvailable atomic.Uint64 // all types of .seg files are available - up to this number
-	idxAvailable      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg               ethconfig.Snapshot
+	dir         string
+	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
+	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
+	cfg         ethconfig.Snapshot
 }
 
 // NewRoSnapshots - opens all snapshots. But to simplify everything:
@@ -289,15 +276,13 @@ func NewRoSnapshots(cfg ethconfig.Snapshot, snapshotDir string) *RoSnapshots {
 	return &RoSnapshots{dir: snapshotDir, cfg: cfg, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}}
 }
 
-func (s *RoSnapshots) Cfg() ethconfig.Snapshot   { return s.cfg }
-func (s *RoSnapshots) Dir() string               { return s.dir }
-func (s *RoSnapshots) SegmentsReady() bool       { return s.segmentsReady.Load() }
-func (s *RoSnapshots) IndicesReady() bool        { return s.indicesReady.Load() }
-func (s *RoSnapshots) IndicesAvailable() uint64  { return s.idxAvailable.Load() }
-func (s *RoSnapshots) SegmentsAvailable() uint64 { return s.segmentsAvailable.Load() }
-func (s *RoSnapshots) BlocksAvailable() uint64 {
-	return min(s.segmentsAvailable.Load(), s.idxAvailable.Load())
-}
+func (s *RoSnapshots) Cfg() ethconfig.Snapshot { return s.cfg }
+func (s *RoSnapshots) Dir() string             { return s.dir }
+func (s *RoSnapshots) SegmentsReady() bool     { return s.segmentsReady.Load() }
+func (s *RoSnapshots) IndicesReady() bool      { return s.indicesReady.Load() }
+func (s *RoSnapshots) IndicesMax() uint64      { return s.idxMax.Load() }
+func (s *RoSnapshots) SegmentsMax() uint64     { return s.segmentsMax.Load() }
+func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapshothashes.Config) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
@@ -333,7 +318,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		txs = seg.To - 1
 		break
 	}
-	return min(headers, min(bodies, txs))
+	return cmp.Min(headers, cmp.Min(bodies, txs))
 }
 
 func (s *RoSnapshots) ReopenIndices() error {
@@ -367,7 +352,7 @@ func (s *RoSnapshots) ReopenSomeIndices(types ...snap.Type) (err error) {
 		}
 	}
 
-	s.idxAvailable.Store(s.idxAvailability())
+	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 	return nil
 }
@@ -439,9 +424,9 @@ func (s *RoSnapshots) Reopen() error {
 		}
 
 		if f.To > 0 {
-			s.segmentsAvailable.Store(f.To - 1)
+			s.segmentsMax.Store(f.To - 1)
 		} else {
-			s.segmentsAvailable.Store(0)
+			s.segmentsMax.Store(0)
 		}
 	}
 	s.segmentsReady.Store(true)
@@ -469,7 +454,7 @@ func (s *RoSnapshots) Reopen() error {
 		}
 	}
 
-	s.idxAvailable.Store(s.idxAvailability())
+	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
 
 	return nil
@@ -526,9 +511,9 @@ func (s *RoSnapshots) ReopenSegments() error {
 		}
 
 		if f.To > 0 {
-			s.segmentsAvailable.Store(f.To - 1)
+			s.segmentsMax.Store(f.To - 1)
 		} else {
-			s.segmentsAvailable.Store(0)
+			s.segmentsMax.Store(0)
 		}
 	}
 	s.segmentsReady.Store(true)
@@ -565,7 +550,7 @@ func (s *RoSnapshots) PrintDebug() {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	fmt.Printf("sn: %d, %d\n", s.segmentsAvailable.Load(), s.idxAvailable.Load())
+	fmt.Printf("sn: %d, %d\n", s.segmentsMax.Load(), s.idxMax.Load())
 	fmt.Println("    == Snapshots, Header")
 	for _, sn := range s.Headers.segments {
 		fmt.Printf("%d,  %t\n", sn.From, sn.idxHeaderHash == nil)
@@ -598,7 +583,7 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 	return s.Txs.ViewSegment(blockNum, f)
 }
 
-func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chainID uint256.Int, tmpDir string, from uint64, workers int, lvl log.Lvl) error {
+func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpDir string, from uint64, workers int, lvl log.Lvl) error {
 	log.Log(lvl, "[snapshots] Build indices", "from", from)
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -619,7 +604,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 					<-workersCh
 				}()
 
-				f := filepath.Join(snapshotDir.Path, snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
+				f := filepath.Join(s.Dir(), snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
 				errs <- HeadersIdx(ctx, f, blockFrom, tmpDir, lvl)
 				select {
 				case <-ctx.Done():
@@ -666,7 +651,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 					<-workersCh
 				}()
 
-				f := filepath.Join(snapshotDir.Path, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+				f := filepath.Join(s.Dir(), snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
 				errs <- BodiesIdx(ctx, f, blockFrom, tmpDir, lvl)
 				select {
 				case <-ctx.Done():
@@ -721,7 +706,7 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, snapshotDir *dir.Rw, chai
 						wg.Done()
 						<-workersCh
 					}()
-					errs <- TransactionsIdx(ctx, chainID, blockFrom, blockTo, snapshotDir, tmpDir, lvl)
+					errs <- TransactionsIdx(ctx, chainID, blockFrom, blockTo, s.Dir(), tmpDir, lvl)
 					select {
 					case <-ctx.Done():
 						errs <- ctx.Err()
@@ -831,15 +816,8 @@ func segments2(dir string) (res []snap.FileInfo, err error) {
 
 func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 	next := (from/blocksPerFile + 1) * blocksPerFile
-	to = min(next, to)
+	to = cmp.Min(next, to)
 	return to - (to % snap.MIN_SEGMENT_SIZE) // round down to the nearest 1k
-}
-
-func min(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 type BlockRetire struct {
@@ -847,11 +825,10 @@ type BlockRetire struct {
 	wg      *sync.WaitGroup
 	result  *BlockRetireResult
 
-	workers     int
-	tmpDir      string
-	snapshots   *RoSnapshots
-	snapshotDir *dir.Rw
-	db          kv.RoDB
+	workers   int
+	tmpDir    string
+	snapshots *RoSnapshots
+	db        kv.RoDB
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
@@ -862,8 +839,8 @@ type BlockRetireResult struct {
 	Err                error
 }
 
-func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, snapshotDir *dir.Rw, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, snapshotDir: snapshotDir, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
+func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, wg: &sync.WaitGroup{}, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
@@ -889,7 +866,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 		maxJump = 10_000
 	}
 	//roundedTo1K := (to / 1_000) * 1_000
-	jump := min(maxJump, roundedTo1K-blockFrom)
+	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
 	case jump >= 500_000:
 		blockTo = blockFrom + 500_000
@@ -906,7 +883,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 }
 func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
-	return min(hardLimit, snapshots.BlocksAvailable()+1)
+	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
 	br.result = nil
@@ -920,7 +897,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		defer br.working.Store(false)
 		defer br.wg.Done()
 
-		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.snapshotDir, br.db, br.workers, br.downloader, lvl, br.notifier)
+		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 		br.result = &BlockRetireResult{
 			BlockFrom: blockFrom,
 			BlockTo:   blockTo,
@@ -933,7 +910,7 @@ type DBEventNotifier interface {
 	OnNewSnapshot()
 }
 
-func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, rwSnapshotDir *dir.Rw, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
+func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, workers int, downloader proto_downloader.DownloaderClient, lvl log.Lvl, notifier DBEventNotifier) error {
 	log.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	// in future we will do it in background
 	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
@@ -946,7 +923,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if idxWorkers > 4 {
 		idxWorkers = 4
 	}
-	if err := BuildIndices(ctx, snapshots, rwSnapshotDir, chainID, tmpDir, snapshots.IndicesAvailable(), idxWorkers, log.LvlInfo); err != nil {
+	if err := BuildIndices(ctx, snapshots, chainID, tmpDir, snapshots.IndicesMax(), idxWorkers, log.LvlInfo); err != nil {
 		return err
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
@@ -954,7 +931,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if len(ranges) == 0 {
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, ranges, rwSnapshotDir, true)
+	err := merger.Merge(ctx, snapshots, ranges, snapshots.Dir(), true)
 	if err != nil {
 		return err
 	}
@@ -1294,7 +1271,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 
 var EmptyTxHash = common.Hash{}
 
-func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir *dir.Rw, tmpDir string, lvl log.Lvl) (err error) {
+func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapshotDir string, tmpDir string, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v", blockFrom, blockTo, rec)
@@ -1303,7 +1280,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	var expectedCount, firstTxID uint64
 	firstBlockNum := blockFrom
 
-	bodySegmentPath := filepath.Join(snapshotDir.Path, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+	bodySegmentPath := filepath.Join(snapshotDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
 	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
 	if err != nil {
 		return err
@@ -1319,7 +1296,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		}
 		firstTxID = firstBody.BaseTxId
 
-		bodyIdxPath := filepath.Join(snapshotDir.Path, snap.IdxFileName(blockFrom, blockTo, snap.Bodies.String()))
+		bodyIdxPath := filepath.Join(snapshotDir, snap.IdxFileName(blockFrom, blockTo, snap.Bodies.String()))
 		idx, err := recsplit.OpenIndex(bodyIdxPath)
 		if err != nil {
 			return err
@@ -1339,7 +1316,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		idx.Close()
 	}
 
-	segmentFilePath := filepath.Join(snapshotDir.Path, snap.SegmentFileName(blockFrom, blockTo, snap.Transactions))
+	segmentFilePath := filepath.Join(snapshotDir, snap.SegmentFileName(blockFrom, blockTo, snap.Transactions))
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -1352,7 +1329,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(snapshotDir.Path, snap.IdxFileName(blockFrom, blockTo, snap.Transactions.String())),
+		IndexFile:  filepath.Join(snapshotDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions.String())),
 		BaseDataID: firstTxID,
 	})
 	if err != nil {
@@ -1364,7 +1341,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(snapshotDir.Path, snap.IdxFileName(blockFrom, blockTo, snap.Transactions2Block.String())),
+		IndexFile:  filepath.Join(snapshotDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions2Block.String())),
 		BaseDataID: firstBlockNum,
 	})
 	if err != nil {
@@ -1691,7 +1668,7 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeH
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir *dir.Rw, doIndex bool) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges []mergeRange, snapshotDir string, doIndex bool) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
@@ -1704,7 +1681,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			return err
 		}
 		{
-			segFilePath := filepath.Join(snapshotDir.Path, snap.SegmentFileName(r.from, r.to, snap.Bodies))
+			segFilePath := filepath.Join(snapshotDir, snap.SegmentFileName(r.from, r.to, snap.Bodies))
 			if err := m.merge(ctx, toMergeBodies, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
@@ -1716,7 +1693,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 
 		{
-			segFilePath := filepath.Join(snapshotDir.Path, snap.SegmentFileName(r.from, r.to, snap.Headers))
+			segFilePath := filepath.Join(snapshotDir, snap.SegmentFileName(r.from, r.to, snap.Headers))
 			if err := m.merge(ctx, toMergeHeaders, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
@@ -1728,7 +1705,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 
 		{
-			segFilePath := filepath.Join(snapshotDir.Path, snap.SegmentFileName(r.from, r.to, snap.Transactions))
+			segFilePath := filepath.Join(snapshotDir, snap.SegmentFileName(r.from, r.to, snap.Transactions))
 			if err := m.merge(ctx, toMergeTxs, segFilePath, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
@@ -1812,7 +1789,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 	return nil
 }
 
-func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
+func (m *Merger) removeOldFiles(toDel []string, snapshotsDir string) error {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
@@ -1823,7 +1800,7 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
 			_ = os.Remove(withoutExt + "-id.idx")
 		}
 	}
-	tmpFiles, err := snap.TmpFiles(snapshotsDir.Path)
+	tmpFiles, err := snap.TmpFiles(snapshotsDir)
 	if err != nil {
 		return err
 	}
@@ -1831,26 +1808,6 @@ func (m *Merger) removeOldFiles(toDel []string, snapshotsDir *dir.Rw) error {
 		_ = os.Remove(f)
 	}
 	return nil
-}
-
-//nolint
-func assertAllSegments(blocks []*BlocksSnapshot, root string) {
-	wg := sync.WaitGroup{}
-	for _, sn := range blocks {
-		wg.Add(1)
-		go func(sn *BlocksSnapshot) {
-			defer wg.Done()
-			f := filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Headers))
-			assertSegment(f)
-			f = filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Bodies))
-			assertSegment(f)
-			f = filepath.Join(root, snap.SegmentFileName(sn.From, sn.To, snap.Transactions))
-			assertSegment(f)
-			fmt.Printf("done:%s\n", f)
-		}(sn)
-	}
-	wg.Wait()
-	panic("success")
 }
 
 //nolint
