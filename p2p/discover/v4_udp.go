@@ -131,7 +131,7 @@ type reply struct {
 }
 
 func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
-	cfg = cfg.withDefaults()
+	cfg = cfg.withDefaults(respTimeout)
 	closeCtx, cancel := context.WithCancel(ctx)
 	t := &UDPv4{
 		conn:            c,
@@ -150,7 +150,7 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 		privateKeyGenerator: cfg.PrivateKeyGenerator,
 	}
 
-	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, t.log)
+	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}

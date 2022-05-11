@@ -55,7 +55,7 @@ const (
 	tableIPLimit, tableSubnet   = 10, 24
 
 	refreshInterval    = 30 * time.Minute
-	revalidateInterval = 10 * time.Second
+	revalidateInterval = 5 * time.Second
 	copyNodesInterval  = 30 * time.Second
 	seedMinTableTime   = 5 * time.Minute
 	seedCount          = 30
@@ -71,6 +71,8 @@ type Table struct {
 	nursery []*node           // bootstrap nodes
 	rand    *mrand.Rand       // source of randomness, periodically reseeded
 	ips     netutil.DistinctNetSet
+
+	revalidateInterval time.Duration
 
 	log        log.Logger
 	db         *enode.DB // database of known nodes
@@ -100,7 +102,13 @@ type bucket struct {
 	ips          netutil.DistinctNetSet
 }
 
-func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, logger log.Logger) (*Table, error) {
+func newTable(
+	t transport,
+	db *enode.DB,
+	bootnodes []*enode.Node,
+	revalidateInterval time.Duration,
+	logger log.Logger,
+) (*Table, error) {
 	tab := &Table{
 		net:        t,
 		db:         db,
@@ -110,7 +118,10 @@ func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, logger log.Log
 		closed:     make(chan struct{}),
 		rand:       mrand.New(mrand.NewSource(0)),
 		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
-		log:        logger,
+
+		revalidateInterval: revalidateInterval,
+
+		log: logger,
 	}
 	if err := tab.setFallbackNodes(bootnodes); err != nil {
 		return nil, err
@@ -218,7 +229,7 @@ func (tab *Table) refresh() <-chan struct{} {
 // loop schedules runs of doRefresh, doRevalidate and copyLiveNodes.
 func (tab *Table) loop() {
 	var (
-		revalidate     = time.NewTimer(tab.nextRevalidateTime())
+		revalidate     = time.NewTimer(tab.revalidateInterval)
 		refresh        = time.NewTicker(refreshInterval)
 		copyNodes      = time.NewTicker(copyNodesInterval)
 		refreshDone    = make(chan struct{})           // where doRefresh reports completion
@@ -257,7 +268,7 @@ loop:
 			revalidateDone = make(chan struct{})
 			go tab.doRevalidate(revalidateDone)
 		case <-revalidateDone:
-			revalidate.Reset(tab.nextRevalidateTime())
+			revalidate.Reset(tab.revalidateInterval)
 			revalidateDone = nil
 		case <-copyNodes.C:
 			go tab.copyLiveNodes()
@@ -371,13 +382,6 @@ func (tab *Table) nodeToRevalidate() (n *node, bi int) {
 		}
 	}
 	return nil, 0
-}
-
-func (tab *Table) nextRevalidateTime() time.Duration {
-	tab.mutex.Lock()
-	defer tab.mutex.Unlock()
-
-	return time.Duration(tab.rand.Int63n(int64(revalidateInterval)))
 }
 
 // copyLiveNodes adds nodes from the table to the database if they have been in the table
