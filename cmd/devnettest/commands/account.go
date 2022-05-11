@@ -46,9 +46,11 @@ var getBalanceCmd = &cobra.Command{
 			return
 		}
 		address := common.HexToAddress(accountAddr)
-		if err := requests.GetBalance(reqId, address, blockNum); err != nil {
+		res, err := requests.GetBalance(reqId, address, blockNum)
+		if err != nil {
 			fmt.Printf("could not get balance: %v\n", err)
 		}
+		fmt.Println(res)
 	},
 }
 

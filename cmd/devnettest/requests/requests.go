@@ -38,43 +38,41 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	return nil
 }
 
-func GetBalance(reqId int, address common.Address, blockNum string) error {
+func GetBalance(reqId int, address common.Address, blockNum string) (string, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
 	if res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b); res.Err != nil {
-		return fmt.Errorf("failed to get balance: %v", res.Err)
+		return "", fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
 	s, err := utils.ParseResponse(b)
 	if err != nil {
-		return fmt.Errorf("error parsing resonse: %v", err)
+		return "", fmt.Errorf("error parsing resonse: %v", err)
 	}
 
-	fmt.Printf("Balance retrieved: %v\n", s)
-	return nil
+	return fmt.Sprintf("Balance retrieved: %v\n", s), nil
 }
 
-func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
+func SendTx(reqId int, signedTx *types.Transaction) (string, *common.Hash, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthSendRawTransaction
 
 	var buf bytes.Buffer
 	if err := (*signedTx).MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("failed to marshal binary: %v", err)
+		return "", nil, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
 	if res := reqGen.Erigon("eth_sendRawTransaction", reqGen.sendRawTransaction(buf.Bytes()), &b); res.Err != nil {
-		return nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
+		return "", nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
 	}
 
 	s, err := utils.ParseResponse(b)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing resonse: %v", err)
+		return "", nil, fmt.Errorf("error parsing resonse: %v", err)
 	}
 
-	fmt.Printf("Submitted transaction successfully: %v\n", s)
-	return &b.TxnHash, nil
+	return fmt.Sprintf("Submitted transaction successfully: %v\n", s), &b.TxnHash, nil
 }
 
 func TxpoolContent(reqId int) error {

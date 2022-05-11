@@ -66,11 +66,13 @@ var sendTxCmd = &cobra.Command{
 			return
 		}
 
-		hash, err := requests.SendTx(reqId, signedTx)
+		res, hash, err := requests.SendTx(reqId, signedTx)
 		if err != nil {
 			fmt.Printf("failed to send transaction: %v\n", err)
 			return
 		}
+
+		fmt.Printf(res)
 
 		if searchBlock {
 			if _, err := services.SearchBlockForTx(*hash); err != nil {

@@ -2,26 +2,25 @@ package utils
 
 import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	turboCLI "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/urfave/cli"
 )
 
 var (
-	DataDirFlag = utils.DirectoryFlag{
-		Name:  "datadir",
-		Usage: "Data directory for the databases",
-		Value: utils.DirectoryString("~/dev"),
-	}
-	
-	ChainFlag = cli.StringFlag{
-		Name:  "chain",
-		Usage: "Name of the testnet to join",
-		Value: networkname.DevChainName,
-	}
+	//DataDirFlag = utils.DirectoryFlag{
+	//	Name:  "datadir",
+	//	Usage: "Data directory for the databases",
+	//	Value: utils.DirectoryString("~/dev"),
+	//}
+	//
+	//ChainFlag = cli.StringFlag{
+	//	Name:  "chain",
+	//	Usage: "Name of the testnet to join",
+	//	Value: networkname.DevChainName,
+	//}
 	
 	DefaultFlags = []cli.Flag{
-		DataDirFlag,
+		utils.DataDirFlag,
 		utils.EthashDatasetDirFlag,
 		utils.SyncModeFlag,
 		utils.TxPoolDisableFlag,
@@ -102,7 +101,7 @@ var (
 		utils.StaticPeersFlag,
 		utils.TrustedPeersFlag,
 		utils.MaxPeersFlag,
-		ChainFlag,
+		utils.ChainFlag,
 		utils.DeveloperPeriodFlag,
 		utils.VMEnableDebugFlag,
 		utils.NetworkIdFlag,

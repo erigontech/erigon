@@ -155,10 +155,11 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 		return fmt.Errorf("failed to sign transaction: %v", err)
 	}
 
-	hash, err := requests.SendTx(reqId, &signedTx)
+	res, hash, err := requests.SendTx(reqId, &signedTx)
 	if err != nil {
 		return fmt.Errorf("failed to send transaction: %v", err)
 	}
+	fmt.Printf(res)
 
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {

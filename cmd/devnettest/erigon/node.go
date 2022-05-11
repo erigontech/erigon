@@ -3,14 +3,19 @@ package erigon
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/rpcdaemon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
 	"os"
+	"time"
 )
+
+var started bool
 
 func RunNode() {
 	defer func() {
@@ -23,9 +28,13 @@ func RunNode() {
 		os.Exit(1)
 	}()
 
-	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags)
-	app.Flags = append(app.Flags, utils.DebugFlags...)
-	if err := app.Run(os.Args); err != nil {
+	fmt.Println("args 0: ", os.Args)
+	app := erigonapp.MakeApp(runDevnet, erigoncli.DefaultFlags)
+	flags := GetCmdLineFlags()
+	args := append(os.Args, flags...)
+	fmt.Println("args 1: ", args)
+	if err := app.Run(args); err != nil {
+		fmt.Println("Error here")
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -48,4 +57,36 @@ func runDevnet(cliCtx *cli.Context) {
 	if err != nil {
 		log.Error("error while serving a Devnet node", "err", err)
 	}
+}
+
+func StartProcess(rpcFlags *utils.RPCFlags) {
+	go RunNode()
+	go rpcdaemon.RunDaemon(rpcFlags)
+	time.Sleep(10 * time.Second)
+	//var wg sync.WaitGroup
+	//wg.Add(1)
+	//wg.Wait()
+}
+
+func GetCmdLineFlags() []string {
+	flags := []string{"--datadir=~/dev", "--chain=dev"}
+	if IsRunning() {
+		fmt.Println("Node is running")
+		return flags
+	}
+	fmt.Println("Node is not running")
+	Start()
+	return append(flags, "--verbosity=0")
+}
+
+func Start() {
+	started = true
+}
+
+func Stop() {
+	started = false
+}
+
+func IsRunning() bool {
+	return started
 }
