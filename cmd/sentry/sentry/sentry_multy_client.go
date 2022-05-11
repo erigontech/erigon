@@ -472,56 +472,36 @@ func (cs *MultyClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			Number:    number,
 		})
 	}
-	if segments, penaltyKind, err := cs.Hd.SplitIntoSegments(csHeaders); err == nil {
-		if penaltyKind == headerdownload.NoPenalty {
-			if cs.Hd.POSSync() {
-				tx, err := cs.db.BeginRo(ctx)
-				defer tx.Rollback()
-				if err != nil {
-					return err
-				}
-				for _, segment := range segments {
-					penalties, err := cs.Hd.ProcessSegmentPOS(segment, tx, ConvertH512ToPeerID(peerID))
-					if err != nil {
-						return err
-					}
-					if len(penalties) > 0 {
-						cs.Penalize(ctx, penalties)
-					}
-				}
-			} else {
-				var canRequestMore bool
-				for _, segment := range segments {
-					requestMore := cs.Hd.ProcessSegment(segment, false /* newBlock */, ConvertH512ToPeerID(peerID))
-					canRequestMore = canRequestMore || requestMore
-				}
-
-				if canRequestMore {
-					currentTime := uint64(time.Now().Unix())
-					req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
-					if req != nil {
-						if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
-							// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-							cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
-							log.Trace("Sent request", "height", req.Number)
-						}
-					}
-					if len(penalties) > 0 {
-						cs.Penalize(ctx, penalties)
-					}
-				}
-			}
-		} else {
-			outreq := proto_sentry.PenalizePeerRequest{
-				PeerId:  peerID,
-				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-			}
-			if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-				log.Error("Could not send penalty", "err", err1)
-			}
+	if cs.Hd.POSSync() {
+		tx, err := cs.db.BeginRo(ctx)
+		defer tx.Rollback()
+		if err != nil {
+			return err
+		}
+		penalties, err := cs.Hd.ProcessHeadersPOS(csHeaders, tx, ConvertH512ToPeerID(peerID))
+		if err != nil {
+			return err
+		}
+		if len(penalties) > 0 {
+			cs.Penalize(ctx, penalties)
 		}
 	} else {
-		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
+		canRequestMore := cs.Hd.ProcessHeaders(csHeaders, false /* newBlock */, ConvertH512ToPeerID(peerID))
+
+		if canRequestMore {
+			currentTime := uint64(time.Now().Unix())
+			req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
+			if req != nil {
+				if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+					cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+					log.Trace("Sent request", "height", req.Number)
+				}
+			}
+			if len(penalties) > 0 {
+				cs.Penalize(ctx, penalties)
+			}
+		}
 	}
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   peerID,
@@ -559,7 +539,7 @@ func (cs *MultyClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 
 	if segments, penalty, err := cs.Hd.SingleHeaderAsSegment(headerRaw, request.Block.Header(), true /* penalizePoSBlocks */); err == nil {
 		if penalty == headerdownload.NoPenalty {
-			cs.Hd.ProcessSegment(segments[0], true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
+			cs.Hd.ProcessHeaders(segments, true /* newBlock */, ConvertH512ToPeerID(inreq.PeerId)) // There is only one segment in this case
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
