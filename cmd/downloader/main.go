@@ -172,7 +172,7 @@ var printTorrentHashes = &cobra.Command{
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			removePieceCompletionStorage(snapshotDir)
+			//removePieceCompletionStorage(snapshotDir)
 			files, err := downloader.AllTorrentPaths(snapshotDir)
 			if err != nil {
 				return err
@@ -232,6 +232,7 @@ var printTorrentHashes = &cobra.Command{
 	},
 }
 
+//nolint
 func removePieceCompletionStorage(snapshotDir string) {
 	_ = os.RemoveAll(filepath.Join(snapshotDir, "db"))
 	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db"))
