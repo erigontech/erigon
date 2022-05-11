@@ -53,6 +53,9 @@ func (b adapterHandler) Handle(r lg.Record) {
 		if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
 			break
 		}
+		if strings.Contains(str, "banned ip") { // suppress useless errors
+			break
+		}
 
 		log.Warn(str)
 	case lg.Error:
