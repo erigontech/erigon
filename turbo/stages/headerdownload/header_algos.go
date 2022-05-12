@@ -871,7 +871,7 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 				hd.moveLinkToQueue(link, InsertQueueID)
 				hd.recursiveLinked(link)
 			}
-		} else if !foundAnchor {
+		} else {
 			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
 				log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
 				hd.removeUpwards([]*Link{link})
