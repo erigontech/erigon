@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM docker.io/library/golang:1.18-alpine3.15 AS builder
 
-RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apk --no-cache add build-base git bash ca-certificates libgcc
 
 WORKDIR /app
 ADD . .
@@ -10,7 +10,7 @@ RUN make erigon rpcdaemon integration sentry txpool downloader hack observer db-
 
 FROM docker.io/library/alpine:3.15
 
-RUN apk add --no-cache ca-certificates libgcc libstdc++ tzdata
+RUN apk add --no-cache ca-certificates libgcc tzdata
 COPY --from=builder /app/build/bin/* /usr/local/bin/
 
 RUN adduser -H -u 1000 -g 1000 -D erigon
