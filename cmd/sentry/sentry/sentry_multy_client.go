@@ -275,8 +275,9 @@ func RecvMessage(
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
-	// need to read all messages from Sentry as fast as we can, then
-	// can group them or process in batch
+	// need to read all messages from Sentry as fast as we can, then:
+	// - can group them or process in batch
+	// - can have slow processing
 	reqs := make(chan *proto_sentry.InboundMessage, 1024)
 	defer close(reqs)
 	go func() {
