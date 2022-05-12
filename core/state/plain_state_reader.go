@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -16,8 +17,6 @@ var _ StateReader = (*PlainStateReader)(nil)
 // as opposed to the "normal" state that uses hashes of merkle paths to store items.
 type PlainStateReader struct {
 	db kv.Getter
-
-	buf [common.AddressLength + common.IncarnationLength + common.HashLength]byte
 }
 
 func NewPlainStateReader(db kv.Getter) *PlainStateReader {
@@ -42,11 +41,8 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 }
 
 func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	copy(r.buf[:], address[:])
-	binary.BigEndian.PutUint64(r.buf[common.AddressLength:], incarnation)
-	copy(r.buf[common.AddressLength+common.IncarnationLength:], key[:])
-
-	enc, err := r.db.GetOne(kv.PlainState, r.buf[:])
+	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	enc, err := r.db.GetOne(kv.PlainState, compositeKey)
 	if err != nil {
 		return nil, err
 	}
