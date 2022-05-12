@@ -687,11 +687,13 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if err != nil {
 		return nil, nil, err
 	}
-	nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
-	nextForkHashStr := hex.EncodeToString(nextForkHash[:])
-	if !snap.isMajorityFork(nextForkHashStr) {
-		log.Debug("[parlia] there is a possible fork, and your client is not the majority. Please check...", "nextForkHash", nextForkHashStr)
-	}
+	/*
+		nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
+		nextForkHashStr := hex.EncodeToString(nextForkHash[:])
+		if !snap.isMajorityFork(nextForkHashStr) {
+			log.Debug("[parlia] there is a possible fork, and your client is not the majority. Please check...", "nextForkHash", nextForkHashStr)
+		}
+	*/
 	// If the block is an epoch end block, verify the validator list
 	// The verification can only be done when the state is ready, it can't be done in VerifyHeader.
 	if number%p.config.Epoch == 0 {
