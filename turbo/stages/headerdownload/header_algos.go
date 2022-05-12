@@ -847,11 +847,11 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 		if !foundParent && !foundAnchor {
 			if sh.Number < hd.highestInDb {
 				log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
-				return false
+				continue
 			}
 			if len(hd.anchors) >= hd.anchorLimit {
 				log.Debug(fmt.Sprintf("too many anchors: %d, limit %d, state: %s", len(hd.anchors), hd.anchorLimit, hd.anchorState()))
-				return false
+				continue
 			}
 		}
 		link := hd.addHeaderAsLink(sh, false /* persisted */)
@@ -875,7 +875,7 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
 				log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
 				hd.removeUpwards([]*Link{link})
-				return false
+				continue
 			}
 			//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
 			// See if it links existing anchor
