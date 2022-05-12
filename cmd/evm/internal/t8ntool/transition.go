@@ -77,6 +77,9 @@ type input struct {
 	Txs   []*txWithKey      `json:"txs,omitempty"`
 }
 
+// dlv exec ./build/bin/evm -- --help
+// from cmd/evm:
+// go run *.go t8n --input.alloc=testdata/1/alloc.json --input.txs testdata/1/txs.json --input.env testdata/1/env.json
 func Main(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	/*
@@ -138,7 +141,7 @@ func Main(ctx *cli.Context) error {
 	// stdin input or in files.
 	// Check if anything needs to be read from stdin
 	var (
-		prestate Prestate
+		prestate Prestate           // moskud: Env + Genesis alloc (world state for certain genesis accounts)
 		txs      types.Transactions // txs to apply
 		allocStr = ctx.String(InputAllocFlag.Name)
 
@@ -162,6 +165,9 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
 	}
+	// moskud: specifies the initial state which is part of the genesis block
+	// not sure how account code/storage data would get in here (those would be just hash in the alloc)
+	// so i sense there might be another place where the genesis input for the block is taken
 	prestate.Pre = inputData.Alloc
 
 	// Set the block environment
@@ -225,6 +231,7 @@ func Main(ctx *cli.Context) error {
 
 	// Run the test and aggregate the result
 	_, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
+	// moskud: result is ExecutionREsult
 	if err1 != nil {
 		return err1
 	}
@@ -284,7 +291,11 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 		}
 	}
 	// assemble transaction
-	t.tx = types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
+	legacyTx := types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
+	legacyTx.V.SetFromBig(txJson.V.ToInt())
+	legacyTx.S.SetFromBig(txJson.S.ToInt())
+	legacyTx.R.SetFromBig(txJson.R.ToInt())
+	t.tx = legacyTx
 	return nil
 }
 
