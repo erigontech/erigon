@@ -278,7 +278,7 @@ func RecvMessage(
 	// need to read all messages from Sentry as fast as we can, then:
 	// - can group them or process in batch
 	// - can have slow processing
-	reqs := make(chan *proto_sentry.InboundMessage, 1024)
+	reqs := make(chan *proto_sentry.InboundMessage, 128)
 	defer close(reqs)
 	go func() {
 		for req := range reqs {
@@ -286,9 +286,6 @@ func RecvMessage(
 			case <-ctx.Done():
 				return
 			default:
-			}
-			if len(reqs) > 0 && len(reqs)%100 == 0 {
-				log.Info("msgs in erigon", "msgs", len(reqs))
 			}
 			if err = handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
