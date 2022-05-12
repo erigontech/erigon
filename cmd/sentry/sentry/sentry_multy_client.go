@@ -275,6 +275,37 @@ func RecvMessage(
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
+	reqs := make(chan *proto_sentry.InboundMessage, 1024)
+	defer close(reqs)
+	go func() {
+		for req := range reqs {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if err = handleInboundMessage(ctx, req, sentry); err != nil {
+				if rlp.IsInvalidRLPError(err) {
+					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
+					outreq := proto_sentry.PenalizePeerRequest{
+						PeerId:  req.PeerId,
+						Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+					}
+					if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
+						log.Error("Could not send penalty", "err", err1)
+					}
+				} else {
+					log.Warn("[RecvMessage] Handling incoming message", "err", err)
+				}
+			}
+		}
+
+		if wg != nil {
+			wg.Done()
+		}
+	}()
+
 	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
 		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
 		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
@@ -298,25 +329,7 @@ func RecvMessage(
 		if req == nil {
 			return
 		}
-
-		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			if rlp.IsInvalidRLPError(err) {
-				log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
-				outreq := proto_sentry.PenalizePeerRequest{
-					PeerId:  req.PeerId,
-					Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
-				}
-				if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-					log.Error("Could not send penalty", "err", err1)
-				}
-			} else {
-				log.Warn("[RecvMessage] Handling incoming message", "err", err)
-			}
-		}
-
-		if wg != nil {
-			wg.Done()
-		}
+		reqs <- req
 	}
 }
 
