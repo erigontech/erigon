@@ -275,6 +275,8 @@ func RecvMessage(
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
+	// need to read all messages from Sentry as fast as we can, then
+	// can group them or process in batch
 	reqs := make(chan *proto_sentry.InboundMessage, 1024)
 	defer close(reqs)
 	go func() {
@@ -284,7 +286,9 @@ func RecvMessage(
 				return
 			default:
 			}
-
+			if len(reqs)%100 == 0 {
+				log.Info("msgs in erigon", "msgs", len(reqs))
+			}
 			if err = handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
 					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
