@@ -95,6 +95,8 @@ func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
 		PingBackDelay: time.Nanosecond,
 
 		PrivateKeyGenerator: contextGetPrivateKeyGenerator(ctx),
+
+		TableRevalidateInterval: time.Hour,
 	})
 	if err != nil {
 		panic(err)
