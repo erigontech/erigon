@@ -348,7 +348,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if cfg.Snapshot.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
 			if err := allSnapshots.Reopen(); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
 			}
 			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			// don't reopen it right here, because snapshots may be not ready yet
