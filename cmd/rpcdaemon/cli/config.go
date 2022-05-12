@@ -297,6 +297,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if err != nil {
 				return err
 			}
+			if genesisBlock == nil {
+				return fmt.Errorf("genesis not found in DB. Likely Erigon was never started on this datadir")
+			}
 			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 			if err != nil {
 				return err
