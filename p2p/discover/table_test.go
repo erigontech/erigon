@@ -23,7 +23,6 @@ import (
 	"net"
 	"reflect"
 	"testing"
-	"testing/quick"
 	"time"
 
 	"github.com/ledgerwatch/erigon/crypto"
@@ -91,35 +90,39 @@ func testPingReplace(t *testing.T, newNodeIsResponding, lastInBucketIsResponding
 	}
 }
 
-func TestBucket_bumpNoDuplicates(t *testing.T) {
-	t.Parallel()
-	cfg := &quick.Config{
-		MaxCount: 200,
-		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
-		Values: func(args []reflect.Value, rand *rand.Rand) {
-			// generate a random list of nodes. this will be the content of the bucket.
-			n := rand.Intn(bucketSize-1) + 1
-			nodes := make([]*node, n)
-			for i := range nodes {
-				nodes[i] = nodeAtDistance(enode.ID{}, 200, intIP(200))
-			}
-			args[0] = reflect.ValueOf(nodes)
-			// generate random bump positions.
-			bumps := make([]int, rand.Intn(100))
-			for i := range bumps {
-				bumps[i] = rand.Intn(len(nodes))
-			}
-			args[1] = reflect.ValueOf(bumps)
-		},
+func testTableBumpNoDuplicatesRun(t *testing.T, bucketCountGen byte, bumpCountGen byte, randGen *rand.Rand) bool {
+	generateBucketNodes := func(bucketCountGen byte) []*node {
+		bucketCount := bucketCountGen % (bucketSize + 1) // [0...bucketSize]
+		nodes := make([]*node, bucketCount)
+		for i := range nodes {
+			nodes[i] = nodeAtDistance(enode.ID{}, 200, intIP(200))
+		}
+		return nodes
 	}
 
-	prop := func(nodes []*node, bumps []int) (ok bool) {
+	generateRandomBumpPositions := func(bumpCountGen byte, bucketCount int, randGen *rand.Rand) []int {
+		bumpCount := bumpCountGen % 100
+		bumps := make([]int, bumpCount)
+		for i := range bumps {
+			bumps[i] = randGen.Intn(bucketCount)
+		}
+		return bumps
+	}
+
+	nodes := generateBucketNodes(bucketCountGen)
+	if len(nodes) == 0 {
+		return true
+	}
+	bumps := generateRandomBumpPositions(bumpCountGen, len(nodes), randGen)
+
+	if len(bumps) > 0 {
 		tab, db := newTestTable(newPingRecorder())
 		defer db.Close()
 		defer tab.close()
 
 		b := &bucket{entries: make([]*node, len(nodes))}
 		copy(b.entries, nodes)
+
 		for i, pos := range bumps {
 			tab.bumpInBucket(b, b.entries[pos])
 			if hasDuplicates(b.entries) {
@@ -133,9 +136,32 @@ func TestBucket_bumpNoDuplicates(t *testing.T) {
 		checkIPLimitInvariant(t, tab)
 		return true
 	}
-	if err := quick.Check(prop, cfg); err != nil {
-		t.Error(err)
-	}
+	return true
+}
+
+func TestTable_bumpNoDuplicates_examples(t *testing.T) {
+	t.Parallel()
+
+	randGen := rand.New(rand.NewSource(time.Now().Unix()))
+
+	t.Run("n1b1", func(t *testing.T) {
+		testTableBumpNoDuplicatesRun(t, 1, 1, randGen)
+	})
+	t.Run("n1b5", func(t *testing.T) {
+		testTableBumpNoDuplicatesRun(t, 1, 5, randGen)
+	})
+	t.Run("n5b1", func(t *testing.T) {
+		testTableBumpNoDuplicatesRun(t, 5, 1, randGen)
+	})
+	t.Run("n5b10", func(t *testing.T) {
+		testTableBumpNoDuplicatesRun(t, 5, 10, randGen)
+	})
+	t.Run("n16b10", func(t *testing.T) {
+		testTableBumpNoDuplicatesRun(t, 16, 10, randGen)
+	})
+	t.Run("n16b90", func(t *testing.T) {
+		testTableBumpNoDuplicatesRun(t, 16, 90, randGen)
+	})
 }
 
 // This checks that the table-wide IP limit is applied correctly.
@@ -291,15 +317,10 @@ func TestTable_findNodeByID_examples(t *testing.T) {
 	})
 }
 
-func TestTable_ReadRandomNodesGetAll(t *testing.T) {
-	cfg := &quick.Config{
-		MaxCount: 200,
-		Rand:     rand.New(rand.NewSource(time.Now().Unix())),
-		Values: func(args []reflect.Value, rand *rand.Rand) {
-			args[0] = reflect.ValueOf(make([]*enode.Node, rand.Intn(1000)))
-		},
-	}
-	test := func(buf []*enode.Node) bool {
+func testTableReadRandomNodesGetAllRun(t *testing.T, nodesCountGen uint16, rand *rand.Rand) bool {
+	nodesCount := nodesCountGen % 1000
+	if nodesCount > 0 {
+		buf := make([]*enode.Node, nodesCount)
 		transport := newPingRecorder()
 		tab, db := newTestTable(transport)
 		defer db.Close()
@@ -307,7 +328,7 @@ func TestTable_ReadRandomNodesGetAll(t *testing.T) {
 		<-tab.initDone
 
 		for i := 0; i < len(buf); i++ {
-			ld := cfg.Rand.Intn(len(tab.buckets))
+			ld := rand.Intn(len(tab.buckets))
 			fillTable(tab, []*node{nodeAtDistance(tab.self().ID(), ld, intIP(ld))})
 		}
 		gotN := tab.ReadRandomNodes(buf)
@@ -321,9 +342,26 @@ func TestTable_ReadRandomNodesGetAll(t *testing.T) {
 		}
 		return true
 	}
-	if err := quick.Check(test, cfg); err != nil {
-		t.Error(err)
-	}
+	return true
+}
+
+func TestTable_ReadRandomNodesGetAll_examples(t *testing.T) {
+	t.Parallel()
+
+	randGen := rand.New(rand.NewSource(time.Now().Unix()))
+
+	t.Run("n1", func(t *testing.T) {
+		testTableReadRandomNodesGetAllRun(t, 1, randGen)
+	})
+	t.Run("n2", func(t *testing.T) {
+		testTableReadRandomNodesGetAllRun(t, 2, randGen)
+	})
+	t.Run("n20", func(t *testing.T) {
+		testTableReadRandomNodesGetAllRun(t, 20, randGen)
+	})
+	t.Run("n200", func(t *testing.T) {
+		testTableReadRandomNodesGetAllRun(t, 200, randGen)
+	})
 }
 
 func generateNodes(rand *rand.Rand, count int) []*node {
