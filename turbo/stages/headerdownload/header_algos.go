@@ -267,7 +267,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
 	}
-	fmt.Printf("RecoverFromDb1 highest = %d\n", hd.highestInDb)
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Headers)
 		if err != nil {
@@ -277,8 +276,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("RecoverFromDb2 highest = %d\n", hd.highestInDb)
-		var minNum uint64
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
@@ -296,9 +293,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 					Number:    header.Number.Uint64(),
 				}
 				hd.addHeaderAsLink(h, true /* persisted */)
-				if minNum == 0 || header.Number.Uint64() < minNum {
-					minNum = header.Number.Uint64()
-				}
 			}
 
 			select {
@@ -307,7 +301,6 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			default:
 			}
 		}
-		fmt.Printf("RecoverFromDb3 minNum = %d\n", minNum)
 		return nil
 	})
 	if err != nil {
@@ -1075,7 +1068,6 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
-	var minNum uint64
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
 		header, err := r.HeaderByNumber(context.Background(), tx, i)
 		if err != nil {
@@ -1096,9 +1088,6 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 		}
 		link := hd.addHeaderAsLink(h, true /* persisted */)
 		link.verified = true
-		if minNum == 0 || link.blockHeight < minNum {
-			minNum = link.blockHeight
-		}
 	}
 	if hd.highestInDb < n {
 		hd.highestInDb = n
@@ -1106,7 +1095,6 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 	if hd.preverifiedHeight < n {
 		hd.preverifiedHeight = n
 	}
-	fmt.Printf("AddHeaderFromSnapshot, minNum = %d\n", minNum)
 
 	return nil
 }
