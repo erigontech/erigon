@@ -17,15 +17,11 @@
 package eth
 
 import (
-	"math/big"
-	"time"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
+	"math/big"
 )
 
 const (
@@ -51,43 +47,6 @@ const (
 	maxReceiptsServe = 1024
 )
 
-// Handler is a callback to invoke from an outside runner after the boilerplate
-// exchanges have passed.
-type Handler func(peer *Peer) error
-
-// Backend defines the data retrieval methods t,o serve remote requests and the
-// callback methods to invoke on remote deliveries.
-type Backend interface {
-	DB() kv.RwDB
-
-	// TxPool retrieves the transaction pool object to serve data.
-	TxPool() TxPool
-
-	// AcceptTxs retrieves whether transaction processing is enabled on the node
-	// or if inbound transactions should simply be dropped.
-	AcceptTxs() bool
-
-	// RunPeer is invoked when a peer joins on the `eth` protocol. The handler
-	// should do any peer maintenance work, handshakes and validations. If all
-	// is passed, control should be given back to the `handler` to process the
-	// inbound messages going forward.
-	RunPeer(peer *Peer, handler Handler) error
-
-	// PeerInfo retrieves all known `eth` information about a peer.
-	PeerInfo(id enode.ID) interface{}
-
-	// Handle is a callback to be invoked when a data packet is received from
-	// the remote peer. Only packets not consumed by the protocol handler will
-	// be forwarded to the backend.
-	Handle(peer *Peer, packet Packet) error
-}
-
-// TxPool defines the methods needed by the protocol handler to serve transactions.
-type TxPool interface {
-	// Get retrieves the the transaction from the local txpool with the given hash.
-	Get(hash common.Hash) types.Transaction
-}
-
 // NodeInfo represents a short summary of the `eth` sub-protocol metadata
 // known about the host peer.
 type NodeInfo struct {
@@ -109,9 +68,4 @@ func ReadNodeInfo(getter kv.Getter, config *params.ChainConfig, genesisHash comm
 		Config:     config,
 		Head:       head.Hash(),
 	}
-}
-
-type Decoder interface {
-	Decode(val interface{}) error
-	Time() time.Time
 }
