@@ -1075,6 +1075,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
+	var minNum uint64
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
 		header, err := r.HeaderByNumber(context.Background(), tx, i)
 		if err != nil {
@@ -1090,11 +1091,14 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 		h := ChainSegmentHeader{
 			HeaderRaw: v,
 			Header:    header,
-			Hash:      types.RawRlpHash(v),
+			Hash:      header.Hash(),
 			Number:    header.Number.Uint64(),
 		}
 		link := hd.addHeaderAsLink(h, true /* persisted */)
 		link.verified = true
+		if minNum == 0 || link.blockHeight < minNum {
+			minNum = link.blockHeight
+		}
 	}
 	if hd.highestInDb < n {
 		hd.highestInDb = n
@@ -1102,6 +1106,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 	if hd.preverifiedHeight < n {
 		hd.preverifiedHeight = n
 	}
+	fmt.Printf("AddHeaderFromSnapshot, minNum = %d\n", minNum)
 
 	return nil
 }
