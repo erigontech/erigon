@@ -699,6 +699,8 @@ func HeadersPOW(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
+	var skeletonReqCount, reqCount int                        // How many requests have been issued in the last logging interval
+	var skeletonReqMin, skeletonReqMax, reqMin, reqMax uint64 // min and max block height for skeleton and non-skeleton requests
 	var noProgressCounter int
 	var wasProgress bool
 Loop:
@@ -737,6 +739,16 @@ Loop:
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 					cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
+					reqCount++
+					// We know that req is reverse request, with Skip == 0, therefore comparing Number with reqMax
+					if req.Number > reqMax {
+						reqMax = req.Number
+					}
+					if reqMin == 0 || req.Number < reqMin+req.Length {
+						if req.Number >= req.Length {
+							reqMin = req.Number - req.Length
+						}
+					}
 				}
 			}
 			if len(penalties) > 0 {
@@ -751,6 +763,13 @@ Loop:
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				log.Trace("Sent skeleton request", "height", req.Number)
+				skeletonReqCount++
+				if skeletonReqMin == 0 || req.Number < skeletonReqMin {
+					skeletonReqMin = req.Number
+				}
+				if req.Number+req.Length*req.Skip > skeletonReqMax {
+					skeletonReqMax = req.Number + req.Length*req.Skip
+				}
 			}
 		}
 		// Load headers into the database
@@ -787,12 +806,23 @@ Loop:
 			logProgressHeaders(logPrefix, prevProgress, progress)
 			if prevProgress == progress {
 				noProgressCounter++
+				respCount, respMin, respMax := cfg.hd.ExtractRespStats()
+				log.Info("Req/resp stats", "req", reqCount, "reqMin", reqMin, "reqMax", reqMax,
+					"skel", skeletonReqCount, "skelMin", skeletonReqMin, "skelMax", skeletonReqMax,
+					"resp", respCount, "respMin", respMin, "respMax", respMax)
+				fmt.Printf("%s\n", cfg.hd.AnchorState())
 				if noProgressCounter >= 5 && wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
 					break Loop
 				}
 			}
 			prevProgress = progress
+			reqCount = 0
+			reqMin = 0
+			reqMax = 0
+			skeletonReqCount = 0
+			skeletonReqMin = 0
+			skeletonReqMax = 0
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
@@ -1178,13 +1208,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 			return err
 		}
-		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
-			return err
-		}
 		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 			return err
 		}
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
+	}
+	if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+		return err
 	}
 
 	return nil
