@@ -1208,13 +1208,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 			return err
 		}
-		if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
-			return err
-		}
 		if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
 			return err
 		}
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
+	}
+	if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+		return err
 	}
 
 	return nil
