@@ -1105,7 +1105,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			parseCtx.WithSender(len(senders) == 0)
 			valueBuf, err = parse(tv, valueBuf, senders, j)
 			if err != nil {
-				return err
+				return fmt.Errorf("%w, block: %d", err, blockNum)
 			}
 			if err := f.AddWord(valueBuf); err != nil {
 				return err
