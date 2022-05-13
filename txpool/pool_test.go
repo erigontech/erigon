@@ -132,7 +132,7 @@ func TestNonceFromAddress(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot1 := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  3,
@@ -150,14 +150,14 @@ func TestNonceFromAddress(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot2 := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  4,
 		}
 		txSlot2.IDHash[0] = 2
 		txSlot3 := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  6,
@@ -178,7 +178,7 @@ func TestNonceFromAddress(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot1 := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 9 * common.Ether,
 			Gas:    100000,
 			Nonce:  3,
@@ -196,7 +196,7 @@ func TestNonceFromAddress(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot1 := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  1,
@@ -256,7 +256,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  3,
@@ -274,7 +274,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 3000000,
 			Gas:    100000,
 			Nonce:  3,
@@ -294,7 +294,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    3000000,
+			Tip:    *uint256.NewInt(3000000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  3,
@@ -314,7 +314,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    330000,
+			Tip:    *uint256.NewInt(330000),
 			FeeCap: 330000,
 			Gas:    100000,
 			Nonce:  3,
@@ -377,7 +377,7 @@ func TestReverseNonces(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot := &types.TxSlot{
-			Tip:    500_000,
+			Tip:    *uint256.NewInt(500_000),
 			FeeCap: 3_000_000,
 			Gas:    100000,
 			Nonce:  3,
@@ -404,7 +404,7 @@ func TestReverseNonces(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot := &types.TxSlot{
-			Tip:    500_000,
+			Tip:    *uint256.NewInt(500_000),
 			FeeCap: 500_000,
 			Gas:    100000,
 			Nonce:  2,
@@ -431,7 +431,7 @@ func TestReverseNonces(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot := &types.TxSlot{
-			Tip:    600_000,
+			Tip:    *uint256.NewInt(600_000),
 			FeeCap: 3_000_000,
 			Gas:    100000,
 			Nonce:  2,
@@ -506,7 +506,7 @@ func TestTxPoke(t *testing.T) {
 	{
 		var txSlots types.TxSlots
 		txSlot := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  2,
@@ -534,7 +534,7 @@ func TestTxPoke(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  2,
@@ -563,7 +563,7 @@ func TestTxPoke(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    3000000,
+			Tip:    *uint256.NewInt(3000000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  2,
@@ -593,7 +593,7 @@ func TestTxPoke(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    300000,
+			Tip:    *uint256.NewInt(300000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  2,
@@ -615,7 +615,7 @@ func TestTxPoke(t *testing.T) {
 	{
 		txSlots := types.TxSlots{}
 		txSlot := &types.TxSlot{
-			Tip:    3000000,
+			Tip:    *uint256.NewInt(3000000),
 			FeeCap: 300000,
 			Gas:    100000,
 			Nonce:  2,

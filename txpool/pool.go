@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -1005,9 +1006,11 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.Tx.SenderID, mt.Tx.Nonce)
 	if found != nil {
-		tipThreshold := found.Tx.Tip * (100 + p.cfg.PriceBump) / 100
+		tipThreshold := uint256.NewInt(0)
+		tipThreshold = tipThreshold.Mul(&found.Tx.Tip, uint256.NewInt(100+p.cfg.PriceBump))
+		tipThreshold.Div(tipThreshold, u256.N100)
 		feecapThreshold := found.Tx.FeeCap * (100 + p.cfg.PriceBump) / 100
-		if mt.Tx.Tip < tipThreshold || mt.Tx.FeeCap < feecapThreshold {
+		if mt.Tx.Tip.Cmp(tipThreshold) < 0 || mt.Tx.FeeCap < feecapThreshold {
 			// Both tip and feecap need to be larger than previously to replace the transaction
 			// In case if the transation is stuck, "poke" it to rebroadcast
 			// TODO refactor to return the list of promoted hashes instead of using added inside the pool
@@ -1163,7 +1166,9 @@ func onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint
 		}
 		minFeeCap = cmp.Min(minFeeCap, mt.Tx.FeeCap)
 		mt.minFeeCap = minFeeCap
-		minTip = cmp.Min(minTip, mt.Tx.Tip)
+		if mt.Tx.Tip.IsUint64() {
+			minTip = cmp.Min(minTip, mt.Tx.Tip.Uint64())
+		}
 		mt.minTip = minTip
 
 		mt.nonceDistance = 0

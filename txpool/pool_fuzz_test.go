@@ -202,7 +202,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 		txs.Txs[i] = &types.TxSlot{
 			Nonce:  txNonce[i],
 			Value:  values[i%len(values)],
-			Tip:    tips[i%len(tips)],
+			Tip:    *uint256.NewInt(tips[i%len(tips)]),
 			FeeCap: feeCap[i%len(feeCap)],
 		}
 		txRlp := fakeRlpTx(txs.Txs[i], senders.At(i%senders.Len()))
@@ -220,7 +220,7 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 // fakeRlpTx add anything what identifying tx to `data` to make hash unique
 func fakeRlpTx(slot *types.TxSlot, data []byte) []byte {
 	dataLen := rlp.U64Len(1) + //chainID
-		rlp.U64Len(slot.Nonce) + rlp.U64Len(slot.Tip) + rlp.U64Len(slot.FeeCap) +
+		rlp.U64Len(slot.Nonce) + rlp.U256Len(&slot.Tip) + rlp.U64Len(slot.FeeCap) +
 		rlp.U64Len(0) + // gas
 		rlp.StringLen(0) + // dest addr
 		rlp.U256Len(&slot.Value) +
@@ -234,11 +234,13 @@ func fakeRlpTx(slot *types.TxSlot, data []byte) []byte {
 	p += rlp.EncodeListPrefix(dataLen, buf[p:])
 	p += rlp.EncodeU64(1, buf[p:]) //chainID
 	p += rlp.EncodeU64(slot.Nonce, buf[p:])
-	p += rlp.EncodeU64(slot.Tip, buf[p:])
+	bb := bytes.NewBuffer(buf[p:p])
+	_ = slot.Tip.EncodeRLP(bb)
+	p += rlp.U256Len(&slot.Tip)
 	p += rlp.EncodeU64(slot.FeeCap, buf[p:])
 	p += rlp.EncodeU64(0, buf[p:])           //gas
 	p += rlp.EncodeString([]byte{}, buf[p:]) //destrination addr
-	bb := bytes.NewBuffer(buf[p:p])
+	bb = bytes.NewBuffer(buf[p:p])
 	_ = slot.Value.EncodeRLP(bb)
 	p += rlp.U256Len(&slot.Value)
 	p += rlp.EncodeString(data, buf[p:])  //data

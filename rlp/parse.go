@@ -211,6 +211,7 @@ func U256(payload []byte, pos int, x *uint256.Int) (int, error) {
 	x.SetBytes(payload[dataPos : dataPos+dataLen])
 	return dataPos + dataLen, nil
 }
+
 func U256Len(z *uint256.Int) int {
 	if z == nil {
 		return 1
