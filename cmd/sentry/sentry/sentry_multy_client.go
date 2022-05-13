@@ -301,10 +301,9 @@ func RecvMessage(
 					log.Warn("[RecvMessage] Handling incoming message", "err", err)
 				}
 			}
-		}
-
-		if wg != nil {
-			wg.Done()
+			if wg != nil {
+				wg.Done()
+			}
 		}
 	}()
 
