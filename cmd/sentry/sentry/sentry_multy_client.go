@@ -287,9 +287,6 @@ func RecvMessage(
 				return
 			default:
 			}
-			if len(reqs) > 0 && len(reqs)%10 == 0 {
-				log.Info("msgs in erigon", "msgs", len(reqs))
-			}
 			if err = handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
 					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
