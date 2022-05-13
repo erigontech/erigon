@@ -1008,7 +1008,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	var sender [20]byte
 	parse := func(v, valueBuf []byte, senders []common.Address, j int) ([]byte, error) {
 		if _, err := parseCtx.ParseTransaction(v, 0, &slot, sender[:], false /* hasEnvelope */, nil); err != nil {
-			fmt.Printf("rlp: %x\n", v)
 			return valueBuf, err
 		}
 		if len(senders) > 0 {
