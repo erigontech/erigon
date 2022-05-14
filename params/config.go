@@ -90,25 +90,7 @@ var (
 	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
-	SepoliaChainConfig = &ChainConfig{
-		ChainName:           networkname.SepoliaChainName,
-		ChainID:             big.NewInt(11155111),
-		Consensus:           EtHashConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		Ethash:              new(EthashConfig),
-	}
+	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
 
 	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
 	RopstenChainConfig = readChainSpec("chainspecs/ropsten.json")
