@@ -3,10 +3,8 @@ package shell
 import (
 	"context"
 	"github.com/abiosoft/ishell/v2"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"strconv"
 )
 
@@ -26,7 +24,7 @@ func sendTx(ctx *ishell.Context, s *ishell.Shell) {
 	sendAddr := ctx.ReadLine()
 	ctx.Printf("Address to send %d ETH to is %s\n", sendValue, sendAddr)
 
-	erigon.StartProcess(&utils.RPCFlags{WebsocketEnabled: false})
+	//erigon.StartProcess(&utils.RPCFlags{WebsocketEnabled: false})
 
 	nonce, err := services.GetNonce(reqId)
 	if err != nil {

@@ -3,7 +3,6 @@ package erigon
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/rpcdaemon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
@@ -61,7 +60,7 @@ func runDevnet(cliCtx *cli.Context) {
 
 func StartProcess(rpcFlags *utils.RPCFlags) {
 	go RunNode()
-	go rpcdaemon.RunDaemon(rpcFlags)
+	//go rpcdaemon.RunDaemon(rpcFlags)
 	time.Sleep(10 * time.Second)
 	//var wg sync.WaitGroup
 	//wg.Add(1)
@@ -69,7 +68,7 @@ func StartProcess(rpcFlags *utils.RPCFlags) {
 }
 
 func GetCmdLineFlags() []string {
-	flags := []string{"--datadir=~/dev", "--chain=dev"}
+	flags := []string{"--datadir=~/dev", "--chain=dev", "--http"}
 	if IsRunning() {
 		fmt.Println("Node is running")
 		return flags

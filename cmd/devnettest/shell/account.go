@@ -3,9 +3,7 @@ package shell
 import (
 	"fmt"
 	"github.com/abiosoft/ishell/v2"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -22,11 +20,10 @@ func getBalance(ctx *ishell.Context, s *ishell.Shell) {
 		return
 	}
 	address := common.HexToAddress(addr)
-	erigon.StartProcess(&utils.RPCFlags{WebsocketEnabled: false})
+	//erigon.StartProcess(&utils.RPCFlags{WebsocketEnabled: false})
 	res, err := requests.GetBalance(reqId, address, blockNum)
 	if err != nil {
 		res = fmt.Sprintf("could not get balance: %v\n", err)
 	}
 	ctx.Printf(res)
-	//erigon.Stop()
 }
