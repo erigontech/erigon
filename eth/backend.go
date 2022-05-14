@@ -139,6 +139,8 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 
 	downloader *downloader.Downloader
+
+	initialCycle bool
 }
 
 // New creates a new Ethereum object (including the
@@ -213,6 +215,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			Accumulator:          shards.NewAccumulator(chainConfig),
 			StateChangesConsumer: kvRPC,
 		},
+		initialCycle: true,
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -651,16 +654,10 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		})
 	}
 
-	if s.chainConfig.ChainID.Uint64() > 10 {
+	if s.chainConfig.ChainID.Uint64() > 10 && s.initialCycle {
 		go func() {
-			skipCycleEvery := time.NewTicker(4 * time.Second)
-			defer skipCycleEvery.Stop()
-			for range skipCycleEvery.C {
-				select {
-				case s.sentriesClient.Hd.SkipCycleHack <- struct{}{}:
-				default:
-				}
-			}
+			time.Sleep(4 * time.Second)
+			s.sentriesClient.Hd.SkipCycleHack <- struct{}{}
 		}()
 	}
 
