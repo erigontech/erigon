@@ -47,10 +47,7 @@ func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
 		}
 		return true
 	} else if config == params.BSCChainConfig {
-		if blockNumber >= BSCNotCheckedFrom {
-			return false
-		}
-		return true
+		return blockNumber < BSCNotCheckedFrom
 	}
 	return false
 }
