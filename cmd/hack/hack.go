@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -50,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/parallelcompress"
@@ -2540,6 +2542,35 @@ func histStat1(chaindata string) error {
 	return nil
 }
 
+func chainConfig(name string) error {
+	var chainConfig *params.ChainConfig
+	switch name {
+	case "mainnet":
+		chainConfig = params.MainnetChainConfig
+	case "ropsten":
+		chainConfig = params.RopstenChainConfig
+	default:
+		return fmt.Errorf("unknown name: %s", name)
+	}
+	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err = encoder.Encode(chainConfig); err != nil {
+		return err
+	}
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -2717,6 +2748,8 @@ func main() {
 		err = histStats()
 	case "histStat1":
 		err = histStat1(*chaindata)
+	case "chainConfig":
+		err = chainConfig(*name)
 	}
 
 	if err != nil {

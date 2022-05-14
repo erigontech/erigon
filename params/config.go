@@ -17,6 +17,8 @@
 package params
 
 import (
+	"embed"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"path"
@@ -27,6 +29,24 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
+
+//go:embed chainspecs
+var chainspecs embed.FS
+
+func readChainSpec(filename string) *ChainConfig {
+	f, err := chainspecs.Open(filename)
+	if err != nil {
+		panic(fmt.Sprintf("Could not open chainspec for %s: %v", filename, err))
+	}
+	defer f.Close()
+	decoder := json.NewDecoder(f)
+	spec := &ChainConfig{}
+	err = decoder.Decode(&spec)
+	if err != nil {
+		panic(fmt.Sprintf("Could not parse chainspec for %s: %v", filename, err))
+	}
+	return spec
+}
 
 type ConsensusType string
 
@@ -67,27 +87,7 @@ var (
 
 var (
 	// MainnetChainConfig is the chain parameters to run a node on the main network.
-	MainnetChainConfig = &ChainConfig{
-		ChainName:           networkname.MainnetChainName,
-		ChainID:             big.NewInt(1),
-		Consensus:           EtHashConsensus,
-		HomesteadBlock:      big.NewInt(1_150_000),
-		DAOForkBlock:        big.NewInt(1_920_000),
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(2_463_000),
-		EIP150Hash:          common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
-		EIP155Block:         big.NewInt(2_675_000),
-		EIP158Block:         big.NewInt(2_675_000),
-		ByzantiumBlock:      big.NewInt(4_370_000),
-		ConstantinopleBlock: big.NewInt(7_280_000),
-		PetersburgBlock:     big.NewInt(7_280_000),
-		IstanbulBlock:       big.NewInt(9_069_000),
-		MuirGlacierBlock:    big.NewInt(9_200_000),
-		BerlinBlock:         big.NewInt(12_244_000),
-		LondonBlock:         big.NewInt(12_965_000),
-		ArrowGlacierBlock:   big.NewInt(13_773_000),
-		Ethash:              new(EthashConfig),
-	}
+	MainnetChainConfig = readChainSpec("chainspecs/mainnet.json")
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = &ChainConfig{
@@ -110,30 +110,8 @@ var (
 		Ethash:              new(EthashConfig),
 	}
 
-	ropstenTTD, _ = new(big.Int).SetString("43531756765713534", 10)
-
 	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
-	RopstenChainConfig = &ChainConfig{
-		ChainName:               networkname.RopstenChainName,
-		ChainID:                 big.NewInt(3),
-		Consensus:               EtHashConsensus,
-		HomesteadBlock:          big.NewInt(0),
-		DAOForkBlock:            nil,
-		DAOForkSupport:          true,
-		EIP150Block:             big.NewInt(0),
-		EIP150Hash:              common.HexToHash("0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d"),
-		EIP155Block:             big.NewInt(10),
-		EIP158Block:             big.NewInt(10),
-		ByzantiumBlock:          big.NewInt(1_700_000),
-		ConstantinopleBlock:     big.NewInt(4_230_000),
-		PetersburgBlock:         big.NewInt(4_939_394),
-		IstanbulBlock:           big.NewInt(6_485_846),
-		MuirGlacierBlock:        big.NewInt(7_117_117),
-		BerlinBlock:             big.NewInt(9_812_189),
-		LondonBlock:             big.NewInt(10_499_401),
-		TerminalTotalDifficulty: ropstenTTD,
-		Ethash:                  new(EthashConfig),
-	}
+	RopstenChainConfig = readChainSpec("chainspecs/ropsten.json")
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
 	RinkebyChainConfig = &ChainConfig{
