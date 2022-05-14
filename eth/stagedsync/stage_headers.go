@@ -828,6 +828,7 @@ Loop:
 		case <-cfg.hd.DeliveryNotify:
 			log.Trace("headerLoop woken up by the incoming request")
 		case <-cfg.hd.SkipCycleHack:
+			log.Info("Received no headers to process, skipping header stage")
 			break Loop
 		}
 		timer.Stop()
