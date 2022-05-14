@@ -810,7 +810,7 @@ Loop:
 				log.Info("Req/resp stats", "req", reqCount, "reqMin", reqMin, "reqMax", reqMax,
 					"skel", skeletonReqCount, "skelMin", skeletonReqMin, "skelMax", skeletonReqMax,
 					"resp", respCount, "respMin", respMin, "respMax", respMax)
-				fmt.Printf("%s\n", cfg.hd.AnchorState())
+
 				if noProgressCounter >= 5 && wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
 					break Loop
