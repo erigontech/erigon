@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	maxKeySize  = 1024
+	maxKeySize  = 512
 	keyHalfSize = maxKeySize / 2
 	maxChild    = 2
 )
@@ -91,7 +91,7 @@ func NewBinHashed(accountKeyLen int,
 func (hph *BinHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []Update) (map[string][]byte, error) {
 	branchNodeUpdates := make(map[string][]byte)
 	for i, hk := range hashedKeys {
-		hashedKey := newBitstring(hk)
+		hashedKey := hexToBin(hk)
 		plainKey := plainKeys[i]
 		update := updates[i]
 		if hph.trace {
@@ -176,11 +176,23 @@ func (hph *BinHashed) Reset() {
 func wrapAccountStorageFn(fn func([]byte, *Cell) error) func(pk []byte, bc *BinCell) error {
 	return func(pk []byte, bc *BinCell) error {
 		cl := &Cell{}
+		cl.Balance = *bc.Balance.Clone()
+		cl.Nonce = bc.Nonce
+		cl.StorageLen = bc.StorageLen
+		cl.apl = bc.apl
+		cl.spl = bc.spl
+		cl.hl = bc.hl
+		copy(cl.apk[:], bc.apk[:])
+		copy(cl.spk[:], bc.spk[:])
+		copy(cl.h[:], bc.h[:])
+		copy(cl.extension[:], bc.extension[:])
+		copy(cl.downHashedKey[:], bc.downHashedKey[:])
+		copy(cl.CodeHash[:], bc.CodeHash[:])
+		copy(cl.Storage[:], bc.Storage[:])
 
 		if err := fn(pk, cl); err != nil {
 			return err
 		}
-		bc.fillEmpty()
 
 		bc.Balance = *cl.Balance.Clone()
 		bc.Nonce = cl.Nonce
@@ -547,7 +559,7 @@ func (hph *BinHashed) needUnfolding(hashedKey []byte) int {
 }
 
 func (hph *BinHashed) unfoldBranchNode(row int, deleted bool, depth int) error {
-	branchData, err := hph.branchFn(hexToCompact(hph.currentKey[:hph.currentKeyLen]))
+	branchData, err := hph.branchFn(binToCompact(hph.currentKey[:hph.currentKeyLen]))
 	if err != nil {
 		return err
 	}
@@ -557,6 +569,7 @@ func (hph *BinHashed) unfoldBranchNode(row int, deleted bool, depth int) error {
 		return nil
 	}
 	hph.branchBefore[row] = true
+	//fmt.Printf("unfoldBranchNode [%x]=>[%x]\n", hph.currentKey[:hph.currentKeyLen], branchData)
 	bitmap := binary.BigEndian.Uint16(branchData[0:])
 	pos := 2
 	if deleted {
@@ -654,7 +667,7 @@ func (hph *BinHashed) unfold(hashedKey []byte, unfolding int) error {
 		cell := &hph.grid[row][nibble]
 		cell.fillFromUpperCell(upCell, depth, unfolding)
 		if hph.trace {
-			fmt.Printf("cell (%d, %x) depth=%d\n", row, nibble, depth)
+			fmt.Printf("cell (%d, %x) depth=%d, a=[%x], upa=[%x]\n", row, nibble, depth, cell.apk[:cell.apl], upCell.apk[:upCell.apl])
 		}
 		if row >= keyHalfSize {
 			cell.apl = 0
@@ -676,7 +689,7 @@ func (hph *BinHashed) unfold(hashedKey []byte, unfolding int) error {
 		cell := &hph.grid[row][nibble]
 		cell.fillFromUpperCell(upCell, depth, upCell.downHashedLen)
 		if hph.trace {
-			fmt.Printf("cell (%d, %x) depth=%d\n", row, nibble, depth)
+			fmt.Printf("cell (%d, %x) depth=%d, a=[%x], upa=[%x]\n", row, nibble, depth, cell.apk[:cell.apl], upCell.apk[:upCell.apl])
 		}
 		if row >= keyHalfSize {
 			cell.apl = 0
@@ -693,6 +706,29 @@ func (hph *BinHashed) unfold(hashedKey []byte, unfolding int) error {
 
 func (hph *BinHashed) needFolding(hashedKey []byte) bool {
 	return !bytes.HasPrefix(hashedKey, hph.currentKey[:hph.currentKeyLen])
+}
+
+func binToCompact(bin []byte) []byte {
+	compact := make([]byte, 2+(len(bin)+7)/8)
+	binary.BigEndian.PutUint16(compact, uint16(len(bin)))
+	for i := 0; i < len(bin); i++ {
+		if bin[i] != 0 {
+			compact[2+i/8] |= (byte(1) << (i % 8))
+		}
+	}
+	return compact
+}
+
+func compactToBin(compact []byte) []byte {
+	bin := make([]byte, binary.BigEndian.Uint16(compact))
+	for i := 0; i < len(bin); i++ {
+		if compact[2+i/8]&(byte(1)<<(i%8)) == 0 {
+			bin[i] = 0
+		} else {
+			bin[i] = 1
+		}
+	}
+	return bin
 }
 
 // The purpose of fold is to reduce hph.currentKey[:hph.currentKeyLen]. It should be invoked
@@ -728,7 +764,7 @@ func (hph *BinHashed) fold() ([]byte, []byte, error) {
 	var branchData []byte
 	var bitmapBuf [4]byte
 	// updateKey, _ := bitstring(hph.currentKey[:updateKeyLen]).reconstructHex()
-	updateKey := bitstring(hph.currentKey[:updateKeyLen])
+	updateKey := binToCompact(hph.currentKey[:updateKeyLen])
 	if hph.trace {
 		fmt.Printf("touchMap[%d]=%016b, afterMap[%d]=%016b\n", row, hph.touchMap[row], row, hph.afterMap[row])
 	}
@@ -929,7 +965,7 @@ func (hph *BinHashed) fold() ([]byte, []byte, error) {
 	}
 	if branchData != nil {
 		if hph.trace {
-			fmt.Printf("fold: update key: %x, branchData: [%x]\n", CompactToHex(updateKey), branchData)
+			fmt.Printf("fold: update key: [%x], branchData: [%x]\n", compactToBin(updateKey), branchData)
 		}
 	}
 	return branchData, updateKey, nil
@@ -1184,6 +1220,26 @@ func (cell *BinCell) fillFromLowerCell(lowCell *BinCell, lowDepth int, preExtens
 	}
 }
 
+func binHashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int) error {
+	keccak.Reset()
+	var hashBufBack [32]byte
+	hashBuf := hashBufBack[:]
+	if _, err := keccak.Write(plainKey); err != nil {
+		return err
+	}
+	if _, err := keccak.Read(hashBuf); err != nil {
+		return err
+	}
+	for k := hashedKeyOffset; k < 256; k++ {
+		if hashBuf[k/8]&(1<<(7-k%8)) == 0 {
+			dest[k-hashedKeyOffset] = 0
+		} else {
+			dest[k-hashedKeyOffset] = 1
+		}
+	}
+	return nil
+}
+
 func (cell *BinCell) deriveHashedKeys(depth int, keccak keccakState, accountKeyLen int) error {
 	extraLen := 0
 	if cell.apl > 0 {
@@ -1206,7 +1262,7 @@ func (cell *BinCell) deriveHashedKeys(depth int, keccak keccakState, accountKeyL
 		cell.downHashedLen += extraLen
 		var hashedKeyOffset, downOffset int
 		if cell.apl > 0 {
-			if err := hashKey(keccak, cell.apk[:cell.apl], cell.downHashedKey[:], depth); err != nil {
+			if err := binHashKey(keccak, cell.apk[:cell.apl], cell.downHashedKey[:], depth); err != nil {
 				return err
 			}
 			downOffset = keyHalfSize - depth
@@ -1215,7 +1271,7 @@ func (cell *BinCell) deriveHashedKeys(depth int, keccak keccakState, accountKeyL
 			if depth >= keyHalfSize {
 				hashedKeyOffset = depth - keyHalfSize
 			}
-			if err := hashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
+			if err := binHashKey(keccak, cell.spk[accountKeyLen:cell.spl], cell.downHashedKey[downOffset:], hashedKeyOffset); err != nil {
 				return err
 			}
 		}

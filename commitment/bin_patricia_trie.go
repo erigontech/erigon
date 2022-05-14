@@ -174,7 +174,7 @@ func (t *BinPatriciaTrie) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates
 					t.root = nil
 				}
 				t.stat.nodesTotal--
-				branchNodeUpdates[newBitstring(hashedKeys[i]).String()] = []byte{}
+				branchNodeUpdates[hexToBin(hashedKeys[i]).String()] = []byte{}
 			}
 			continue
 		}
@@ -630,17 +630,23 @@ var Zero30 = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 
 type bitstring []uint8
 
+func hexToBin(hex []byte) bitstring {
+	bin := make([]byte, 4*len(hex))
+	for i := range bin {
+		if hex[i/4]&(1<<(3-i%4)) != 0 {
+			bin[i] = 1
+		}
+	}
+	return bin
+}
+
 func newBitstring(key []byte) bitstring {
 	bits := make([]byte, 8*len(key))
 	for i := range bits {
-
-		if key[i/8]&(1<<(7-i%8)) == 0 {
-			bits[i] = 0
-		} else {
+		if key[i/8]&(1<<(7-i%7)) != 0 {
 			bits[i] = 1
 		}
 	}
-
 	return bits
 }
 
