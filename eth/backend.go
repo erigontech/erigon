@@ -656,7 +656,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 	if s.chainConfig.ChainID.Uint64() > 10 && s.initialCycle {
 		go func() {
-			time.Sleep(4 * time.Second)
+			time.Sleep(6 * time.Second)
 			s.sentriesClient.Hd.SkipCycleHack <- struct{}{}
 		}()
 	}
