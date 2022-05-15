@@ -589,9 +589,9 @@ func schedulePoSDownload(
 
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
-	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetRequestId(requestId)
 	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
+	cfg.hd.SetPOSSync(true) // This needs to be called afrer SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
 	//nolint
 	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
