@@ -2557,6 +2557,20 @@ func chainConfig(name string) error {
 		chainConfig = params.GoerliChainConfig
 	case "kiln-devnet":
 		chainConfig = params.KilnDevnetChainConfig
+	case "bsc":
+		chainConfig = params.BSCChainConfig
+	case "sokol":
+		chainConfig = params.SokolChainConfig
+	case "chapel":
+		chainConfig = params.ChapelChainConfig
+	case "rialto":
+		chainConfig = params.RialtoChainConfig
+	case "fermion":
+		chainConfig = params.FermionChainConfig
+	case "mumbai":
+		chainConfig = params.MumbaiChainConfig
+	case "bor-mainnet":
+		chainConfig = params.BorMainnetChainConfig
 	default:
 		return fmt.Errorf("unknown name: %s", name)
 	}
