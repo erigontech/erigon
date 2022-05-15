@@ -48,9 +48,8 @@ func StageLoop(
 		select {
 		case <-ctx.Done():
 			return
-		case <-hd.DeliveryNotify:
+		default:
 		}
-
 		start := time.Now()
 
 		// Estimate the current top height seen from the peer
@@ -101,6 +100,16 @@ func StageLoop(
 			case <-ctx.Done():
 				return
 			case <-c:
+			}
+		}
+		if !hd.POSSync() {
+			// Wait for delivery of any p2p headers here to resume the stage loop
+			// Since StageLoopStep creates RW database transaction, the mining loop can only do its work (it also requires creating RW transaction)
+			// when the control flow is outside StageLoopStep function. Therefore wait here to give mining loop this opportunity
+			select {
+			case <-ctx.Done():
+				return
+			case <-hd.DeliveryNotify:
 			}
 		}
 	}

@@ -398,10 +398,11 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime uint64) (timeout 
 	}
 
 	// Request ancestors
+	log.Info("Requested", "anchor", anchor.parentHash)
 	request = &HeaderRequest{
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
-		Number:  anchor.blockHeight - 1,
+		Number:  0, // Since posAnchor may be an estimate, do not specify it here
 		Length:  192,
 		Skip:    0,
 		Reverse: true,
@@ -541,6 +542,7 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
+	log.Trace("Set posAnchor", "blockHeight", height+1)
 	hd.posAnchor = &Anchor{
 		parentHash:  hash,
 		blockHeight: height + 1,
@@ -551,13 +553,18 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
+	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.posAnchor == nil {
+		// May happen if peers are sending unrequested header packets after we've synced
+		log.Trace("posAnchor is nil")
 		return nil, nil
 	}
 	// We may have received answer from old request so not enough evidence for penalizing.
-	if csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
+	if hd.posAnchor.blockHeight != 1 && csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
+		// hd.posAnchor.blockHeight == 1 is a special case when the height of the anchor is unknown (it is created from the fork choice message from beacon node)
+		log.Trace("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
 		return nil, nil
 	}
 
@@ -566,7 +573,6 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		return nil, nil
 	}
 
-	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
 	for _, sh := range csHeaders {
 		header := sh.Header
 		headerHash := sh.Hash
@@ -589,6 +595,11 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 			hd.posAnchor = nil
 			hd.posStatus = Synced
 			hd.BeaconRequestList.Interrupt(engineapi.Synced)
+			// Wake up stage loop if it is outside any of the stages
+			select {
+			case hd.DeliveryNotify <- struct{}{}:
+			default:
+			}
 			return nil, nil
 		}
 
@@ -918,6 +929,7 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(csHeaders), "limit", hd.linkLimit)
 		hd.pruneLinkQueue()
 	}
+	// Wake up stage loop if it is outside any of the stages
 	select {
 	case hd.DeliveryNotify <- struct{}{}:
 	default:

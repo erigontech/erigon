@@ -295,9 +295,8 @@ func startHandlingForkChoice(
 	if header == nil {
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
 		hashToDownload := headerHash
-		heighToDownload := cfg.hd.TopSeenHeight() // approximate
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestStatus, requestId, hashToDownload, heighToDownload, s, cfg)
+		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
 		return nil
 	}
 
