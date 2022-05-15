@@ -807,12 +807,9 @@ func (s *Ethereum) Start() error {
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 	go func() {
 		stop := false
-		retry := false
+		// checks if we stop checking for stage loop or not
 		for !stop {
-			if s.initialCycle || !s.sentriesClient.Hd.IsLinkQueueEmpty() || retry {
-				retry, stop = stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle, s.initialCycle)
-			}
-			s.initialCycle = false
+			stop = stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle, &s.initialCycle)
 		}
 	}()
 	return nil

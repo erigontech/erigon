@@ -40,68 +40,70 @@ func StageLoop(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
-	initialCycle bool,
-) (bool, bool) {
+	initialCycle *bool,
+) bool {
 	defer close(waitForDone)
 
-	select {
-	case <-ctx.Done():
-		return false, true
-	default:
-	}
-
-	start := time.Now()
-
-	// Estimate the current top height seen from the peer
-	height := hd.TopSeenHeight()
-	headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
-
-	pendingPayloadStatus := hd.GetPendingPayloadStatus()
-	if pendingPayloadStatus != (common.Hash{}) {
-		if err != nil {
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
-		} else {
-			var status remote.EngineStatus
-			if headBlockHash == pendingPayloadStatus {
-				status = remote.EngineStatus_VALID
-			} else {
-				status = remote.EngineStatus_INVALID
-			}
-			hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          status,
-				LatestValidHash: headBlockHash,
-			}
-		}
-
-		hd.ClearPendingPayloadStatus()
-	}
-
-	if err != nil {
-		if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
-			return false, true
-		}
-
-		log.Error("Staged Sync", "err", err)
-		if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
-			log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
-		}
-		time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
-		return true, false
-	}
-
-	hd.EnableRequestChaining()
-
-	if loopMinTime != 0 {
-		waitTime := loopMinTime - time.Since(start)
-		log.Info("Wait time until next loop", "for", waitTime)
-		c := time.After(waitTime)
+	for *initialCycle || !hd.IsLinkQueueEmpty() {
 		select {
 		case <-ctx.Done():
-			return false, true
-		case <-c:
+			return true
+		default:
+		}
+
+		start := time.Now()
+
+		// Estimate the current top height seen from the peer
+		height := hd.TopSeenHeight()
+		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, *initialCycle, updateHead, nil)
+
+		pendingPayloadStatus := hd.GetPendingPayloadStatus()
+		if pendingPayloadStatus != (common.Hash{}) {
+			if err != nil {
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{CriticalError: err}
+			} else {
+				var status remote.EngineStatus
+				if headBlockHash == pendingPayloadStatus {
+					status = remote.EngineStatus_VALID
+				} else {
+					status = remote.EngineStatus_INVALID
+				}
+				hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					Status:          status,
+					LatestValidHash: headBlockHash,
+				}
+			}
+
+			hd.ClearPendingPayloadStatus()
+		}
+
+		if err != nil {
+			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
+				return true
+			}
+			*initialCycle = false
+			hd.EnableRequestChaining()
+			log.Error("Staged Sync", "err", err)
+			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
+			}
+			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
+			return false
+		}
+		*initialCycle = false
+		hd.EnableRequestChaining()
+		if loopMinTime != 0 {
+			waitTime := loopMinTime - time.Since(start)
+			log.Info("Wait time until next loop", "for", waitTime)
+			c := time.After(waitTime)
+			select {
+			case <-ctx.Done():
+				return true
+			case <-c:
+			}
 		}
 	}
-	return false, false
+	return false
 }
 
 func StageLoopStep(
