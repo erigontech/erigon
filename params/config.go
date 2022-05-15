@@ -96,72 +96,12 @@ var (
 	RopstenChainConfig = readChainSpec("chainspecs/ropsten.json")
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
-	RinkebyChainConfig = &ChainConfig{
-		ChainName:           networkname.RinkebyChainName,
-		ChainID:             big.NewInt(4),
-		Consensus:           CliqueConsensus,
-		HomesteadBlock:      big.NewInt(1),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(2),
-		EIP150Hash:          common.HexToHash("0x9b095b36c15eaf13044373aef8ee0bd3a382a5abb92e402afa44b8249c3a90e9"),
-		EIP155Block:         big.NewInt(3),
-		EIP158Block:         big.NewInt(3),
-		ByzantiumBlock:      big.NewInt(1_035_301),
-		ConstantinopleBlock: big.NewInt(3_660_663),
-		PetersburgBlock:     big.NewInt(4_321_234),
-		IstanbulBlock:       big.NewInt(5_435_345),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(8_290_928),
-		LondonBlock:         big.NewInt(8_897_988),
-		Clique: &CliqueConfig{
-			Period: 15,
-			Epoch:  30000,
-		},
-	}
+	RinkebyChainConfig = readChainSpec("chainspecs/rinkeby.json")
 
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
-	GoerliChainConfig = &ChainConfig{
-		ChainName:           networkname.GoerliChainName,
-		ChainID:             big.NewInt(5),
-		Consensus:           CliqueConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(1_561_651),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(4_460_644),
-		LondonBlock:         big.NewInt(5_062_605),
-		Clique: &CliqueConfig{
-			Period: 15,
-			Epoch:  30000,
-		},
-	}
+	GoerliChainConfig = readChainSpec("chainspecs/goerli.json")
 
-	KilnDevnetChainConfig = &ChainConfig{
-		ChainName:               networkname.KilnDevnetChainName,
-		Consensus:               EtHashConsensus,
-		ChainID:                 big.NewInt(1337802),
-		HomesteadBlock:          big.NewInt(0),
-		EIP150Block:             big.NewInt(0),
-		EIP155Block:             big.NewInt(0),
-		EIP158Block:             big.NewInt(0),
-		ByzantiumBlock:          big.NewInt(0),
-		ConstantinopleBlock:     big.NewInt(0),
-		PetersburgBlock:         big.NewInt(0),
-		IstanbulBlock:           big.NewInt(0),
-		BerlinBlock:             big.NewInt(0),
-		LondonBlock:             big.NewInt(0),
-		MergeForkBlock:          big.NewInt(1000),
-		TerminalTotalDifficulty: big.NewInt(20_000_000_000_000),
-		Ethash:                  &EthashConfig{},
-	}
+	KilnDevnetChainConfig = readChainSpec("chainspecs/kiln-devnet.json")
 
 	BSCChainConfig = &ChainConfig{
 		ChainName:           networkname.BSCChainName,
