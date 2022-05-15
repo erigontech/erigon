@@ -95,6 +95,8 @@ func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
 		PingBackDelay: time.Nanosecond,
 
 		PrivateKeyGenerator: contextGetPrivateKeyGenerator(ctx),
+
+		TableRevalidateInterval: time.Hour,
 	})
 	if err != nil {
 		panic(err)
@@ -540,6 +542,9 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 	t.Parallel()
 
+	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
+
 	// Start the network.
 	nodes := make([]*UDPv4, 4)
 	for i := range nodes {
@@ -548,9 +553,18 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 			bn := nodes[0].Self()
 			cfg.Bootnodes = []*enode.Node{bn}
 		}
-		nodes[i] = startLocalhostV4(t, cfg)
-		defer nodes[i].Close()
+		cfg.ReplyTimeout = 50 * time.Millisecond
+		cfg.PingBackDelay = time.Nanosecond
+		cfg.TableRevalidateInterval = time.Hour
+
+		nodes[i] = startLocalhostV4(ctx, t, cfg)
 	}
+
+	defer func() {
+		for _, node := range nodes {
+			node.Close()
+		}
+	}()
 
 	// Run through the iterator on all nodes until
 	// they have all found each other.
@@ -572,14 +586,13 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 
 	// Wait for all status reports.
-	timeout := time.NewTimer(30 * time.Second)
+	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	for received := 0; received < len(nodes); {
 		select {
 		case <-timeout.C:
-			for _, node := range nodes {
-				node.Close()
-			}
+			t.Fatalf("Failed to converge within timeout")
+			return
 		case err := <-status:
 			received++
 			if err != nil {
@@ -590,7 +603,7 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 }
 
-func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
+func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config) *UDPv4 {
 	t.Helper()
 
 	cfg.PrivateKey = newkey()
@@ -617,8 +630,6 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	ctx := context.Background()
-	ctx = disableLookupSlowdown(ctx)
 	udp, err := ListenV4(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)

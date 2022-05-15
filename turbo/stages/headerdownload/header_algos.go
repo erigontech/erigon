@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"math/big"
 	"sort"
 	"strings"
@@ -55,83 +54,8 @@ const POSPandaBanner = `
 
 `
 
-// Implements sort.Interface so we can sort the incoming header in the message by block height
-type HeadersByHeightAndHash []ChainSegmentHeader
-
-func (h HeadersByHeightAndHash) Len() int {
-	return len(h)
-}
-
-func (h HeadersByHeightAndHash) Less(i, j int) bool {
-	// Note - the ordering is the inverse ordering of the block heights
-	if h[i].Number != h[j].Number {
-		return h[i].Number > h[j].Number
-	}
-	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) > 0
-}
-
-func (h HeadersByHeightAndHash) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-// SplitIntoSegments converts message containing headers into a collection of chain segments
-func (hd *HeaderDownload) SplitIntoSegments(csHeaders []ChainSegmentHeader) ([]ChainSegment, Penalty, error) {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	sort.Sort(HeadersByHeightAndHash(csHeaders))
-	// Now all headers are order from the highest block height to the lowest
-	var segments []ChainSegment                          // Segments being built
-	segmentMap := make(map[common.Hash]int)              // Mapping of the header hash to the index of the chain segment it belongs
-	childrenMap := make(map[common.Hash][]*types.Header) // Mapping parent hash to the children
-
-	number := uint64(math.MaxUint64)
-	var hash common.Hash
-	for _, h := range csHeaders {
-		// Headers are sorted by number, then by hash, so any dups will be consecutive
-		if h.Number == number && h.Hash == hash {
-			return nil, DuplicateHeaderPenalty, nil
-		}
-		number = h.Number
-		hash = h.Hash
-
-		if _, bad := hd.badHeaders[hash]; bad {
-			return nil, BadBlockPenalty, nil
-		}
-		var segmentIdx int
-		children := childrenMap[hash]
-		for _, child := range children {
-			if valid, penalty := hd.childParentValid(child, h.Header); !valid {
-				return nil, penalty, nil
-			}
-		}
-		if len(children) == 1 {
-			// Single child, extract segmentIdx
-			segmentIdx = segmentMap[hash]
-		} else {
-			// No children, or more than one child, create new segment
-			segmentIdx = len(segments)
-			segments = append(segments, ChainSegment{})
-		}
-		segments[segmentIdx] = append(segments[segmentIdx], h)
-		segmentMap[h.Header.ParentHash] = segmentIdx
-		siblings := childrenMap[h.Header.ParentHash]
-		siblings = append(siblings, h.Header)
-		childrenMap[h.Header.ParentHash] = siblings
-	}
-	return segments, NoPenalty, nil
-}
-
-// Checks whether child-parent relationship between two headers is correct
-// (excluding Proof Of Work validity)
-func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, Penalty) {
-	if parent.Number.Uint64()+1 != child.Number.Uint64() {
-		return false, WrongChildBlockHeightPenalty
-	}
-	return true, NoPenalty
-}
-
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header, penalizePoSBlocks bool) ([]ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header, penalizePoSBlocks bool) ([]ChainSegmentHeader, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 
@@ -148,7 +72,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 		Hash:      headerHash,
 		Number:    header.Number.Uint64(),
 	}
-	return []ChainSegment{{h}}, NoPenalty, nil
+	return []ChainSegmentHeader{h}, NoPenalty, nil
 }
 
 // ReportBadHeader -
@@ -604,12 +528,14 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 	}
 }
 
-func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
-	if len(segment) == 0 {
+func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if len(csHeaders) == 0 {
 		return nil, nil
 	}
 	// We may have received answer from old request so not enough evidence for penalizing.
-	if segment[0].Number != hd.posAnchor.blockHeight-1 {
+	if csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
 		return nil, nil
 	}
 
@@ -617,20 +543,18 @@ func (hd *HeaderDownload) ProcessSegmentPOS(segment ChainSegment, tx kv.Getter, 
 	if hd.headersCollector == nil {
 		return nil, nil
 	}
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
 
-	log.Trace("Collecting...", "from", segment[0].Number, "to", segment[len(segment)-1].Number, "len", len(segment))
-	for _, segmentFragment := range segment {
-		header := segmentFragment.Header
-		headerHash := segmentFragment.Hash
+	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+	for _, sh := range csHeaders {
+		header := sh.Header
+		headerHash := sh.Hash
 		if headerHash != hd.posAnchor.parentHash {
 			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
 			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
 		}
 
 		headerNumber := header.Number.Uint64()
-		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, headerHash), segmentFragment.HeaderRaw); err != nil {
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, headerHash), sh.HeaderRaw); err != nil {
 			return nil, err
 		}
 
@@ -898,14 +822,20 @@ func (hd *HeaderDownload) recursiveLinked(link *Link) {
 	}
 }
 
-func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, peerID [64]byte) bool {
+func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	hd.respCount++
 	requestMore := false
-	for i := len(segment); i > 0; i-- {
-		sh := segment[i-1]
+	for _, sh := range csHeaders {
 		if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
 			hd.topSeenHeightPoW = sh.Number
+		}
+		if sh.Number > hd.respMax {
+			hd.respMax = sh.Number
+		}
+		if hd.respMin == 0 || sh.Number < hd.respMin {
+			hd.respMin = sh.Number
 		}
 		if _, ok := hd.links[sh.Hash]; ok {
 			// Duplicate
@@ -917,11 +847,11 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 		if !foundParent && !foundAnchor {
 			if sh.Number < hd.highestInDb {
 				log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
-				return false
+				continue
 			}
 			if len(hd.anchors) >= hd.anchorLimit {
 				log.Debug(fmt.Sprintf("too many anchors: %d, limit %d, state: %s", len(hd.anchors), hd.anchorLimit, hd.anchorState()))
-				return false
+				continue
 			}
 		}
 		link := hd.addHeaderAsLink(sh, false /* persisted */)
@@ -941,11 +871,11 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 				hd.moveLinkToQueue(link, InsertQueueID)
 				hd.recursiveLinked(link)
 			}
-		} else if !foundAnchor {
+		} else {
 			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
 				log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
 				hd.removeUpwards([]*Link{link})
-				return false
+				continue
 			}
 			//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
 			// See if it links existing anchor
@@ -963,7 +893,7 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 	}
 	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
-		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(segment), "limit", hd.linkLimit)
+		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(csHeaders), "limit", hd.linkLimit)
 		hd.pruneLinkQueue()
 	}
 	select {
@@ -972,6 +902,16 @@ func (hd *HeaderDownload) ProcessSegment(segment ChainSegment, newBlock bool, pe
 	}
 
 	return hd.requestChaining && requestMore
+}
+
+func (hd *HeaderDownload) ExtractRespStats() (respCount int, respMin uint64, respMax uint64) {
+	respCount = hd.respCount
+	respMin = hd.respMin
+	respMax = hd.respMax
+	hd.respCount = 0
+	hd.respMin = 0
+	hd.respMax = 0
+	return
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
@@ -1120,9 +1060,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 
 	peerID := [64]byte{'m', 'i', 'n', 'e', 'r'} // "miner"
 
-	for _, segment := range segments {
-		_ = hd.ProcessSegment(segment, false /* newBlock */, peerID)
-	}
+	_ = hd.ProcessHeaders(segments, false /* newBlock */, peerID)
 	return nil
 }
 
@@ -1145,7 +1083,7 @@ func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces
 		h := ChainSegmentHeader{
 			HeaderRaw: v,
 			Header:    header,
-			Hash:      types.RawRlpHash(v),
+			Hash:      header.Hash(),
 			Number:    header.Number.Uint64(),
 		}
 		link := hd.addHeaderAsLink(h, true /* persisted */)

@@ -591,11 +591,13 @@ func (d *dialTestDialer) waitForDials(nodes []*enode.Node) error {
 	return d.checkUnexpectedDial()
 }
 
+var dialTestDialerUnexpectedDialTimeout = time.Millisecond
+
 func (d *dialTestDialer) checkUnexpectedDial() error {
 	select {
 	case req := <-d.init:
 		return fmt.Errorf("attempt to dial unexpected node %v", req.n.ID())
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(dialTestDialerUnexpectedDialTimeout):
 		return nil
 	}
 }

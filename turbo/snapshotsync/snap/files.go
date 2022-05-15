@@ -143,6 +143,9 @@ func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir,
 func TmpFiles(dir string) (res []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 	for _, f := range files {
@@ -162,6 +165,9 @@ var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
 func ParseDir(dir string) (res []FileInfo, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []FileInfo{}, nil
+		}
 		return nil, err
 	}
 	for _, f := range files {

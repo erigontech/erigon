@@ -502,7 +502,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
-				log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
+				//log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
 				if !verify || snap != nil {
 					break
@@ -567,7 +567,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		if err = snap.store(p.db); err != nil {
 			return nil, err
 		}
-		log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
+		//log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
 	return snap, err
 }
@@ -687,10 +687,13 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if err != nil {
 		return nil, nil, err
 	}
-	nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
-	if !snap.isMajorityFork(hex.EncodeToString(nextForkHash[:])) {
-		log.Debug("there is a possible fork, and your client is not the majority. Please check...", "nextForkHash", hex.EncodeToString(nextForkHash[:]))
-	}
+	/*
+		nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
+		nextForkHashStr := hex.EncodeToString(nextForkHash[:])
+		if !snap.isMajorityFork(nextForkHashStr) {
+			log.Debug("[parlia] there is a possible fork, and your client is not the majority. Please check...", "nextForkHash", nextForkHashStr)
+		}
+	*/
 	// If the block is an epoch end block, verify the validator list
 	// The verification can only be done when the state is ready, it can't be done in VerifyHeader.
 	if number%p.config.Epoch == 0 {
@@ -715,7 +718,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 	if number == 1 {
 		var err error
 		if txs, systemTxs, receipts, err = p.initContract(state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
-			log.Error("init contract failed: %+v", err)
+			log.Error("[parlia] init contract failed: %+v", err)
 			os.Exit(1)
 		}
 	}
@@ -729,7 +732,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			}
 		}
 		if !signedRecently {
-			log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
+			//log.Trace("slash validator", "block hash", header.Hash(), "address", spoiledVal)
 			var tx types.Transaction
 			var receipt *types.Receipt
 			if systemTxs, tx, receipt, err = p.slash(spoiledVal, state, header, len(txs), systemTxs, &header.GasUsed, mining); err != nil {
@@ -795,7 +798,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// For 0-period chains, refuse to seal empty blocks (no reward but would spin sealing)
 	if p.config.Period == 0 && len(block.Transactions()) == 0 {
-		log.Info("Sealing paused, waiting for transactions")
+		log.Info("[parlia] Sealing paused, waiting for transactions")
 		return nil
 	}
 	// Don't hold the val fields for the entire sealing procedure
@@ -818,7 +821,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		if recent == val {
 			// Signer is among recent, only wait if the current block doesn't shift it out
 			if limit := uint64(len(snap.Validators)/2 + 1); number < limit || seen > number-limit {
-				log.Info("Signed recently, must wait for others")
+				log.Info("[parlia] Signed recently, must wait for others")
 				return nil
 			}
 		}
@@ -837,7 +840,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	copy(header.Extra[len(header.Extra)-extraSeal:], sig)
 
 	// Wait until sealing is terminated or delay timeout.
-	log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	//log.Trace("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
 	go func() {
 		select {
 		case <-stop:
@@ -845,20 +848,20 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		case <-time.After(delay):
 		}
 		if p.shouldWaitForCurrentBlockProcess(chain, header, snap) {
-			log.Info("Waiting for received in turn block to process")
+			log.Info("[parlia] Waiting for received in turn block to process")
 			select {
 			case <-stop:
-				log.Info("Received block process finished, abort block seal")
+				log.Info("[parlia] Received block process finished, abort block seal")
 				return
 			case <-time.After(time.Duration(processBackOffTime) * time.Second):
-				log.Info("Process backoff time exhausted, start to seal block")
+				log.Info("[parlia] Process backoff time exhausted, start to seal block")
 			}
 		}
 
 		select {
 		case results <- block.WithSeal(header):
 		default:
-			log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
+			log.Warn("[parlia] Sealing result is not read by miner", "sealhash", SealHash(header, p.chainConfig.ChainID))
 		}
 	}()
 
@@ -1031,11 +1034,11 @@ func (p *Parlia) distributeIncoming(val common.Address, state *state.IntraBlockS
 			}
 			txs = append(txs, tx)
 			receipts = append(receipts, receipt)
-			log.Debug("distribute to system reward pool", "block hash", header.Hash(), "amount", rewards)
+			//log.Debug("[parlia] distribute to system reward pool", "block hash", header.Hash(), "amount", rewards)
 			balance = balance.Sub(balance, rewards)
 		}
 	}
-	log.Debug("distribute to validator contract", "block hash", header.Hash(), "amount", balance)
+	//log.Debug("[parlia] distribute to validator contract", "block hash", header.Hash(), "amount", balance)
 	var err error
 	var tx types.Transaction
 	var receipt *types.Receipt
@@ -1059,7 +1062,7 @@ func (p *Parlia) slash(spoiledVal common.Address, state *state.IntraBlockState, 
 		spoiledVal,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for slash", "err", err)
+		log.Error("[parlia] Unable to pack tx for slash", "err", err)
 		return nil, nil, nil, err
 	}
 	// apply message
@@ -1086,11 +1089,11 @@ func (p *Parlia) initContract(state *state.IntraBlockState, header *types.Header
 	// get packed data
 	data, err := p.validatorSetABI.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for init validator set", "err", err)
+		log.Error("[parlia] Unable to pack tx for init validator set", "err", err)
 		return nil, nil, nil, err
 	}
 	for _, c := range contracts {
-		log.Info("init contract", "block hash", header.Hash(), "contract", c)
+		log.Info("[parlia] init contract", "block hash", header.Hash(), "contract", c)
 		var tx types.Transaction
 		var receipt *types.Receipt
 		if systemTxs, tx, receipt, err = p.applyTransaction(header.Coinbase, c, u256.Num0, data, state, header, len(txs), systemTxs, usedGas, mining); err != nil {
@@ -1123,7 +1126,7 @@ func (p *Parlia) distributeToValidator(amount *uint256.Int, validator common.Add
 		validator,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for deposit", "err", err)
+		log.Error("[parlia] Unable to pack tx for deposit", "err", err)
 		return nil, nil, nil, err
 	}
 	// apply message

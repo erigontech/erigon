@@ -643,7 +643,9 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 		if err != nil {
 			peerInfo.Remove()
 			ss.GoodPeers.Delete(peerInfo.ID())
-			log.Debug(logPrefix, "msgcode", msgcode, "err", err)
+			if !errors.Is(err, p2p.ErrShuttingDown) {
+				log.Debug(logPrefix, "msgcode", msgcode, "err", err)
+			}
 		} else {
 			if ttl > 0 {
 				peerInfo.AddDeadline(time.Now().Add(ttl))

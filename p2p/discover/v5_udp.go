@@ -84,6 +84,7 @@ type UDPv5 struct {
 	callCh        chan *callV5
 	callDoneCh    chan *callV5
 	respTimeoutCh chan *callTimeout
+	replyTimeout  time.Duration
 
 	// state of dispatch
 	codec            codecV5
@@ -139,7 +140,7 @@ func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
 func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 	closeCtx, cancelCloseCtx := context.WithCancel(ctx)
-	cfg = cfg.withDefaults()
+	cfg = cfg.withDefaults(respTimeoutV5)
 	t := &UDPv5{
 		// static fields
 		conn:         conn,
@@ -157,6 +158,7 @@ func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config
 		callCh:        make(chan *callV5),
 		callDoneCh:    make(chan *callV5),
 		respTimeoutCh: make(chan *callTimeout),
+		replyTimeout:  cfg.ReplyTimeout,
 		// state of dispatch
 		codec:            v5wire.NewCodec(ln, cfg.PrivateKey, cfg.Clock),
 		activeCallByNode: make(map[enode.ID]*callV5),
@@ -166,7 +168,7 @@ func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config
 		closeCtx:       closeCtx,
 		cancelCloseCtx: cancelCloseCtx,
 	}
-	tab, err := newTable(t, t.db, cfg.Bootnodes, cfg.Log)
+	tab, err := newTable(t, t.db, cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
@@ -550,7 +552,7 @@ func (t *UDPv5) startResponseTimeout(c *callV5) {
 		timer mclock.Timer
 		done  = make(chan struct{})
 	)
-	timer = t.clock.AfterFunc(respTimeoutV5, func() {
+	timer = t.clock.AfterFunc(t.replyTimeout, func() {
 		<-done
 		select {
 		case t.respTimeoutCh <- &callTimeout{c, timer}:
@@ -828,7 +830,7 @@ func packNodes(reqid []byte, nodes []*enode.Node) []*v5wire.Nodes {
 		return []*v5wire.Nodes{{ReqID: reqid, Total: 1}}
 	}
 
-	total := uint8(math.Ceil(float64(len(nodes)) / 3))
+	total := uint8(math.Ceil(float64(len(nodes)) / nodesResponseItemLimit))
 	var resp []*v5wire.Nodes
 	for len(nodes) > 0 {
 		p := &v5wire.Nodes{ReqID: reqid, Total: total}

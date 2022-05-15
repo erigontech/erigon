@@ -278,6 +278,9 @@ type HeaderDownload struct {
 	fetchingNew        bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
 	trace              bool
+	respCount          int
+	respMin            uint64
+	respMax            uint64
 
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          interfaces.HeaderReader

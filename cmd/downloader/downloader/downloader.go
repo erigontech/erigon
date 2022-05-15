@@ -236,12 +236,13 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	}
 	c, err = torrentcfg.NewMdbxPieceCompletion(db)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}
 	m = storage.NewMMapWithCompletion(snapshotDir, c)
+	cfg.DefaultStorage = m
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
 
 	if err := BuildTorrentsAndAdd(context.Background(), snapshotDir, torrentClient); err != nil {

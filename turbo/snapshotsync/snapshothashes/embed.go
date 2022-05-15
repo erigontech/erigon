@@ -23,6 +23,10 @@ var Goerli = fromToml(goerli)
 var bsc []byte
 var Bsc = fromToml(bsc)
 
+//go:embed erigon-snapshots/ropsten.toml
+var ropsten []byte
+var Ropsten = fromToml(ropsten)
+
 type PreverifiedItem struct {
 	Name string
 	Hash string
@@ -50,6 +54,7 @@ var (
 	MainnetChainSnapshotConfig = newConfig(Mainnet)
 	GoerliChainSnapshotConfig  = newConfig(Goerli)
 	BscChainSnapshotConfig     = newConfig(Bsc)
+	RopstenChainSnapshotConfig = newConfig(Ropsten)
 )
 
 func newConfig(preverified Preverified) *Config {
@@ -99,6 +104,8 @@ func KnownConfig(networkName string) *Config {
 		return GoerliChainSnapshotConfig
 	case networkname.BSCChainName:
 		return BscChainSnapshotConfig
+	case networkname.RopstenChainName:
+		return RopstenChainSnapshotConfig
 	default:
 		return newConfig(Preverified{})
 	}

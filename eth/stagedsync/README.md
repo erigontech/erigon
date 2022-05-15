@@ -67,7 +67,9 @@ In the Proof-of-Stake world staged sync becomes somewhat more complicated, as th
 
 Each stage consists of 2 functions `ExecFunc` that progesses the stage forward and `UnwindFunc` that unwinds the stage backwards.
 
-Some of the stages can theoretically work offline though it isn't implemented in the current version.
+Most of the stages can work offline though it isn't implemented in the current version.
+
+We can add/remove stages, so exact stage numbers may change - but order and names stay the same. 
 
 ### Stage 1: [Download Headers Stage](/eth/stagedsync/stage_headers.go)
 

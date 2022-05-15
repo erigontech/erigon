@@ -56,9 +56,11 @@ type Config struct {
 	PingBackDelay time.Duration
 
 	PrivateKeyGenerator func() (*ecdsa.PrivateKey, error)
+
+	TableRevalidateInterval time.Duration
 }
 
-func (cfg Config) withDefaults() Config {
+func (cfg Config) withDefaults(defaultReplyTimeout time.Duration) Config {
 	if cfg.Log == nil {
 		cfg.Log = log.Root()
 	}
@@ -69,13 +71,16 @@ func (cfg Config) withDefaults() Config {
 		cfg.Clock = mclock.System{}
 	}
 	if cfg.ReplyTimeout == 0 {
-		cfg.ReplyTimeout = respTimeout
+		cfg.ReplyTimeout = defaultReplyTimeout
 	}
 	if cfg.PingBackDelay == 0 {
 		cfg.PingBackDelay = respTimeout
 	}
 	if cfg.PrivateKeyGenerator == nil {
 		cfg.PrivateKeyGenerator = crypto.GenerateKey
+	}
+	if cfg.TableRevalidateInterval == 0 {
+		cfg.TableRevalidateInterval = revalidateInterval
 	}
 	return cfg
 }
