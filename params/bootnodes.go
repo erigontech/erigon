@@ -173,9 +173,6 @@ var ChapelStaticPeers = []string{
 var RialtoBootnodes = []string{}
 var RialtoStaticPeers = ChapelStaticPeers
 
-// ErigonBootnodes are the enode URLs of the P2P bootstrap nodes running on the ErigonNodes devnet
-var ErigonBootnodes = []string{}
-
 var SokolBootnodes = []string{
 	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
 	"enode://e08adce358fc26dfbe1f24ee578dceaa29575ca44a39d9041203131db5135aceba6241840a9b57b1540eeaf7b4eff1aead28a74641be43342c35af454abb31b3@199.247.18.10:30313",
@@ -255,8 +252,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return ChapelBootnodes
 	case networkname.RialtoChainName:
 		return RialtoBootnodes
-	case networkname.ErigonMineName:
-		return ErigonBootnodes
 	case networkname.SokolChainName:
 		return SokolBootnodes
 	case networkname.FermionChainName:

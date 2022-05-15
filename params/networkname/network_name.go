@@ -8,7 +8,6 @@ const (
 	GoerliChainName     = "goerli"
 	KilnDevnetChainName = "kiln-devnet"
 	DevChainName        = "dev"
-	ErigonMineName      = "erigonmine"
 	SokolChainName      = "sokol"
 	FermionChainName    = "fermion"
 	BSCChainName        = "bsc"
@@ -26,7 +25,6 @@ var All = []string{
 	GoerliChainName,
 	KilnDevnetChainName,
 	//DevChainName,
-	ErigonMineName,
 	SokolChainName,
 	FermionChainName,
 	BSCChainName,
