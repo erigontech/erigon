@@ -40,10 +40,9 @@ func StageLoop(
 	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
-	initialCycle *bool,
 ) {
 	defer close(waitForDone)
-
+	initialCycle := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -55,7 +54,7 @@ func StageLoop(
 
 		// Estimate the current top height seen from the peer
 		height := hd.TopSeenHeight()
-		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, *initialCycle, updateHead, nil)
+		headBlockHash, err := StageLoopStep(ctx, db, sync, height, notifications, initialCycle, updateHead, nil)
 
 		pendingPayloadStatus := hd.GetPendingPayloadStatus()
 		if pendingPayloadStatus != (common.Hash{}) {
@@ -89,7 +88,7 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
 		}
-		*initialCycle = false
+		initialCycle = false
 		hd.EnableRequestChaining()
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)

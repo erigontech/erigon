@@ -139,8 +139,6 @@ type Ethereum struct {
 	notifyMiningAboutNewTxs chan struct{}
 
 	downloader *downloader.Downloader
-
-	initialCycle bool
 }
 
 // New creates a new Ethereum object (including the
@@ -215,7 +213,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			Accumulator:          shards.NewAccumulator(chainConfig),
 			StateChangesConsumer: kvRPC,
 		},
-		initialCycle: true,
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
@@ -798,7 +795,7 @@ func (s *Ethereum) Start() error {
 		}(i)
 	}
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
-	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle, &s.initialCycle)
+	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
 	return nil
 }
 

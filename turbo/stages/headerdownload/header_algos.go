@@ -610,13 +610,6 @@ func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
 	return false
 }
 
-func (hd *HeaderDownload) IsLinkQueueEmpty() bool {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-
-	return hd.linkQueue.Len() == 0
-}
-
 // SaveExternalAnnounce - does mark hash as seen in external announcement
 // only such hashes will broadcast further after
 func (hd *HeaderDownload) SaveExternalAnnounce(hash common.Hash) {
