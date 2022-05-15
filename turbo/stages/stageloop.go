@@ -43,6 +43,7 @@ func StageLoop(
 ) {
 	defer close(waitForDone)
 	initialCycle := true
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -88,8 +89,10 @@ func StageLoop(
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
 		}
+
 		initialCycle = false
 		hd.EnableRequestChaining()
+
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
 			log.Info("Wait time until next loop", "for", waitTime)
