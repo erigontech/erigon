@@ -529,6 +529,8 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 }
 
 func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
@@ -541,8 +543,6 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if hd.headersCollector == nil {
 		return nil, nil
 	}
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
 
 	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
 	for _, sh := range csHeaders {
