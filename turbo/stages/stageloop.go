@@ -48,9 +48,8 @@ func StageLoop(
 		select {
 		case <-ctx.Done():
 			return
-		case <-hd.DeliveryNotify:
+		default:
 		}
-
 		start := time.Now()
 
 		// Estimate the current top height seen from the peer
@@ -101,6 +100,13 @@ func StageLoop(
 			case <-ctx.Done():
 				return
 			case <-c:
+			}
+		}
+		if !hd.POSSync() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-hd.DeliveryNotify:
 			}
 		}
 	}
