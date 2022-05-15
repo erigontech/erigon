@@ -41,14 +41,14 @@ func StageLoop(
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 	initialCycle *bool,
-) bool {
+) {
 	defer close(waitForDone)
 
-	for *initialCycle || !hd.IsLinkQueueEmpty() {
+	for {
 		select {
 		case <-ctx.Done():
-			return true
-		default:
+			return
+		case <-hd.DeliveryNotify:
 		}
 
 		start := time.Now()
@@ -79,7 +79,7 @@ func StageLoop(
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
-				return true
+				return
 			}
 			*initialCycle = false
 			hd.EnableRequestChaining()
@@ -88,7 +88,6 @@ func StageLoop(
 				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
-			return false
 		}
 		*initialCycle = false
 		hd.EnableRequestChaining()
@@ -98,12 +97,11 @@ func StageLoop(
 			c := time.After(waitTime)
 			select {
 			case <-ctx.Done():
-				return true
+				return
 			case <-c:
 			}
 		}
 	}
-	return false
 }
 
 func StageLoopStep(
