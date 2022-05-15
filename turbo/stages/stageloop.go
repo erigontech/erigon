@@ -103,6 +103,9 @@ func StageLoop(
 			}
 		}
 		if !hd.POSSync() {
+			// Wait for delivery of any p2p headers here to resume the stage loop
+			// Since StageLoopStep creates RW database transaction, the mining loop can only do its work (it also requires creating RW transaction)
+			// when the control flow is outside StageLoopStep function. Therefore wait here to give mining loop this opportunity
 			select {
 			case <-ctx.Done():
 				return
