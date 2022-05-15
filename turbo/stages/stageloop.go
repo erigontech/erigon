@@ -81,13 +81,13 @@ func StageLoop(
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
-			*initialCycle = false
-			hd.EnableRequestChaining()
+
 			log.Error("Staged Sync", "err", err)
 			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
 				log.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
+			continue
 		}
 		*initialCycle = false
 		hd.EnableRequestChaining()
