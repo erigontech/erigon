@@ -296,7 +296,7 @@ func startHandlingForkChoice(
 		log.Info(fmt.Sprintf("[%s] Fork choice missing header", s.LogPrefix()))
 		hashToDownload := headerHash
 		cfg.hd.SetPoSDownloaderTip(headerHash)
-		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0, s, cfg)
+		schedulePoSDownload(requestStatus, requestId, hashToDownload, 0 /* header height is unknown, setting to 0 */, s, cfg)
 		return nil
 	}
 

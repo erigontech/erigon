@@ -553,16 +553,18 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 	if len(csHeaders) == 0 {
 		return nil, nil
 	}
-	log.Info("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+	log.Debug("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.posAnchor == nil {
-		log.Warn("posAnchor is nil")
+		// May happen if peers are sending unrequested header packets after we've synced
+		log.Debug("posAnchor is nil")
 		return nil, nil
 	}
 	// We may have received answer from old request so not enough evidence for penalizing.
 	if hd.posAnchor.blockHeight != 1 && csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
-		log.Warn("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+		// hd.posAnchor.blockHeight == 1 is a special case when the height of the anchor is unknown (it is created from the fork choice message from beacon node)
+		log.Debug("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
 		return nil, nil
 	}
 
