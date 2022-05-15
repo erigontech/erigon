@@ -589,9 +589,9 @@ func schedulePoSDownload(
 
 	log.Info(fmt.Sprintf("[%s] Downloading PoS headers...", s.LogPrefix()), "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
 
-	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetRequestId(requestId)
 	cfg.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
+	cfg.hd.SetPOSSync(true) // This needs to be called afrer SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
 	//nolint
 	headerCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -810,7 +810,7 @@ Loop:
 				log.Info("Req/resp stats", "req", reqCount, "reqMin", reqMin, "reqMax", reqMax,
 					"skel", skeletonReqCount, "skelMin", skeletonReqMin, "skelMax", skeletonReqMax,
 					"resp", respCount, "respMin", respMin, "respMax", respMax)
-				fmt.Printf("%s\n", cfg.hd.AnchorState())
+
 				if noProgressCounter >= 5 && wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
 					break Loop
@@ -827,8 +827,6 @@ Loop:
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
 			log.Trace("headerLoop woken up by the incoming request")
-		case <-cfg.hd.SkipCycleHack:
-			break Loop
 		}
 		timer.Stop()
 	}

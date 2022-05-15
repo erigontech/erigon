@@ -266,7 +266,6 @@ type HeaderDownload struct {
 	linkQueue          LinkQueue      // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue   // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
-	SkipCycleHack      chan struct{} // devenet will signal to this channel to skip sync cycle and release write db transaction. It's temporary solution - later we will do mining without write transaction.
 	toAnnounce         []Announce
 	lock               sync.RWMutex
 	preverifiedHeight  uint64 // Block height corresponding to the last preverified hash
@@ -325,7 +324,6 @@ func NewHeaderDownload(
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
-		SkipCycleHack:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,

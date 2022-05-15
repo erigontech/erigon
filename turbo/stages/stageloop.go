@@ -48,7 +48,7 @@ func StageLoop(
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-hd.DeliveryNotify:
 		}
 
 		start := time.Now()
