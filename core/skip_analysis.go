@@ -21,7 +21,7 @@ import (
 )
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const MainnetNotCheckedFrom uint64 = 14_702_900
+const MainnetNotCheckedFrom uint64 = 14_780_000
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
 const BSCNotCheckedFrom uint64 = 11_000_000
