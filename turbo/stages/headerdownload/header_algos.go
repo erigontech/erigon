@@ -54,6 +54,25 @@ const POSPandaBanner = `
 
 `
 
+// Implements sort.Interface so we can sort the incoming header in the message by block height
+type HeadersByHeightAndHash []ChainSegmentHeader
+
+func (h HeadersByHeightAndHash) Len() int {
+	return len(h)
+}
+
+func (h HeadersByHeightAndHash) Less(i, j int) bool {
+	// Note - the ordering is the inverse ordering of the block heights
+	if h[i].Number != h[j].Number {
+		return h[i].Number > h[j].Number
+	}
+	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) > 0
+}
+
+func (h HeadersByHeightAndHash) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
 func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header, penalizePoSBlocks bool) ([]ChainSegmentHeader, Penalty, error) {
 	hd.lock.RLock()
@@ -529,9 +548,12 @@ func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64
 }
 
 func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
+	if len(csHeaders) == 0 {
+		return nil, nil
+	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if len(csHeaders) == 0 {
+	if hd.posAnchor == nil {
 		return nil, nil
 	}
 	// We may have received answer from old request so not enough evidence for penalizing.

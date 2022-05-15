@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -487,6 +488,7 @@ func (cs *MultyClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		})
 	}
 	if cs.Hd.POSSync() {
+		sort.Sort(headerdownload.HeadersByHeightAndHash(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
 		defer tx.Rollback()
 		if err != nil {
