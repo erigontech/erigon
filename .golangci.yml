@@ -7,15 +7,15 @@ linters:
     - gofmt
     - deadcode
     - errcheck
-    - gosimple
+#    - gosimple # 1.18
     - govet
     - ineffassign
-    - staticcheck
-    - structcheck
-    - unused
+#    - staticcheck # 1.18
+#    - structcheck # 1.18
+#    - unused # 1.18
     - varcheck
 #    - gocritic
-    - bodyclose
+#    - bodyclose # 1.18
 #    - gosec
 #    - forcetypeassert
 
