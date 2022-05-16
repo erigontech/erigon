@@ -1095,7 +1095,6 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}
-			panic(_allSnapshotsSingleton.BlocksAvailable())
 		}
 	})
 	return _allSnapshotsSingleton
