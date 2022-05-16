@@ -27,25 +27,25 @@ type Experiments struct {
 func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
 	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
-	if flags == "default" || flags == "disabled" {
-		return DefaultMode, nil
-	}
-	mode.Initialised = true
-	for _, flag := range flags {
-		switch flag {
-		case 'h':
-			mode.History = Distance(params.FullImmutabilityThreshold)
-		case 'r':
-			mode.Receipts = Distance(params.FullImmutabilityThreshold)
-		case 't':
-			mode.TxIndex = Distance(params.FullImmutabilityThreshold)
-		case 'c':
-			mode.CallTraces = Distance(params.FullImmutabilityThreshold)
-		default:
-			return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
+	if flags != "default" && flags != "disabled" {
+		mode.Initialised = true
+		for _, flag := range flags {
+			switch flag {
+			case 'h':
+				mode.History = Distance(params.FullImmutabilityThreshold)
+			case 'r':
+				mode.Receipts = Distance(params.FullImmutabilityThreshold)
+			case 't':
+				mode.TxIndex = Distance(params.FullImmutabilityThreshold)
+			case 'c':
+				mode.CallTraces = Distance(params.FullImmutabilityThreshold)
+			default:
+				return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
+			}
 		}
 	}
 
+	mode.Initialised = true
 	if exactHistory > 0 {
 		mode.History = Distance(exactHistory)
 	}
