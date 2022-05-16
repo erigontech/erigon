@@ -275,7 +275,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapshotDir)
+		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -493,10 +493,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		headCh = make(chan *types.Block, 1)
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB,
-		stack.Config().P2P, *config, chainConfig.TerminalTotalDifficulty,
-		backend.sentriesClient, tmpdir, backend.notifications,
-		backend.downloaderClient, allSnapshots, config.SnapshotDir, headCh)
+	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.log, backend.chainDB, stack.Config().P2P, *config, backend.sentriesClient, tmpdir, backend.notifications, backend.downloaderClient, allSnapshots, headCh)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
@@ -1092,7 +1091,6 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		if syncmode == ethconfig.SnapSync {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
-			dir.MustExist(filepath.Join(datadir, "snapshots"))
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
@@ -1165,7 +1163,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if allSn != nil {
 		cfg.Snapshot = allSn.Cfg()
 	}
-	cfg.SnapshotDir = filepath.Join(datadir, "snapshots")
+	cfg.SnapDir = filepath.Join(datadir, "snapshots")
 	var engine consensus.Engine
 	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
@@ -1191,10 +1189,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
-		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
-		&stagedsync.Notifications{}, nil, allSn, cfg.SnapshotDir, nil,
-	)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, sentryControlServer, tmpdir, &stagedsync.Notifications{}, nil, allSn, nil)
 	if err != nil {
 		panic(err)
 	}

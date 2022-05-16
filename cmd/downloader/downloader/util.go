@@ -123,15 +123,15 @@ func BuildTorrentFileIfNeed(ctx context.Context, originalFileName, root string) 
 	return true, nil
 }
 
-func BuildTorrentAndAdd(ctx context.Context, originalFileName, snapshotDir string, client *torrent.Client) error {
-	ok, err := BuildTorrentFileIfNeed(ctx, originalFileName, snapshotDir)
+func BuildTorrentAndAdd(ctx context.Context, originalFileName, snapDir string, client *torrent.Client) error {
+	ok, err := BuildTorrentFileIfNeed(ctx, originalFileName, snapDir)
 	if err != nil {
 		return fmt.Errorf("BuildTorrentFileIfNeed: %w", err)
 	}
 	if !ok {
 		return nil
 	}
-	torrentFilePath := filepath.Join(snapshotDir, originalFileName+".torrent")
+	torrentFilePath := filepath.Join(snapDir, originalFileName+".torrent")
 	_, err = AddTorrentFile(ctx, torrentFilePath, client)
 	if err != nil {
 		return fmt.Errorf("AddTorrentFile: %w", err)
@@ -140,11 +140,11 @@ func BuildTorrentAndAdd(ctx context.Context, originalFileName, snapshotDir strin
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir string) error {
+func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := allSegmentFiles(snapshotDir)
+	files, err := allSegmentFiles(snapDir)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir string) error {
 		wg.Add(1)
 		go func(f string, i int) {
 			defer wg.Done()
-			_, err = BuildTorrentFileIfNeed(ctx, f, snapshotDir)
+			_, err = BuildTorrentFileIfNeed(ctx, f, snapDir)
 			if err != nil {
 				errs <- err
 			}
@@ -180,11 +180,11 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapshotDir string) error {
 	return nil
 }
 
-// BuildTorrentsAndAdd - create .torrent files from .seg files (big IO) - if .seg files were placed manually to snapshotDir
-func BuildTorrentsAndAdd(ctx context.Context, snapshotDir string, client *torrent.Client) error {
+// BuildTorrentsAndAdd - create .torrent files from .seg files (big IO) - if .seg files were placed manually to snapDir
+func BuildTorrentsAndAdd(ctx context.Context, snapDir string, client *torrent.Client) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	files, err := allSegmentFiles(snapshotDir)
+	files, err := allSegmentFiles(snapDir)
 	if err != nil {
 		return fmt.Errorf("allSegmentFiles: %w", err)
 	}
@@ -211,7 +211,7 @@ func BuildTorrentsAndAdd(ctx context.Context, snapshotDir string, client *torren
 				log.Info("[Snapshots] Verify snapshots", "Progress", fmt.Sprintf("%d/%d", i, len(files)))
 			default:
 			}
-			errs <- BuildTorrentAndAdd(ctx, f, snapshotDir, client)
+			errs <- BuildTorrentAndAdd(ctx, f, snapDir, client)
 		}(f, i)
 	}
 	go func() {
@@ -347,10 +347,10 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	return t, nil
 }
 
-func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
+func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
-	files, err := AllTorrentPaths(snapshotDir)
+	files, err := AllTorrentPaths(snapDir)
 	if err != nil {
 		return err
 	}
@@ -378,7 +378,7 @@ func VerifyDtaFiles(ctx context.Context, snapshotDir string) error {
 			return err
 		}
 
-		err = verifyTorrent(&info, snapshotDir, func(i int, good bool) error {
+		err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
 			j++
 			if !good {
 				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", f)

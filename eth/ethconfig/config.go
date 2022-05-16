@@ -164,7 +164,7 @@ type Config struct {
 	Snapshot Snapshot
 	Torrent  *torrentcfg.Cfg
 
-	SnapshotDir string
+	SnapDir string
 
 	BlockDownloaderWindow int
 
