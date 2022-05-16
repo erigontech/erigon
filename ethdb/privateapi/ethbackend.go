@@ -470,14 +470,20 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		}, nil
 	}
 
-	log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
-	s.requestList.AddForkChoiceRequest(&forkChoice)
+	payloadStatus := PayloadStatus{
+		Status: remote.EngineStatus_VALID,
+	}
 
-	payloadStatus := <-s.statusCh
-	log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+	if (forkChoice.HeadBlockHash != common.Hash{} || forkChoice.HeadBlockHash != common.Hash{}) {
+		log.Trace("[ForkChoiceUpdated] sending forkChoiceMessage", "head", forkChoice.HeadBlockHash)
+		s.requestList.AddForkChoiceRequest(&forkChoice)
 
-	if payloadStatus.CriticalError != nil {
-		return nil, payloadStatus.CriticalError
+		payloadStatus = <-s.statusCh
+		log.Trace("[ForkChoiceUpdated] got reply", "payloadStatus", payloadStatus)
+
+		if payloadStatus.CriticalError != nil {
+			return nil, payloadStatus.CriticalError
+		}
 	}
 
 	// No need for payload building
