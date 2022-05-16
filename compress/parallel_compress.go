@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/sais"
 	"github.com/ledgerwatch/log/v3"
 	atomic2 "go.uber.org/atomic"
+	"golang.org/x/exp/slices"
 )
 
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
@@ -826,7 +827,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		}
 		//log.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
-		var b Int32Sort = inv
+		var b = inv
 		j = 0
 		for i := 0; i < n-1; i++ {
 			// Only when there is a drop in LCP value
@@ -855,7 +856,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 
 				window := i - j + 2
 				copy(b, filtered[j:i+2])
-				sort.Sort(b[:window])
+				slices.Sort(b[:window])
 				repeats := 1
 				lastK := 0
 				for k := 1; k < window; k++ {
@@ -959,9 +960,3 @@ func ReadSimpleFile(fileName string, walker func(v []byte) error) error {
 	}
 	return nil
 }
-
-type Int32Sort []int32
-
-func (f Int32Sort) Len() int           { return len(f) }
-func (f Int32Sort) Less(i, j int) bool { return f[i] < f[j] }
-func (f Int32Sort) Swap(i, j int)      { f[i], f[j] = f[j], f[i] }

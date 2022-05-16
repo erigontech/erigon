@@ -20,12 +20,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"sort"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 )
@@ -353,7 +353,7 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 		}
 
 	}
-	sort.Strings(hashed)
+	slices.Sort(hashed)
 	plainKeys = make([][]byte, len(hashed))
 	hashedKeys = make([][]byte, len(hashed))
 	updates = make([]Update, len(hashed))
@@ -435,7 +435,7 @@ func TestEmptyState(t *testing.T) {
 	for key := range branchNodeUpdates {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, key := range keys {
 		branchNodeUpdate := branchNodeUpdates[key]
 		fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
@@ -459,7 +459,7 @@ func TestEmptyState(t *testing.T) {
 	for key := range branchNodeUpdates {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, key := range keys {
 		branchNodeUpdate := branchNodeUpdates[key]
 		fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
@@ -483,7 +483,7 @@ func TestEmptyState(t *testing.T) {
 	for key := range branchNodeUpdates {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, key := range keys {
 		branchNodeUpdate := branchNodeUpdates[key]
 		fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
@@ -517,7 +517,7 @@ func Test_HexPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	for key := range branchNodeUpdates {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, key := range keys {
 		branchNodeUpdate := branchNodeUpdates[key]
 		fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
@@ -568,7 +568,7 @@ func TestHexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
 		for key := range branchNodeUpdates {
 			keys = append(keys, key)
 		}
-		sort.Strings(keys)
+		slices.Sort(keys)
 		for _, key := range keys {
 			branchNodeUpdate := branchNodeUpdates[key]
 			fmt.Printf("%x => %s\n", CompactToHex([]byte(key)), branchToString(branchNodeUpdate))
