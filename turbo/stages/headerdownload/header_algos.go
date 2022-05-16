@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
@@ -238,7 +239,7 @@ func (hd *HeaderDownload) anchorState() string {
 			bs = append(bs, int(link.blockHeight))
 		}
 		var sbb strings.Builder
-		sort.Ints(bs)
+		slices.Sort(bs)
 		for j, b := range bs {
 			if j == 0 {
 				sbb.WriteString(fmt.Sprintf("%d", b))

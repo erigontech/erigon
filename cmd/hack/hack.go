@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/pprof"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -33,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -1109,7 +1109,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 			return err1
 		}
 	}
-	sort.Strings(unfurlList)
+	slices.Sort(unfurlList)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
 		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
@@ -1915,7 +1915,7 @@ func snapSizes(chaindata string) error {
 		lens[i] = l
 		i++
 	}
-	sort.Ints(lens)
+	slices.Sort(lens)
 
 	for _, l := range lens {
 		fmt.Printf("%6d - %d\n", l, sizes[l])
@@ -2465,9 +2465,7 @@ func histStats() error {
 	for endBlock := range endBlockMap {
 		endBlocks = append(endBlocks, endBlock)
 	}
-	sort.Slice(endBlocks, func(i, j int) bool {
-		return endBlocks[i] < endBlocks[j]
-	})
+	slices.Sort(endBlocks)
 	var lastEndBlock uint64
 	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
 	for _, endBlock := range endBlocks {
@@ -2528,9 +2526,7 @@ func histStat1(chaindata string) error {
 	for endBlock := range endBlockMap {
 		endBlocks = append(endBlocks, endBlock)
 	}
-	sort.Slice(endBlocks, func(i, j int) bool {
-		return endBlocks[i] < endBlocks[j]
-	})
+	slices.Sort(endBlocks)
 	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
 	for _, endBlock := range endBlocks {
 		fmt.Printf("%d", endBlock)

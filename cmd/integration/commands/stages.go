@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 )
 
 var cmdStageHeaders = &cobra.Command{
@@ -1058,7 +1058,7 @@ func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
 			appliedStrs[i] = k
 			i++
 		}
-		sort.Strings(appliedStrs)
+		slices.Sort(appliedStrs)
 		log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
 		return nil
 	})

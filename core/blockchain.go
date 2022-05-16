@@ -21,10 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"golang.org/x/exp/slices"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/log/v3"
@@ -315,9 +315,7 @@ func ExecuteBlockEphemerally(
 	var stateSyncReceipt *types.ReceiptForStorage
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
 		var stateSyncLogs []*types.Log
-		sort.SliceStable(blockLogs, func(i, j int) bool {
-			return blockLogs[i].Index < blockLogs[j].Index
-		})
+		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
 			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
