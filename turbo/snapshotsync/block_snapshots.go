@@ -10,7 +10,6 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
+	"golang.org/x/exp/slices"
 )
 
 type HeaderSegment struct {
@@ -1640,7 +1640,7 @@ func (*Merger) FindMergeRanges(snapshots *RoSnapshots) (res []mergeRange) {
 			break
 		}
 	}
-	sort.Slice(res, func(i, j int) bool { return res[i].from < res[j].from })
+	slices.SortFunc(res, func(i, j mergeRange) bool { return i.from < j.from })
 	return res
 }
 func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (toMergeHeaders, toMergeBodies, toMergeTxs []string, err error) {

@@ -3,12 +3,12 @@ package snapshothashes
 import (
 	_ "embed"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/exp/slices"
 )
 
 //go:embed erigon-snapshots/mainnet.toml
@@ -46,7 +46,7 @@ func doSort(in preverified) Preverified {
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(i, j PreverifiedItem) bool { return i.Name < j.Name })
 	return out
 }
 

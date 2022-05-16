@@ -6,9 +6,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/exp/slices"
 )
 
 type Type int
@@ -162,6 +163,7 @@ func TmpFiles(dir string) (res []string, err error) {
 
 var ErrSnapshotMissed = fmt.Errorf("snapshot missed")
 
+// ParseDir - reading dir (
 func ParseDir(dir string) (res []FileInfo, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -188,20 +190,20 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 		res = append(res, meta)
 	}
-	sort.Slice(res, func(i, j int) bool {
-		if res[i].Version != res[j].Version {
-			return res[i].Version < res[j].Version
+	slices.SortFunc(res, func(i, j FileInfo) bool {
+		if i.Version != j.Version {
+			return i.Version < j.Version
 		}
-		if res[i].From != res[j].From {
-			return res[i].From < res[j].From
+		if i.From != j.From {
+			return i.From < j.From
 		}
-		if res[i].To != res[j].To {
-			return res[i].To < res[j].To
+		if i.To != j.To {
+			return i.To < j.To
 		}
-		if res[i].T != res[j].T {
-			return res[i].T < res[j].T
+		if i.T != j.T {
+			return i.T < j.T
 		}
-		return res[i].Ext < res[j].Ext
+		return i.Ext < j.Ext
 	})
 
 	return res, nil
