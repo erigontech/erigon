@@ -13,7 +13,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
@@ -1091,12 +1090,12 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		if syncmode == ethconfig.SnapSync {
-			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
-			dir.MustExist(filepath.Join(datadir, "snapshots"))
-			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
+			snapDir := filepath.Join(datadir, "snapshots")
+			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, true), snapDir)
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}
+			panic(_allSnapshotsSingleton.BlocksAvailable())
 		}
 	})
 	return _allSnapshotsSingleton
