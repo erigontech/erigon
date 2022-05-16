@@ -543,7 +543,7 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 }
 
 // MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.
-func (g *Getter) MatchPrefix(buf []byte) bool {
+func (g *Getter) MatchPrefix(prefix []byte) bool {
 	savePos := g.dataP
 	defer func() {
 		g.dataP, g.dataBit = savePos, 0
@@ -551,31 +551,31 @@ func (g *Getter) MatchPrefix(buf []byte) bool {
 
 	l := g.nextPos(true /* clean */)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
-	lenBuf := len(buf)
+	prefixLen := len(prefix)
 	if l == 0 {
 		if g.dataBit > 0 {
 			g.dataP++
 			g.dataBit = 0
 		}
-		if lenBuf != 0 {
+		if prefixLen != 0 {
 			g.dataP, g.dataBit = savePos, 0
 		}
-		return lenBuf == 0
+		return prefixLen == 0
 	}
 
-	var bufPos int
+	var prefixPos int
 	// In the first pass, we only check patterns
 	// Only run this loop as far as the prefix goes, there is no need to check further
-	for pos := g.nextPos(false /* clean */); pos != 0 && bufPos < lenBuf; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1
+	for pos := g.nextPos(false /* clean */); pos != 0 && prefixPos < prefixLen; pos = g.nextPos(false) {
+		prefixPos += int(pos) - 1
 		pattern := g.nextPattern()
 		var comparisonLen int
-		if lenBuf < bufPos+len(pattern) {
-			comparisonLen = lenBuf - bufPos
+		if prefixLen < prefixPos+len(pattern) {
+			comparisonLen = prefixLen - prefixPos
 		} else {
 			comparisonLen = len(pattern)
 		}
-		if !bytes.Equal(buf[bufPos:bufPos+comparisonLen], pattern[:comparisonLen]) {
+		if !bytes.Equal(prefix[prefixPos:prefixPos+comparisonLen], pattern[:comparisonLen]) {
 			return false
 		}
 	}
@@ -588,34 +588,34 @@ func (g *Getter) MatchPrefix(buf []byte) bool {
 	g.nextPos(true /* clean */) // Reset the state of huffman decoder
 	// Second pass - we check spaces not covered by the patterns
 	var lastUncovered int
-	bufPos = 0
-	for pos := g.nextPos(false /* clean */); pos != 0 && lastUncovered < lenBuf; pos = g.nextPos(false) {
-		bufPos += int(pos) - 1
+	prefixPos = 0
+	for pos := g.nextPos(false /* clean */); pos != 0 && lastUncovered < prefixLen; pos = g.nextPos(false) {
+		prefixPos += int(pos) - 1
 		patternLen := len(g.nextPattern())
-		if bufPos > lastUncovered {
-			dif := uint64(bufPos - lastUncovered)
+		if prefixPos > lastUncovered {
+			dif := uint64(prefixPos - lastUncovered)
 			var comparisonLen int
-			if lenBuf < lastUncovered+int(dif) {
-				comparisonLen = lenBuf - lastUncovered
+			if prefixLen < lastUncovered+int(dif) {
+				comparisonLen = prefixLen - lastUncovered
 			} else {
 				comparisonLen = int(dif)
 			}
-			if !bytes.Equal(buf[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
+			if !bytes.Equal(prefix[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
 				return false
 			}
 			postLoopPos += dif
 		}
-		lastUncovered = bufPos + patternLen
+		lastUncovered = prefixPos + patternLen
 	}
-	if lenBuf > lastUncovered && int(l) > lastUncovered {
+	if prefixLen > lastUncovered && int(l) > lastUncovered {
 		dif := l - uint64(lastUncovered)
 		var comparisonLen int
-		if lenBuf < int(l) {
-			comparisonLen = lenBuf - lastUncovered
+		if prefixLen < int(l) {
+			comparisonLen = prefixLen - lastUncovered
 		} else {
 			comparisonLen = int(dif)
 		}
-		if !bytes.Equal(buf[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
+		if !bytes.Equal(prefix[lastUncovered:lastUncovered+comparisonLen], g.data[postLoopPos:postLoopPos+uint64(comparisonLen)]) {
 			return false
 		}
 	}

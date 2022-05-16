@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCompressEmptyDict(t *testing.T) {
@@ -86,6 +87,12 @@ func prepareDict(t *testing.T) *Decompressor {
 	}
 	defer c.Close()
 	for i := 0; i < 100; i++ {
+		if err = c.AddWord(nil); err != nil {
+			panic(err)
+		}
+		//if err = c.AddWord([]byte("long")); err != nil {
+		//	t.Fatal(err)
+		//}
 		if err = c.AddWord([]byte(fmt.Sprintf("longlongword %d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -105,8 +112,19 @@ func TestCompressDict1(t *testing.T) {
 	defer d.Close()
 	g := d.MakeGetter()
 	i := 0
+	g.Reset(0)
 	for g.HasNext() {
+		require.False(t, g.MatchPrefix([]byte("long")))
+		require.False(t, g.MatchPrefix([]byte("longlonglonglonglonglonglonglonglonglonglong")))
+		require.True(t, g.MatchPrefix([]byte{}))
 		word, _ := g.Next(nil)
+		require.Nil(t, word)
+
+		require.True(t, g.MatchPrefix([]byte("long")))
+		require.True(t, g.MatchPrefix([]byte("longlong")))
+		require.False(t, g.MatchPrefix([]byte("longlonglonglonglonglonglonglonglonglonglong")))
+		require.True(t, g.MatchPrefix([]byte{}))
+		word, _ = g.Next(nil)
 		expected := fmt.Sprintf("longlongword %d", i)
 		if string(word) != expected {
 			t.Errorf("expected %s, got (hex) [%s]", expected, word)
@@ -114,7 +132,7 @@ func TestCompressDict1(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.compressedFile); cs != 1233679659 {
+	if cs := checksum(d.compressedFile); cs != 2250069750 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/ledgerwatch/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
