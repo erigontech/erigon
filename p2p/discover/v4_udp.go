@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/discover/v4wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -78,8 +77,12 @@ type UDPv4 struct {
 
 	addReplyMatcher chan *replyMatcher
 	gotreply        chan reply
+	replyTimeout    time.Duration
+	pingBackDelay   time.Duration
 	closeCtx        context.Context
 	cancelCloseCtx  context.CancelFunc
+
+	privateKeyGenerator func() (*ecdsa.PrivateKey, error)
 }
 
 // replyMatcher represents a pending reply.
@@ -128,7 +131,7 @@ type reply struct {
 }
 
 func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
-	cfg = cfg.withDefaults()
+	cfg = cfg.withDefaults(respTimeout)
 	closeCtx, cancel := context.WithCancel(ctx)
 	t := &UDPv4{
 		conn:            c,
@@ -138,12 +141,16 @@ func ListenV4(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (
 		db:              ln.Database(),
 		gotreply:        make(chan reply),
 		addReplyMatcher: make(chan *replyMatcher),
+		replyTimeout:    cfg.ReplyTimeout,
+		pingBackDelay:   cfg.PingBackDelay,
 		closeCtx:        closeCtx,
 		cancelCloseCtx:  cancel,
 		log:             cfg.Log,
+
+		privateKeyGenerator: cfg.PrivateKeyGenerator,
 	}
 
-	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, t.log)
+	tab, err := newTable(t, ln.Database(), cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +224,7 @@ func (t *UDPv4) Ping(n *enode.Node) error {
 func (t *UDPv4) ping(n *enode.Node) (seq uint64, err error) {
 	rm := t.sendPing(n.ID(), &net.UDPAddr{IP: n.IP(), Port: n.UDP()}, nil)
 	if err = <-rm.errc; err == nil {
-		seq = rm.reply.(*v4wire.Pong).ENRSeq()
+		seq = rm.reply.(*v4wire.Pong).ENRSeq
 	}
 	return seq, err
 }
@@ -248,13 +255,12 @@ func (t *UDPv4) sendPing(toid enode.ID, toaddr *net.UDPAddr, callback func()) *r
 }
 
 func (t *UDPv4) makePing(toaddr *net.UDPAddr) *v4wire.Ping {
-	seq, _ := rlp.EncodeToBytes(t.localNode.Node().Seq())
 	return &v4wire.Ping{
 		Version:    4,
 		From:       t.ourEndpoint(),
 		To:         v4wire.NewEndpoint(toaddr, 0),
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
-		Rest:       []rlp.RawValue{seq},
+		ENRSeq:     t.localNode.Node().Seq(),
 	}
 }
 
@@ -284,7 +290,7 @@ func (t *UDPv4) lookupSelf() []*enode.Node {
 }
 
 func (t *UDPv4) newRandomLookup(ctx context.Context) *lookup {
-	key, err := crypto.GenerateKey()
+	key, err := t.privateKeyGenerator()
 	if err != nil {
 		t.log.Warn("Failed to generate a random node key for newRandomLookup", "err", err)
 		key = t.priv
@@ -301,8 +307,14 @@ func (t *UDPv4) newLookup(ctx context.Context, targetKey *ecdsa.PublicKey) *look
 	return it
 }
 
-// findnode sends a findnode request to the given node and waits until
-// the node has sent up to k neighbors.
+// FindNode sends a "FindNode" request to the given node and waits until
+// the node has sent up to bucketSize neighbors or a respTimeout has passed.
+func (t *UDPv4) FindNode(toNode *enode.Node, targetKey *ecdsa.PublicKey) ([]*enode.Node, error) {
+	targetKeyEnc := v4wire.EncodePubkey(targetKey)
+	nodes, err := t.findnode(toNode.ID(), wrapNode(toNode).addr(), targetKeyEnc)
+	return unwrapNodes(nodes), err
+}
+
 func (t *UDPv4) findnode(toid enode.ID, toaddr *net.UDPAddr, target v4wire.Pubkey) ([]*node, error) {
 	t.ensureBond(toid, toaddr)
 
@@ -443,7 +455,7 @@ func (t *UDPv4) loop() {
 		now := time.Now()
 		for el := plist.Front(); el != nil; el = el.Next() {
 			nextTimeout = el.Value.(*replyMatcher)
-			if dist := nextTimeout.deadline.Sub(now); dist < 2*respTimeout {
+			if dist := nextTimeout.deadline.Sub(now); dist < 2*t.replyTimeout {
 				timeout.Reset(dist)
 				return
 			}
@@ -468,7 +480,7 @@ func (t *UDPv4) loop() {
 			return
 
 		case p := <-t.addReplyMatcher:
-			p.deadline = time.Now().Add(respTimeout)
+			p.deadline = time.Now().Add(t.replyTimeout)
 			plist.PushBack(p)
 
 		case r := <-t.gotreply:
@@ -591,7 +603,7 @@ func (t *UDPv4) ensureBond(toid enode.ID, toaddr *net.UDPAddr) {
 		rm := t.sendPing(toid, toaddr, nil)
 		<-rm.errc
 		// Wait for them to ping back and process our pong.
-		time.Sleep(respTimeout)
+		time.Sleep(t.pingBackDelay)
 	}
 }
 
@@ -678,14 +690,12 @@ func (t *UDPv4) handlePing(h *packetHandlerV4, from *net.UDPAddr, fromID enode.I
 	req := h.Packet.(*v4wire.Ping)
 
 	// Reply.
-	seq, _ := rlp.EncodeToBytes(t.localNode.Node().Seq())
-
 	//nolint:errcheck
 	t.send(from, fromID, &v4wire.Pong{
 		To:         v4wire.NewEndpoint(from, req.From.TCP),
 		ReplyTok:   mac,
 		Expiration: uint64(time.Now().Add(expiration).Unix()),
-		Rest:       []rlp.RawValue{seq},
+		ENRSeq:     t.localNode.Node().Seq(),
 	})
 
 	// Ping back if our last pong on file is too far in the past.

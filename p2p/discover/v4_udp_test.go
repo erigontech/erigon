@@ -61,6 +61,17 @@ type udpTest struct {
 }
 
 func newUDPTest(t *testing.T) *udpTest {
+	return newUDPTestContext(context.Background(), t)
+}
+
+func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
+	ctx = disableLookupSlowdown(ctx)
+
+	replyTimeout := contextGetReplyTimeout(ctx)
+	if replyTimeout == 0 {
+		replyTimeout = 50 * time.Millisecond
+	}
+
 	test := &udpTest{
 		t:          t,
 		pipe:       newpipe(),
@@ -75,11 +86,17 @@ func newUDPTest(t *testing.T) *udpTest {
 		panic(err)
 	}
 	ln := enode.NewLocalNode(test.db, test.localkey)
-	ctx := context.Background()
-	ctx = disableLookupSlowdown(ctx)
 	test.udp, err = ListenV4(ctx, test.pipe, ln, Config{
 		PrivateKey: test.localkey,
 		Log:        testlog.Logger(t, log.LvlError),
+
+		ReplyTimeout: replyTimeout,
+
+		PingBackDelay: time.Nanosecond,
+
+		PrivateKeyGenerator: contextGetPrivateKeyGenerator(ctx),
+
+		TableRevalidateInterval: time.Hour,
 	})
 	if err != nil {
 		panic(err)
@@ -111,7 +128,11 @@ func (test *udpTest) packetInFrom(wantError error, key *ecdsa.PrivateKey, addr *
 		test.t.Errorf("%s encode error: %v", data.Name(), err)
 	}
 	test.sent = append(test.sent, enc)
-	if err = test.udp.handlePacket(addr, enc); err != wantError {
+
+	err = test.udp.handlePacket(addr, enc)
+	if (wantError == nil) && (err != nil) {
+		test.t.Errorf("handlePacket error: %q", err)
+	} else if (wantError != nil) && (err != wantError) {
 		test.t.Errorf("error mismatch: got %q, want %q", err, wantError)
 	}
 }
@@ -175,9 +196,12 @@ func TestUDPv4_responseTimeouts(t *testing.T) {
 	if runtime.GOOS == `darwin` {
 		t.Skip("unstable test on darwin")
 	}
-
 	t.Parallel()
-	test := newUDPTest(t)
+
+	ctx := context.Background()
+	ctx = contextWithReplyTimeout(ctx, respTimeout)
+
+	test := newUDPTestContext(ctx, t)
 	defer test.close()
 
 	rand.Seed(time.Now().UnixNano())
@@ -487,13 +511,13 @@ func TestUDPv4_EIP868(t *testing.T) {
 	// Perform endpoint proof and check for sequence number in packet tail.
 	test.packetIn(nil, &v4wire.Ping{Expiration: futureExp})
 	test.waitPacketOut(func(p *v4wire.Pong, addr *net.UDPAddr, hash []byte) {
-		if p.ENRSeq() != wantNode.Seq() {
-			t.Errorf("wrong sequence number in pong: %d, want %d", p.ENRSeq(), wantNode.Seq())
+		if p.ENRSeq != wantNode.Seq() {
+			t.Errorf("wrong sequence number in pong: %d, want %d", p.ENRSeq, wantNode.Seq())
 		}
 	})
 	test.waitPacketOut(func(p *v4wire.Ping, addr *net.UDPAddr, hash []byte) {
-		if p.ENRSeq() != wantNode.Seq() {
-			t.Errorf("wrong sequence number in ping: %d, want %d", p.ENRSeq(), wantNode.Seq())
+		if p.ENRSeq != wantNode.Seq() {
+			t.Errorf("wrong sequence number in ping: %d, want %d", p.ENRSeq, wantNode.Seq())
 		}
 		test.packetIn(nil, &v4wire.Pong{Expiration: futureExp, ReplyTok: hash})
 	})
@@ -518,6 +542,9 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 	t.Parallel()
 
+	ctx := context.Background()
+	ctx = disableLookupSlowdown(ctx)
+
 	// Start the network.
 	nodes := make([]*UDPv4, 4)
 	for i := range nodes {
@@ -526,9 +553,18 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 			bn := nodes[0].Self()
 			cfg.Bootnodes = []*enode.Node{bn}
 		}
-		nodes[i] = startLocalhostV4(t, cfg)
-		defer nodes[i].Close()
+		cfg.ReplyTimeout = 50 * time.Millisecond
+		cfg.PingBackDelay = time.Nanosecond
+		cfg.TableRevalidateInterval = time.Hour
+
+		nodes[i] = startLocalhostV4(ctx, t, cfg)
 	}
+
+	defer func() {
+		for _, node := range nodes {
+			node.Close()
+		}
+	}()
 
 	// Run through the iterator on all nodes until
 	// they have all found each other.
@@ -550,14 +586,13 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 
 	// Wait for all status reports.
-	timeout := time.NewTimer(30 * time.Second)
+	timeout := time.NewTimer(5 * time.Second)
 	defer timeout.Stop()
 	for received := 0; received < len(nodes); {
 		select {
 		case <-timeout.C:
-			for _, node := range nodes {
-				node.Close()
-			}
+			t.Fatalf("Failed to converge within timeout")
+			return
 		case err := <-status:
 			received++
 			if err != nil {
@@ -568,7 +603,7 @@ func TestUDPv4_smallNetConvergence(t *testing.T) {
 	}
 }
 
-func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
+func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config) *UDPv4 {
 	t.Helper()
 
 	cfg.PrivateKey = newkey()
@@ -595,13 +630,29 @@ func startLocalhostV4(t *testing.T, cfg Config) *UDPv4 {
 	realaddr := socket.LocalAddr().(*net.UDPAddr)
 	ln.SetStaticIP(realaddr.IP)
 	ln.SetFallbackUDP(realaddr.Port)
-	ctx := context.Background()
-	ctx = disableLookupSlowdown(ctx)
 	udp, err := ListenV4(ctx, socket, ln, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return udp
+}
+
+func contextWithReplyTimeout(ctx context.Context, value time.Duration) context.Context {
+	return context.WithValue(ctx, "p2p.discover.Config.ReplyTimeout", value)
+}
+
+func contextGetReplyTimeout(ctx context.Context) time.Duration {
+	value, _ := ctx.Value("p2p.discover.Config.ReplyTimeout").(time.Duration)
+	return value
+}
+
+func contextWithPrivateKeyGenerator(ctx context.Context, value func() (*ecdsa.PrivateKey, error)) context.Context {
+	return context.WithValue(ctx, "p2p.discover.Config.PrivateKeyGenerator", value)
+}
+
+func contextGetPrivateKeyGenerator(ctx context.Context) func() (*ecdsa.PrivateKey, error) {
+	value, _ := ctx.Value("p2p.discover.Config.PrivateKeyGenerator").(func() (*ecdsa.PrivateKey, error))
+	return value
 }
 
 // dgramPipe is a fake UDP socket. It queues all sent datagrams.

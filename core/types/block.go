@@ -1280,6 +1280,52 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	return rlpHash(uncles)
 }
 
+// Copy creates a deep copy of the Block.
+func (b *Block) Copy() *Block {
+	uncles := make([]*Header, 0, len(b.uncles))
+	for _, uncle := range b.uncles {
+		uncles = append(uncles, CopyHeader(uncle))
+	}
+
+	transactionsData, err := MarshalTransactionsBinary(b.transactions)
+	if err != nil {
+		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
+	}
+	transactions, err := DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
+
+	var hashValue atomic.Value
+	if value := b.hash.Load(); value != nil {
+		hash := value.(common.Hash)
+		hashCopy := common.BytesToHash(hash.Bytes())
+		hashValue.Store(hashCopy)
+	}
+
+	var sizeValue atomic.Value
+	if size := b.size.Load(); size != nil {
+		sizeValue.Store(size)
+	}
+
+	td := big.NewInt(0).Set(b.td)
+
+	if b.ReceivedFrom != nil {
+		panic("ReceivedFrom deep copy is not supported")
+	}
+
+	return &Block{
+		header:       CopyHeader(b.header),
+		uncles:       uncles,
+		transactions: transactions,
+		hash:         hashValue,
+		size:         sizeValue,
+		td:           td,
+		ReceivedAt:   b.ReceivedAt,
+		ReceivedFrom: nil,
+	}
+}
+
 // WithSeal returns a new block with the data from b but the header replaced with
 // the sealed one.
 func (b *Block) WithSeal(header *Header) *Block {

@@ -5,11 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/pprof"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,11 +26,13 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -50,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/parallelcompress"
@@ -221,7 +223,7 @@ func mychart() {
 	buffer := bytes.NewBuffer([]byte{})
 	err := graph1.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart1.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart1.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 
 	heapSeries := &chart.ContinuousSeries{
@@ -302,7 +304,7 @@ func mychart() {
 	buffer.Reset()
 	err = graph2.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart2.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart2.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 }
 
@@ -350,7 +352,7 @@ func bucketStats(chaindata string) error {
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
-	data, err := ioutil.ReadFile("dust/hack.log")
+	data, err := os.ReadFile("dust/hack.log")
 	tool.Check(err)
 	thresholds := []float64{}
 	counts := map[int][]float64{}
@@ -468,7 +470,7 @@ func trieChart() {
 	buffer := bytes.NewBuffer([]byte{})
 	err := graph3.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart3.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart3.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 	graph4 := chart.Chart{
 		Width:  1280,
@@ -504,7 +506,7 @@ func trieChart() {
 	buffer = bytes.NewBuffer([]byte{})
 	err = graph4.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart4.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart4.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 	graph5 := chart.Chart{
 		Width:  1280,
@@ -551,7 +553,7 @@ func trieChart() {
 	buffer = bytes.NewBuffer([]byte{})
 	err = graph5.Render(chart.PNG, buffer)
 	tool.Check(err)
-	err = ioutil.WriteFile("chart5.png", buffer.Bytes(), 0644)
+	err = os.WriteFile("chart5.png", buffer.Bytes(), 0644)
 	tool.Check(err)
 }
 
@@ -1020,7 +1022,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
 	block := *headNumber - uint64(rewind)
 	log.Info("GetProof", "address", address, "storage keys", len(storageKeys), "head", *headNumber, "block", block,
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	accountMap := make(map[string]*accounts.Account)
 
@@ -1048,7 +1050,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account map", "size", len(accountMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	storageMap := make(map[string][]byte)
 	if err := changeset.ForRange(tx, kv.StorageChangeSet, block+1, *headNumber+1, func(blockN uint64, address, v []byte) error {
 		var addrHash, err = common.HashData(address)
@@ -1065,7 +1067,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed storage map", "size", len(storageMap),
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
 	unfurl := trie.NewRetainList(0)
 	i := 0
@@ -1107,10 +1109,10 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 			return err1
 		}
 	}
-	sort.Strings(unfurlList)
+	slices.Sort(unfurlList)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	loader := trie.NewFlatDBTrieLoader("checkRoots")
 	if err = loader.Reset(unfurl, nil, nil, false); err != nil {
@@ -1129,13 +1131,13 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	runtime.ReadMemStats(&m)
 	log.Info("Loaded subtries",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(tx, hash, block)
 	runtime.ReadMemStats(&m)
 	log.Info("Constructed trie",
-		"alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)
 	return nil
 }
@@ -1913,7 +1915,7 @@ func snapSizes(chaindata string) error {
 		lens[i] = l
 		i++
 	}
-	sort.Ints(lens)
+	slices.Sort(lens)
 
 	for _, l := range lens {
 		fmt.Printf("%6d - %d\n", l, sizes[l])
@@ -2372,7 +2374,7 @@ func mainnetGenesis() error {
 }
 
 func junkdb() error {
-	dir, err := ioutil.TempDir(".", "junk")
+	dir, err := os.MkdirTemp(".", "junk")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db size test: %w", err)
 	}
@@ -2463,9 +2465,7 @@ func histStats() error {
 	for endBlock := range endBlockMap {
 		endBlocks = append(endBlocks, endBlock)
 	}
-	sort.Slice(endBlocks, func(i, j int) bool {
-		return endBlocks[i] < endBlocks[j]
-	})
+	slices.Sort(endBlocks)
 	var lastEndBlock uint64
 	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
 	for _, endBlock := range endBlocks {
@@ -2526,9 +2526,7 @@ func histStat1(chaindata string) error {
 	for endBlock := range endBlockMap {
 		endBlocks = append(endBlocks, endBlock)
 	}
-	sort.Slice(endBlocks, func(i, j int) bool {
-		return endBlocks[i] < endBlocks[j]
-	})
+	slices.Sort(endBlocks)
 	fmt.Printf("endBlock,%s\n", strings.Join(keys, ","))
 	for _, endBlock := range endBlocks {
 		fmt.Printf("%d", endBlock)
@@ -2536,6 +2534,57 @@ func histStat1(chaindata string) error {
 			fmt.Printf(",%.3f", float64(sizeMap[k][endBlock])/1024.0/1024.0/1024.0)
 		}
 		fmt.Printf("\n")
+	}
+	return nil
+}
+
+func chainConfig(name string) error {
+	var chainConfig *params.ChainConfig
+	switch name {
+	case "mainnet":
+		chainConfig = params.MainnetChainConfig
+	case "ropsten":
+		chainConfig = params.RopstenChainConfig
+	case "sepolia":
+		chainConfig = params.SepoliaChainConfig
+	case "rinkeby":
+		chainConfig = params.RinkebyChainConfig
+	case "goerli":
+		chainConfig = params.GoerliChainConfig
+	case "kiln-devnet":
+		chainConfig = params.KilnDevnetChainConfig
+	case "bsc":
+		chainConfig = params.BSCChainConfig
+	case "sokol":
+		chainConfig = params.SokolChainConfig
+	case "chapel":
+		chainConfig = params.ChapelChainConfig
+	case "rialto":
+		chainConfig = params.RialtoChainConfig
+	case "fermion":
+		chainConfig = params.FermionChainConfig
+	case "mumbai":
+		chainConfig = params.MumbaiChainConfig
+	case "bor-mainnet":
+		chainConfig = params.BorMainnetChainConfig
+	default:
+		return fmt.Errorf("unknown name: %s", name)
+	}
+	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err = encoder.Encode(chainConfig); err != nil {
+		return err
+	}
+	if err = w.Flush(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -2717,6 +2766,8 @@ func main() {
 		err = histStats()
 	case "histStat1":
 		err = histStat1(*chaindata)
+	case "chainConfig":
+		err = chainConfig(*name)
 	}
 
 	if err != nil {

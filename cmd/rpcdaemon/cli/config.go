@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -79,7 +80,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, "rpc.accessList", "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, "rpc.batch.concurrency", 2, "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request")
-	rootCmd.PersistentFlags().IntVar(&cfg.DBReadConcurrency, "db.read.concurrency", runtime.NumCPU(), "Does limit amount of parallel db reads")
+	rootCmd.PersistentFlags().IntVar(&cfg.DBReadConcurrency, "db.read.concurrency", runtime.GOMAXPROCS(-1), "Does limit amount of parallel db reads")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
@@ -107,8 +108,8 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		cfg.SingleNodeMode = cfg.DataDir != "" || cfg.Chaindata != ""
-		if cfg.SingleNodeMode {
+		cfg.WithDatadir = cfg.DataDir != "" || cfg.Chaindata != ""
+		if cfg.WithDatadir {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
@@ -235,20 +236,20 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 }
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
-// `cfg.SingleNodeMode` (mode when it on 1 machine with Erigon)
+// `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, borDb kv.RoDB,
 	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet *services.StarknetService,
 	stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
 	ff *filters.Filters, err error) {
-	if !cfg.SingleNodeMode && cfg.PrivateApiAddr == "" {
+	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
 	}
 
 	// Do not change the order of these checks. Chaindata needs to be checked first, because PrivateApiAddr has default value which is not ""
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
-	if cfg.SingleNodeMode {
+	if cfg.WithDatadir {
 		var rwKv kv.RwDB
 		log.Trace("Creating chain db", "path", cfg.Chaindata)
 		limiter := make(chan struct{}, cfg.DBReadConcurrency)
@@ -289,6 +290,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
+
 	if db != nil {
 		var cc *params.ChainConfig
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -296,7 +298,14 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if err != nil {
 				return err
 			}
+			if genesisBlock == nil {
+				return fmt.Errorf("genesis not found in DB. Likely Erigon was never started on this datadir")
+			}
 			cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+			if err != nil {
+				return err
+			}
+			cfg.Snapshot.Enabled, err = snap.Enabled(tx)
 			if err != nil {
 				return err
 			}
@@ -308,17 +317,16 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
 
-		cfg.SyncMode = ethconfig.SyncModeByChainName(cc.ChainName, cfg.SyncModeCli)
-		cfg.Snapshot.Enabled = cfg.SyncMode == ethconfig.SnapSync
-		if cfg.SingleNodeMode {
-			cfg.Snapshot = ethconfig.NewSnapshotCfg(cfg.Snapshot.Enabled, cfg.Snapshot.KeepBlocks)
+		if cfg.Snapshot.Enabled {
+			cfg.SyncMode = ethconfig.SnapSync
+		} else {
+			cfg.SyncMode = ethconfig.FullSync
 		}
 
-		// if chain config has terminal total difficulty then rpc has to have these API's to function
+		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
 		if cc.TerminalTotalDifficulty != nil {
 			hasEthApiEnabled := false
 			hasEngineApiEnabled := false
-			hasNetApiEnabled := false
 
 			for _, api := range cfg.API {
 				switch api {
@@ -326,8 +334,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					hasEthApiEnabled = true
 				case "engine":
 					hasEngineApiEnabled = true
-				case "net":
-					hasNetApiEnabled = true
 				}
 			}
 
@@ -338,26 +344,25 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if !hasEngineApiEnabled {
 				cfg.API = append(cfg.API, "engine")
 			}
-
-			if !hasNetApiEnabled {
-				cfg.API = append(cfg.API, "net")
-			}
-
 		}
 	}
 
-	var onNewSnapshot func()
-	if cfg.SingleNodeMode {
+	onNewSnapshot := func() {}
+	if cfg.WithDatadir {
 		if cfg.Snapshot.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
-			allSnapshots.AsyncOpenAll(ctx)
+			if err := allSnapshots.Reopen(); err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
+			}
+			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+			// don't reopen it right here, because snapshots may be not ready yet
 			onNewSnapshot = func() {
 				allSnapshots.Reopen()
+				log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
-			blockReader = snapshotsync.NewBlockReader()
-			onNewSnapshot = func() {}
+			log.Info("Use --syncmode=full")
 		}
 	}
 
@@ -378,7 +383,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
 
-	if !cfg.SingleNodeMode {
+	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
 	}
 	remoteEth := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
@@ -430,7 +435,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
-	var engineListenerAuth *http.Server
 	var engineSrv *rpc.Server
 	var engineHttpEndpoint string
 
@@ -495,7 +499,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
 	if len(engineAPI) > 0 {
-		engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
+		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api for engine: %w", err)
 		}
@@ -535,11 +539,6 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 
 		if engineListener != nil {
 			_ = engineListener.Shutdown(shutdownCtx)
-			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
-		}
-
-		if engineListenerAuth != nil {
-			_ = engineListenerAuth.Shutdown(shutdownCtx)
 			log.Info("Engine HTTP endpoint close", "url", engineHttpEndpoint)
 		}
 
@@ -613,60 +612,45 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 	return handler, nil
 }
 
-func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort)
-	engineHttpEndpointAuth := fmt.Sprintf("%s:%d", cfg.EngineHTTPListenAddress, cfg.EnginePort+1)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, "", err
 	}
 	engineSrv.SetAllowList(allowListForRPC)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true); err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
+		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
 	jwtSecret, err := obtainJWTSecret(cfg)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, "", err
 	}
 
-	var wsHandlerNonAuth http.Handler
-	var wsHandlerAuth http.Handler
-
+	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
-		wsHandlerNonAuth = engineSrv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
-		wsHandlerAuth = engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
+		wsHandler = engineSrv.WebsocketHandler([]string{"*"}, jwtSecret, cfg.WebsocketCompression)
 	}
 
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression)
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandlerNonAuth, nil)
-	if err != nil {
-		return nil, nil, nil, "", err
-	}
 
-	engineApiHandlerAuth, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandlerAuth, jwtSecret)
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, jwtSecret)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, "", err
 	}
 
 	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
 	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
-	}
-
-	engineListenerAuth, _, err := node.StartHTTPEndpoint(engineHttpEndpointAuth, rpc.DefaultHTTPTimeouts, engineApiHandlerAuth)
-	if err != nil {
-		return nil, nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
+		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
 	engineInfo := []interface{}{"url", engineHttpEndpoint, "ws", cfg.WebsocketEnabled}
-	log.Info("HTTP endpoint opened for engine", engineInfo...)
-	engineInfoAuth := []interface{}{"url", engineHttpEndpointAuth, "ws", cfg.WebsocketEnabled}
-	log.Info("HTTP endpoint opened for auth engine", engineInfoAuth...)
+	log.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
-	return engineListener, engineListenerAuth, engineSrv, engineHttpEndpoint, nil
+	return engineListener, engineSrv, engineHttpEndpoint, nil
 }

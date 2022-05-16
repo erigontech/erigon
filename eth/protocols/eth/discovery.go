@@ -17,8 +17,10 @@
 package eth
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -40,4 +42,15 @@ func CurrentENREntryFromForks(forks []uint64, genesisHash common.Hash, headHeigh
 	return &enrEntry{
 		ForkID: forkid.NewIDFromForks(forks, genesisHash, headHeight),
 	}
+}
+
+func LoadENRForkID(r *enr.Record) (*forkid.ID, error) {
+	var entry enrEntry
+	if err := r.Load(&entry); err != nil {
+		if enr.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to load fork ID from ENR: %w", err)
+	}
+	return &entry.ForkID, nil
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sort"
 	"sync"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -70,6 +70,7 @@ type EthBackend interface {
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
+	Peers(ctx context.Context) (*remote.PeersReply, error)
 }
 
 // This is the status of a newly execute block.
@@ -172,6 +173,11 @@ func (s *EthBackendServer) Subscribe(r *remote.SubscribeRequest, subscribeServer
 			log.Warn("subscription to newHeaders closed")
 		}
 	}()
+	if s.events.OnNewSnapshotHappened() {
+		if err = subscribeServer.Send(&remote.SubscribeReply{Type: remote.Event_NEW_SNAPSHOT}); err != nil {
+			return err
+		}
+	}
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -523,7 +529,7 @@ func (s *EthBackendServer) evictOldPendingPayloads() {
 	for id := range s.pendingPayloads {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 
 	// remove old payloads so that at most MaxPendingPayloads - 1 remain
 	for i := 0; i <= len(s.pendingPayloads)-MaxPendingPayloads; i++ {
@@ -614,6 +620,10 @@ func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoReques
 		return nil, err
 	}
 	return nodesInfo, nil
+}
+
+func (s *EthBackendServer) Peers(ctx context.Context, _ *emptypb.Empty) (*remote.PeersReply, error) {
+	return s.eth.Peers(ctx)
 }
 
 func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsServer) (err error) {

@@ -3,19 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
 	"time"
 
-	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/c2h5oh/datasize"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
@@ -42,6 +39,7 @@ var (
 	natSetting                     string
 	torrentVerbosity               string
 	downloadRateStr, uploadRateStr string
+	torrentDownloadSlots           int
 	torrentPort                    int
 	torrentMaxPeers                int
 	torrentConnsPerFile            int
@@ -54,14 +52,15 @@ func init() {
 
 	withDataDir(rootCmd)
 
-	rootCmd.Flags().StringVar(&natSetting, "nat", "", utils.NATFlag.Usage)
+	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
-	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", lg.Warning.LogString(), "DEBUG | INFO | WARN | ERROR")
-	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", "8mb", "bytes per second, example: 32mb")
-	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", "8mb", "bytes per second, example: 32mb")
-	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", 42069, "port to listen and serve BitTorrent protocol")
-	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", 10, "")
-	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", 5, "connections per file")
+	rootCmd.Flags().StringVar(&torrentVerbosity, "torrent.verbosity", utils.TorrentVerbosityFlag.Value, utils.TorrentVerbosityFlag.Usage)
+	rootCmd.Flags().StringVar(&downloadRateStr, "torrent.download.rate", utils.TorrentDownloadRateFlag.Value, utils.TorrentDownloadRateFlag.Usage)
+	rootCmd.Flags().StringVar(&uploadRateStr, "torrent.upload.rate", utils.TorrentUploadRateFlag.Value, utils.TorrentUploadRateFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentPort, "torrent.port", utils.TorrentPortFlag.Value, utils.TorrentPortFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
+	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -113,8 +112,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir := &dir.Rw{Path: filepath.Join(datadir, "snapshots")}
-	defer snapshotDir.Close()
+	snapshotDir := filepath.Join(datadir, "snapshots")
 	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
 	if !ok {
 		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
@@ -134,25 +132,20 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, pieceCompletion, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentMaxPeers, torrentConnsPerFile)
+	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
-	defer pieceCompletion.Close()
 
-	protocols, err := downloader.New(cfg, snapshotDir)
+	d, err := downloader.New(cfg)
 	if err != nil {
 		return err
 	}
-	defer protocols.Close()
-	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", protocols.TorrentClient.PeerID()))
-	if err = downloader.CreateTorrentFilesAndAdd(ctx, snapshotDir, protocols.TorrentClient); err != nil {
-		return fmt.Errorf("CreateTorrentFilesAndAdd: %w", err)
-	}
+	defer d.Close()
+	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
+	go downloader.MainLoop(ctx, d, false)
 
-	go downloader.LoggingLoop(ctx, protocols.TorrentClient)
-
-	bittorrentServer, err := downloader.NewGrpcServer(protocols.DB, protocols, snapshotDir, true)
+	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
@@ -178,11 +171,8 @@ var printTorrentHashes = &cobra.Command{
 			return downloader.VerifyDtaFiles(ctx, snapshotDir)
 		}
 
-		lockedSnapshotDir := &dir.Rw{Path: snapshotDir}
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			defer lockedSnapshotDir.Close()
-			removeChunksStorage(lockedSnapshotDir)
-
+			//removePieceCompletionStorage(snapshotDir)
 			files, err := downloader.AllTorrentPaths(snapshotDir)
 			if err != nil {
 				return err
@@ -192,9 +182,9 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, lockedSnapshotDir); err != nil {
-			return err
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
+				return err
+			}
 		}
 
 		res := map[string]string{}
@@ -223,7 +213,7 @@ var printTorrentHashes = &cobra.Command{
 			return nil
 		}
 
-		oldContent, err := ioutil.ReadFile(targetFile)
+		oldContent, err := os.ReadFile(targetFile)
 		if err != nil {
 			return err
 		}
@@ -235,18 +225,20 @@ var printTorrentHashes = &cobra.Command{
 			log.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 			return nil
 		}
-		if err := ioutil.WriteFile(targetFile, serialized, 0644); err != nil {
+		if err := os.WriteFile(targetFile, serialized, 0644); err != nil {
 			return err
 		}
 		return nil
 	},
 }
 
-func removeChunksStorage(snapshotDir *dir.Rw) {
-	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.bolt.db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db-shm"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir.Path, ".torrent.db-wal"))
+//nolint
+func removePieceCompletionStorage(snapshotDir string) {
+	_ = os.RemoveAll(filepath.Join(snapshotDir, "db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.bolt.db"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-shm"))
+	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-wal"))
 }
 
 func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {

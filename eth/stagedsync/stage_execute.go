@@ -10,12 +10,13 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/common"
+	commonold "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -37,7 +38,7 @@ import (
 )
 
 const (
-	logInterval    = 30 * time.Second
+	logInterval    = 20 * time.Second
 	lruDefaultSize = 1_000_000 // 56 MB
 )
 
@@ -98,7 +99,7 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	contractHasTEVM func(contractHash common.Hash) (bool, error),
+	contractHasTEVM func(contractHash commonold.Hash) (bool, error),
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
@@ -108,7 +109,7 @@ func executeBlock(
 	}
 
 	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash commonold.Hash, number uint64) *types.Header {
 		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
 		return h
 	}
@@ -210,7 +211,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
+		to = cmp.Min(prevStageProgress, toBlock)
 	}
 	if to <= s.BlockNumber {
 		return nil
@@ -256,7 +257,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	var stoppedErr error
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
-		if stoppedErr = libcommon.Stopped(quit); stoppedErr != nil {
+		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
 
@@ -275,7 +276,7 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		var contractHasTEVM func(contractHash common.Hash) (bool, error)
+		var contractHasTEVM func(contractHash commonold.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
 			contractHasTEVM = ethdb.GetHasTEVM(tx)
@@ -329,9 +330,9 @@ Loop:
 			totalGasTmp := new(big.Int).Set(totalGasUsed)
 			elapsed := time.Since(startTime)
 			estimateRatio := float64(cumulativeGas.Sub(cumulativeGas, startGasUsed).Uint64()) / float64(totalGasTmp.Sub(totalGasTmp, startGasUsed).Uint64())
-			var estimatedTime common.PrettyDuration
+			var estimatedTime commonold.PrettyDuration
 			if estimateRatio != 0 {
-				estimatedTime = common.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
+				estimatedTime = commonold.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
 			}
 			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), estimatedTime, batch)
 			gas = 0
@@ -357,7 +358,7 @@ Loop:
 	return stoppedErr
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, estimatedTime common.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, estimatedTime commonold.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
@@ -368,18 +369,18 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	runtime.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
-		"blk/s", speed,
-		"tx/s", speedTx,
-		"Mgas/s", speedMgas,
-		"gasState", gasState,
+		"blk/s", fmt.Sprintf("%.1f", speed),
+		"tx/s", fmt.Sprintf("%.1f", speedTx),
+		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
+		"gasState", fmt.Sprintf("%.2f", gasState),
 	}
 	if estimatedTime > 0 {
 		logpairs = append(logpairs, "estimated duration", estimatedTime)
 	}
 	if batch != nil {
-		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
+		logpairs = append(logpairs, "batch", common.ByteCount(uint64(batch.BatchSize())))
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	logpairs = append(logpairs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime
@@ -453,7 +454,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 
 				// Fetch the code hash
 				recoverCodeHashPlain(&acc, tx, k)
-				var address common.Address
+				var address commonold.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
@@ -481,7 +482,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				}
 			} else {
 				if accumulator != nil {
-					var address common.Address
+					var address commonold.Address
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
@@ -492,13 +493,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 			return nil
 		}
 		if accumulator != nil {
-			var address common.Address
+			var address commonold.Address
 			var incarnation uint64
-			var location common.Hash
+			var location commonold.Hash
 			copy(address[:], k[:length.Addr])
 			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
 			copy(location[:], k[length.Addr+length.Incarnation:])
-			accumulator.ChangeStorage(address, incarnation, location, libcommon.Copy(v))
+			accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
 		}
 		if len(v) > 0 {
 			if err := next(k, k[:storageKeyLength], v); err != nil {
@@ -519,11 +520,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		return err
 	}
 
-	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking receipts: %w", err)
+	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate receipts: %w", err)
+	}
+	if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate bor receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking epoch: %w", err)
+		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 
 	// Truncate CallTraceSet
@@ -547,20 +551,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address common.Address
+	var address commonold.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
-}
-
-func min(a, b uint64) uint64 {
-	if a <= b {
-		return a
-	}
-	return b
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
@@ -587,11 +584,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = PruneTable(tx, kv.Receipts, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxInt32); err != nil {
+		if err = PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
 		// LogIndex.Prune will read everything what not pruned here
-		if err = PruneTable(tx, kv.Log, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx, math.MaxInt32); err != nil {
+		if err = PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
 	}

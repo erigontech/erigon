@@ -22,7 +22,6 @@ type QueueID uint8
 const (
 	NoQueue QueueID = iota
 	EntryQueueID
-	VerifyQueueID
 	InsertQueueID
 	PersistedQueueID
 )
@@ -40,6 +39,7 @@ type Link struct {
 	blockHeight uint64
 	persisted   bool    // Whether this link comes from the database record
 	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
+	linked      bool    // Whether this link is connected (via chain of ParentHash to one of the persisted links)
 	idx         int     // Index in the heap
 	queueId     QueueID // which queue this link belongs to
 }
@@ -180,6 +180,7 @@ const (
 	TooFarFuturePenalty
 	TooFarPastPenalty
 	AbandonedAnchorPenalty
+	NewBlockGossipAfterMergePenalty
 )
 
 type PeerPenalty struct {
@@ -256,18 +257,15 @@ const ( // SyncStatus values
 
 type HeaderDownload struct {
 	badHeaders         map[common.Hash]struct{}
-	anchors            map[common.Hash]*Anchor  // Mapping from parentHash to collection of anchors
-	preverifiedHashes  map[common.Hash]struct{} // Set of hashes that are known to belong to canonical chain
-	links              map[common.Hash]*Link    // Links by header hash
+	anchors            map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
+	links              map[common.Hash]*Link   // Links by header hash
 	engine             consensus.Engine
-	verifyQueue        InsertQueue    // Priority queue of non-peristed links ready for verification
-	insertQueue        InsertQueue    // Priority queue of non-persisted links that are verified and can be inserted
+	insertQueue        InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces      *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	persistedLinkQueue LinkQueue      // Priority queue of persisted links used to limit their number
 	linkQueue          LinkQueue      // Priority queue of non-persisted links used to limit their number
 	anchorQueue        *AnchorQueue   // Priority queue of anchors used to sequence the header requests
 	DeliveryNotify     chan struct{}
-	SkipCycleHack      chan struct{} // devenet will signal to this channel to skip sync cycle and release write db transaction. It's temporary solution - later we will do mining without write transaction.
 	toAnnounce         []Announce
 	lock               sync.RWMutex
 	preverifiedHeight  uint64 // Block height corresponding to the last preverified hash
@@ -278,6 +276,10 @@ type HeaderDownload struct {
 	requestChaining    bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
 	fetchingNew        bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW   uint64
+	trace              bool
+	respCount          int
+	respMin            uint64
+	respMax            uint64
 
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          interfaces.HeaderReader
@@ -318,12 +320,10 @@ func NewHeaderDownload(
 		linkLimit:          linkLimit - persistentLinkLimit,
 		anchorLimit:        anchorLimit,
 		engine:             engine,
-		preverifiedHashes:  make(map[common.Hash]struct{}),
 		links:              make(map[common.Hash]*Link),
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
-		SkipCycleHack:      make(chan struct{}),
 		BeaconRequestList:  engineapi.NewRequestList(),
 		PayloadStatusCh:    make(chan privateapi.PayloadStatus, 1),
 		headerReader:       headerReader,
@@ -332,7 +332,6 @@ func NewHeaderDownload(
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
 	heap.Init(hd.anchorQueue)
-	heap.Init(&hd.verifyQueue)
 	heap.Init(&hd.insertQueue)
 	return hd
 }
@@ -355,6 +354,8 @@ func (p Penalty) String() string {
 		return "TooFarFuture"
 	case TooFarPastPenalty:
 		return "TooFarPast"
+	case NewBlockGossipAfterMergePenalty:
+		return "NewBlockGossipAfterMerge"
 	default:
 		return fmt.Sprintf("Unknown(%d)", p)
 	}
@@ -373,8 +374,6 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 	case NoQueue:
 	case EntryQueueID:
 		heap.Remove(&hd.linkQueue, link.idx)
-	case VerifyQueueID:
-		heap.Remove(&hd.verifyQueue, link.idx)
 	case InsertQueueID:
 		heap.Remove(&hd.insertQueue, link.idx)
 	case PersistedQueueID:
@@ -385,8 +384,6 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 	case NoQueue:
 	case EntryQueueID:
 		heap.Push(&hd.linkQueue, link)
-	case VerifyQueueID:
-		heap.Push(&hd.verifyQueue, link)
 	case InsertQueueID:
 		heap.Push(&hd.insertQueue, link)
 	case PersistedQueueID:

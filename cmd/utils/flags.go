@@ -31,7 +31,6 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
@@ -131,6 +130,14 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
+	OverrideTerminalTotalDifficulty = BigFlag{
+		Name:  "override.terminaltotaldifficulty",
+		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
+	}
+	OverrideMergeForkBlock = BigFlag{
+		Name:  "override.mergeForkBlock",
+		Usage: "Manually specify FORK_NEXT_VALUE (see EIP-3675), overriding the bundled setting",
+	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
 		Name:  "ethash.cachesinmem",
@@ -152,7 +159,7 @@ var (
 	}
 	SyncModeFlag = cli.StringFlag{
 		Name:  "syncmode",
-		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "fast" in all other cases`,
+		Usage: `Default: "snap" for BSC, Mainnet and Goerli. "full" in all other cases`,
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
@@ -294,6 +301,7 @@ var (
 	EthStatsURLFlag = cli.StringFlag{
 		Name:  "ethstats",
 		Usage: "Reporting URL of a ethstats service (nodename:secret@host:port)",
+		Value: "",
 	}
 	FakePoWFlag = cli.BoolFlag{
 		Name:  "fakepow",
@@ -310,7 +318,7 @@ var (
 	}
 	HTTPEnabledFlag = cli.BoolFlag{
 		Name:  "http",
-		Usage: "Enable the HTTP-RPC server",
+		Usage: "Enabled by default. Use --http=false to disable the HTTP-RPC server",
 	}
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
@@ -341,11 +349,11 @@ var (
 
 	HttpCompressionFlag = cli.BoolFlag{
 		Name:  "http.compression",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Usage: "Enable compression over HTTP-RPC",
 	}
 	WsCompressionFlag = cli.BoolFlag{
 		Name:  "ws.compression",
-		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
+		Usage: "Enable compression over WebSocket",
 	}
 	HTTPCORSDomainFlag = cli.StringFlag{
 		Name:  "http.corsdomain",
@@ -369,8 +377,8 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Does limit amount of parallel db reads (Default: number of CPU)",
-		Value: runtime.NumCPU(),
+		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
+		Value: runtime.GOMAXPROCS(-1),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -487,7 +495,7 @@ var (
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
-		Usage: "Maximum number of pending connection attempts (defaults used if set to 0)",
+		Usage: "Maximum number of TCP connections pending to become connected peers",
 		Value: node.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
@@ -632,17 +640,22 @@ var (
 	TorrentVerbosityFlag = cli.StringFlag{
 		Name:  "torrent.verbosity",
 		Value: lg.Warning.LogString(),
-		Usage: "DEBUG | INFO | WARN | ERROR",
+		Usage: "DEBUG | INFO | WARN | ERROR (must set --verbosity to equal or higher level)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
-		Value: "4mb",
+		Value: "8mb",
 		Usage: "bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name:  "torrent.upload.rate",
 		Value: "4mb",
-		Usage: "byt,es per second, example: 32mb",
+		Usage: "bytes per second, example: 32mb",
+	}
+	TorrentDownloadSlotsFlag = cli.IntFlag{
+		Name:  "torrent.download.slots",
+		Value: 3,
+		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
@@ -652,11 +665,11 @@ var (
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
 		Value: 100,
-		Usage: "limit amount of torrent peers",
+		Usage: "unused parameter (reserved for future use)",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
-		Value: 20,
+		Value: 10,
 		Usage: "connections per file",
 	}
 	DbPageSizeFlag = cli.StringFlag{
@@ -801,7 +814,19 @@ func ParseNodesFromURLs(urls []string) ([]*enode.Node, error) {
 
 // NewP2PConfig
 //  - doesn't setup bootnodes - they will set when genesisHash will know
-func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName string, staticPeers []string, trustedPeers []string, port, protocol uint) (*p2p.Config, error) {
+func NewP2PConfig(
+	nodiscover bool,
+	datadir string,
+	netRestrict string,
+	natSetting string,
+	maxPeers int,
+	maxPendPeers int,
+	nodeName string,
+	staticPeers []string,
+	trustedPeers []string,
+	port,
+	protocol uint,
+) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
 	case eth.ETH66:
@@ -816,14 +841,15 @@ func NewP2PConfig(nodiscover bool, datadir, netRestrict, natSetting, nodeName st
 	}
 
 	cfg := &p2p.Config{
-		ListenAddr:   fmt.Sprintf(":%d", port),
-		MaxPeers:     100,
-		NAT:          nat.Any(),
-		NoDiscovery:  nodiscover,
-		PrivateKey:   serverKey,
-		Name:         nodeName,
-		Log:          log.New(),
-		NodeDatabase: enodeDBPath,
+		ListenAddr:      fmt.Sprintf(":%d", port),
+		MaxPeers:        maxPeers,
+		MaxPendingPeers: maxPendPeers,
+		NAT:             nat.Any(),
+		NoDiscovery:     nodiscover,
+		PrivateKey:      serverKey,
+		Name:            nodeName,
+		Log:             log.New(),
+		NodeDatabase:    enodeDBPath,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1043,14 +1069,12 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
 
-	if ctx.GlobalIsSet(DbPageSizeFlag.Name) {
-		if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
-			panic(err)
-		}
-		sz := cfg.MdbxPageSize.Bytes()
-		if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-			panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
-		}
+	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
+		panic(err)
+	}
+	sz := cfg.MdbxPageSize.Bytes()
+	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
+		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
 	}
 }
 
@@ -1352,8 +1376,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
 	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
-	snDir := &dir.Rw{Path: filepath.Join(nodeConfig.DataDir, "snapshots")}
-	cfg.SnapshotDir = snDir
+	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
@@ -1366,19 +1389,18 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			panic(err)
 		}
 
-		torrentCfg, dirCloser, err := torrentcfg.New(cfg.SnapshotDir,
+		var err error
+		cfg.Torrent, err = torrentcfg.New(cfg.SnapshotDir,
 			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
-			ctx.GlobalInt(TorrentMaxPeersFlag.Name),
 			ctx.GlobalInt(TorrentConnsPerFileFlag.Name),
+			ctx.GlobalInt(TorrentDownloadSlotsFlag.Name),
 		)
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent = torrentCfg
-		cfg.TorrentDirCloser = dirCloser
 	}
 
 	nodeConfig.Http.Snapshot = cfg.Snapshot
@@ -1398,6 +1420,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
 
+	cfg.Ethstats = ctx.GlobalString(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.EnabledIssuance = ctx.GlobalIsSet(EnabledIssuance.Name)
 	if ctx.GlobalIsSet(NetworkIdFlag.Name) {
@@ -1463,6 +1486,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		if !ctx.GlobalIsSet(MinerGasPriceFlag.Name) {
 			cfg.Miner.GasPrice = big.NewInt(1)
 		}
+	}
+
+	if ctx.GlobalIsSet(OverrideTerminalTotalDifficulty.Name) {
+		cfg.Genesis.Config.TerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
+	}
+	if ctx.GlobalIsSet(OverrideMergeForkBlock.Name) {
+		cfg.Genesis.Config.MergeForkBlock = GlobalBig(ctx, OverrideMergeForkBlock.Name)
 	}
 }
 

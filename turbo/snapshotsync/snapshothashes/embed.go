@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/exp/slices"
 )
 
 //go:embed erigon-snapshots/mainnet.toml
@@ -22,12 +23,30 @@ var Goerli = fromToml(goerli)
 var bsc []byte
 var Bsc = fromToml(bsc)
 
-type Preverified map[string]string
+//go:embed erigon-snapshots/ropsten.toml
+var ropsten []byte
+var Ropsten = fromToml(ropsten)
+
+type PreverifiedItem struct {
+	Name string
+	Hash string
+}
+type Preverified []PreverifiedItem
+type preverified map[string]string
 
 func fromToml(in []byte) (out Preverified) {
-	if err := toml.Unmarshal(in, &out); err != nil {
+	var outMap preverified
+	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
+	return doSort(outMap)
+}
+func doSort(in preverified) Preverified {
+	out := make(Preverified, 0, len(in))
+	for k, v := range in {
+		out = append(out, PreverifiedItem{k, v})
+	}
+	slices.SortFunc(out, func(i, j PreverifiedItem) bool { return i.Name < j.Name })
 	return out
 }
 
@@ -35,6 +54,7 @@ var (
 	MainnetChainSnapshotConfig = newConfig(Mainnet)
 	GoerliChainSnapshotConfig  = newConfig(Goerli)
 	BscChainSnapshotConfig     = newConfig(Bsc)
+	RopstenChainSnapshotConfig = newConfig(Ropsten)
 )
 
 func newConfig(preverified Preverified) *Config {
@@ -43,8 +63,8 @@ func newConfig(preverified Preverified) *Config {
 
 func maxBlockNum(preverified Preverified) uint64 {
 	max := uint64(0)
-	for name := range preverified {
-		_, fileName := filepath.Split(name)
+	for _, p := range preverified {
+		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
 		if ext != ".seg" {
 			continue
@@ -84,6 +104,8 @@ func KnownConfig(networkName string) *Config {
 		return GoerliChainSnapshotConfig
 	case networkname.BSCChainName:
 		return BscChainSnapshotConfig
+	case networkname.RopstenChainName:
+		return RopstenChainSnapshotConfig
 	default:
 		return newConfig(Preverified{})
 	}

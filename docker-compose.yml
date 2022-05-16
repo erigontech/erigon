@@ -17,12 +17,10 @@ services:
     ports:
       - "30303:30303/tcp"
       - "30303:30303/udp"
-      - "30304:30304/tcp"
-      - "30304:30304/udp"
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.33.5
+    image: prom/prometheus:v2.35.0
     user: 1000:1000 # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports:
@@ -33,7 +31,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:8.4.4
+    image: grafana/grafana:8.5.2
     user: 1000:1000 # Uses erigon user from Dockerfile
     ports:
       - "3000:3000"
@@ -52,7 +50,6 @@ services:
       - erigon
     ports:
       - "8545:8545"
-      - "8550:8550"
       - "8551:8551"
     restart: unless-stopped
 
@@ -65,5 +62,6 @@ services:
       - erigon
     ports:
       - "9093:9093"
-      - "42069:42069"
+      - "42069:42069/tcp"
+      - "42069:42069/udp"
     restart: unless-stopped

@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -39,7 +40,7 @@ func ReadBorReceiptRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawVal
 func ReadRawBorReceipt(db kv.Tx, hash common.Hash, number uint64) *types.Receipt {
 	// Retrieve the flattened receipt slice
 	data := ReadBorReceiptRLP(db, hash, number)
-	if data == nil || len(data) == 0 {
+	if len(data) == 0 {
 		return nil
 	}
 
@@ -146,4 +147,14 @@ func ReadBorTransaction(db kv.Tx, hash common.Hash) (*types.Transaction, common.
 
 	var tx types.Transaction = types.NewBorTransaction()
 	return &tx, blockHash, *blockNumber, uint64(bodyForStorage.TxAmount), nil
+}
+
+// TruncateBorReceipts removes all bor receipt for given block number or newer
+func TruncateBorReceipts(db kv.RwTx, number uint64) error {
+	if err := db.ForEach(kv.BorReceipts, dbutils.EncodeBlockNumber(number), func(k, _ []byte) error {
+		return db.Delete(kv.BorReceipts, k, nil)
+	}); err != nil {
+		return err
+	}
+	return nil
 }

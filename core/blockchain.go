@@ -21,10 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"golang.org/x/exp/slices"
 
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/log/v3"
@@ -315,9 +315,7 @@ func ExecuteBlockEphemerally(
 	var stateSyncReceipt *types.ReceiptForStorage
 	if chainConfig.Consensus == params.BorConsensus && len(blockLogs) > 0 {
 		var stateSyncLogs []*types.Log
-		sort.SliceStable(blockLogs, func(i, j int) bool {
-			return blockLogs[i].Index < blockLogs[j].Index
-		})
+		slices.SortStableFunc(blockLogs, func(i, j *types.Log) bool { return i.Index < j.Index })
 
 		if len(blockLogs) > len(logs) {
 			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
@@ -351,9 +349,16 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
-	blockContext := NewEVMBlockContext(header, nil, engine, &state.SystemAddress, nil)
+	isBor := chainConfig.Bor != nil
+	var author *common.Address
+	if isBor {
+		author = &header.Coinbase
+	} else {
+		author = &state.SystemAddress
+	}
+	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
-	if chainConfig.Bor != nil {
+	if isBor {
 		ret, _, err := evm.Call(
 			vm.AccountRef(msg.From()),
 			*msg.To(),

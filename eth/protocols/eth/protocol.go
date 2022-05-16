@@ -44,14 +44,6 @@ var ProtocolToString = map[uint]string{
 // devp2p capability negotiation.
 const ProtocolName = "eth"
 
-// ProtocolVersions are the supported versions of the `eth` protocol (first
-// is primary).
-var ProtocolVersions = []uint{ETH66} //nolint
-
-// protocolLengths are the number of implemented message corresponding to
-// different protocol versions.
-var protocolLengths = map[uint]uint64{ETH66: 17} //nolint
-
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
 const ProtocolMaxMsgSize = maxMessageSize
@@ -76,25 +68,6 @@ const (
 	GetPooledTransactionsMsg      = 0x09
 	PooledTransactionsMsg         = 0x0a
 )
-
-//nolint
-var ToString = map[uint]string{
-	StatusMsg:                     "StatusMsg",
-	NewBlockHashesMsg:             "NewBlockHashesMsg",
-	TransactionsMsg:               "TransactionsMsg",
-	GetBlockHeadersMsg:            "GetBlockHeadersMsg",
-	BlockHeadersMsg:               "BlockHeadersMsg",
-	GetBlockBodiesMsg:             "GetBlockBodiesMsg",
-	BlockBodiesMsg:                "BlockBodiesMsg",
-	NewBlockMsg:                   "NewBlockMsg",
-	GetNodeDataMsg:                "GetNodeDataMsg",
-	NodeDataMsg:                   "NodeDataMsg",
-	GetReceiptsMsg:                "GetReceiptsMsg",
-	ReceiptsMsg:                   "ReceiptsMsg",
-	NewPooledTransactionHashesMsg: "NewPooledTransactionHashesMsg",
-	GetPooledTransactionsMsg:      "GetPooledTransactionsMsg",
-	PooledTransactionsMsg:         "PooledTransactionsMsg",
-}
 
 var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 	ETH66: {
@@ -133,17 +106,6 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
 }
-
-var (
-	ErrNoStatusMsg             = errors.New("no status message")
-	errMsgTooLarge             = errors.New("message too long")
-	errDecode                  = errors.New("invalid message")
-	errInvalidMsgCode          = errors.New("invalid message code") //nolint
-	ErrProtocolVersionMismatch = errors.New("protocol version mismatch")
-	ErrNetworkIDMismatch       = errors.New("network ID mismatch")
-	ErrGenesisMismatch         = errors.New("genesis mismatch")
-	ErrForkIDRejected          = errors.New("fork ID rejected")
-)
 
 // Packet represents a p2p message in the `eth` protocol.
 type Packet interface {

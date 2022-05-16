@@ -30,27 +30,31 @@ var (
 	nodiscover   bool // disable sentry's discovery mechanism
 	protocol     string
 	netRestrict  string // CIDR to restrict peering to
+	maxPeers     int
+	maxPendPeers int
 	healthCheck  bool
 )
 
 func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
-	rootCmd.Flags().StringVar(&natSetting, "nat", "", utils.NATFlag.Usage)
-	rootCmd.Flags().IntVar(&port, "port", 30303, "p2p port number")
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
-	rootCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth66")
-	rootCmd.Flags().StringSliceVar(&staticPeers, "staticpeers", []string{}, "static peer list [enode]")
-	rootCmd.Flags().StringSliceVar(&trustedPeers, "trustedpeers", []string{}, "trusted peer list [enode]")
+	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().StringVar(&natSetting, utils.NATFlag.Name, utils.NATFlag.Value, utils.NATFlag.Usage)
+	rootCmd.Flags().IntVar(&port, utils.ListenPortFlag.Name, utils.ListenPortFlag.Value, utils.ListenPortFlag.Usage)
+	rootCmd.Flags().StringSliceVar(&staticPeers, utils.StaticPeersFlag.Name, []string{}, utils.StaticPeersFlag.Usage)
+	rootCmd.Flags().StringSliceVar(&trustedPeers, utils.TrustedPeersFlag.Name, []string{}, utils.TrustedPeersFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
-	rootCmd.Flags().StringVar(&netRestrict, "netrestrict", "", "CIDR range to accept peers from <CIDR>")
-	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().StringVar(&protocol, "p2p.protocol", "eth66", "eth66")
+	rootCmd.Flags().StringVar(&netRestrict, utils.NetrestrictFlag.Name, utils.NetrestrictFlag.Value, utils.NetrestrictFlag.Usage)
+	rootCmd.Flags().IntVar(&maxPeers, utils.MaxPeersFlag.Name, utils.MaxPeersFlag.Value, utils.MaxPeersFlag.Usage)
+	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
+
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
-
 }
 
 var rootCmd = &cobra.Command{
@@ -71,10 +75,23 @@ var rootCmd = &cobra.Command{
 		p := eth.ETH66
 
 		nodeConfig := node2.NewNodeConfig()
-		p2pConfig, err := utils.NewP2PConfig(nodiscover, datadir, netRestrict, natSetting, nodeConfig.NodeName(), staticPeers, trustedPeers, uint(port), uint(p))
+		p2pConfig, err := utils.NewP2PConfig(
+			nodiscover,
+			datadir,
+			netRestrict,
+			natSetting,
+			maxPeers,
+			maxPendPeers,
+			nodeConfig.NodeName(),
+			staticPeers,
+			trustedPeers,
+			uint(port),
+			uint(p),
+		)
 		if err != nil {
 			return err
 		}
+
 		return sentry.Sentry(cmd.Context(), datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
 	},
 }

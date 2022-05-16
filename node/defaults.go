@@ -26,7 +26,7 @@ import (
 const (
 	DefaultHTTPHost       = "localhost" // Default host interface for the HTTP RPC server
 	DefaultHTTPPort       = 8545        // Default TCP port for the HTTP RPC server
-	DefaultEngineHTTPPort = 8550        // Default TCP port for the engineApi HTTP RPC server
+	DefaultEngineHTTPPort = 8551        // Default TCP port for the engineApi HTTP RPC server
 	DefaultWSHost         = "localhost" // Default host interface for the websocket RPC server
 	DefaultWSPort         = 8546        // Default TCP port for the websocket RPC server
 	DefaultGRPCHost       = "localhost" // Default host interface for the GRPC server
@@ -43,9 +43,10 @@ var DefaultConfig = Config{
 	WSPort:           DefaultWSPort,
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{
-		ListenAddr:   ":30303",
-		ListenAddr65: ":30304",
-		MaxPeers:     100,
-		NAT:          nat.Any(),
+		ListenAddr:      ":30303",
+		ListenAddr65:    ":30304",
+		MaxPeers:        100,
+		MaxPendingPeers: 1000,
+		NAT:             nat.Any(),
 	},
 }

@@ -18,7 +18,6 @@
 package ethconfig
 
 import (
-	"io"
 	"math/big"
 	"os"
 	"os/user"
@@ -27,27 +26,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/params/networkname"
-
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/aura"
-	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
-	"github.com/ledgerwatch/erigon/consensus/clique"
-	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/consensus/parlia"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -73,7 +60,7 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode: FastSync,
+	SyncMode: FullSync,
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
@@ -175,10 +162,9 @@ type Config struct {
 	BadBlockHash common.Hash // hash of the block marked as bad
 
 	Snapshot Snapshot
-	Torrent  *torrent.ClientConfig
+	Torrent  *torrentcfg.Cfg
 
-	TorrentDirCloser io.Closer
-	SnapshotDir      *dir.Rw
+	SnapshotDir string
 
 	BlockDownloaderWindow int
 
@@ -227,84 +213,28 @@ type Config struct {
 
 	// No heimdall service
 	WithoutHeimdall bool
-}
-
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string) consensus.Engine {
-	var eng consensus.Engine
-
-	switch consensusCfg := config.(type) {
-	case *ethash.Config:
-		switch consensusCfg.PowMode {
-		case ethash.ModeFake:
-			log.Warn("Ethash used in fake mode")
-			eng = ethash.NewFaker()
-		case ethash.ModeTest:
-			log.Warn("Ethash used in test mode")
-			eng = ethash.NewTester(nil, noverify)
-		case ethash.ModeShared:
-			log.Warn("Ethash used in shared mode")
-			eng = ethash.NewShared()
-		default:
-			eng = ethash.New(ethash.Config{
-				CachesInMem:      consensusCfg.CachesInMem,
-				CachesLockMmap:   consensusCfg.CachesLockMmap,
-				DatasetDir:       consensusCfg.DatasetDir,
-				DatasetsInMem:    consensusCfg.DatasetsInMem,
-				DatasetsOnDisk:   consensusCfg.DatasetsOnDisk,
-				DatasetsLockMmap: consensusCfg.DatasetsLockMmap,
-			}, notify, noverify)
-		}
-	case *params.ConsensusSnapshotConfig:
-		if chainConfig.Clique != nil {
-			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
-		}
-	case *params.AuRaConfig:
-		if chainConfig.Aura != nil {
-			var err error
-			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory), chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
-			if err != nil {
-				panic(err)
-			}
-		}
-	case *params.ParliaConfig:
-		if chainConfig.Parlia != nil {
-			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory))
-		}
-	case *params.BorConfig:
-		if chainConfig.Bor != nil {
-			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
-			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false), HeimdallURL, WithoutHeimdall)
-		}
-	}
-
-	if eng == nil {
-		panic("unknown config" + spew.Sdump(config))
-	}
-
-	if chainConfig.TerminalTotalDifficulty == nil {
-		return eng
-	} else {
-		return serenity.New(eng) // the Merge
-	}
+	// Ethstats service
+	Ethstats string
 }
 
 type SyncMode string
 
 const (
-	FastSync SyncMode = "fast"
+	FullSync SyncMode = "full"
 	SnapSync SyncMode = "snap"
 )
 
 func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
-	if syncCliFlag == "fast" {
-		return FastSync
+	if syncCliFlag == "full" {
+		return FullSync
 	} else if syncCliFlag == "snap" {
 		return SnapSync
 	}
 	switch chain {
-	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName:
+	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
+		networkname.RopstenChainName:
 		return SnapSync
 	default:
-		return FastSync
+		return FullSync
 	}
 }
