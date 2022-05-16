@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"errors"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -65,32 +64,14 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 
 // run runs the given contract and takes care of running precompiles with a fallback to the byte code interpreter.
 func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, error) {
-	callback, err := selectInterpreter(evm, contract)
-	if err != nil {
-		return nil, err
+	if contract.vmType == TEVMType {
+		interpreter := evm.interpreter
+		defer func() {
+			evm.interpreter = interpreter
+		}()
 	}
-
-	defer callback()
 
 	return evm.interpreter.Run(contract, input, readOnly)
-}
-
-func selectInterpreter(evm *EVM, contract *Contract) (func(), error) {
-	interpreter := evm.interpreter
-	callback := func() {
-		evm.interpreter = interpreter
-	}
-
-	switch contract.vmType {
-	case EVMType:
-		evm.interpreter = evm.interpreters[EVMType]
-	case TEVMType:
-		evm.interpreter = evm.interpreters[TEVMType]
-	default:
-		return nil, errors.New("no compatible interpreter")
-	}
-
-	return callback, nil
 }
 
 // BlockContext provides the EVM with auxiliary information. Once provided
