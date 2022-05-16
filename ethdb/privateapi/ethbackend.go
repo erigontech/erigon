@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sort"
 	"sync"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -529,7 +529,7 @@ func (s *EthBackendServer) evictOldPendingPayloads() {
 	for id := range s.pendingPayloads {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 
 	// remove old payloads so that at most MaxPendingPayloads - 1 remain
 	for i := 0; i <= len(s.pendingPayloads)-MaxPendingPayloads; i++ {

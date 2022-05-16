@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -751,9 +752,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		return nil, nil, fmt.Errorf("the length of systemTxs is still %d", len(systemTxs))
 	}
 	// Re-order receipts so that are in right order
-	sort.Slice(receipts, func(i int, j int) bool {
-		return receipts[i].TransactionIndex < receipts[j].TransactionIndex
-	})
+	slices.SortFunc(receipts, func(a, b *types.Receipt) bool { return a.TransactionIndex < b.TransactionIndex })
 	return txs, receipts, nil
 }
 

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -22,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 type HistoryCfg struct {
@@ -341,7 +341,7 @@ func truncateBitmaps64(tx kv.RwTx, bucket string, inMem map[string]struct{}, to 
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange64(tx, bucket, []byte(k), to+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)

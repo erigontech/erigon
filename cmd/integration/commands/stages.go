@@ -6,14 +6,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
@@ -40,6 +38,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 )
 
 var cmdStageHeaders = &cobra.Command{
@@ -1059,7 +1058,7 @@ func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
 			appliedStrs[i] = k
 			i++
 		}
-		sort.Strings(appliedStrs)
+		slices.Sort(appliedStrs)
 		log.Info("Applied", "migrations", strings.Join(appliedStrs, " "))
 		return nil
 	})
@@ -1091,9 +1090,8 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		if syncmode == ethconfig.SnapSync {
-			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
-			dir.MustExist(filepath.Join(datadir, "snapshots"))
-			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
+			snapDir := filepath.Join(datadir, "snapshots")
+			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, true), snapDir)
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}

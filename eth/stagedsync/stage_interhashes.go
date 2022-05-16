@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/bits"
 	"os"
-	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -19,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 type TrieCfg struct {
@@ -240,7 +240,7 @@ func (p *HashPromoter) Promote(logPrefix string, s *StageState, from, to uint64,
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
-		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
+		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
 		for _, k := range deletedAccounts {
 			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
 				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
@@ -329,7 +329,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 
 	if !storage { // delete Intermediate hashes of deleted accounts
-		sort.Slice(deletedAccounts, func(i, j int) bool { return bytes.Compare(deletedAccounts[i], deletedAccounts[j]) < 0 })
+		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
 		for _, k := range deletedAccounts {
 			if err := p.db.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
 				if err := p.db.Delete(kv.TrieOfStorage, k, v); err != nil {
