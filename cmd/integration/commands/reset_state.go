@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -266,6 +267,23 @@ func printStages(db kv.Tx) error {
 		return err
 	}
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
+
+	{
+		c, err := db.Cursor(kv.Headers)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		_, _, err = c.First()
+		if err != nil {
+			return err
+		}
+		firstNonGenesis, _, err := c.Next()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "first header in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
+	}
 
 	return nil
 }
