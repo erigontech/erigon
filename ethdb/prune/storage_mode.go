@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
@@ -198,32 +199,33 @@ func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
 	}
+	const defaultVal uint64 = 90000
 	long := ""
-	short := "--prune="
+	short := ""
 	if m.History.Enabled() {
 		if m.History.useDefaultValue() {
-			short += "h"
+			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
 		}
 	}
 	if m.Receipts.Enabled() {
 		if m.Receipts.useDefaultValue() {
-			short += "r"
+			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.toValue())
 		}
 	}
 	if m.TxIndex.Enabled() {
 		if m.TxIndex.useDefaultValue() {
-			short += "t"
+			short += fmt.Sprintf(" --prune.t.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.toValue())
 		}
 	}
 	if m.CallTraces.Enabled() {
 		if m.CallTraces.useDefaultValue() {
-			short += "c"
+			short += fmt.Sprintf(" --prune.c.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
 		}
@@ -231,7 +233,8 @@ func (m Mode) String() string {
 	if m.Experiments.TEVM {
 		long += " --experiments.tevm=enabled"
 	}
-	return short + long
+
+	return strings.TrimLeft(short+long, " ")
 }
 
 func Override(db kv.RwTx, sm Mode) error {
