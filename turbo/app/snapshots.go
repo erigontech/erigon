@@ -281,6 +281,8 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 	}
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
 	snapDir := filepath.Join(datadir, "snapshots")
+	dir.MustExist(snapDir)
+	dir.MustExist(filepath.Join(snapDir, "db")) // this folder will be checked on existance - to understand that snapshots are ready
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	dir.MustExist(tmpDir)
 
@@ -338,8 +340,6 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 			return err
 		}
 	}
-
-	dir.MustExist(snapDir)
 
 	log.Info("Last body number", "last", last)
 	workers := runtime.GOMAXPROCS(-1) - 1
