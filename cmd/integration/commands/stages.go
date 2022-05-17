@@ -1090,8 +1090,8 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		if syncmode == ethconfig.SnapSync {
-			snapDir := filepath.Join(datadir, "snapshots")
-			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, true), snapDir)
+			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
+			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}
@@ -1163,7 +1163,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if allSn != nil {
 		cfg.Snapshot = allSn.Cfg()
 	}
-	cfg.SnapshotDir = filepath.Join(datadir, "snapshots")
+	cfg.SnapDir = filepath.Join(datadir, "snapshots")
 	var engine consensus.Engine
 	config := &ethconfig.Defaults
 	if chainConfig.Clique != nil {
@@ -1189,10 +1189,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg,
-		chainConfig.TerminalTotalDifficulty, sentryControlServer, tmpdir,
-		&stagedsync.Notifications{}, nil, allSn, cfg.SnapshotDir, nil,
-	)
+	sync, err := stages2.NewStagedSync(context.Background(), logger, db, p2p.Config{}, cfg, sentryControlServer, tmpdir, &stagedsync.Notifications{}, nil, allSn, nil)
 	if err != nil {
 		panic(err)
 	}

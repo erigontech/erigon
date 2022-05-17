@@ -89,13 +89,6 @@ func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash co
 	return *n, true, nil
 }
 
-//func (back *BlockReader) TxnByHashDeprecated(ctx context.Context, tx kv.Getter, txnHash common.Hash) (txn types.Transaction, blockHash common.Hash, blockNum, txnIndex uint64, err error) {
-//	return rawdb.ReadTransactionByHash(tx, txnHash)
-//}
-//func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-//	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
-//}
-
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
@@ -561,25 +554,22 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		offset := sn.IdxTxnHash.Lookup2(txnId)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
-		buf, _ = gg.Next(buf[:0])
-		if len(buf) == 0 { // system-txn
-			continue
-		}
-
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
-		if len(buf) > 1 && txnHash[0] != buf[0] {
+		if !gg.MatchPrefix([]byte{txnHash[0]}) {
 			continue
 		}
+		buf, _ = gg.Next(buf[:0])
+		sender, txnRlp := buf[1:1+20], buf[1+20:]
 
-		sender := buf[1 : 1+20]
-
-		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
-		blockNum = reader2.Lookup(txnHash[:])
-		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(buf[1+20:]), uint64(len(buf))))
+		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
 		if err != nil {
 			return
 		}
-		txn.SetSender(common.BytesToAddress(sender))
+		txn.SetSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+
+		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
+		blockNum = reader2.Lookup(txnHash[:])
+
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
 			return
