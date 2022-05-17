@@ -709,6 +709,7 @@ func HeadersPOW(
 	var skeletonReqMin, skeletonReqMax, reqMin, reqMax uint64 // min and max block height for skeleton and non-skeleton requests
 	var noProgressCounter int
 	var wasProgress bool
+	var lastSkeletonTime time.Time
 Loop:
 	for !stopped {
 
@@ -764,17 +765,20 @@ Loop:
 		}
 
 		// Send skeleton request if required
-		req = cfg.hd.RequestSkeleton()
-		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				log.Trace("Sent skeleton request", "height", req.Number)
-				skeletonReqCount++
-				if skeletonReqMin == 0 || req.Number < skeletonReqMin {
-					skeletonReqMin = req.Number
-				}
-				if req.Number+req.Length*req.Skip > skeletonReqMax {
-					skeletonReqMax = req.Number + req.Length*req.Skip
+		if time.Since(lastSkeletonTime) > 1*time.Second {
+			req = cfg.hd.RequestSkeleton()
+			if req != nil {
+				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				if sentToPeer {
+					log.Trace("Sent skeleton request", "height", req.Number)
+					skeletonReqCount++
+					if skeletonReqMin == 0 || req.Number < skeletonReqMin {
+						skeletonReqMin = req.Number
+					}
+					if req.Number+req.Length*req.Skip > skeletonReqMax {
+						skeletonReqMax = req.Number + req.Length*req.Skip
+					}
+					lastSkeletonTime = time.Now()
 				}
 			}
 		}
