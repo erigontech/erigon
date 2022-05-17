@@ -1,5 +1,4 @@
 //go:build gofuzzbeta
-// +build gofuzzbeta
 
 /*
    Copyright 2022 Erigon contributors
