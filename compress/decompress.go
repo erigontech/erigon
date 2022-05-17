@@ -27,7 +27,7 @@ import (
 
 type patternTable struct {
 	bitLen   int             // Number of bits to lookup in the table
-	patterns [][]byte        // Patterns corresponding to entries
+	patterns []*word         // Patterns corresponding to entries
 	lens     []byte          // Number of bits in the codes
 	ptrs     []*patternTable // pointers to deeper level tables
 }
@@ -108,7 +108,7 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 		tableSize := 1 << bitLen
 		d.dict = &patternTable{
 			bitLen:   bitLen,
-			patterns: make([][]byte, tableSize),
+			patterns: make([]*word, tableSize),
 			lens:     make([]byte, tableSize),
 			ptrs:     make([]*patternTable, tableSize),
 		}
@@ -154,24 +154,28 @@ func NewDecompressor(compressedFile string) (*Decompressor, error) {
 	return d, nil
 }
 
+type word []byte
+
 // returns number of depth and patterns comsumed
 func buildPatternTable(depths []uint64, patterns [][]byte, table *patternTable, code uint16, bits int, depth uint64, maxDepth uint64) int {
 	if len(depths) == 0 {
 		return 0
 	}
 	if depth == depths[0] {
-		pattern := patterns[0]
+		pattern := word(make([]byte, len(patterns[0])))
+		copy(pattern, patterns[0])
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
 		if table.bitLen == int(bits) {
-			table.patterns[code] = pattern
+			table.patterns[code] = &pattern
 			table.lens[code] = byte(bits)
 			table.ptrs[code] = nil
 		} else {
 			codeStep := uint16(1) << bits
 			codeFrom := code
 			codeTo := code | (uint16(1) << table.bitLen)
+
 			for c := codeFrom; c < codeTo; c += codeStep {
-				table.patterns[c] = pattern
+				table.patterns[c] = &pattern
 				table.lens[c] = byte(bits)
 				table.ptrs[c] = nil
 			}
@@ -188,7 +192,7 @@ func buildPatternTable(depths []uint64, patterns [][]byte, table *patternTable, 
 		tableSize := 1 << bitLen
 		newTable := &patternTable{
 			bitLen:   bitLen,
-			patterns: make([][]byte, tableSize),
+			patterns: make([]*word, tableSize),
 			lens:     make([]byte, tableSize),
 			ptrs:     make([]*patternTable, tableSize),
 		}
@@ -317,7 +321,7 @@ func (g *Getter) nextPos(clean bool) uint64 {
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
 	if table.bitLen == 0 {
-		return table.patterns[0]
+		return *table.patterns[0]
 	}
 	var l byte
 	var pattern []byte
@@ -333,7 +337,7 @@ func (g *Getter) nextPattern() []byte {
 			g.dataBit += 9
 		} else {
 			g.dataBit += int(l)
-			pattern = table.patterns[code]
+			pattern = *table.patterns[code]
 		}
 		g.dataP += uint64(g.dataBit / 8)
 		g.dataBit = g.dataBit % 8
