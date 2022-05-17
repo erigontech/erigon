@@ -42,8 +42,15 @@ changes but we don't guarantee anything. Things can and will break.**
 System Requirements
 ===================
 
-For an Archive node of Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
-200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Mainnet Full node (see `--prune*` flags): 400Gb (April 2022), BSC Archive: 7Tb. BSC Full: 1Tb. Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+* For an Archive node of Ethereum Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
+200GB temp files (can symlink or mount folder `<datadir>/etl-tmp` to another disk). Ethereum Mainnet Full node (see `--prune*` flags): 400Gb (April 2022).
+
+* Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+
+* BSC Archive: 7TB. BSC Full: 1TB. 
+
+* Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB.
+
 SSD or NVMe. Do not recommend HDD - on HDD Erigon will always stay N blocks behind chain tip, but not fall behind. 
 Bear in mind that SSD performance deteriorates when close to capacity.
 
@@ -66,6 +73,8 @@ make erigon
 Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--syncmode=full`. Increase download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code> 
 
 Use `--datadir` to choose where to store data.
+
+Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
 
 ### Optional stages
 
@@ -90,6 +99,8 @@ in `goerli` subdirectory of the current directory. Name of the directory `--data
 the chain in `--chain`.
 
 ### Mining
+
+**Disclaimer: Not supported/tested for Polygon Network (In Progress)**
 
 Support only remote-miners.
 
