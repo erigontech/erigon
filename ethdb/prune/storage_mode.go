@@ -199,7 +199,7 @@ func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
 	}
-	const defaultVal uint64 = 90000
+	const defaultVal uint64 = params.FullImmutabilityThreshold
 	long := ""
 	short := ""
 	if m.History.Enabled() {
