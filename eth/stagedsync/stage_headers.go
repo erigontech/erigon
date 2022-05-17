@@ -179,7 +179,7 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter); err != nil {
+		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader); err != nil {
 			return err
 		}
 	} else {
@@ -242,6 +242,7 @@ func startHandlingForkChoice(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
+	headerReader interfaces.HeaderReader,
 ) error {
 	headerHash := forkChoice.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
@@ -307,7 +308,10 @@ func startHandlingForkChoice(
 
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
-		parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+		if err != nil {
+			return err
+		}
 		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
 		if err != nil {
 			if requestStatus == engineapi.New {
@@ -439,7 +443,10 @@ func handleNewPayload(
 		return nil
 	}
 
-	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+	parent, err := cfg.blockReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+	if err != nil {
+		return err
+	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
