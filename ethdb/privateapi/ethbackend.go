@@ -461,7 +461,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
 	// (i.e. it references an old block).
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
-	if rawdb.ReadHeadBlockHash(tx1) == forkChoice.HeadBlockHash {
+	if rawdb.ReadHeadBlockHash(tx1) == forkChoice.HeadBlockHash && req.PayloadAttributes == nil {
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
 		}, nil
