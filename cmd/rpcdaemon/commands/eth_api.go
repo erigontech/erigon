@@ -213,6 +213,10 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
+func (api *BaseAPI) pendingBlockHeeader() *types.Header {
+	return api.filters.LastPendingBlockHeader()
+}
+
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil
