@@ -205,7 +205,7 @@ func safeAndFinalizedBlocksAreCanonical(
 	if err != nil {
 		return false, err
 	}
-	if !safeIsCanonical {
+	if (!safeIsCanonical && forkChoice.SafeBlockHash != common.Hash{}) {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -219,7 +219,7 @@ func safeAndFinalizedBlocksAreCanonical(
 	if err != nil {
 		return false, err
 	}
-	if !finalizedIsCanonical {
+	if (!finalizedIsCanonical && forkChoice.FinalizedBlockHash != common.Hash{}) {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
