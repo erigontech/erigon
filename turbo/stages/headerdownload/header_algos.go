@@ -853,14 +853,6 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 	return hi.newCanonical
 }
 
-func (hd *HeaderDownload) recursiveLinked(link *Link) {
-	for _, n := range link.next {
-		n.linked = true
-		hd.moveLinkToQueue(n, InsertQueueID)
-		hd.recursiveLinked(n)
-	}
-}
-
 func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
