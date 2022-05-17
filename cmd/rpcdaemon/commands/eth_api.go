@@ -101,10 +101,10 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader interfaces.BlockReader
+	_blockReader  interfaces.BlockReader
 	_headerReader interfaces.HeaderReader
-	_txnReader   interfaces.TxnReader
-	TevmEnabled  bool // experiment
+	_txnReader    interfaces.TxnReader
+	TevmEnabled   bool // experiment
 }
 
 func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockTxnAndHeaderReader, singleNodeMode bool) *BaseAPI {
