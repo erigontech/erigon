@@ -47,10 +47,10 @@ type RemoteBackend struct {
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
-	blockReader      interfaces.BlockAndTxnReader
+	blockReader      interfaces.BlockTxnAndHeaderReader
 }
 
-func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader interfaces.BlockAndTxnReader) *RemoteBackend {
+func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader interfaces.BlockTxnAndHeaderReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: client,
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
@@ -188,6 +188,18 @@ func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash 
 }
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
+}
+
+func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+	return back.blockReader.Header(ctx, tx, hash, blockHeight)
+}
+
+func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
+	return back.blockReader.HeaderByNumber(ctx, tx, blockHeight)
+}
+
+func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+	return back.blockReader.HeaderByHash(ctx, tx, hash)
 }
 
 func (back *RemoteBackend) EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EnginePayloadStatus, err error) {

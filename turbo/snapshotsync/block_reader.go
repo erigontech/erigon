@@ -139,6 +139,27 @@ func (back *RemoteBlockReader) Header(ctx context.Context, tx kv.Getter, hash co
 	}
 	return block.Header(), nil
 }
+
+func (back *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
+	header := rawdb.ReadHeaderByNumber(tx, blockHeight)
+	if header == nil {
+		return nil, fmt.Errorf("header was not found: %d", blockHeight)
+	}
+	return header, nil
+}
+
+func (back *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+	header, err := rawdb.ReadHeaderByHash(tx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("header was not found: %s", hash)
+	}
+
+	return header, nil
+}
+
 func (back *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	block, _, err := back.BlockWithSenders(ctx, tx, hash, blockHeight)
 	if err != nil {

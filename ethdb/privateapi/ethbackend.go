@@ -49,7 +49,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RoDB
-	blockReader interfaces.BlockAndTxnReader
+	blockReader interfaces.BlockTxnAndHeaderReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
@@ -88,7 +88,7 @@ type pendingPayload struct {
 	built bool
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockTxnAndHeaderReader,
 	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
 	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {

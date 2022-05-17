@@ -39,9 +39,9 @@ type HeaderAndCanonicalReader interface {
 	CanonicalReader
 }
 
-type BlockAndTxnReader interface {
+type BlockTxnAndHeaderReader interface {
 	BlockReader
-	//HeaderReader
+	HeaderReader
 	TxnReader
 }
 

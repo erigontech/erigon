@@ -102,11 +102,12 @@ type BaseAPI struct {
 	_genesisLock sync.RWMutex
 
 	_blockReader interfaces.BlockReader
+	_headerReader interfaces.HeaderReader
 	_txnReader   interfaces.TxnReader
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockTxnAndHeaderReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -215,6 +216,14 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 
 func (api *BaseAPI) pendingBlockHeader() *types.Header {
 	return api.filters.LastPendingBlockHeader()
+}
+
+func (api *BaseAPI) getHeaderByRPCNumber(ctx context.Context, tx kv.Tx, number rpc.BlockNumber) (*types.Header, error) {
+	blockNum, err := getBlockNumber(number, tx)
+	if err != nil {
+		return nil, err
+	}
+	return api._headerReader.HeaderByNumber(ctx, tx, blockNum)
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
