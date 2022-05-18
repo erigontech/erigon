@@ -429,20 +429,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	strideHeight := hd.highestInDb + stride
-	lowestAnchorHeight := hd.topSeenHeightPoW + 1 // Inclusive upper bound
-	if lowestAnchorHeight > 1 && lowestAnchorHeight <= strideHeight {
-		return nil
-	}
-	// Determine the query range as the height of lowest anchor
-	for _, anchor := range hd.anchors {
-		if anchor.blockHeight > strideHeight && (lowestAnchorHeight == 1 || anchor.blockHeight < lowestAnchorHeight) {
-			lowestAnchorHeight = anchor.blockHeight // Exclusive upper bound
-		}
-	}
-	length := (lowestAnchorHeight - strideHeight) / stride
-	if length > 192 {
-		length = 192
-	}
+	var length uint64 = 192
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
