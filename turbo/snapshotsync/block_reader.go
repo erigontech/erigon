@@ -555,6 +555,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		trace := sn.From == 12_000_000
+		gg.Trace(trace)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if !gg.MatchPrefix([]byte{txnHash[0]}, trace) {
 			if trace {
