@@ -17,6 +17,7 @@
 package t8ntool
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
@@ -141,7 +142,7 @@ func Main(ctx *cli.Context) error {
 	// stdin input or in files.
 	// Check if anything needs to be read from stdin
 	var (
-		prestate Prestate           // moskud: Env + Genesis alloc (world state for certain genesis accounts)
+		prestate Prestate
 		txs      types.Transactions // txs to apply
 		allocStr = ctx.String(InputAllocFlag.Name)
 
@@ -165,9 +166,7 @@ func Main(ctx *cli.Context) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
 		}
 	}
-	// moskud: specifies the initial state which is part of the genesis block
-	// not sure how account code/storage data would get in here (those would be just hash in the alloc)
-	// so i sense there might be another place where the genesis input for the block is taken
+
 	prestate.Pre = inputData.Alloc
 
 	// Set the block environment
@@ -230,16 +229,19 @@ func Main(ctx *cli.Context) error {
 	}
 
 	// Run the test and aggregate the result
-	_, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
-	// moskud: result is ExecutionREsult
+	db, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
 	if err1 != nil {
 		return err1
 	}
 	body, _ := rlp.EncodeToBytes(txs)
 	// Dump the excution result
 	collector := make(Alloc)
-	// TODO: Where DumpToCollector is declared?
-	//state.DumpToCollector(collector, false, false, false, nil, -1)
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	dumper := state.NewDumper(tx, prestate.Env.Number)
+	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 
 }

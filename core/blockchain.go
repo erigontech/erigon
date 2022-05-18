@@ -226,7 +226,7 @@ func ExecuteBlockEphemerally(
 	engine consensus.Engine,
 	block *types.Block,
 	stateReader state.StateReader,
-	stateWriter state.WriterWithChangeSets,
+	stateWriter state.WriterWithChangeSets, // writes are done by block finalization -> ibs.CommitBlock which updates the world state + changesets
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),

@@ -181,6 +181,15 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		if err != nil {
 			return nil, nil, err
 		}
+		// if tx.IsStarkNet() {
+		// 	vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+		// } else {
+		// 	blockContext := NewEVMBlockContext(header, getHeader, engine, author, contractHasTEVM)
+		// 	vmenv = vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
+		// }
+
+		// return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+
 		vmConfig.Tracer = tracer
 		vmConfig.Debug = (tracer != nil)
 		ibs.Prepare(txn.Hash(), blockHash, txIndex)
