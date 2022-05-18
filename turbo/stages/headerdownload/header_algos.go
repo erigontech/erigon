@@ -145,7 +145,11 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastVal
 	return
 }
 
-func (hd *HeaderDownload) removeUpwards(toRemove *Link) {
+func (hd *HeaderDownload) removeUpwards(link *Link) {
+	var toRemove []*Link
+	for child := link; child != nil; child = child.next {
+		toRemove = append(toRemove, child)
+	}
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
@@ -350,7 +354,7 @@ func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
 	log.Debug("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
 	hd.removeAnchor(anchor)
-	hd.removeUpwards(anchor.links)
+	hd.removeUpwards(anchor.fLink)
 }
 
 func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest, []PenaltyItem) {
@@ -506,9 +510,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		link.header = nil // Drop header reference to free memory, as we won't need it anymore
 		link.headerRaw = nil
 		hd.moveLinkToQueue(link, PersistedQueueID)
-		for _, nextLink := range link.next {
-			if !nextLink.persisted {
-				hd.moveLinkToQueue(nextLink, InsertQueueID)
+		for child := link.fChild; child != nil; child = child.next {
+			if !child.persisted {
+				hd.moveLinkToQueue(child, InsertQueueID)
 			}
 		}
 	}
@@ -874,16 +878,18 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 	}
 	link := hd.addHeaderAsLink(sh, false /* persisted */)
 	if foundAnchor {
-		link.next = anchor.links
+		link.fChild = anchor.fLink
 		hd.removeAnchor(anchor)
 		//fmt.Printf("removed anchor %d %x\n", anchor.blockHeight, anchor.parentHash)
 	}
 	if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
-		parentAnchor.links = append(parentAnchor.links, link)
+		link.next = parentAnchor.fLink
+		parentAnchor.fLink = link
 	}
 	if foundParent {
 		//fmt.Printf("sh = %d %x, found parent\n", sh.Number, sh.Hash)
-		parent.next = append(parent.next, link)
+		link.next = parent.fChild
+		parent.fChild = link
 		if parent.persisted {
 			link.linked = true
 			hd.moveLinkToQueue(link, InsertQueueID)
@@ -891,7 +897,7 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 	} else {
 		if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
 			log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
-			hd.removeUpwards([]*Link{link})
+			hd.removeUpwards(link)
 			return false
 		}
 		//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
@@ -902,7 +908,8 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			peerID:        peerID,
 			blockHeight:   sh.Number,
 		}
-		anchor.links = append(anchor.links, link)
+		link.next = anchor.fLink
+		anchor.fLink = link
 		hd.anchors[anchor.parentHash] = anchor
 		heap.Push(hd.anchorQueue, anchor)
 		return true
