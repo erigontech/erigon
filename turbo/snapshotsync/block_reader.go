@@ -554,8 +554,9 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		offset := sn.IdxTxnHash.Lookup2(txnId)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
+		trace := sn.From == 12_000_000
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
-		if !gg.MatchPrefix([]byte{txnHash[0]}) {
+		if !gg.MatchPrefix([]byte{txnHash[0]}, trace) {
 			buf, _ = gg.Next(buf[:0])
 			fmt.Printf("alex not found: %d, %x, %x\n", sn.From, []byte{txnHash[0]}, buf)
 			continue
