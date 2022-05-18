@@ -240,10 +240,11 @@ func Main(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+
+	defer tx.Commit() // mostly empty
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
-
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
