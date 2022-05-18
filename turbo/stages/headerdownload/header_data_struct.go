@@ -34,7 +34,8 @@ const (
 type Link struct {
 	header      *types.Header
 	headerRaw   []byte
-	next        []*Link     // Allows iteration over links in ascending block height order
+	fChild      *Link       // Pointer to the first child, further children can be found by following `next` pointers to the siblings
+	next        *Link       // Pointer to the next sibling, or nil if there are no siblings
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
 	persisted   bool    // Whether this link comes from the database record
@@ -101,7 +102,7 @@ func (lq *LinkQueue) Pop() interface{} {
 // more than one pointer.
 type Anchor struct {
 	peerID        [64]byte
-	links         []*Link     // Links attached immediately to this anchor
+	fLink         *Link       // Links attached immediately to this anchor (pointer to the first one, the rest can be found by following `next` fields)
 	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
 	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
