@@ -487,7 +487,7 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	l := g.nextPos(true)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	lenBuf := len(buf)
-	if l == 0 {
+	if l == 0 || int(l) != lenBuf {
 		if g.dataBit > 0 {
 			g.dataP++
 			g.dataBit = 0
@@ -495,7 +495,7 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 		if lenBuf != 0 {
 			g.dataP, g.dataBit = savePos, 0
 		}
-		return lenBuf == 0, g.dataP
+		return lenBuf == int(l), g.dataP
 	}
 
 	var bufPos int
@@ -556,7 +556,7 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 	l := g.nextPos(true /* clean */)
 	l-- // because when create huffman tree we do ++ , because 0 is terminator
 	prefixLen := len(prefix)
-	if l == 0 {
+	if l == 0 || int(l) < prefixLen {
 		if g.dataBit > 0 {
 			g.dataP++
 			g.dataBit = 0
@@ -564,7 +564,7 @@ func (g *Getter) MatchPrefix(prefix []byte) bool {
 		if prefixLen != 0 {
 			g.dataP, g.dataBit = savePos, 0
 		}
-		return prefixLen == 0
+		return prefixLen == int(l)
 	}
 
 	var prefixPos int

@@ -90,9 +90,12 @@ func prepareDict(t *testing.T) *Decompressor {
 		if err = c.AddWord(nil); err != nil {
 			panic(err)
 		}
-		//if err = c.AddWord([]byte("long")); err != nil {
-		//	t.Fatal(err)
-		//}
+		if err = c.AddWord([]byte("long")); err != nil {
+			t.Fatal(err)
+		}
+		if err = c.AddWord([]byte("word")); err != nil {
+			t.Fatal(err)
+		}
 		if err = c.AddWord([]byte(fmt.Sprintf("longlongword %d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -114,15 +117,37 @@ func TestCompressDict1(t *testing.T) {
 	i := 0
 	g.Reset(0)
 	for g.HasNext() {
+		// next word is `nil`
 		require.False(t, g.MatchPrefix([]byte("long")))
-		require.False(t, g.MatchPrefix([]byte("longlonglonglonglonglonglonglonglonglonglong")))
+		require.True(t, g.MatchPrefix([]byte("")))
 		require.True(t, g.MatchPrefix([]byte{}))
 		word, _ := g.Next(nil)
 		require.Nil(t, word)
 
+		// next word is `long`
+		require.True(t, g.MatchPrefix([]byte("long")))
+		require.False(t, g.MatchPrefix([]byte("longlong")))
+		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+		require.True(t, g.MatchPrefix([]byte{}))
+		_, _ = g.Next(nil)
+
+		// next word is `word`
+		require.False(t, g.MatchPrefix([]byte("long")))
+		require.False(t, g.MatchPrefix([]byte("longlong")))
+		require.True(t, g.MatchPrefix([]byte("word")))
+		require.True(t, g.MatchPrefix([]byte("")))
+		require.True(t, g.MatchPrefix(nil))
+		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
+		_, _ = g.Next(nil)
+
+		// next word is `longlongword %d`
 		require.True(t, g.MatchPrefix([]byte("long")))
 		require.True(t, g.MatchPrefix([]byte("longlong")))
-		require.False(t, g.MatchPrefix([]byte("longlonglonglonglonglonglonglonglonglonglong")))
+		require.True(t, g.MatchPrefix([]byte("longlongword ")))
+		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
+		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
 		word, _ = g.Next(nil)
 		expected := fmt.Sprintf("longlongword %d", i)
@@ -132,7 +157,7 @@ func TestCompressDict1(t *testing.T) {
 		i++
 	}
 
-	if cs := checksum(d.compressedFile); cs != 2250069750 {
+	if cs := checksum(d.compressedFile); cs != 3509080505 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/ledgerwatch/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
