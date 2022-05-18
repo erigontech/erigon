@@ -554,14 +554,8 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		offset := sn.IdxTxnHash.Lookup2(txnId)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
-		trace := sn.From == 12_000_000
-		gg.Trace(trace)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if !gg.MatchPrefix([]byte{txnHash[0]}) {
-			if trace {
-				buf, _ = gg.Next(buf[:0])
-				fmt.Printf("alex not found: %d, %x, %x\n", sn.From, []byte{txnHash[0]}, buf)
-			}
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
@@ -588,13 +582,11 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 
 // TxnLookup - find blockNumber and txnID by txnHash
 func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	fmt.Printf("alex2\n")
 	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
 	}
 	if n != nil {
-		fmt.Printf("alex3\n")
 		return *n, true, nil
 	}
 
