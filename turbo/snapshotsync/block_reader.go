@@ -561,7 +561,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
-		fmt.Printf("alex found: %d, %x, %x\n", sn.From, []byte{txnHash[0]}, buf)
+		//fmt.Printf("alex found: %d, %x, %x\n", sn.From, []byte{txnHash[0]}, buf)
 		sender, txnRlp := buf[1:1+20], buf[1+20:]
 
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
