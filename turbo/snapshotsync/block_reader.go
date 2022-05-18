@@ -552,14 +552,16 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
 		txnId := reader.Lookup(txnHash[:])
 		offset := sn.IdxTxnHash.Lookup2(txnId)
-		fmt.Printf("alex: %d, %d, %d\n", sn.From, txnId, offset)
 		gg := sn.Seg.MakeGetter()
 		gg.Reset(offset)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if !gg.MatchPrefix([]byte{txnHash[0]}) {
+			buf, _ = gg.Next(buf[:0])
+			fmt.Printf("alex not found: %d, %x, %x\n", sn.From, []byte{txnHash[0]}, buf)
 			continue
 		}
 		buf, _ = gg.Next(buf[:0])
+		fmt.Printf("alex found: %d, %x, %x\n", sn.From, []byte{txnHash[0]}, buf)
 		sender, txnRlp := buf[1:1+20], buf[1+20:]
 
 		txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
