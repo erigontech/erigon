@@ -518,8 +518,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	// successfully assembled the payload and assigned the correct id
 	return &remote.EngineForkChoiceUpdatedReply{
-		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
-		PayloadId:     s.payloadId,
+		PayloadStatus: &remote.EnginePayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+		},
+		PayloadId: s.payloadId,
 	}, nil
 }
 
