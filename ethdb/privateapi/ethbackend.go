@@ -456,12 +456,12 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK},
 		}, nil
 	}
-	tx1.Rollback()
 
 	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
 	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
 	// (i.e. it references an old block).
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
+	tx1.Rollback()
 
 	if s.stageLoopIsBusy() {
 		log.Trace("[ForkChoiceUpdated] stage loop is busy")

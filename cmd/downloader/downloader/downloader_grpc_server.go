@@ -29,7 +29,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
 		if it.TorrentHash == nil {
-			err := BuildTorrentAndAdd(ctx, it.Path, s.d.SnapshotsDir(), torrentClient)
+			err := BuildTorrentAndAdd(ctx, it.Path, s.d.SnapDir(), torrentClient)
 			if err != nil {
 				return nil, err
 			}
@@ -52,7 +52,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			t.AllowDataUpload()
 			<-t.GotInfo()
 			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(s.d.SnapshotsDir(), t.Info(), &mi); err != nil {
+			if err := CreateTorrentFileIfNotExists(s.d.SnapDir(), t.Info(), &mi); err != nil {
 				log.Warn("[downloader] create torrent file", "err", err)
 				return
 			}

@@ -501,7 +501,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			// Make sure long insertions do not appear as a stuck stage 1
 			select {
 			case <-logChannel:
-				log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
+				log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb, "queue", hd.insertQueue.Len())
 			default:
 			}
 			td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
@@ -530,6 +530,11 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			link.header = nil // Drop header reference to free memory, as we won't need it anymore
 			link.headerRaw = nil
 			hd.moveLinkToQueue(link, PersistedQueueID)
+			for _, nextLink := range link.next {
+				if !nextLink.persisted {
+					hd.moveLinkToQueue(nextLink, InsertQueueID)
+				}
+			}
 		}
 		for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
 			link := heap.Pop(&hd.persistedLinkQueue).(*Link)
@@ -848,14 +853,6 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 	return hi.newCanonical
 }
 
-func (hd *HeaderDownload) recursiveLinked(link *Link) {
-	for _, n := range link.next {
-		n.linked = true
-		hd.moveLinkToQueue(n, InsertQueueID)
-		hd.recursiveLinked(n)
-	}
-}
-
 func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -900,10 +897,9 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 		if foundParent {
 			//fmt.Printf("sh = %d %x, found parent\n", sh.Number, sh.Hash)
 			parent.next = append(parent.next, link)
-			if parent.linked {
+			if parent.persisted {
 				link.linked = true
 				hd.moveLinkToQueue(link, InsertQueueID)
-				hd.recursiveLinked(link)
 			}
 		} else {
 			if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {

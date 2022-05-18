@@ -17,11 +17,12 @@
 package eth
 
 import (
+	"math/big"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/params"
-	"math/big"
 )
 
 const (
@@ -59,13 +60,17 @@ type NodeInfo struct {
 
 // ReadNodeInfo retrieves some `eth` protocol metadata about the running host node.
 func ReadNodeInfo(getter kv.Getter, config *params.ChainConfig, genesisHash common.Hash, network uint64) *NodeInfo {
-	head := rawdb.ReadCurrentHeader(getter)
-	td, _ := rawdb.ReadTd(getter, head.Hash(), head.Number.Uint64())
+	headHash := rawdb.ReadHeadHeaderHash(getter)
+	headNumber := rawdb.ReadHeaderNumber(getter, headHash)
+	var td *big.Int
+	if headNumber != nil {
+		td, _ = rawdb.ReadTd(getter, headHash, *headNumber)
+	}
 	return &NodeInfo{
 		Network:    network,
 		Difficulty: td,
 		Genesis:    genesisHash,
 		Config:     config,
-		Head:       head.Hash(),
+		Head:       headHash,
 	}
 }

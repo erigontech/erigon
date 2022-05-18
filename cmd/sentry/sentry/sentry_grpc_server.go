@@ -211,6 +211,7 @@ func handShake(
 	ourTD := gointerfaces.ConvertH256ToUint256Int(status.TotalDifficulty)
 	// Convert proto status data into the one required by devp2p
 	genesisHash := gointerfaces.ConvertH256ToHash(status.ForkData.Genesis)
+
 	go func() {
 		defer debug.LogPanic()
 		s := &eth.StatusPacket{
@@ -223,58 +224,15 @@ func handShake(
 		}
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
-	var readStatus = func() error {
-		forks := make([]uint64, len(status.ForkData.Forks)) // copy because forkid.NewFilterFromForks will write into this slice
-		copy(forks, status.ForkData.Forks)
-		forkFilter := forkid.NewFilterFromForks(forks, genesisHash, status.MaxBlock)
-		networkID := status.NetworkId
-		// Read handshake message
-		msg, err1 := rw.ReadMsg()
-		if err1 != nil {
-			return err1
-		}
 
-		if msg.Code != eth.StatusMsg {
-			msg.Discard()
-			return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
-		}
-		if msg.Size > eth.ProtocolMaxMsgSize {
-			msg.Discard()
-			return fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize)
-		}
-		// Decode the handshake and make sure everything matches
-		var reply eth.StatusPacket
-		if err1 = msg.Decode(&reply); err1 != nil {
-			msg.Discard()
-			return fmt.Errorf("decode message %v: %w", msg, err1)
-		}
-		msg.Discard()
-		if reply.NetworkID != networkID {
-			return fmt.Errorf("network id does not match: theirs %d, ours %d", reply.NetworkID, networkID)
-		}
-		if uint(reply.ProtocolVersion) < minVersion {
-			return fmt.Errorf("version is less than allowed minimum: theirs %d, min %d", reply.ProtocolVersion, minVersion)
-		}
-		if uint(reply.ProtocolVersion) > version {
-			return fmt.Errorf("version is more than what this senty supports: theirs %d, max %d", reply.ProtocolVersion, version)
-		}
-		if reply.Genesis != genesisHash {
-			return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
-		}
-		if err1 = forkFilter(reply.ForkID); err1 != nil {
-			return fmt.Errorf("%w", err1)
-		}
-
-		if startSync != nil {
-			if err := startSync(reply.Head); err != nil {
-				return err
-			}
-		}
-
-		return nil
-	}
 	go func() {
-		errc <- readStatus()
+		reply, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
+
+		if (err == nil) && (startSync != nil) {
+			err = startSync(reply.Head)
+		}
+
+		errc <- err
 	}()
 
 	timeout := time.NewTimer(handshakeTimeout)

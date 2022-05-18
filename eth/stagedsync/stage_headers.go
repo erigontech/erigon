@@ -150,6 +150,7 @@ func HeadersPOS(
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
 
+	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
@@ -179,7 +180,7 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter); err != nil {
+		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader); err != nil {
 			return err
 		}
 	} else {
@@ -205,7 +206,7 @@ func safeAndFinalizedBlocksAreCanonical(
 	if err != nil {
 		return false, err
 	}
-	if !safeIsCanonical {
+	if (!safeIsCanonical && forkChoice.SafeBlockHash != common.Hash{}) {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -219,7 +220,7 @@ func safeAndFinalizedBlocksAreCanonical(
 	if err != nil {
 		return false, err
 	}
-	if !finalizedIsCanonical {
+	if (!finalizedIsCanonical && forkChoice.FinalizedBlockHash != common.Hash{}) {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -242,6 +243,7 @@ func startHandlingForkChoice(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
+	headerReader interfaces.HeaderReader,
 ) error {
 	headerHash := forkChoice.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
@@ -307,7 +309,10 @@ func startHandlingForkChoice(
 
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
-		parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+		if err != nil {
+			return err
+		}
 		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
 		if err != nil {
 			if requestStatus == engineapi.New {
@@ -439,7 +444,10 @@ func handleNewPayload(
 		return nil
 	}
 
-	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+	parent, err := cfg.blockReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+	if err != nil {
+		return err
+	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
@@ -702,6 +710,7 @@ func HeadersPOW(
 	var skeletonReqMin, skeletonReqMax, reqMin, reqMax uint64 // min and max block height for skeleton and non-skeleton requests
 	var noProgressCounter int
 	var wasProgress bool
+	var lastSkeletonTime time.Time
 Loop:
 	for !stopped {
 
@@ -757,17 +766,20 @@ Loop:
 		}
 
 		// Send skeleton request if required
-		req = cfg.hd.RequestSkeleton()
-		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				log.Trace("Sent skeleton request", "height", req.Number)
-				skeletonReqCount++
-				if skeletonReqMin == 0 || req.Number < skeletonReqMin {
-					skeletonReqMin = req.Number
-				}
-				if req.Number+req.Length*req.Skip > skeletonReqMax {
-					skeletonReqMax = req.Number + req.Length*req.Skip
+		if time.Since(lastSkeletonTime) > 1*time.Second {
+			req = cfg.hd.RequestSkeleton()
+			if req != nil {
+				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				if sentToPeer {
+					log.Trace("Sent skeleton request", "height", req.Number)
+					skeletonReqCount++
+					if skeletonReqMin == 0 || req.Number < skeletonReqMin {
+						skeletonReqMin = req.Number
+					}
+					if req.Number+req.Length*req.Skip > skeletonReqMax {
+						skeletonReqMax = req.Number + req.Length*req.Skip
+					}
+					lastSkeletonTime = time.Now()
 				}
 			}
 		}

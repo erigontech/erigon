@@ -255,13 +255,11 @@ func NewStagedSync(
 	db kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
-	terminalTotalDifficulty *big.Int,
 	controlServer *sentry.MultyClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
-	snapshotDir string,
 	headCh chan *types.Block,
 ) (*stagedsync.Sync, error) {
 	var blockReader interfaces.FullBlockReader

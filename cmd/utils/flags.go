@@ -1376,7 +1376,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
 	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
-	cfg.SnapshotDir = filepath.Join(nodeConfig.DataDir, "snapshots")
+	cfg.SnapDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
@@ -1390,7 +1390,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 
 		var err error
-		cfg.Torrent, err = torrentcfg.New(cfg.SnapshotDir,
+		cfg.Torrent, err = torrentcfg.New(cfg.SnapDir,
 			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
