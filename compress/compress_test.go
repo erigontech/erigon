@@ -96,7 +96,7 @@ func prepareDict(t *testing.T) *Decompressor {
 		if err = c.AddWord([]byte("word")); err != nil {
 			t.Fatal(err)
 		}
-		if err = c.AddWord([]byte(fmt.Sprintf("longlongword %d", i))); err != nil {
+		if err = c.AddWord([]byte(fmt.Sprintf("%d longlongword %d", i, i))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,21 +143,24 @@ func TestCompressDict1(t *testing.T) {
 		_, _ = g.Next(nil)
 
 		// next word is `longlongword %d`
-		require.True(t, g.MatchPrefix([]byte("long")))
-		require.True(t, g.MatchPrefix([]byte("longlong")))
-		require.True(t, g.MatchPrefix([]byte("longlongword ")))
+		expectPrefix := fmt.Sprintf("%d long", i)
+
+		require.True(t, g.MatchPrefix([]byte(fmt.Sprintf("%d", i))))
+		require.True(t, g.MatchPrefix([]byte(expectPrefix)))
+		require.True(t, g.MatchPrefix([]byte(expectPrefix+"long")))
+		require.True(t, g.MatchPrefix([]byte(expectPrefix+"longword ")))
 		require.False(t, g.MatchPrefix([]byte("wordnotmatch")))
 		require.False(t, g.MatchPrefix([]byte("longnotmatch")))
 		require.True(t, g.MatchPrefix([]byte{}))
 		word, _ = g.Next(nil)
-		expected := fmt.Sprintf("longlongword %d", i)
+		expected := fmt.Sprintf("%d longlongword %d", i, i)
 		if string(word) != expected {
 			t.Errorf("expected %s, got (hex) [%s]", expected, word)
 		}
 		i++
 	}
 
-	if cs := checksum(d.compressedFile); cs != 3509080505 {
+	if cs := checksum(d.compressedFile); cs != 3153486123 {
 		// it's ok if hash changed, but need re-generate all existing snapshot hashes
 		// in https://github.com/ledgerwatch/erigon-snapshot
 		t.Errorf("result file hash changed, %d", cs)
