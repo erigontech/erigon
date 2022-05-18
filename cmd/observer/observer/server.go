@@ -142,7 +142,7 @@ func (server *Server) detectNATExternalIP() (net.IP, error) {
 		return nil, errors.New("no NAT flag configured")
 	}
 	if _, hasExtIP := server.natInterface.(nat.ExtIP); !hasExtIP {
-		server.log.Info("Detecting external IP...")
+		server.log.Debug("Detecting external IP...")
 	}
 	ip, err := server.natInterface.ExternalIP()
 	if err != nil {
