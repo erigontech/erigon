@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
@@ -60,15 +59,12 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 			}
 		}(magnet.String())
 	}
-	s.d.ReCalcStats(10 * time.Second)
-
-	fmt.Printf("download done\n")
+	s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 	return &emptypb.Empty{}, nil
 }
 
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
 	stats := s.d.Stats()
-	fmt.Printf("stat call: %t\n", stats.Completed)
 	return &proto_downloader.StatsReply{
 		MetadataReady: stats.MetadataReady,
 		FilesTotal:    stats.FilesTotal,
