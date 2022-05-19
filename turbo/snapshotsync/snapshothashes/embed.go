@@ -27,6 +27,10 @@ var Bsc = fromToml(bsc)
 var ropsten []byte
 var Ropsten = fromToml(ropsten)
 
+//go:embed erigon-snapshots/bor-mainnet.toml
+var borMainnet []byte
+var BorMainnet = fromToml(borMainnet)
+
 type PreverifiedItem struct {
 	Name string
 	Hash string
@@ -51,10 +55,11 @@ func doSort(in preverified) Preverified {
 }
 
 var (
-	MainnetChainSnapshotConfig = newConfig(Mainnet)
-	GoerliChainSnapshotConfig  = newConfig(Goerli)
-	BscChainSnapshotConfig     = newConfig(Bsc)
-	RopstenChainSnapshotConfig = newConfig(Ropsten)
+	MainnetChainSnapshotConfig    = newConfig(Mainnet)
+	GoerliChainSnapshotConfig     = newConfig(Goerli)
+	BscChainSnapshotConfig        = newConfig(Bsc)
+	RopstenChainSnapshotConfig    = newConfig(Ropsten)
+	BorMainnetChainSnapshotConfig = newConfig(BorMainnet)
 )
 
 func newConfig(preverified Preverified) *Config {
@@ -106,6 +111,8 @@ func KnownConfig(networkName string) *Config {
 		return BscChainSnapshotConfig
 	case networkname.RopstenChainName:
 		return RopstenChainSnapshotConfig
+	case networkname.BorMainnetChainName:
+		return BorMainnetChainSnapshotConfig
 	default:
 		return newConfig(Preverified{})
 	}
