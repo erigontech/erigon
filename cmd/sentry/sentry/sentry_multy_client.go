@@ -288,6 +288,7 @@ func RecvMessage(
 				return
 			default:
 			}
+			t := time.Now()
 			if err = handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
 					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
@@ -302,6 +303,7 @@ func RecvMessage(
 					log.Warn("[RecvMessage] Handling incoming message", "err", err)
 				}
 			}
+			fmt.Printf("queue: %d , %s\n", len(reqs), time.Since(t))
 			if wg != nil {
 				wg.Done()
 			}
