@@ -787,16 +787,20 @@ Loop:
 				}
 			}
 		}
+		t := time.Now()
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
 		}
+		fmt.Printf("InsertHeaders: %s\n", time.Since(t))
 
+		t = time.Now()
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
+		fmt.Printf("announceNewHashes: %s\n", time.Since(t))
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
@@ -845,6 +849,8 @@ Loop:
 		}
 		timer.Stop()
 	}
+	t := time.Now()
+
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	}
@@ -871,6 +877,7 @@ Loop:
 	}
 	// We do not print the following line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+	fmt.Printf("headers end: %s\n", time.Since(t))
 
 	return nil
 }
