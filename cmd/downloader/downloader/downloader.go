@@ -124,6 +124,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		default:
 		}
 
+		fmt.Printf("alex: %t, %.2f, %s\n", t.Complete.Bool(), float32(float64(100)*(float64(t.BytesCompleted())/float64(t.Length()))), t.Name())
 		stats.Completed = stats.Completed && t.Complete.Bool()
 	}
 

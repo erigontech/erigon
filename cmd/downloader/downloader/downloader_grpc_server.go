@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -41,7 +40,7 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		if _, ok := torrentClient.Torrent(hash); ok {
 			continue
 		}
-		fmt.Printf("alex\n")
+
 		magnet := mi.Magnet(&hash, nil)
 		go func(magnetUrl string) {
 			t, err := torrentClient.AddMagnet(magnetUrl)
