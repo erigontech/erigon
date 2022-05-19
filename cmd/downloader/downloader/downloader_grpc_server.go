@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -28,23 +29,22 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 	torrentClient := s.d.Torrent()
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	for _, it := range request.Items {
-		go func(it *proto_downloader.DownloadItem) {
-			if it.TorrentHash == nil {
-				err := BuildTorrentAndAdd(ctx, it.Path, s.d.SnapDir(), torrentClient)
-				if err != nil {
-					log.Warn("[downloader] BuildTorrentAndAdd", "err", err)
-					return
-				}
-				return
+		if it.TorrentHash == nil {
+			err := BuildTorrentAndAdd(ctx, it.Path, s.d.SnapDir(), torrentClient)
+			if err != nil {
+				return nil, err
 			}
+			continue
+		}
 
-			hash := Proto2InfoHash(it.TorrentHash)
-			if _, ok := torrentClient.Torrent(hash); ok {
-				return
-			}
-
-			magnet := mi.Magnet(&hash, nil)
-			t, err := torrentClient.AddMagnet(magnet.String())
+		hash := Proto2InfoHash(it.TorrentHash)
+		if _, ok := torrentClient.Torrent(hash); ok {
+			continue
+		}
+		fmt.Printf("alex\n")
+		magnet := mi.Magnet(&hash, nil)
+		go func(magnetUrl string) {
+			t, err := torrentClient.AddMagnet(magnetUrl)
 			if err != nil {
 				log.Warn("[downloader] add magnet link", "err", err)
 				return
@@ -57,7 +57,8 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				log.Warn("[downloader] create torrent file", "err", err)
 				return
 			}
-		}(it)
+		}(magnet.String())
+
 	}
 	return &emptypb.Empty{}, nil
 }
