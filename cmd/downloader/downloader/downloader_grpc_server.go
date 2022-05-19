@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -63,7 +64,9 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 }
 
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
+
 	stats := s.d.Stats()
+	fmt.Printf("stat call: %t\n", stats.Completed)
 	return &proto_downloader.StatsReply{
 		MetadataReady: stats.MetadataReady,
 		FilesTotal:    stats.FilesTotal,
