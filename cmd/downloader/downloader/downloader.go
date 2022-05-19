@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -283,7 +282,6 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 		}
 	}()
 
-	var m runtime.MemStats
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -309,14 +307,12 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 				continue
 			}
 
-			runtime.ReadMemStats(&m)
 			if stats.Completed {
 				log.Info("[Snapshots] Seeding",
 					"up", common2.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
-					"files", stats.FilesTotal,
-					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					"files", stats.FilesTotal)
 				continue
 			}
 
@@ -326,8 +322,7 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 				"upload", common2.ByteCount(stats.UploadRate)+"/s",
 				"peers", stats.PeersUnique,
 				"connections", stats.ConnectionsTotal,
-				"files", stats.FilesTotal,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				"files", stats.FilesTotal)
 			if stats.PeersUnique == 0 {
 				ips := d.Torrent().BadPeerIPs()
 				if len(ips) > 0 {

@@ -254,7 +254,7 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
 		"block_num", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
