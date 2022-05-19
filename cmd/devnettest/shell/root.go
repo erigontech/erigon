@@ -5,7 +5,7 @@ import (
 )
 
 var (
-	reqId    int
+	reqId int
 )
 
 func Execute() {

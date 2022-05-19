@@ -18,7 +18,7 @@ var (
 	//	Usage: "Name of the testnet to join",
 	//	Value: networkname.DevChainName,
 	//}
-	
+
 	DefaultFlags = []cli.Flag{
 		utils.DataDirFlag,
 		utils.EthashDatasetDirFlag,
@@ -140,7 +140,6 @@ type RPCFlags struct {
 }
 
 type ErigonFlags struct {
-
 }
 
 var (
