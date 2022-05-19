@@ -1107,7 +1107,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		return nil
 	}
 
-	if err := WaitForDownloader(ctx, tx, cfg); err != nil {
+	if err := WaitForDownloader(ctx, cfg); err != nil {
 		return err
 	}
 	if err := cfg.snapshots.Reopen(); err != nil {
@@ -1116,25 +1116,17 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
 	if cfg.snapshots.SegmentsMax() < expect {
-		c, err := tx.Cursor(kv.Headers)
+		k, err := rawdb.SecondKey(tx, kv.Headers) // genesis always first
 		if err != nil {
 			return err
 		}
-		defer c.Close()
-		firstK, _, err := c.First()
-		if err != nil {
-			return err
-		}
-		c.Close()
-		hasInDB := binary.BigEndian.Uint64(firstK)
+		hasInDB := binary.BigEndian.Uint64(k)
+		fmt.Printf("aaa: %d\n", cfg.snapshots.SegmentsMax(), hasInDB)
 		if cfg.snapshots.SegmentsMax() < hasInDB {
 			return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
 		} else {
 			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
 		}
-	}
-	if err := cfg.snapshots.Reopen(); err != nil {
-		return fmt.Errorf("ReopenIndices: %w", err)
 	}
 
 	// Create .idx files
@@ -1159,7 +1151,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if cfg.dbEventNotifier != nil {
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
-	log.Info("[snapshots] see", "blocks", cfg.snapshots.BlocksAvailable())
+	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable())
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
@@ -1230,11 +1222,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
-	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
-
+func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
 	// send all hashes to the Downloader service
-	preverified := snapshotsCfg.Preverified
+	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
