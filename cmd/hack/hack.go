@@ -1009,7 +1009,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}
 	storageKeys := []string{}
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
 	tx, err1 := db.BeginRo(context.Background())
@@ -1048,7 +1048,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}); err != nil {
 		return err
 	}
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info("Constructed account map", "size", len(accountMap),
 		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	storageMap := make(map[string][]byte)
@@ -1065,7 +1065,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	}); err != nil {
 		return err
 	}
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info("Constructed storage map", "size", len(storageMap),
 		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	var unfurlList = make([]string, len(accountMap)+len(storageMap))
@@ -1110,7 +1110,7 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 		}
 	}
 	slices.Sort(unfurlList)
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info("Constructed account unfurl lists",
 		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
@@ -1129,13 +1129,13 @@ func testGetProof(chaindata string, address common.Address, rewind int, regen bo
 	if err != nil {
 		return err
 	}
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info("Loaded subtries",
 		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	hash, err := rawdb.ReadCanonicalHash(tx, block)
 	tool.Check(err)
 	header := rawdb.ReadHeader(tx, hash, block)
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info("Constructed trie",
 		"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 	fmt.Printf("Resulting root: %x, expected root: %x\n", root, header.Root)

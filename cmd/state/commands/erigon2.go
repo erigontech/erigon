@@ -377,7 +377,7 @@ func (s *stat) print(aStats aggregator.FilesStats, logger log.Logger) {
 
 func (s *stat) delta(aStats aggregator.FilesStats, blockNum uint64) *stat {
 	currentTime := time.Now()
-	runtime.ReadMemStats(&s.mem)
+	libcommon.ReadMemStats(&s.mem)
 
 	interval := currentTime.Sub(s.prevTime).Seconds()
 	s.blockNum = blockNum

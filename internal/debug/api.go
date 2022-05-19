@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -74,7 +75,7 @@ func (*HandlerT) BacktraceAt(location string) error {
 // MemStats returns detailed runtime memory statistics.
 func (*HandlerT) MemStats() *runtime.MemStats {
 	s := new(runtime.MemStats)
-	runtime.ReadMemStats(s)
+	common.ReadMemStats(s)
 	return s
 }
 
