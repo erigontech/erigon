@@ -226,7 +226,7 @@ func readPlainStateOnce(
 		select {
 		default:
 		case <-logEvery.C:
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
 	}

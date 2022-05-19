@@ -1025,7 +1025,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
@@ -1145,7 +1145,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	// Create .idx files
@@ -1287,7 +1287,7 @@ Loop:
 					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
-				runtime.ReadMemStats(&m)
+				libcommon.ReadMemStats(&m)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",

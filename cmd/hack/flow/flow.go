@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -93,7 +94,7 @@ func worker(code []byte) {
 		defer debug.LogPanic()
 		for {
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			common.ReadMemStats(&m)
 			// For info on each, see: https://golang.org/pkg/runtime/#MemStats
 			if !*quiet {
 				fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))

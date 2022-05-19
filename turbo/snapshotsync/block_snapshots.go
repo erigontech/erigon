@@ -612,7 +612,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 					return
 				case <-logEvery.C:
 					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
+					if lvl >= log.LvlInfo {
+						common2.ReadMemStats(&m)
+					}
 					log.Log(lvl, "[snapshots] HeadersIdx", "blockNum", blockTo,
 						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
@@ -659,7 +661,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 					return
 				case <-logEvery.C:
 					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
+					if lvl >= log.LvlInfo {
+						common2.ReadMemStats(&m)
+					}
 					log.Log(lvl, "[snapshots] BodiesIdx", "blockNum", blockTo,
 						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
@@ -713,7 +717,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 						return
 					case <-logEvery.C:
 						var m runtime.MemStats
-						runtime.ReadMemStats(&m)
+						if lvl >= log.LvlInfo {
+							common2.ReadMemStats(&m)
+						}
 						log.Log(lvl, "[Snapshots Indexing] TransactionsIdx", "blockNum", blockTo,
 							"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 					default:
@@ -1129,7 +1135,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			if lvl >= log.LvlInfo {
+				common2.ReadMemStats(&m)
+			}
 			log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
@@ -1197,7 +1205,9 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			if lvl >= log.LvlInfo {
+				common2.ReadMemStats(&m)
+			}
 			log.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
@@ -1252,7 +1262,9 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			if lvl >= log.LvlInfo {
+				common2.ReadMemStats(&m)
+			}
 			log.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
