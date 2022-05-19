@@ -728,12 +728,14 @@ Loop:
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
+			t := time.Now()
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
+			fmt.Printf("alex send req: %s, %d\n", time.Since(t), req.Number)
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -742,6 +744,7 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
+				t := time.Now()
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
@@ -758,6 +761,7 @@ Loop:
 						}
 					}
 				}
+				fmt.Printf("alex send req: %s, %d\n", time.Since(t), req.Number)
 			}
 			if len(penalties) > 0 {
 				cfg.penalize(ctx, penalties)
