@@ -60,11 +60,11 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 		}(magnet.String())
 
 	}
+	fmt.Printf("download done\n")
 	return &emptypb.Empty{}, nil
 }
 
 func (s *GrpcServer) Stats(ctx context.Context, request *proto_downloader.StatsRequest) (*proto_downloader.StatsReply, error) {
-
 	stats := s.d.Stats()
 	fmt.Printf("stat call: %t\n", stats.Completed)
 	return &proto_downloader.StatsReply{
