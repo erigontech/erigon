@@ -102,12 +102,13 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 
 func txnLookupTransform(logPrefix string, tx kv.RwTx, startKey, endKey []byte, quitCh <-chan struct{}, cfg TxLookupCfg) error {
 	bigNum := new(big.Int)
+	fmt.Printf("start: %x\n", startKey)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum := binary.BigEndian.Uint64(k)
 		blockHash := common.BytesToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
-			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
+			return fmt.Errorf("transform: empty block body %d, hash %x", blocknum, v)
 		}
 
 		for _, txn := range body.Transactions {
@@ -149,8 +150,13 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 
 	// end key needs to be s.BlockNumber + 1 and not s.BlockNumber, because
 	// the keys in BlockBody table always have hash after the block number
-	if err := deleteTxLookupRange(tx, s.LogPrefix(), u.UnwindPoint+1, s.BlockNumber+1, ctx, cfg); err != nil {
-		return err
+	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
+	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
+		smallestInDB := cfg.snapshots.BlocksAvailable()
+		blockFrom, blockTo = libcommon.Max(blockFrom, smallestInDB), libcommon.Max(blockTo, smallestInDB)
+	}
+	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo, ctx, cfg); err != nil {
+		return fmt.Errorf("unwind: %w", err)
 	}
 	if err := u.Done(tx); err != nil {
 		return err
@@ -173,27 +179,19 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		}
 		defer tx.Rollback()
 	}
-	blockFrom := s.PruneProgress
+	blockFrom, blockTo := s.PruneProgress, uint64(0)
 
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.TxIndex.Enabled() {
-		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
-		if blockFrom < to {
-			if err = deleteTxLookupRange(tx, logPrefix, blockFrom, to, ctx, cfg); err != nil {
-				return err
-			}
-		}
-		if err = s.DoneAt(tx, to); err != nil {
-			return err
-		}
+		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
-		to := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
-		if blockFrom < to {
-			if err = deleteTxLookupRange(tx, logPrefix, blockFrom, to, ctx, cfg); err != nil {
-				return err
-			}
+		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
+	}
+	if blockFrom < blockTo {
+		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
+			return fmt.Errorf("prune: %w", err)
 		}
-		if err = s.DoneAt(tx, to); err != nil {
+		if err = s.DoneAt(tx, blockTo); err != nil {
 			return err
 		}
 	}

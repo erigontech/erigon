@@ -745,7 +745,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	}
-	integrity.Trie(tx, integritySlow, ctx)
+	integrity.Trie(db, tx, integritySlow, ctx)
 	return tx.Commit()
 }
 

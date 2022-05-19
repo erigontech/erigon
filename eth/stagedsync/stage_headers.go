@@ -1121,7 +1121,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 		hasInDB := binary.BigEndian.Uint64(k)
-		fmt.Printf("aaa: %d\n", cfg.snapshots.SegmentsMax(), hasInDB)
 		if cfg.snapshots.SegmentsMax() < hasInDB {
 			return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
 		} else {
