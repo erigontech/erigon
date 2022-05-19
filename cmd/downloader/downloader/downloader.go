@@ -285,15 +285,15 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	interval := 10 * time.Second
-	statEvery := time.NewTicker(interval)
+	statInterval := 10 * time.Second
+	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-statEvery.C:
-			d.ReCalcStats(interval)
+			d.ReCalcStats(statInterval)
 
 		case <-logEvery.C:
 			if silent {
