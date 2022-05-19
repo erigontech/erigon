@@ -57,7 +57,7 @@ const JwtDefaultFile = "jwt.hex"
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	//utils2.DebugFlags[0] = utils2.VerbosityFlag
-	utils.CobraFlags(rootCmd, append(debug.Flags2, utils.MetricFlags...))
+	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")

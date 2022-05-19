@@ -85,12 +85,6 @@ var Flags = []cli.Flag{
 	cpuprofileFlag, traceFlag,
 }
 
-var Flags2 = []cli.Flag{
-	logjsonFlag, //backtraceAtFlag, vmoduleFlag, debugFlag,
-	pprofFlag, pprofAddrFlag, pprofPortFlag,
-	cpuprofileFlag, traceFlag,
-}
-
 //var glogger *log.GlogHandler
 
 func init() {

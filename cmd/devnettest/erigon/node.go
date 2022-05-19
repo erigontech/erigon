@@ -3,10 +3,10 @@ package erigon
 import (
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/rpcdaemon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
-	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
@@ -28,7 +28,7 @@ func RunNode() {
 	}()
 
 	fmt.Println("args 0: ", os.Args)
-	app := erigonapp.MakeApp(runDevnet, erigoncli.DefaultFlags)
+	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags)
 	flags := GetCmdLineFlags()
 	args := append(os.Args, flags...)
 	fmt.Println("args 1: ", args)
@@ -60,15 +60,15 @@ func runDevnet(cliCtx *cli.Context) {
 
 func StartProcess(rpcFlags *utils.RPCFlags) {
 	go RunNode()
-	//go rpcdaemon.RunDaemon(rpcFlags)
 	time.Sleep(10 * time.Second)
+	go rpcdaemon.RunDaemon(rpcFlags)
 	//var wg sync.WaitGroup
 	//wg.Add(1)
 	//wg.Wait()
 }
 
 func GetCmdLineFlags() []string {
-	flags := []string{"--datadir=~/dev", "--chain=dev", "--http"}
+	flags := []string{"--datadir=~/dev", "--chain=dev"} // TODO: change to ./dev
 	if IsRunning() {
 		fmt.Println("Node is running")
 		return flags
