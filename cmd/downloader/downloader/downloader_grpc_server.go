@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -57,8 +58,8 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				return
 			}
 		}(magnet.String())
-
 	}
+	s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 	return &emptypb.Empty{}, nil
 }
 
