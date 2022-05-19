@@ -1256,6 +1256,10 @@ func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
+	if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err == nil && stats.Completed {
+		return nil
+	}
+
 	var m runtime.MemStats
 	// Print download progress until all segments are available
 Loop:

@@ -3,6 +3,7 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -58,8 +59,9 @@ func (s *GrpcServer) Download(ctx context.Context, request *proto_downloader.Dow
 				return
 			}
 		}(magnet.String())
-
 	}
+	s.d.ReCalcStats(10 * time.Second)
+
 	fmt.Printf("download done\n")
 	return &emptypb.Empty{}, nil
 }
