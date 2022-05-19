@@ -2,6 +2,8 @@ package erigon
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/rpcdaemon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
@@ -10,8 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
-	"os"
-	"time"
 )
 
 var started bool
@@ -27,11 +27,10 @@ func RunNode() {
 		os.Exit(1)
 	}()
 
-	fmt.Println("args 0: ", os.Args)
 	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags)
 	flags := GetCmdLineFlags()
 	args := append(os.Args, flags...)
-	fmt.Println("args 1: ", args)
+	log.Info("args 1: ", args)
 	if err := app.Run(args); err != nil {
 		fmt.Println("Error here")
 		fmt.Fprintln(os.Stderr, err)
@@ -60,7 +59,6 @@ func runDevnet(cliCtx *cli.Context) {
 
 func StartProcess(rpcFlags *utils.RPCFlags) {
 	go RunNode()
-	time.Sleep(10 * time.Second)
 	go rpcdaemon.RunDaemon(rpcFlags)
 	//var wg sync.WaitGroup
 	//wg.Add(1)
@@ -68,7 +66,7 @@ func StartProcess(rpcFlags *utils.RPCFlags) {
 }
 
 func GetCmdLineFlags() []string {
-	flags := []string{"--datadir=~/dev", "--chain=dev"} // TODO: change to ./dev
+	flags := []string{"--datadir=./dev", "--chain=dev"} // TODO: change to ./dev
 	if IsRunning() {
 		fmt.Println("Node is running")
 		return flags
