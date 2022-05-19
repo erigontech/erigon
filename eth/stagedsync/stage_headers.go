@@ -1110,14 +1110,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := WaitForDownloader(ctx, cfg); err != nil {
 		return err
 	}
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("[Snapshots] after", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-
 	if err := cfg.snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
-
 	expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
 	if cfg.snapshots.SegmentsMax() < expect {
 		k, err := rawdb.SecondKey(tx, kv.Headers) // genesis always first
@@ -1134,6 +1129,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
 		}
 	}
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	// Create .idx files
 	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
@@ -1157,8 +1156,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if cfg.dbEventNotifier != nil {
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
-	runtime.ReadMemStats(&m)
-	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
