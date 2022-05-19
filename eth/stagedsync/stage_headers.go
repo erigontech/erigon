@@ -655,6 +655,7 @@ func HeadersPOW(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
+	tt := time.Now()
 	var headerProgress uint64
 	var err error
 
@@ -711,6 +712,8 @@ func HeadersPOW(
 	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
+	fmt.Printf("headers start: %s\n", time.Since(tt))
+
 Loop:
 	for !stopped {
 
