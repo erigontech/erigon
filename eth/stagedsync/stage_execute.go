@@ -439,11 +439,12 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 
 	changes := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer changes.Close()
+	t := time.Now()
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {
 		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
-
+	fmt.Printf("rewind: %s\n", time.Since(t))
 	if err := changes.Load(tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
 			if len(v) > 0 {
