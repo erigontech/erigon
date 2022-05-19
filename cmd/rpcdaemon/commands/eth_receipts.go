@@ -259,20 +259,23 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-	if !ok && chainConfig.Bor != nil {
-		return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
-	}
 
 	if chainConfig.Bor != nil {
-		var blocN uint64
-		borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
-		if err != nil {
-			return nil, err
+		if !ok {
+			var blocN uint64
+			borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
+			if err != nil {
+				return nil, err
+			}
+			if borTx == nil {
+				return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
+			}
+			blockNum = blocN
 		}
-		if borTx == nil {
+	} else {
+		if !ok {
 			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
-		blockNum = blocN
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
