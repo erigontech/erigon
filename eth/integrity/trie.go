@@ -11,9 +11,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 )
 
 // AssertSubset a & b == a - checks whether a is subset of b
@@ -23,7 +25,7 @@ func AssertSubset(prefix []byte, a, b uint16) {
 	}
 }
 
-func Trie(tx kv.Tx, slowChecks bool, ctx context.Context) {
+func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -32,6 +34,8 @@ func Trie(tx kv.Tx, slowChecks bool, ctx context.Context) {
 	buf2 := make([]byte, 256)
 
 	{
+		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.TrieOfAccounts, nil, math.MaxInt32)
+		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxInt32)
 		c, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
@@ -141,6 +145,8 @@ func Trie(tx kv.Tx, slowChecks bool, ctx context.Context) {
 		}
 	}
 	{
+		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.TrieOfStorage, nil, math.MaxInt32)
+		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxInt32)
 		c, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)

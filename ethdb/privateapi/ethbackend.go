@@ -333,7 +333,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK}, nil
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID}, nil
 	}
 	tx.Rollback()
 
@@ -453,7 +453,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
 		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK},
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID},
 		}, nil
 	}
 
@@ -507,6 +507,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
 	}
 
+	if headHeader.Time > req.PayloadAttributes.Timestamp {
+		return nil, fmt.Errorf("timestamp is too low")
+	}
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
@@ -518,8 +521,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	// successfully assembled the payload and assigned the correct id
 	return &remote.EngineForkChoiceUpdatedReply{
-		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
-		PayloadId:     s.payloadId,
+		PayloadStatus: &remote.EnginePayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+		},
+		PayloadId: s.payloadId,
 	}, nil
 }
 

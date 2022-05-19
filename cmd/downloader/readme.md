@@ -50,9 +50,17 @@ downloader torrent_hashes --rebuild --datadir=<your_datadir>
 # Start downloader (seeds automatically)
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 
-# Erigon is not required for snapshots seeding 
+# Erigon is not required for snapshots seeding. But Erigon with --syncmode=snap also does seeding. 
+```
 
-# But Erigon can use snapshots only after indexing them (this step is not required for seeding)
+Additional info:
+```shell
+# Snapshots creation does not require fully-synced Erigon - few first stages enough. For example:  
+STOP_BEFORE_STAGE=Execution ./build/bin/erigon --syncmode=full --datadir=<your_datadir> 
+# But for security - better have fully-synced Erigon
+
+
+# Erigon can use snapshots only after indexing them. Erigon will automatically index them but also can run (this step is not required for seeding):
 erigon snapshots index --datadir=<your_datadir> 
 ```
 
