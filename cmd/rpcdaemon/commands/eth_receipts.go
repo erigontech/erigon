@@ -259,7 +259,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 	if err != nil {
 		return nil, err
 	}
-
 	if !ok {
 		if chainConfig.Bor != nil {
 			var blocN uint64
