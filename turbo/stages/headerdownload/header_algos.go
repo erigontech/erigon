@@ -1100,7 +1100,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	return nil
 }
 
-func (hd *HeaderDownload) AddHeaderFromSnapshot(tx kv.Tx, n uint64, r interfaces.FullBlockReader) error {
+func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r interfaces.FullBlockReader) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
