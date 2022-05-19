@@ -1103,64 +1103,63 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
-	if cfg.snapshots == nil {
+	if cfg.snapshots == nil || !initialCycle {
 		return nil
 	}
 
-	if initialCycle {
-		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
+	if err := WaitForDownloader(ctx, tx, cfg); err != nil {
+		return err
+	}
+	if err := cfg.snapshots.Reopen(); err != nil {
+		return fmt.Errorf("ReopenSegments: %w", err)
+	}
+
+	expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
+	if cfg.snapshots.SegmentsMax() < expect {
+		c, err := tx.Cursor(kv.Headers)
+		if err != nil {
 			return err
 		}
-		if err := cfg.snapshots.Reopen(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
+		defer c.Close()
+		firstK, _, err := c.First()
+		if err != nil {
+			return err
+		}
+		c.Close()
+		hasInDB := binary.BigEndian.Uint64(firstK)
+		if cfg.snapshots.SegmentsMax() < hasInDB {
+			return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
+		} else {
+			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
+		}
+	}
+	if err := cfg.snapshots.Reopen(); err != nil {
+		return fmt.Errorf("ReopenIndices: %w", err)
+	}
+
+	// Create .idx files
+	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+		if !cfg.snapshots.SegmentsReady() {
+			return fmt.Errorf("not all snapshot segments are available")
 		}
 
-		expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
-		if cfg.snapshots.SegmentsMax() < expect {
-			c, err := tx.Cursor(kv.Headers)
-			if err != nil {
+		// wait for Downloader service to download all expected snapshots
+		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
 				return err
-			}
-			defer c.Close()
-			firstK, _, err := c.First()
-			if err != nil {
-				return err
-			}
-			c.Close()
-			hasInDB := binary.BigEndian.Uint64(firstK)
-			if cfg.snapshots.SegmentsMax() < hasInDB {
-				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
-			} else {
-				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
 			}
 		}
+
 		if err := cfg.snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenIndices: %w", err)
 		}
-
-		// Create .idx files
-		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-			if !cfg.snapshots.SegmentsReady() {
-				return fmt.Errorf("not all snapshot segments are available")
-			}
-
-			// wait for Downloader service to download all expected snapshots
-			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-					return err
-				}
-			}
-
-			if err := cfg.snapshots.Reopen(); err != nil {
-				return fmt.Errorf("ReopenIndices: %w", err)
-			}
-		}
-		if cfg.dbEventNotifier != nil {
-			cfg.dbEventNotifier.OnNewSnapshot()
-		}
 	}
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
+	log.Info("[snapshots] see", "blocks", cfg.snapshots.BlocksAvailable())
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
