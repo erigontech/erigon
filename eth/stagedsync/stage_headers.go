@@ -655,7 +655,6 @@ func HeadersPOW(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	useExternalTx bool,
 ) error {
-	tt := time.Now()
 	var headerProgress uint64
 	var err error
 
@@ -712,8 +711,6 @@ func HeadersPOW(
 	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
-	fmt.Printf("headers start: %s\n", time.Since(tt))
-
 Loop:
 	for !stopped {
 
@@ -731,14 +728,12 @@ Loop:
 		currentTime := uint64(time.Now().Unix())
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			t := time.Now()
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
-			fmt.Printf("alex send req: %s, %d\n", time.Since(t), req.Number)
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -747,7 +742,6 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				t := time.Now()
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
@@ -764,7 +758,6 @@ Loop:
 						}
 					}
 				}
-				fmt.Printf("alex send req: %s, %d\n", time.Since(t), req.Number)
 			}
 			if len(penalties) > 0 {
 				cfg.penalize(ctx, penalties)
@@ -790,20 +783,16 @@ Loop:
 				}
 			}
 		}
-		t := time.Now()
 		// Load headers into the database
 		var inSync bool
 		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
 			return err
 		}
-		fmt.Printf("InsertHeaders: %s\n", time.Since(t))
 
-		t = time.Now()
 		announces := cfg.hd.GrabAnnounces()
 		if len(announces) > 0 {
 			cfg.announceNewHashes(ctx, announces)
 		}
-		fmt.Printf("announceNewHashes: %s\n", time.Since(t))
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
@@ -852,8 +841,6 @@ Loop:
 		}
 		timer.Stop()
 	}
-	t := time.Now()
-
 	if headerInserter.Unwind() {
 		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
 	}
@@ -880,7 +867,6 @@ Loop:
 	}
 	// We do not print the following line if the stage was interrupted
 	log.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
-	fmt.Printf("headers end: %s\n", time.Since(t))
 
 	return nil
 }
