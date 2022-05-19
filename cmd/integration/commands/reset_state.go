@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -269,16 +270,7 @@ func printStages(db kv.Tx) error {
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
 
 	{
-		c, err := db.Cursor(kv.Headers)
-		if err != nil {
-			return err
-		}
-		defer c.Close()
-		_, _, err = c.First()
-		if err != nil {
-			return err
-		}
-		firstNonGenesis, _, err := c.Next()
+		firstNonGenesis, err := rawdb.SecondKey(db, kv.Headers)
 		if err != nil {
 			return err
 		}
