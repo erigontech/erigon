@@ -222,7 +222,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
-			runtime.ReadMemStats(&m)
+			common.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", logPrefix), logArs...)
 		}
@@ -273,12 +273,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 		}
 	}
 
-	runtime.ReadMemStats(&m)
-	log.Trace(
-		fmt.Sprintf("[%s] ETL Load done", logPrefix),
-		"bucket", bucket,
-		"records", i,
-		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	log.Trace(fmt.Sprintf("[%s] ETL Load done", logPrefix), "bucket", bucket, "records", i)
 
 	return nil
 }

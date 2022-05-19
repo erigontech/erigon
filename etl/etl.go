@@ -143,7 +143,7 @@ func extractBucketIntoFiles(
 				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
 			}
 
-			runtime.ReadMemStats(&m)
+			common.ReadMemStats(&m)
 			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
