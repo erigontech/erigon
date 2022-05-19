@@ -36,6 +36,18 @@ const (
 	maxChild    = 2
 )
 
+type bitstring []uint8
+
+func hexToBin(hex []byte) bitstring {
+	bin := make([]byte, 4*len(hex))
+	for i := range bin {
+		if hex[i/4]&(1<<(3-i%4)) != 0 {
+			bin[i] = 1
+		}
+	}
+	return bin
+}
+
 // BinHashed implements commitment based on patricia merkle tree with radix 16,
 // with keys pre-hashed by keccak256
 type BinHashed struct {
@@ -73,18 +85,18 @@ type BinHashed struct {
 	byteArrayWriter ByteArrayWriter
 }
 
-func NewBinHashed(accountKeyLen int,
+func NewBinPatriciaHashed(accountKeyLen int,
 	branchFn func(prefix []byte) ([]byte, error),
-	accountFn func(plainKey []byte, cell *BinCell) error,
-	storageFn func(plainKey []byte, cell *BinCell) error,
+	accountFn func(plainKey []byte, cell *Cell) error,
+	storageFn func(plainKey []byte, cell *Cell) error,
 ) *BinHashed {
 	return &BinHashed{
 		keccak:        sha3.NewLegacyKeccak256().(keccakState),
 		keccak2:       sha3.NewLegacyKeccak256().(keccakState),
 		accountKeyLen: accountKeyLen,
 		branchFn:      branchFn,
-		accountFn:     accountFn,
-		storageFn:     storageFn,
+		accountFn:     wrapAccountStorageFn(accountFn),
+		storageFn:     wrapAccountStorageFn(storageFn),
 	}
 }
 
@@ -142,7 +154,7 @@ func (hph *BinHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, updates []U
 }
 
 func (hph *BinHashed) Variant() TrieVariant {
-	return VariantReducedHexPatriciaTrie
+	return VariantBinPatriciaTrie
 }
 
 func (hph *BinHashed) RootHash() ([]byte, error) {
@@ -763,7 +775,6 @@ func (hph *BinHashed) fold() ([]byte, []byte, error) {
 	depth := hph.depths[hph.activeRows-1]
 	var branchData []byte
 	var bitmapBuf [4]byte
-	// updateKey, _ := bitstring(hph.currentKey[:updateKeyLen]).reconstructHex()
 	updateKey := binToCompact(hph.currentKey[:updateKeyLen])
 	if hph.trace {
 		fmt.Printf("touchMap[%d]=%016b, afterMap[%d]=%016b\n", row, hph.touchMap[row], row, hph.afterMap[row])

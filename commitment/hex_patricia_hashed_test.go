@@ -542,25 +542,25 @@ func Test_HexPatriciaHashed_EmptyUpdateState(t *testing.T) {
 	require.EqualValues(t, hashBeforeEmptyUpdate, hashAfterEmptyUpdate)
 }
 
-func TestHexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
+func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation(t *testing.T) {
 	ms := NewMockState(t)
 	ms2 := NewMockState(t)
 
 	plainKeys, hashedKeys, updates := NewUpdateBuilder().
 		Balance("f4", 4).
-		//Storage("04", "01", "0401").
+		Storage("04", "01", "0401").
 		Balance("ba", 065606).
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
 		Balance("03", 7).
-		//Storage("03", "56", "050505").
+		// Storage("03", "56", "050505").
 		Balance("05", 9).
-		//Storage("03", "57", "060606").
+		// Storage("03", "57", "060606").
 		Balance("b9", 6).
-		//Nonce("ff", 169356).
-		//Storage("05", "02", "8989").
-		//Storage("f5", "04", "9898").
+		Nonce("ff", 169356).
+		Storage("05", "02", "8989").
+		Storage("f5", "04", "9898").
 		Build()
 
 	renderUpdates := func(branchNodeUpdates map[string][]byte) {
