@@ -53,7 +53,6 @@ ForLoop:
 		case v := <-ch:
 			blockCount++
 			blockNumber := v.(map[string]interface{})["number"]
-			fmt.Printf("Searching for the transaction in block with number: %+v\n", blockNumber.(string))
 			num, foundTx, err := blockHasHash(client, hash, blockNumber.(string))
 			if err != nil {
 				return uint64(0), fmt.Errorf("could not verify if current block contains the tx hash: %v", err)
@@ -76,8 +75,6 @@ func Logs(addresses, topics []string) error {
 	if clientErr != nil {
 		return fmt.Errorf("failed to dial websocket: %v", clientErr)
 	}
-	fmt.Println()
-	fmt.Println("Connected to web socket successfully")
 
 	if err := subscribeToLogs(client, "eth_logs", addresses, topics); err != nil {
 		return fmt.Errorf("failed to subscribe to logs: %v", err)

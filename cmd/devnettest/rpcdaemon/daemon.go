@@ -1,10 +1,9 @@
 package rpcdaemon
 
 import (
-	"os"
-
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"os"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
@@ -13,13 +12,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func RunDaemon(flags *utils.RPCFlags) {
+func RunDaemon() {
 	cmd, cfg := cli.RootCommand()
-	setUpFlags(cfg, flags)
+	setupCfg(cfg)
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		args = append(args, "--verbosity=0")
 		ctx := cmd.Context()
 		logger := log.New()
+		time.Sleep(100 * time.Millisecond)
 		db, borDb, backend, txPool, mining, starknet, stateCache, blockReader, ff, err := cli.RemoteServices(ctx, *cfg, logger, rootCancel)
 		if err != nil {
 			log.Error("Could not connect to DB", "err", err)
@@ -45,6 +46,6 @@ func RunDaemon(flags *utils.RPCFlags) {
 	}
 }
 
-func setUpFlags(cfg *httpcfg.HttpCfg, flags *utils.RPCFlags) {
-	cfg.WebsocketEnabled = flags.WebsocketEnabled
+func setupCfg(cfg *httpcfg.HttpCfg) {
+	cfg.WebsocketEnabled = true
 }

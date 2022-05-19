@@ -20,10 +20,9 @@ func getBalance(ctx *ishell.Context, s *ishell.Shell) {
 		return
 	}
 	address := common.HexToAddress(addr)
-	//erigon.StartProcess(&utils.RPCFlags{WebsocketEnabled: false})
-	res, err := requests.GetBalance(reqId, address, blockNum)
+	bal, err := requests.GetBalance(reqId, address, blockNum)
 	if err != nil {
-		res = fmt.Sprintf("could not get balance: %v\n", err)
+		bal = fmt.Sprintf("could not get balance: %v\n", err)
 	}
-	ctx.Printf(res)
+	ctx.Printf("Balance is: \n", bal)
 }

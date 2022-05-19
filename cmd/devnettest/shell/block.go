@@ -33,18 +33,18 @@ func sendTx(ctx *ishell.Context, s *ishell.Shell) {
 	}
 
 	// subscriptionContract is the handler to the contract for further operations
-	signedTx, address, subscriptionContract, transactOpts, err := services.CreateTransaction(txType, sendAddr, uint64(sendValue), nonce, searchBlock)
+	signedTx, address, subscriptionContract, transactOpts, err := services.CreateTransaction(txType, sendAddr, uint64(sendValue), nonce)
 	if err != nil {
 		ctx.Printf("failed to create transaction: %v\n", err)
 		return
 	}
 
-	res, hash, err := requests.SendTx(reqId, signedTx)
+	hash, err := requests.SendTx(reqId, signedTx)
 	if err != nil {
 		ctx.Printf("failed to send transaction: %v\n", err)
 		return
 	}
-	ctx.Printf(res)
+	ctx.Printf("Transaction mined with hash: %v\n", hash)
 
 	if searchBlock {
 		if _, err := services.SearchBlockForTx(*hash); err != nil {

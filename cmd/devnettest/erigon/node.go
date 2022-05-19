@@ -14,8 +14,6 @@ import (
 	"github.com/urfave/cli"
 )
 
-var started bool
-
 func RunNode() {
 	defer func() {
 		panicResult := recover()
@@ -27,12 +25,9 @@ func RunNode() {
 		os.Exit(1)
 	}()
 
-	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags)
-	flags := GetCmdLineFlags()
-	args := append(os.Args, flags...)
-	log.Info("args 1: ", args)
-	if err := app.Run(args); err != nil {
-		fmt.Println("Error here")
+	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags) // change to erigoncli.DefaultFlags later on
+	customArgs := []string{"./build/bin/devnettest", "--datadir=./dev", "--chain=dev", "--mine", "--dev.period=5", "--verbosity=0"}
+	if err := app.Run(customArgs); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -57,33 +52,7 @@ func runDevnet(cliCtx *cli.Context) {
 	}
 }
 
-func StartProcess(rpcFlags *utils.RPCFlags) {
+func StartProcess() {
 	go RunNode()
-	go rpcdaemon.RunDaemon(rpcFlags)
-	//var wg sync.WaitGroup
-	//wg.Add(1)
-	//wg.Wait()
-}
-
-func GetCmdLineFlags() []string {
-	flags := []string{"--datadir=./dev", "--chain=dev"} // TODO: change to ./dev
-	if IsRunning() {
-		fmt.Println("Node is running")
-		return flags
-	}
-	fmt.Println("Node is not running")
-	Start()
-	return append(flags, "--verbosity=0")
-}
-
-func Start() {
-	started = true
-}
-
-func Stop() {
-	started = false
-}
-
-func IsRunning() bool {
-	return started
+	go rpcdaemon.RunDaemon()
 }

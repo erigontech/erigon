@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 )
 
 func post(client *http.Client, url, request string, response interface{}) error {
-	fmt.Printf("Request: %+v\n", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
@@ -46,33 +46,34 @@ func GetBalance(reqId int, address common.Address, blockNum string) (string, err
 		return "", fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	s, err := utils.ParseResponse(b)
+	bal, err := json.Marshal(b.Balance)
 	if err != nil {
-		return "", fmt.Errorf("error parsing resonse: %v", err)
+		fmt.Println(err)
 	}
 
-	return fmt.Sprintf("Balance retrieved: %v\n", s), nil
+	balStr := string(bal)[3:len(bal) - 1]
+	balance, err := strconv.ParseInt(balStr, 16, 64)
+	if err != nil {
+		return "", fmt.Errorf("cannot convert balance to decimal: %v", err)
+	}
+
+	return strconv.FormatInt(balance, 10), nil
 }
 
-func SendTx(reqId int, signedTx *types.Transaction) (string, *common.Hash, error) {
+func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthSendRawTransaction
 
 	var buf bytes.Buffer
 	if err := (*signedTx).MarshalBinary(&buf); err != nil {
-		return "", nil, fmt.Errorf("failed to marshal binary: %v", err)
+		return nil, fmt.Errorf("failed to marshal binary: %v", err)
 	}
 
 	if res := reqGen.Erigon("eth_sendRawTransaction", reqGen.sendRawTransaction(buf.Bytes()), &b); res.Err != nil {
-		return "", nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
+		return nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
 	}
 
-	s, err := utils.ParseResponse(b)
-	if err != nil {
-		return "", nil, fmt.Errorf("error parsing resonse: %v", err)
-	}
-
-	return fmt.Sprintf("Submitted transaction successfully: %v\n", s), &b.TxnHash, nil
+	return &b.TxnHash, nil
 }
 
 func TxpoolContent(reqId int) error {
@@ -126,25 +127,31 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 	return nil
 }
 
-func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) error {
+func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) (string, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
 	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
-		return fmt.Errorf("error getting transaction count: %v\n", res.Err)
+		return "", fmt.Errorf("error getting transaction count: %v\n", res.Err)
 	}
 
 	if b.Error != nil {
-		return fmt.Errorf("error populating response object: %v", b.Error)
+		return "", fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
-	s, err := utils.ParseResponse(b)
+	n, err := json.Marshal(b.Result)
 	if err != nil {
-		return fmt.Errorf("error parsing resonse: %v", err)
+		fmt.Println(err)
 	}
 
-	fmt.Printf("Nonce: %v\n", s)
-	return nil
+	nonceStr := string(n)[3:len(n) - 1]
+
+	nonce, err := strconv.ParseInt(nonceStr, 16, 64)
+	if err != nil {
+		return "", fmt.Errorf("cannot convert nonce to decimal: %v", err)
+	}
+
+	return strconv.FormatInt(nonce, 10), nil
 }
 
 func GetTransactionCount(reqId int, address common.Address, blockNum string) (rpctest.EthGetTransactionCount, error) {
