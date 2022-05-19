@@ -285,7 +285,7 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	statInterval := 10 * time.Second
+	statInterval := 20 * time.Second
 	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
 	for {
