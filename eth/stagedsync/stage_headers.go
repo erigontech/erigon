@@ -1153,7 +1153,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if cfg.dbEventNotifier != nil {
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
-	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable())
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
 		logEvery := time.NewTicker(logInterval)
@@ -1215,9 +1217,18 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
 	}
+
+	if s.BlockNumber > cfg.snapshots.BlocksAvailable() {
+
+	}
+	runtime.ReadMemStats(&m)
+	log.Info("[Snapshots] before", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+
 	if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 		return err
 	}
+	runtime.ReadMemStats(&m)
+	log.Info("[Snapshots] after", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	return nil
 }
