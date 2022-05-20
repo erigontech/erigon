@@ -89,6 +89,28 @@ func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash co
 	}
 	return *n, true, nil
 }
+func (back *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	var k [8 + 32]byte
+	binary.BigEndian.PutUint64(k[:], blockNum)
+	copy(k[8:], canonicalHash[:])
+	b, err := rawdb.ReadBodyForStorageByKey(tx, k[:])
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+
+	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
+	if err != nil {
+		return nil, err
+	}
+	return txn, nil
+}
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
