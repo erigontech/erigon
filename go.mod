@@ -17,7 +17,7 @@ require (
 	github.com/dop251/goja v0.0.0-20211011172007-d99e4b8cbf48
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/emicklei/dot v0.16.0
-	github.com/emirpasic/gods v1.12.0
+	github.com/emirpasic/gods v1.18.1
 	github.com/fjl/gencodec v0.0.0-20191126094850-e283372f291f
 	github.com/goccy/go-json v0.9.7
 	github.com/gofrs/flock v0.8.1
@@ -50,7 +50,7 @@ require (
 	github.com/torquem-ch/mdbx-go v0.24.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli v1.22.5
+	github.com/urfave/cli v1.22.8
 	github.com/valyala/fastjson v1.6.3
 	github.com/wcharczuk/go-chart/v2 v2.1.0
 	github.com/xsleonard/go-merkle v1.1.0
