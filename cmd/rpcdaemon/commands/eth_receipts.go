@@ -142,43 +142,63 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return logs, nil
 	}
 
-	iter := blockNumbers.Iterator()
-	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
-			return nil, err
+	type Res struct {
+		blockNum  uint64
+		blockLogs []*types.Log
+	}
+	ch := make(chan Res, 16)
+	go func() {
+		defer close(ch)
+		tx, beginErr := api.db.BeginRo(ctx)
+		if beginErr != nil {
+			panic(beginErr)
 		}
+		defer tx.Rollback()
 
-		block := uint64(iter.Next())
-		var logIndex uint
-		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
-			var logs types.Logs
-			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+		iter := blockNumbers.Iterator()
+		for iter.HasNext() {
+			if err = ctx.Err(); err != nil {
+				panic(err)
+				//return nil, err
 			}
-			for _, log := range logs {
-				log.Index = logIndex
-				logIndex++
-			}
-			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
-			if len(filtered) == 0 {
+
+			block := uint64(iter.Next())
+			var logIndex uint
+			var blockLogs []*types.Log
+			err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
+				var logs types.Logs
+				if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+					return fmt.Errorf("receipt unmarshal failed:  %w", err)
+				}
+				for _, log := range logs {
+					log.Index = logIndex
+					logIndex++
+				}
+				filtered := filterLogs(logs, crit.Addresses, crit.Topics)
+				if len(filtered) == 0 {
+					return nil
+				}
+				txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+				for _, log := range filtered {
+					log.TxIndex = txIndex
+				}
+				blockLogs = append(blockLogs, filtered...)
+
 				return nil
+			})
+			if err != nil {
+				panic(err)
+				//return nil, err
 			}
-			txIndex := uint(binary.BigEndian.Uint32(k[8:]))
-			for _, log := range filtered {
-				log.TxIndex = txIndex
+			if len(blockLogs) == 0 {
+				continue
 			}
-			blockLogs = append(blockLogs, filtered...)
-
-			return nil
-		})
-		if err != nil {
-			return logs, err
+			ch <- Res{blockNum: block, blockLogs: blockLogs}
 		}
-		if len(blockLogs) == 0 {
-			continue
-		}
-
+	}()
+	for res := range ch {
+		block := res.blockNum
+		blockLogs := res.blockLogs
 		blockHash, _ := rawdb.ReadCanonicalHash(tx, block)
 		for _, log := range blockLogs {
 			log.BlockNumber = block
