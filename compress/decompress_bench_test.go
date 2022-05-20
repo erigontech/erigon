@@ -17,7 +17,11 @@
 package compress
 
 import (
+	"fmt"
+	"os"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkDecompressNext(b *testing.B) {
@@ -65,5 +69,30 @@ func BenchmarkDecompressMatchPrefix(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = g.MatchPrefix([]byte("longlongword"))
+	}
+}
+
+func BenchmarkDecompressTorrent(t *testing.B) {
+	t.Skip()
+
+	// fpath := "./v1-000500-001000-transactions.seg"
+	// fpath := "./v1-004000-004500-transactions.seg"
+	// fpath := "./v1-005500-006000-transactions.seg"
+	fpath := "./v1-006000-006500-transactions.seg"
+	st, err := os.Stat(fpath)
+	require.NoError(t, err)
+	fmt.Printf("stat: %+v %dbytes\n", st.Name(), st.Size())
+
+	d, err := NewDecompressor(fpath)
+	require.NoError(t, err)
+	defer d.Close()
+
+	getter := d.MakeGetter()
+
+	for i := 0; i < t.N; i++ {
+		_, sz := getter.Next(nil)
+		if sz == 0 {
+			t.Fatal("sz == 0")
+		}
 	}
 }
