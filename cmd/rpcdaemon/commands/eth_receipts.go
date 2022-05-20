@@ -6,13 +6,13 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -142,80 +142,55 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		return logs, nil
 	}
 
-	type Res struct {
-		blockNum  uint64
-		blockLogs []*types.Log
-	}
-	ch := make(chan Res, 1024)
-	go func() {
-		defer func(t time.Time) { fmt.Printf("eth_receipts.go:151: %s\n", time.Since(t)) }(time.Now())
-		defer close(ch)
-		tx, beginErr := api.db.BeginRo(ctx)
-		if beginErr != nil {
-			panic(beginErr)
+	iter := blockNumbers.Iterator()
+	for iter.HasNext() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
 		}
-		defer tx.Rollback()
 
-		kk := make([]byte, 8)
-		iter := blockNumbers.Iterator()
-		for iter.HasNext() {
-			if err = ctx.Err(); err != nil {
-				panic(err)
-				//return nil, err
+		block := uint64(iter.Next())
+		var logIndex uint
+		var blockLogs []*types.Log
+		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
+			var logs types.Logs
+			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+				return fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
-
-			block := uint64(iter.Next())
-			var logIndex uint
-
-			var blockLogs []*types.Log
-			binary.BigEndian.PutUint64(kk, block)
-			err := tx.ForPrefix(kv.Log, kk, func(k, v []byte) error {
-				var logs types.Logs
-				if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-					return fmt.Errorf("receipt unmarshal failed:  %w", err)
-				}
-				for _, log := range logs {
-					log.Index = logIndex
-					logIndex++
-				}
-				filtered := filterLogs(logs, crit.Addresses, crit.Topics)
-				if len(filtered) == 0 {
-					return nil
-				}
-				txIndex := uint(binary.BigEndian.Uint32(k[8:]))
-				for _, log := range filtered {
-					log.TxIndex = txIndex
-				}
-				blockLogs = append(blockLogs, filtered...)
-
+			for _, log := range logs {
+				log.Index = logIndex
+				logIndex++
+			}
+			filtered := filterLogs(logs, crit.Addresses, crit.Topics)
+			if len(filtered) == 0 {
 				return nil
-			})
-			if err != nil {
-				panic(err)
-				//return nil, err
 			}
-			if len(blockLogs) == 0 {
-				continue
+			txIndex := uint(binary.BigEndian.Uint32(k[8:]))
+			for _, log := range filtered {
+				log.TxIndex = txIndex
 			}
-			ch <- Res{blockNum: block, blockLogs: blockLogs}
+			blockLogs = append(blockLogs, filtered...)
+
+			return nil
+		})
+		if err != nil {
+			return logs, err
 		}
-	}()
-	for res := range ch {
-		block := res.blockNum
-		blockLogs := res.blockLogs
-		blockHash, _ := rawdb.ReadCanonicalHash(tx, block)
+		if len(blockLogs) == 0 {
+			continue
+		}
+
+		b, err := api.blockByNumberWithSenders(tx, block)
+		if err != nil {
+			return nil, err
+		}
+		if b == nil {
+			return nil, fmt.Errorf("block not found %d", block)
+		}
+		blockHash := b.Hash()
 		for _, log := range blockLogs {
 			log.BlockNumber = block
 			log.BlockHash = blockHash
-			txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, block, int(log.TxIndex))
-			if err != nil {
-				return nil, err
-			}
-			if txn == nil {
-				return nil, fmt.Errorf("block not found %d", block)
-			}
-			//b.Transactions()[log.TxIndex].Hash()
-			log.TxHash = txn.Hash()
+			log.TxHash = b.Transactions()[log.TxIndex].Hash()
 		}
 		logs = append(logs, blockLogs...)
 	}
