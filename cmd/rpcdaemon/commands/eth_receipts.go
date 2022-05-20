@@ -13,7 +13,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -157,6 +156,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		}
 		defer tx.Rollback()
 
+		kk := make([]byte, 8)
 		iter := blockNumbers.Iterator()
 		for iter.HasNext() {
 			if err = ctx.Err(); err != nil {
@@ -166,8 +166,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 
 			block := uint64(iter.Next())
 			var logIndex uint
+
 			var blockLogs []*types.Log
-			err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(block), func(k, v []byte) error {
+			binary.BigEndian.PutUint64(kk, block)
+			err := tx.ForPrefix(kv.Log, kk, func(k, v []byte) error {
 				var logs types.Logs
 				if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 					return fmt.Errorf("receipt unmarshal failed:  %w", err)
