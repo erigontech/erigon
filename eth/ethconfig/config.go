@@ -231,7 +231,7 @@ func SyncModeByChainName(chain, syncCliFlag string) (SyncMode, error) {
 	} else if syncCliFlag == "snap" {
 		return SnapSync, nil
 	} else if syncCliFlag != "" {
-		return FullSync, fmt.Errorf("unknown syncmode: %s, only next options are valid: %s, %s", syncCliFlag, FullSync, SnapSync)
+		return FullSync, fmt.Errorf("unexpected syncmode: %s, only next options are valid: %s, %s", syncCliFlag, FullSync, SnapSync)
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
