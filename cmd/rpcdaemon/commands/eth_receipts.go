@@ -179,18 +179,19 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 			continue
 		}
 
-		b, err := api.blockByNumberWithSenders(tx, block)
-		if err != nil {
-			return nil, err
-		}
-		if b == nil {
-			return nil, fmt.Errorf("block not found %d", block)
-		}
-		blockHash := b.Hash()
+		blockHash, _ := rawdb.ReadCanonicalHash(tx, block)
 		for _, log := range blockLogs {
 			log.BlockNumber = block
 			log.BlockHash = blockHash
-			log.TxHash = b.Transactions()[log.TxIndex].Hash()
+			txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, block, int(log.TxIndex))
+			if err != nil {
+				return nil, err
+			}
+			if txn == nil {
+				return nil, fmt.Errorf("block not found %d", block)
+			}
+			//b.Transactions()[log.TxIndex].Hash()
+			log.TxHash = txn.Hash()
 		}
 		logs = append(logs, blockLogs...)
 	}

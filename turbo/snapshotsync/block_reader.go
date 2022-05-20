@@ -3,6 +3,7 @@ package snapshotsync
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -475,25 +476,9 @@ func (back *BlockReaderWithSnapshots) headerFromSnapshotByHash(hash common.Hash,
 }
 
 func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.Body, uint64, uint32, []byte, error) {
-	if sn.idxBodyNumber == nil {
-		return nil, 0, 0, buf, nil
-	}
-	bodyOffset := sn.idxBodyNumber.Lookup2(blockHeight - sn.idxBodyNumber.BaseDataID())
-
-	gg := sn.seg.MakeGetter()
-	gg.Reset(bodyOffset)
-	buf, _ = gg.Next(buf[:0])
-	if len(buf) == 0 {
-		return nil, 0, 0, buf, nil
-	}
-	b := &types.BodyForStorage{}
-	reader := bytes.NewReader(buf)
-	if err := rlp.Decode(reader, b); err != nil {
+	b, buf, err := back.bodyForStorageFromSnapshot(blockHeight, sn, buf)
+	if err != nil {
 		return nil, 0, 0, buf, err
-	}
-
-	if b.BaseTxId < sn.idxBodyNumber.BaseDataID() {
-		return nil, 0, 0, buf, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.idxBodyNumber.BaseDataID(), sn.seg.FilePath())
 	}
 
 	body := new(types.Body)
@@ -503,6 +488,30 @@ func (back *BlockReaderWithSnapshots) bodyFromSnapshot(blockHeight uint64, sn *B
 		txsAmount = b.TxAmount - 2
 	}
 	return body, b.BaseTxId + 1, txsAmount, buf, nil // empty txs in the beginning and end of block
+}
+
+func (back *BlockReaderWithSnapshots) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.BodyForStorage, []byte, error) {
+	if sn.idxBodyNumber == nil {
+		return nil, buf, nil
+	}
+	bodyOffset := sn.idxBodyNumber.Lookup2(blockHeight - sn.idxBodyNumber.BaseDataID())
+
+	gg := sn.seg.MakeGetter()
+	gg.Reset(bodyOffset)
+	buf, _ = gg.Next(buf[:0])
+	if len(buf) == 0 {
+		return nil, nil, nil
+	}
+	b := &types.BodyForStorage{}
+	reader := bytes.NewReader(buf)
+	if err := rlp.Decode(reader, b); err != nil {
+		return nil, buf, err
+	}
+
+	if b.BaseTxId < sn.idxBodyNumber.BaseDataID() {
+		return nil, buf, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", b.BaseTxId, sn.idxBodyNumber.BaseDataID(), sn.seg.FilePath())
+	}
+	return b, buf, nil
 }
 
 func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
@@ -542,6 +551,21 @@ func (back *BlockReaderWithSnapshots) txsFromSnapshot(baseTxnID uint64, txsAmoun
 	return txs, senders, nil
 }
 
+func (back *BlockReaderWithSnapshots) txnByID(txnID uint64, sn *TxnSegment, buf []byte) (txn types.Transaction, err error) {
+	offset := sn.IdxTxnHash.Lookup2(txnID - sn.IdxTxnHash.BaseDataID())
+	gg := sn.Seg.MakeGetter()
+	gg.Reset(offset)
+	buf, _ = gg.Next(buf[:0])
+	sender, txnRlp := buf[1:1+20], buf[1+20:]
+
+	txn, err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(txnRlp), uint64(len(txnRlp))))
+	if err != nil {
+		return
+	}
+	txn.SetSender(*(*common.Address)(sender)) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+	return
+}
+
 func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
@@ -576,6 +600,62 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 		}
 	}
 	return
+}
+
+func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
+	var b *types.BodyForStorage
+	ok, err := back.sn.ViewBodies(blockNum, func(segment *BodySegment) error {
+		b, _, err = back.bodyForStorageFromSnapshot(blockNum, segment, nil)
+		if err != nil {
+			return err
+		}
+		if b == nil {
+			return nil
+		}
+
+		return nil
+	})
+	if ok {
+		ok, err = back.sn.Txs.ViewSegment(blockNum, func(segment *TxnSegment) error {
+			// +1 because block has system-txn in the beginning of block
+			txn, err = back.txnByID(b.BaseTxId+1+uint64(i), segment, nil)
+			if err != nil {
+				return err
+			}
+			if txn == nil {
+				return nil
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return txn, nil
+		}
+		return nil, nil
+	}
+
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	var k [8 + 32]byte
+	binary.BigEndian.PutUint64(k[:], blockNum)
+	copy(k[8:], canonicalHash[:])
+	b, err = rawdb.ReadBodyForStorageByKey(tx, k[:])
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+
+	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
+	if err != nil {
+		return nil, err
+	}
+	return txn, nil
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
