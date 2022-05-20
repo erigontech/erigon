@@ -28,6 +28,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
 // In memory commitment and state to use with the tests
@@ -130,7 +131,7 @@ func (ms MockState) storageFn(plainKey []byte, cell *Cell) error {
 	if ex.Flags&STORAGE_UPDATE != 0 {
 		copy(cell.Storage[:], ex.CodeHashOrStorage[:])
 	} else {
-		cell.Storage = [32]byte{}
+		cell.Storage = [length.Hash]byte{}
 	}
 	return nil
 }
@@ -203,7 +204,7 @@ func decodeHex(in string) []byte {
 type UpdateBuilder struct {
 	balances   map[string]*uint256.Int
 	nonces     map[string]uint64
-	codeHashes map[string][32]byte
+	codeHashes map[string][length.Hash]byte
 	storages   map[string]map[string][]byte
 	deletes    map[string]struct{}
 	deletes2   map[string]map[string]struct{}
@@ -215,7 +216,7 @@ func NewUpdateBuilder() *UpdateBuilder {
 	return &UpdateBuilder{
 		balances:   make(map[string]*uint256.Int),
 		nonces:     make(map[string]uint64),
-		codeHashes: make(map[string][32]byte),
+		codeHashes: make(map[string][length.Hash]byte),
 		storages:   make(map[string]map[string][]byte),
 		deletes:    make(map[string]struct{}),
 		deletes2:   make(map[string]map[string]struct{}),
@@ -240,7 +241,7 @@ func (ub *UpdateBuilder) Nonce(addr string, nonce uint64) *UpdateBuilder {
 	return ub
 }
 
-func (ub *UpdateBuilder) CodeHash(addr string, hash [32]byte) *UpdateBuilder {
+func (ub *UpdateBuilder) CodeHash(addr string, hash [length.Hash]byte) *UpdateBuilder {
 	sk := string(decodeHex(addr))
 	delete(ub.deletes, sk)
 	ub.codeHashes[sk] = hash
@@ -395,7 +396,7 @@ func (ub *UpdateBuilder) Build() (plainKeys, hashedKeys [][]byte, updates []Upda
 			if sm, ok1 := ub.storages[string(key)]; ok1 {
 				if storage, ok2 := sm[string(key2)]; ok2 {
 					u.Flags |= STORAGE_UPDATE
-					u.CodeHashOrStorage = [32]byte{}
+					u.CodeHashOrStorage = [length.Hash]byte{}
 					u.ValLength = len(storage)
 					copy(u.CodeHashOrStorage[:], storage)
 				}

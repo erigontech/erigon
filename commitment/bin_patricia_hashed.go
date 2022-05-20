@@ -233,7 +233,7 @@ func (hph *BinHashed) ResetFns(
 	hph.storageFn = wrapAccountStorageFn(storageFn)
 }
 
-func (hph *BinHashed) completeLeafHash(buf []byte, keyPrefix []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
+func (hph *BinHashed) completeLeafHash(buf, keyPrefix []byte, kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlp.RlpSerializable, singleton bool) ([]byte, error) {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
 	pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
@@ -281,7 +281,7 @@ func (hph *BinHashed) completeLeafHash(buf []byte, keyPrefix []byte, kp, kl, com
 	return buf, nil
 }
 
-func (hph *BinHashed) leafHashWithKeyVal(buf []byte, key []byte, val rlp.RlpSerializableBytes, singleton bool) ([]byte, error) {
+func (hph *BinHashed) leafHashWithKeyVal(buf, key []byte, val rlp.RlpSerializableBytes, singleton bool) ([]byte, error) {
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -303,11 +303,7 @@ func (hph *BinHashed) leafHashWithKeyVal(buf []byte, key []byte, val rlp.RlpSeri
 	} else {
 		kl = 1
 	}
-	buf, err := hph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, singleton)
-	if err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return hph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, singleton)
 }
 
 func (hph *BinHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSerializable) ([]byte, error) {
@@ -340,14 +336,12 @@ func (hph *BinHashed) accountLeafHashWithKey(buf, key []byte, val rlp.RlpSeriali
 	} else {
 		kl = 1
 	}
-	var err error
-	if buf, err = hph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, true); err != nil {
-		return nil, err
-	}
-	return buf, nil
+	return hph.completeLeafHash(buf, keyPrefix[:], kp, kl, compactLen, key, compact0, ni, val, true)
 }
 
-func (hph *BinHashed) extensionHash(buf []byte, key []byte, hash []byte) ([]byte, error) {
+func (hph *BinHashed) extensionHash(key []byte, hash []byte) ([length.Hash]byte, error) {
+	var hashBuf [length.Hash]byte
+
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -382,37 +376,35 @@ func (hph *BinHashed) extensionHash(buf []byte, key []byte, hash []byte) ([]byte
 	pt := rlp.GenerateStructLen(lenPrefix[:], totalLen)
 	hph.keccak.Reset()
 	if _, err := hph.keccak.Write(lenPrefix[:pt]); err != nil {
-		return nil, err
+		return hashBuf, err
 	}
 	if _, err := hph.keccak.Write(keyPrefix[:kp]); err != nil {
-		return nil, err
+		return hashBuf, err
 	}
 	var b [1]byte
 	b[0] = compact0
 	if _, err := hph.keccak.Write(b[:]); err != nil {
-		return nil, err
+		return hashBuf, err
 	}
 	for i := 1; i < compactLen; i++ {
 		b[0] = key[ni]*16 + key[ni+1]
 		if _, err := hph.keccak.Write(b[:]); err != nil {
-			return nil, err
+			return hashBuf, err
 		}
 		ni += 2
 	}
 	b[0] = 0x80 + length.Hash
 	if _, err := hph.keccak.Write(b[:]); err != nil {
-		return nil, err
+		return hashBuf, err
 	}
 	if _, err := hph.keccak.Write(hash); err != nil {
-		return nil, err
+		return hashBuf, err
 	}
 	// Replace previous hash with the new one
-	var hashBuf [33]byte
-	if _, err := hph.keccak.Read(hashBuf[:length.Hash]); err != nil {
-		return nil, err
+	if _, err := hph.keccak.Read(hashBuf[:]); err != nil {
+		return hashBuf, err
 	}
-	buf = append(buf, hashBuf[:length.Hash]...)
-	return buf, nil
+	return hashBuf, nil
 }
 
 func (hph *BinHashed) computeCellHashLen(cell *BinCell, depth int) int {
@@ -439,7 +431,8 @@ func (hph *BinHashed) computeCellHashLen(cell *BinCell, depth int) int {
 
 func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]byte, error) {
 	var err error
-	var storageRootHash []byte
+	var storageRootHash [length.Hash]byte
+	storageRootHashIsSet := false
 	if cell.spl > 0 {
 		var hashedKeyOffset int
 		if depth >= keyHalfSize {
@@ -454,18 +447,15 @@ func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]b
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal(singleton) for [%x]=>[%x]\n", cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
-			if storageRootHash, err = hph.leafHashWithKeyVal(nil, cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen]), true); err != nil {
+			if _, err = hph.leafHashWithKeyVal(storageRootHash[:0], cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen]), true); err != nil {
 				return nil, err
 			}
-			storageRootHash = storageRootHash[1:]
+			storageRootHashIsSet = true
 		} else {
 			if hph.trace {
 				fmt.Printf("leafHashWithKeyVal for [%x]=>[%x]\n", cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], cell.Storage[:cell.StorageLen])
 			}
-			if buf, err = hph.leafHashWithKeyVal(buf, cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen]), false); err != nil {
-				return nil, err
-			}
-			return buf, nil
+			return hph.leafHashWithKeyVal(buf, cell.downHashedKey[:keyHalfSize-hashedKeyOffset+1], rlp.RlpSerializableBytes(cell.Storage[:cell.StorageLen]), false)
 		}
 	}
 	if cell.apl > 0 {
@@ -473,23 +463,23 @@ func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]b
 			return nil, err
 		}
 		cell.downHashedKey[keyHalfSize-depth] = 16 // Add terminator
-		if storageRootHash == nil {
+		if !storageRootHashIsSet {
 			if cell.extLen > 0 {
 				// Extension
 				if cell.hl > 0 {
 					if hph.trace {
 						fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.h[:cell.hl])
 					}
-					if storageRootHash, err = hph.extensionHash(nil, cell.extension[:cell.extLen], cell.h[:cell.hl]); err != nil {
+					if storageRootHash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.h[:cell.hl]); err != nil {
 						return nil, err
 					}
 				} else {
 					return nil, fmt.Errorf("computeCellHash extension without hash")
 				}
 			} else if cell.hl > 0 {
-				storageRootHash = cell.h[:cell.hl]
+				storageRootHash = cell.h
 			} else {
-				storageRootHash = EmptyRootHash
+				storageRootHash = *(*[length.Hash]byte)(EmptyRootHash)
 			}
 		}
 		var valBuf [128]byte
@@ -497,10 +487,7 @@ func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]b
 		if hph.trace {
 			fmt.Printf("accountLeafHashWithKey for [%x]=>[%x]\n", cell.downHashedKey[:keyHalfSize+1-depth], valBuf[:valLen])
 		}
-		if buf, err = hph.accountLeafHashWithKey(buf, cell.downHashedKey[:keyHalfSize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen])); err != nil {
-			return nil, err
-		}
-		return buf, nil
+		return hph.accountLeafHashWithKey(buf, cell.downHashedKey[:keyHalfSize+1-depth], rlp.RlpEncodedBytes(valBuf[:valLen]))
 	}
 	buf = append(buf, 0x80+32)
 	if cell.extLen > 0 {
@@ -509,9 +496,11 @@ func (hph *BinHashed) computeCellHash(cell *BinCell, depth int, buf []byte) ([]b
 			if hph.trace {
 				fmt.Printf("extensionHash for [%x]=>[%x]\n", cell.extension[:cell.extLen], cell.h[:cell.hl])
 			}
-			if buf, err = hph.extensionHash(buf, cell.extension[:cell.extLen], cell.h[:cell.hl]); err != nil {
+			var hash [length.Hash]byte
+			if hash, err = hph.extensionHash(cell.extension[:cell.extLen], cell.h[:cell.hl]); err != nil {
 				return nil, err
 			}
+			buf = append(buf, hash[:]...)
 		} else {
 			return nil, fmt.Errorf("computeCellHash extension without hash")
 		}
@@ -1113,20 +1102,20 @@ func (hph *BinHashed) updateStorage(plainKey, hashedKey, value []byte) {
 }
 
 type BinCell struct {
-	h             [32]byte // cell hash
-	hl            int      // Length of the hash (or embedded)
-	apk           [20]byte // account plain key
-	apl           int      // length of account plain key
-	spk           [52]byte // storage plain key
-	spl           int      // length of the storage plain key
+	h             [length.Hash]byte               // cell hash
+	hl            int                             // Length of the hash (or embedded)
+	apk           [length.Addr]byte               // account plain key
+	apl           int                             // length of account plain key
+	spk           [length.Addr + length.Hash]byte // storage plain key
+	spl           int                             // length of the storage plain key
 	downHashedKey [maxKeySize]byte
 	downHashedLen int
 	extension     [64]byte
 	extLen        int
 	Nonce         uint64
 	Balance       uint256.Int
-	CodeHash      [32]byte // hash of the bytecode
-	Storage       [32]byte
+	CodeHash      [length.Hash]byte // hash of the bytecode
+	Storage       [length.Hash]byte
 	StorageLen    int
 }
 
@@ -1233,7 +1222,7 @@ func (cell *BinCell) fillFromLowerCell(lowCell *BinCell, lowDepth int, preExtens
 
 func binHashKey(keccak keccakState, plainKey []byte, dest []byte, hashedKeyOffset int) error {
 	keccak.Reset()
-	var hashBufBack [32]byte
+	var hashBufBack [length.Hash]byte
 	hashBuf := hashBufBack[:]
 	if _, err := keccak.Write(plainKey); err != nil {
 		return err
@@ -1373,7 +1362,7 @@ func (cell *BinCell) fillFromFields(data []byte, pos int, fieldBits PartFlags) (
 	return pos, nil
 }
 
-func (cell *BinCell) accountForHashing(buffer, storageRootHash []byte) int {
+func (cell *BinCell) accountForHashing(buffer []byte, storageRootHash [length.Hash]byte) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
 		balanceBytes = cell.Balance.ByteLen()
@@ -1432,7 +1421,7 @@ func (cell *BinCell) accountForHashing(buffer, storageRootHash []byte) int {
 	// Encoding Root and CodeHash
 	buffer[pos] = 128 + 32
 	pos++
-	copy(buffer[pos:], storageRootHash[:length.Hash])
+	copy(buffer[pos:], storageRootHash[:])
 	pos += 32
 	buffer[pos] = 128 + 32
 	pos++
