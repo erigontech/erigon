@@ -279,9 +279,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		if err = allSnapshots.Reopen(); err != nil {
 			return nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
 		}
-		//fmt.Printf("go\n")
-		//time.Sleep(time.Minute)
-
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -559,8 +556,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 			}
 		}()
 	}
-	fmt.Printf("aaa\n")
-	time.Sleep(time.Minute)
 
 	// Register the backend on the node
 	stack.RegisterAPIs(backend.APIs())
