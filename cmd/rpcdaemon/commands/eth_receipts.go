@@ -146,8 +146,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) ([
 		blockNum  uint64
 		blockLogs []*types.Log
 	}
-	ch := make(chan Res, 16)
+	ch := make(chan Res, 1024)
 	go func() {
+		defer func(t time.Time) { fmt.Printf("eth_receipts.go:151: %s\n", time.Since(t)) }(time.Now())
 		defer close(ch)
 		tx, beginErr := api.db.BeginRo(ctx)
 		if beginErr != nil {
