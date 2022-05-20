@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -277,6 +278,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	if config.Snapshot.Enabled {
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
 		allSnapshots.Reopen()
+		var m runtime.MemStats
+		libcommon.ReadMemStats(&m)
+		log.Info("Flushed buffer file", "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+
 		time.Sleep(1 * time.Minute)
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
