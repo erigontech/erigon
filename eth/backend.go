@@ -180,7 +180,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, genesisErr
 	}
 
-	config.SyncMode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	config.SyncMode, err = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	if err != nil {
+		return nil, err
+	}
 	config.Snapshot.Enabled = config.SyncMode == ethconfig.SnapSync
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
