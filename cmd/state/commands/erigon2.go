@@ -150,10 +150,6 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	switch commitmentTrie {
 	case "bin":
 		logger.Info("using Binary Patricia Hashed Trie for commitments")
-		trieVariant = commitment.VariantReducedHexPatriciaTrie
-		blockRootMismatchExpected = true
-	case "bin-slow":
-		logger.Info("using slow Binary Patricia Hashed Trie for commitments")
 		trieVariant = commitment.VariantBinPatriciaTrie
 		blockRootMismatchExpected = true
 	case "hex":
