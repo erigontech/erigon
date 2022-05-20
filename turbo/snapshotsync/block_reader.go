@@ -109,6 +109,10 @@ func (back *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnH
 	return reply.BlockNumber, true, nil
 }
 
+func (back *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
+	panic("not implemented")
+}
+
 func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	reply, err := back.client.Block(ctx, &remote.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
