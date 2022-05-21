@@ -212,13 +212,13 @@ func (hd *HeaderDownload) pruneLinkQueue() {
 	}
 }
 
-func (hd *HeaderDownload) AnchorState() string {
+func (hd *HeaderDownload) LogAnchorState() {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.anchorState()
+	hd.logAnchorState()
 }
 
-func (hd *HeaderDownload) anchorState() string {
+func (hd *HeaderDownload) logAnchorState() {
 	//nolint:prealloc
 	var ss []string
 	for anchorParent, anchor := range hd.anchors {
@@ -276,7 +276,9 @@ func (hd *HeaderDownload) anchorState() string {
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
-	return strings.Join(ss, "\n")
+	for _, s := range ss {
+		log.Info(s)
+	}
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
@@ -877,7 +879,7 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			return false
 		}
 		if len(hd.anchors) >= hd.anchorLimit {
-			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d, state: %s", len(hd.anchors), hd.anchorLimit, hd.anchorState()))
+			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
 			return false
 		}
 	}
