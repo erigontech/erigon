@@ -368,7 +368,7 @@ var (
 	HTTPApiFlag = cli.StringFlag{
 		Name:  "http.api",
 		Usage: "API's offered over the HTTP-RPC interface",
-		Value: "eth,erigon",
+		Value: "eth,erigon,engine",
 	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
