@@ -150,10 +150,6 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	switch commitmentTrie {
 	case "bin":
 		logger.Info("using Binary Patricia Hashed Trie for commitments")
-		trieVariant = commitment.VariantReducedHexPatriciaTrie
-		blockRootMismatchExpected = true
-	case "bin-slow":
-		logger.Info("using slow Binary Patricia Hashed Trie for commitments")
 		trieVariant = commitment.VariantBinPatriciaTrie
 		blockRootMismatchExpected = true
 	case "hex":
@@ -228,7 +224,10 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 
 	var blockReader interfaces.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
+	syncMode, err := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
+	if err != nil {
+		return err
+	}
 	if syncMode == ethconfig.SnapSync {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()

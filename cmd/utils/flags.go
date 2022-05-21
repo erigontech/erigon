@@ -957,7 +957,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		networkname.RialtoChainName:  true,
 		networkname.ChapelChainName:  true,
 	}
-	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
+	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok || ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
 			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
 		}

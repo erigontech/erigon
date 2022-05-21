@@ -1088,7 +1088,10 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
 func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
-		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
+		syncmode, err := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
+		if err != nil {
+			panic(err)
+		}
 		if syncmode == ethconfig.SnapSync {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))

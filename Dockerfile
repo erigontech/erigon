@@ -25,6 +25,7 @@ EXPOSE 8545 8551 8546 30303 30303/udp 42069 42069/udp 8080 9090 6060
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 ARG BUILD_DATE
 ARG VCS_REF
+ARG VERSION
 LABEL org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.name="Erigon" \
       org.label-schema.description="Erigon Ethereum Client" \
