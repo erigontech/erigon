@@ -432,7 +432,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }
 
-func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, engineAPI []rpc.API) error {
+func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) error {
 	var engineListener *http.Server
 	var engineSrv *rpc.Server
 	var engineHttpEndpoint string
@@ -449,13 +449,22 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, 
 	srv.SetAllowList(allowListForRPC)
 
 	var defaultAPIList []rpc.API
-	useEngineApi := false
+	var engineAPI []rpc.API
 
 	for _, api := range rpcAPI {
 		if api.Namespace != "engine" {
 			defaultAPIList = append(defaultAPIList, api)
 		} else {
-			useEngineApi = true
+			engineAPI = append(engineAPI, api)
+		}
+	}
+
+	if len(engineAPI) != 0 {
+		// eth API should also be exposed on the same port as engine API
+		for _, api := range rpcAPI {
+			if api.Namespace == "eth" {
+				engineAPI = append(engineAPI, api)
+			}
 		}
 	}
 
@@ -488,7 +497,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, 
 	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
 		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
 
-	if useEngineApi {
+	if len(engineAPI) > 0 {
 		engineListener, engineSrv, engineHttpEndpoint, err = createEngineListener(cfg, engineAPI)
 		if err != nil {
 			return fmt.Errorf("could not start RPC api for engine: %w", err)
