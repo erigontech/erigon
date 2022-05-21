@@ -102,5 +102,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
-      - run: git submodule update --init --recursive --force
-      - run: docker build .
+        with:
+          fetch-depth: 0 # fetch git tags for "git describe"
+      - run: make docker
