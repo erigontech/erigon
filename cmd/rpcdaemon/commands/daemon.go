@@ -15,7 +15,7 @@ import (
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet starknet.CAIROVMClient, filters *filters.Filters, stateCache kvcache.Cache,
-	blockReader interfaces.BlockAndTxnReader, cfg httpcfg.HttpCfg) (list []rpc.API) {
+	blockReader interfaces.BlockAndTxnReader, cfg httpcfg.HttpCfg) (list []rpc.API, defaultEngineApi []rpc.API) {
 
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
 	if cfg.TevmEnabled {
@@ -131,5 +131,18 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth services.ApiBackend, txPool txpool.T
 		}
 	}
 
-	return list
+	defaultEngineApi = append(defaultEngineApi, rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   EngineAPI(engineImpl),
+		Version:   "1.0",
+	})
+	defaultEngineApi = append(defaultEngineApi, rpc.API{
+		Namespace: "eth",
+		Public:    true,
+		Service:   EthAPI(ethImpl),
+		Version:   "1.0",
+	})
+
+	return list, defaultEngineApi
 }
