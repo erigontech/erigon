@@ -1,5 +1,6 @@
 package lightclient
 
+/*
 import (
 	"fmt"
 
@@ -84,3 +85,4 @@ func QueryKeyWithProof(node rpcclient.Client, key []byte, storeName string, heig
 
 	return key, result.Response.Value, proofBytes, nil
 }
+*/

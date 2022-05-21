@@ -378,10 +378,10 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
 		if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
 			canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
-			if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 1_000); err != nil {
+			if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
 				return nil
 			}
-			if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 1_000); err != nil {
+			if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 100); err != nil {
 				return err
 			}
 		}

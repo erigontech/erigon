@@ -304,6 +304,20 @@ func ReadStorageBody(db kv.Getter, hash common.Hash, number uint64) (types.BodyF
 	return *bodyForStorage, nil
 }
 
+func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
+	txIdKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(txIdKey, id)
+	v, err := db.GetOne(kv.EthTx, txIdKey)
+	if err != nil {
+		return nil, err
+	}
+	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), uint64(len(v))))
+	if err != nil {
+		return nil, err
+	}
+	return txn, nil
+}
+
 func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
 	if amount == 0 {
 		return []types.Transaction{}, nil

@@ -180,7 +180,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, genesisErr
 	}
 
-	config.SyncMode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	config.SyncMode, err = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	if err != nil {
+		return nil, err
+	}
 	config.Snapshot.Enabled = config.SyncMode == ethconfig.SnapSync
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
@@ -276,6 +279,9 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
+		if err = allSnapshots.Reopen(); err != nil {
+			return nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
+		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {

@@ -102,16 +102,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
 	hd.badHeaders[headerHash] = struct{}{}
 	// Find the link, remove it and all its descendands from all the queues
 	if link, ok := hd.links[headerHash]; ok {
-		removeList := []*Link{link}
-		for len(removeList) > 0 {
-			removal := removeList[len(removeList)-1]
-			removeList = removeList[:len(removeList)-1]
-			hd.moveLinkToQueue(removal, NoQueue)
-			delete(hd.links, removal.hash)
-			for child := removal.fChild; child != nil; child = child.next {
-				removeList = append(removeList, child)
-			}
-		}
+		hd.removeUpwards(link)
 	}
 }
 
@@ -146,16 +137,16 @@ func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastVal
 }
 
 func (hd *HeaderDownload) removeUpwards(link *Link) {
-	var toRemove []*Link
-	for child := link; child != nil; child = child.next {
-		toRemove = append(toRemove, child)
+	if link == nil {
+		return
 	}
+	var toRemove []*Link = []*Link{link}
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
 		delete(hd.links, removal.hash)
 		hd.moveLinkToQueue(removal, NoQueue)
-		for child := removal.fChild; child != nil; child = child.next {
+		for child := removal.fChild; child != nil; child, child.next = child.next, nil {
 			toRemove = append(toRemove, child)
 		}
 	}
@@ -185,6 +176,8 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
 	heap.Remove(hd.anchorQueue, anchor.idx)
+	for child := anchor.fLink; child != nil; child, child.next = child.next, nil {
+	}
 	anchor.idx = -1
 }
 
@@ -192,6 +185,8 @@ func (hd *HeaderDownload) pruneLinkQueue() {
 	for hd.linkQueue.Len() > hd.linkLimit {
 		link := heap.Pop(&hd.linkQueue).(*Link)
 		delete(hd.links, link.hash)
+		for child := link.fChild; child != nil; child, child.next = child.next, nil {
+		}
 		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
 			var prevChild *Link
 			for child := parentLink.fChild; child != nil && child != link; child = child.next {
@@ -295,6 +290,8 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 	for hd.persistedLinkQueue.Len() > 0 {
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
+		for child := link.fChild; child != nil; child, child.next = child.next, nil {
+		}
 	}
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Headers)
@@ -448,7 +445,7 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
@@ -461,19 +458,21 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			// If the link or its parent is marked bad, throw it out
 			hd.moveLinkToQueue(link, NoQueue)
 			delete(hd.links, link.hash)
-			return true, nil
+			hd.removeUpwards(link)
+			return true, false, nil
 		}
 		if !link.verified {
 			if err := hd.VerifyHeader(link.header); err != nil {
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
-					return false, nil // prevent removal of the link from the hd.linkQueue
+					return false, false, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					log.Debug("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
-					return true, nil
+					hd.removeUpwards(link)
+					return true, false, nil
 				}
 			}
 		}
@@ -486,7 +485,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
 		if td != nil {
 			if hd.seenAnnounces.Pop(link.hash) {
@@ -496,7 +495,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 				hd.highestInDb = link.blockHeight
 				log.Info(POSPandaBanner)
-				return true, nil
+				return true, true, nil
 			}
 		}
 
@@ -519,8 +518,10 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
+		for child := link.fChild; child != nil; child, child.next = child.next, nil {
+		}
 	}
-	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, nil
+	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, false, nil
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
@@ -528,9 +529,13 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	var more bool = true
 	var err error
+	var isPos bool
 	for more {
-		if more, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+		if more, isPos, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
+		}
+		if isPos {
+			return true, nil
 		}
 	}
 	hd.lock.RLock()
@@ -926,6 +931,8 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 			requestMore = true
 		}
 	}
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
 	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
 		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(csHeaders), "limit", hd.linkLimit)
