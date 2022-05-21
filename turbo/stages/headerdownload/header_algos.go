@@ -56,13 +56,13 @@ const POSPandaBanner = `
 `
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
-type HeadersByHeightAndHash []ChainSegmentHeader
+type HeadersReverseSort []ChainSegmentHeader
 
-func (h HeadersByHeightAndHash) Len() int {
+func (h HeadersReverseSort) Len() int {
 	return len(h)
 }
 
-func (h HeadersByHeightAndHash) Less(i, j int) bool {
+func (h HeadersReverseSort) Less(i, j int) bool {
 	// Note - the ordering is the inverse ordering of the block heights
 	if h[i].Number != h[j].Number {
 		return h[i].Number > h[j].Number
@@ -70,7 +70,26 @@ func (h HeadersByHeightAndHash) Less(i, j int) bool {
 	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) > 0
 }
 
-func (h HeadersByHeightAndHash) Swap(i, j int) {
+func (h HeadersReverseSort) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+// Implements sort.Interface so we can sort the incoming header in the message by block height
+type HeadersSort []ChainSegmentHeader
+
+func (h HeadersSort) Len() int {
+	return len(h)
+}
+
+func (h HeadersSort) Less(i, j int) bool {
+	// Note - the ordering is the inverse ordering of the block heights
+	if h[i].Number != h[j].Number {
+		return h[i].Number < h[j].Number
+	}
+	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) < 0
+}
+
+func (h HeadersSort) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
@@ -207,6 +226,9 @@ func (hd *HeaderDownload) pruneLinkQueue() {
 				anchor.fLink = link.next
 			} else {
 				prevChild.next = link.next
+			}
+			if anchor.fLink == nil {
+				hd.removeAnchor(anchor)
 			}
 		}
 	}
