@@ -448,7 +448,7 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	if hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
@@ -461,19 +461,19 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			// If the link or its parent is marked bad, throw it out
 			hd.moveLinkToQueue(link, NoQueue)
 			delete(hd.links, link.hash)
-			return true, nil
+			return true, false, nil
 		}
 		if !link.verified {
 			if err := hd.VerifyHeader(link.header); err != nil {
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
-					return false, nil // prevent removal of the link from the hd.linkQueue
+					return false, false, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					log.Debug("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
-					return true, nil
+					return true, false, nil
 				}
 			}
 		}
@@ -486,7 +486,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
 		if td != nil {
 			if hd.seenAnnounces.Pop(link.hash) {
@@ -496,7 +496,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
 				hd.highestInDb = link.blockHeight
 				log.Info(POSPandaBanner)
-				return true, nil
+				return true, true, nil
 			}
 		}
 
@@ -520,7 +520,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
 	}
-	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, nil
+	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, false, nil
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
@@ -528,9 +528,13 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	var more bool = true
 	var err error
+	var isPos bool
 	for more {
-		if more, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+		if more, isPos, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
+		}
+		if isPos {
+			return true, nil
 		}
 	}
 	hd.lock.RLock()
