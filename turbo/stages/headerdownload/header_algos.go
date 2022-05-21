@@ -56,13 +56,13 @@ const POSPandaBanner = `
 `
 
 // Implements sort.Interface so we can sort the incoming header in the message by block height
-type HeadersByHeightAndHash []ChainSegmentHeader
+type HeadersReverseSort []ChainSegmentHeader
 
-func (h HeadersByHeightAndHash) Len() int {
+func (h HeadersReverseSort) Len() int {
 	return len(h)
 }
 
-func (h HeadersByHeightAndHash) Less(i, j int) bool {
+func (h HeadersReverseSort) Less(i, j int) bool {
 	// Note - the ordering is the inverse ordering of the block heights
 	if h[i].Number != h[j].Number {
 		return h[i].Number > h[j].Number
@@ -70,7 +70,26 @@ func (h HeadersByHeightAndHash) Less(i, j int) bool {
 	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) > 0
 }
 
-func (h HeadersByHeightAndHash) Swap(i, j int) {
+func (h HeadersReverseSort) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+// Implements sort.Interface so we can sort the incoming header in the message by block height
+type HeadersSort []ChainSegmentHeader
+
+func (h HeadersSort) Len() int {
+	return len(h)
+}
+
+func (h HeadersSort) Less(i, j int) bool {
+	// Note - the ordering is the inverse ordering of the block heights
+	if h[i].Number != h[j].Number {
+		return h[i].Number < h[j].Number
+	}
+	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) < 0
+}
+
+func (h HeadersSort) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
@@ -208,17 +227,20 @@ func (hd *HeaderDownload) pruneLinkQueue() {
 			} else {
 				prevChild.next = link.next
 			}
+			if anchor.fLink == nil {
+				hd.removeAnchor(anchor)
+			}
 		}
 	}
 }
 
-func (hd *HeaderDownload) AnchorState() string {
+func (hd *HeaderDownload) LogAnchorState() {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.anchorState()
+	hd.logAnchorState()
 }
 
-func (hd *HeaderDownload) anchorState() string {
+func (hd *HeaderDownload) logAnchorState() {
 	//nolint:prealloc
 	var ss []string
 	for anchorParent, anchor := range hd.anchors {
@@ -276,7 +298,9 @@ func (hd *HeaderDownload) anchorState() string {
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
-	return strings.Join(ss, "\n")
+	for _, s := range ss {
+		log.Info(s)
+	}
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
@@ -877,7 +901,7 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			return false
 		}
 		if len(hd.anchors) >= hd.anchorLimit {
-			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d, state: %s", len(hd.anchors), hd.anchorLimit, hd.anchorState()))
+			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
 			return false
 		}
 	}
