@@ -375,27 +375,17 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 	}
 
 	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
-	if cfg.blockRetire.Snapshots() == nil {
-		fmt.Printf("cfg.blockRetire.Snapshots() == nil\n")
-	} else {
-		fmt.Printf("cfg.blockReture.Snapshots().Cfg().Enabled == %t\n", cfg.blockRetire.Snapshots().Cfg().Enabled)
-	}
 	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
-		fmt.Printf("cfg.blockReture.Snapshots().Cfg().KeepBlocks == %t\n", cfg.blockRetire.Snapshots().Cfg().KeepBlocks)
 		if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
 			canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
-			fmt.Printf("canDeleteTo == %d\n", canDeleteTo)
 			if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
-				fmt.Printf("Cannot delete: %v\n", err)
 				return nil
 			}
-			fmt.Printf("deleted ancient blocks\n")
 			if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 100); err != nil {
 				return err
 			}
 		}
 
-		fmt.Printf("retire in background\n")
 		if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
 		}
