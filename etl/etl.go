@@ -147,7 +147,8 @@ func extractBucketIntoFiles(
 			logArs = append(logArs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
-		if endkey != nil && bytes.Compare(k, endkey) > 0 {
+		if endkey != nil && bytes.Compare(k, endkey) >= 0 {
+			// endKey is exclusive bound
 			return nil
 		}
 		if err := extractFunc(k, v, collector.extractNextFunc); err != nil {
