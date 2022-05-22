@@ -1126,17 +1126,18 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if b == nil {
-			return fmt.Errorf("DeleteAncientBlocks: block body not found for block %d", n)
-		}
-		txIDBytes := make([]byte, 8)
-		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
-			binary.BigEndian.PutUint64(txIDBytes, txID)
-			bucket := kv.EthTx
-			if !isCanonical {
-				bucket = kv.NonCanonicalTxs
-			}
-			if err := db.Delete(bucket, txIDBytes, nil); err != nil {
-				return err
+			log.Warn("DeleteAncientBlocks: block body not found", "height", n)
+		} else {
+			txIDBytes := make([]byte, 8)
+			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+				binary.BigEndian.PutUint64(txIDBytes, txID)
+				bucket := kv.EthTx
+				if !isCanonical {
+					bucket = kv.NonCanonicalTxs
+				}
+				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+					return err
+				}
 			}
 		}
 		if err := db.Delete(kv.Headers, k, nil); err != nil {

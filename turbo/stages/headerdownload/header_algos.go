@@ -195,8 +195,6 @@ func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
 	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
 	heap.Remove(hd.anchorQueue, anchor.idx)
-	for child := anchor.fLink; child != nil; child, child.next = child.next, nil {
-	}
 	anchor.idx = -1
 }
 
@@ -375,6 +373,8 @@ func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
 	log.Debug("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
 	hd.removeAnchor(anchor)
+	for child := anchor.fLink; child != nil; child, child.next = child.next, nil {
+	}
 	hd.removeUpwards(anchor.fLink)
 }
 
@@ -937,7 +937,6 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			peerID:        peerID,
 			blockHeight:   sh.Number,
 		}
-		link.next = anchor.fLink
 		anchor.fLink = link
 		hd.anchors[anchor.parentHash] = anchor
 		heap.Push(hd.anchorQueue, anchor)
