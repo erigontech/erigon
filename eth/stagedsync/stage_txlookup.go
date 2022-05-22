@@ -85,7 +85,8 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		startBlock++
 	}
 	startKey := dbutils.EncodeBlockNumber(startBlock)
-	if err = txnLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(endBlock), quitCh, cfg); err != nil {
+	// etl.Transform uses ExtractEndKey as exclusive bound, therefore endBlock + 1
+	if err = txnLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(endBlock+1), quitCh, cfg); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
