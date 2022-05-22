@@ -693,6 +693,7 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 	if n != nil {
 		return *n, true, nil
 	}
+	fmt.Printf("Looked up %x, did not find in the DB:\n", txnHash)
 
 	var txn types.Transaction
 	var blockNum uint64
@@ -709,6 +710,7 @@ func (back *BlockReaderWithSnapshots) TxnLookup(ctx context.Context, tx kv.Gette
 		return 0, false, err
 	}
 	if txn == nil {
+		fmt.Printf("Looked up %x, did not find in the seg files:\n", txnHash)
 		return 0, false, nil
 	}
 	return blockNum, true, nil
