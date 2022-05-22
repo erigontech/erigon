@@ -85,7 +85,8 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		startBlock++
 	}
 	startKey := dbutils.EncodeBlockNumber(startBlock)
-	if err = txnLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(endBlock), quitCh, cfg); err != nil {
+	// etl.Transform uses ExtractEndKey as exclusive bound, therefore endBlock + 1
+	if err = txnLookupTransform(logPrefix, tx, startKey, dbutils.EncodeBlockNumber(endBlock+1), quitCh, cfg); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -154,7 +155,8 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 		smallestInDB := cfg.snapshots.BlocksAvailable()
 		blockFrom, blockTo = libcommon.Max(blockFrom, smallestInDB), libcommon.Max(blockTo, smallestInDB)
 	}
-	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo, ctx, cfg); err != nil {
+	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
+	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 		return fmt.Errorf("unwind: %w", err)
 	}
 	if err := u.Done(tx); err != nil {

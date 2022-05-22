@@ -888,6 +888,10 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
 func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
+	if curBlockNum+999 < params.FullImmutabilityThreshold {
+		// To prevent overflow of uint64 below
+		return snapshots.BlocksAvailable() + 1
+	}
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }

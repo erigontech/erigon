@@ -222,7 +222,8 @@ func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupR
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
+		// Not a perfect solution, assumes there are no transactions in block 0
+		return &remote.TxnLookupReply{BlockNumber: 0}, nil
 	}
 	return &remote.TxnLookupReply{BlockNumber: blockNum}, nil
 }
