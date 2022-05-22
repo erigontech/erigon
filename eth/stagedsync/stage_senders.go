@@ -386,6 +386,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			}
 		}
 
+		fmt.Printf("retire in background\n")
 		if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
 			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
 		}
