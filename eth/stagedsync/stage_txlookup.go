@@ -155,6 +155,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 		smallestInDB := cfg.snapshots.BlocksAvailable()
 		blockFrom, blockTo = libcommon.Max(blockFrom, smallestInDB), libcommon.Max(blockTo, smallestInDB)
 	}
+	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 		return fmt.Errorf("unwind: %w", err)
 	}
