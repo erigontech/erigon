@@ -386,6 +386,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
 			fmt.Printf("canDeleteTo == %d\n", canDeleteTo)
 			if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
+				fmt.Printf("Cannot delete: %v\n", err)
 				return nil
 			}
 			fmt.Printf("deleted ancient blocks\n")
