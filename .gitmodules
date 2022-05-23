@@ -8,3 +8,6 @@
 	path = cmd/downloader/trackers/trackerslist
 	url = https://github.com/ngosang/trackerslist.git
 	
+[submodule "libmdbx"]
+	path = libmdbx
+	url = https://github.com/torquem-ch/libmdbx.git
