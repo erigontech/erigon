@@ -33,6 +33,8 @@ var (
 	maxPeers     int
 	maxPendPeers int
 	healthCheck  bool
+
+	healthCheckHTTPAddr string
 )
 
 func init() {
@@ -51,6 +53,7 @@ func init() {
 	rootCmd.Flags().IntVar(&maxPeers, utils.MaxPeersFlag.Name, utils.MaxPeersFlag.Value, utils.MaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
+	rootCmd.Flags().StringVar(&healthCheckHTTPAddr, utils.HealthCheckHTTPAddrFlag.Name, "", utils.HealthCheckHTTPAddrFlag.Usage)
 
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
@@ -92,7 +95,16 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		return sentry.Sentry(cmd.Context(), datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
+		return sentry.Sentry(
+			cmd.Context(),
+			datadir,
+			sentryAddr,
+			discoveryDNS,
+			p2pConfig,
+			uint(p),
+			healthCheck,
+			healthCheckHTTPAddr,
+		)
 	},
 }
 

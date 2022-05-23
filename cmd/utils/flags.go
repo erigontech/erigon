@@ -685,6 +685,11 @@ var (
 		Usage: "Enabling grpc health check",
 	}
 
+	HealthCheckHTTPAddrFlag = cli.BoolFlag{
+		Name:  "healthcheck.http.addr",
+		Usage: "<host>:<port> of an HTTP health check endpoint",
+	}
+
 	HeimdallURLFlag = cli.StringFlag{
 		Name:  "bor.heimdall",
 		Usage: "URL of Heimdall service",

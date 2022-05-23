@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/rand"
 	"net"
+	"net/http"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -436,9 +437,16 @@ func runPeer(
 	}
 }
 
-func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, healthCheck bool) (*grpc.Server, error) {
+func grpcSentryServer(
+	ctx context.Context,
+	sentryAddr string,
+	ss *GrpcServer,
+	healthCheck bool,
+	healthCheckHTTPAddr string,
+) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	log.Info("Starting Sentry gRPC server", "on", sentryAddr)
+
 	listenConfig := net.ListenConfig{
 		Control: func(network, address string, _ syscall.RawConn) error {
 			log.Info("Sentry gRPC received connection", "via", network, "from", address)
@@ -449,23 +457,54 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	if err != nil {
 		return nil, fmt.Errorf("could not create Sentry P2P listener: %w, addr=%s", err, sentryAddr)
 	}
+
 	grpcServer := grpcutil.NewServer(100, nil)
 	proto_sentry.RegisterSentryServer(grpcServer, ss)
+
 	var healthServer *health.Server
-	if healthCheck {
+	if healthCheck || (healthCheckHTTPAddr != "") {
 		healthServer = health.NewServer()
 		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	}
 
+	var healthCheckServer *http.Server
+	if (healthServer != nil) && (healthCheckHTTPAddr != "") {
+		healthCheckServer = startHealthCheckServer(healthServer, healthCheckHTTPAddr)
+	}
+
 	go func() {
-		if healthCheck {
+		if healthServer != nil {
 			defer healthServer.Shutdown()
 		}
+		if healthCheckServer != nil {
+			defer func() {
+				_ = healthCheckServer.Close()
+			}()
+		}
+
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Sentry gRPC server fail", "err", err1)
 		}
 	}()
 	return grpcServer, nil
+}
+
+func startHealthCheckServer(healthServer *health.Server, healthCheckHTTPAddr string) *http.Server {
+	healthCheckHandler := common.HealthCheckHandler(func() bool {
+		response, _ := healthServer.Check(nil, &grpc_health_v1.HealthCheckRequest{})
+		return response.Status == grpc_health_v1.HealthCheckResponse_SERVING
+	})
+	healthCheckServer := &http.Server{
+		Addr:    healthCheckHTTPAddr,
+		Handler: healthCheckHandler,
+	}
+	go func() {
+		log.Info("Starting a health check HTTP server", "addr", healthCheckHTTPAddr)
+		if err := healthCheckServer.ListenAndServe(); (err != nil) && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("Failed to start a health check HTTP server", "err", err)
+		}
+	}()
+	return healthCheckServer
 }
 
 func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint) *GrpcServer {
@@ -532,12 +571,27 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry(ctx context.Context, datadir string, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
+func Sentry(
+	ctx context.Context,
+	datadir string,
+	sentryAddr string,
+	discoveryDNS []string,
+	cfg *p2p.Config,
+	protocolVersion uint,
+	healthCheck bool,
+	healthCheckHTTPAddr string,
+) error {
 	dir.MustExist(datadir)
 	sentryServer := NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 
-	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
+	grpcServer, err := grpcSentryServer(
+		ctx,
+		sentryAddr,
+		sentryServer,
+		healthCheck,
+		healthCheckHTTPAddr,
+	)
 	if err != nil {
 		return err
 	}
