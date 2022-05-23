@@ -31,6 +31,7 @@ import (
 )
 
 func TestIHCursor(t *testing.T) {
+	t.Skip("FIXME #4236")
 	db, tx := memdb.NewTestTx(t)
 	require := require.New(t)
 	hash := common.HexToHash(fmt.Sprintf("%064d", 0))
