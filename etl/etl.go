@@ -64,6 +64,7 @@ type LoadCommitHandler func(db kv.Putter, key []byte, isDone bool) error
 type AdditionalLogArguments func(k, v []byte) (additionalLogArguments []interface{})
 
 type TransformArgs struct {
+	// [ExtractStartKey, ExtractEndKey)
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
 	BufferType      int
@@ -106,6 +107,7 @@ func Transform(
 	return collector.Load(db, toBucket, loadFunc, args)
 }
 
+// extractBucketIntoFiles - [startkey, endkey)
 func extractBucketIntoFiles(
 	logPrefix string,
 	db kv.Tx,
@@ -148,7 +150,7 @@ func extractBucketIntoFiles(
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
 		}
 		if endkey != nil && bytes.Compare(k, endkey) >= 0 {
-			// endKey is exclusive bound
+			// endKey is exclusive bound: [startkey, endkey)
 			return nil
 		}
 		if err := extractFunc(k, v, collector.extractNextFunc); err != nil {
