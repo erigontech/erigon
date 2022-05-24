@@ -1001,7 +1001,7 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockFrom, blockTo uint64, workers int, lvl log.Lvl) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	readAheadCtx, cancel := context.WithCancel(ctx)
+	warmupCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	chainConfig := tool.ChainConfigFromDB(db)
@@ -1083,10 +1083,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return true, nil
 		}
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
-			kv.ReadAhead(readAheadCtx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
+			kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			kv.ReadAhead(readAheadCtx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
+			kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
