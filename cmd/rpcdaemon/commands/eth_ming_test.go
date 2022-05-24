@@ -26,7 +26,6 @@ func TestPendingBlock(t *testing.T) {
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)
 	ch := make(chan *types.Block, 1)
-	defer close(ch)
 	id := ff.SubscribePendingBlock(ch)
 	defer ff.UnsubscribePendingBlock(id)
 
