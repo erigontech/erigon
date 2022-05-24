@@ -63,6 +63,9 @@ func BytesToHash(b []byte) Hash {
 	return h
 }
 
+// CastToHash - panics if input is shorter than 32 bytes, see https://go.dev/doc/go1.17#language
+func CastToHash(b []byte) Hash { return *(*Hash)(b) }
+
 // BigToHash sets byte representation of b to hash.
 // If b is larger than len(h), b will be cropped from the left.
 func BigToHash(b *big.Int) Hash { return BytesToHash(b.Bytes()) }
