@@ -27,6 +27,9 @@ func AssertSubset(prefix []byte, a, b uint16) {
 
 func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 	quit := ctx.Done()
+	readAheadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 	seek := make([]byte, 256)
@@ -34,23 +37,26 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 	buf2 := make([]byte, 256)
 
 	{
-		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.TrieOfAccounts, nil, math.MaxInt32)
-		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxInt32)
 		c, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
 		}
+		defer c.Close()
+		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfAccounts, nil, math.MaxInt32)
+
 		trieAcc2, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
 			panic(err)
 		}
+		defer trieAcc2.Close()
+
 		accC, err := tx.Cursor(kv.HashedAccounts)
 		if err != nil {
 			panic(err)
 		}
-		defer c.Close()
-		defer trieAcc2.Close()
 		defer accC.Close()
+		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxInt32)
+
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
 				panic(errc)
@@ -145,23 +151,25 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 		}
 	}
 	{
-		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.TrieOfStorage, nil, math.MaxInt32)
-		kv.ReadAhead(ctx, db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxInt32)
 		c, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)
 		}
+		defer c.Close()
+		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfStorage, nil, math.MaxInt32)
+
 		trieStorage, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
 			panic(err)
 		}
+		defer trieStorage.Close()
+
 		storageC, err := tx.Cursor(kv.HashedStorage)
 		if err != nil {
 			panic(err)
 		}
-		defer c.Close()
-		defer trieStorage.Close()
 		defer storageC.Close()
+		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxInt32)
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
