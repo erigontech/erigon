@@ -1,5 +1,5 @@
 /*
-   Copyright 2021 Erigon contributors
+   Copyright 2022 Erigon contributors
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -332,8 +332,9 @@ type RwCursorDupSort interface {
 	CursorDupSort
 	RwCursor
 
-	DeleteCurrentDuplicates() error    // DeleteCurrentDuplicates - deletes all of the data items for the current key
-	AppendDup(key, value []byte) error // AppendDup - same as Append, but for sorted dup data
+	PutNoDupData(key, value []byte) error // PutNoDupData - inserts key without dupsort
+	DeleteCurrentDuplicates() error       // DeleteCurrentDuplicates - deletes all of the data items for the current key
+	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 
 var ErrNotSupported = errors.New("not supported")
