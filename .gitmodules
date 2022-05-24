@@ -1,9 +1,6 @@
 [submodule "tests"]
 	path = tests/testdata
 	url = https://github.com/ethereum/tests
-[submodule "libmdbx"]
-	path = libmdbx
-    url = https://abf.io/erthink/libmdbx
 [submodule "turbo/snapshotsync/snapshothashes/erigon-snapshots"]
 	path = turbo/snapshotsync/snapshothashes/erigon-snapshots
 	url = https://github.com/ledgerwatch/erigon-snapshot
