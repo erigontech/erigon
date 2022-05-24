@@ -288,7 +288,7 @@ func RecvMessage(
 				return
 			default:
 			}
-			if err = handleInboundMessage(ctx, req, sentry); err != nil {
+			if err := handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
 					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
 					outreq := proto_sentry.PenalizePeerRequest{
