@@ -30,6 +30,9 @@ var _ SentryServer = &SentryServerMock{}
 // 			NodeInfoFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error) {
 // 				panic("mock out the NodeInfo method")
 // 			},
+// 			PeerByIdFunc: func(contextMoqParam context.Context, peerByIdRequest *PeerByIdRequest) (*PeerByIdReply, error) {
+// 				panic("mock out the PeerById method")
+// 			},
 // 			PeerCountFunc: func(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error) {
 // 				panic("mock out the PeerCount method")
 // 			},
@@ -78,6 +81,9 @@ type SentryServerMock struct {
 
 	// NodeInfoFunc mocks the NodeInfo method.
 	NodeInfoFunc func(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error)
+
+	// PeerByIdFunc mocks the PeerById method.
+	PeerByIdFunc func(contextMoqParam context.Context, peerByIdRequest *PeerByIdRequest) (*PeerByIdReply, error)
 
 	// PeerCountFunc mocks the PeerCount method.
 	PeerCountFunc func(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error)
@@ -134,6 +140,13 @@ type SentryServerMock struct {
 			ContextMoqParam context.Context
 			// Empty is the empty argument value.
 			Empty *emptypb.Empty
+		}
+		// PeerById holds details about calls to the PeerById method.
+		PeerById []struct {
+			// ContextMoqParam is the contextMoqParam argument value.
+			ContextMoqParam context.Context
+			// PeerByIdRequest is the peerByIdRequest argument value.
+			PeerByIdRequest *PeerByIdRequest
 		}
 		// PeerCount holds details about calls to the PeerCount method.
 		PeerCount []struct {
@@ -212,6 +225,7 @@ type SentryServerMock struct {
 	lockHandShake                          sync.RWMutex
 	lockMessages                           sync.RWMutex
 	lockNodeInfo                           sync.RWMutex
+	lockPeerById                           sync.RWMutex
 	lockPeerCount                          sync.RWMutex
 	lockPeerEvents                         sync.RWMutex
 	lockPeerMinBlock                       sync.RWMutex
@@ -338,6 +352,45 @@ func (mock *SentryServerMock) NodeInfoCalls() []struct {
 	mock.lockNodeInfo.RLock()
 	calls = mock.calls.NodeInfo
 	mock.lockNodeInfo.RUnlock()
+	return calls
+}
+
+// PeerById calls PeerByIdFunc.
+func (mock *SentryServerMock) PeerById(contextMoqParam context.Context, peerByIdRequest *PeerByIdRequest) (*PeerByIdReply, error) {
+	callInfo := struct {
+		ContextMoqParam context.Context
+		PeerByIdRequest *PeerByIdRequest
+	}{
+		ContextMoqParam: contextMoqParam,
+		PeerByIdRequest: peerByIdRequest,
+	}
+	mock.lockPeerById.Lock()
+	mock.calls.PeerById = append(mock.calls.PeerById, callInfo)
+	mock.lockPeerById.Unlock()
+	if mock.PeerByIdFunc == nil {
+		var (
+			peerByIdReplyOut *PeerByIdReply
+			errOut           error
+		)
+		return peerByIdReplyOut, errOut
+	}
+	return mock.PeerByIdFunc(contextMoqParam, peerByIdRequest)
+}
+
+// PeerByIdCalls gets all the calls that were made to PeerById.
+// Check the length with:
+//     len(mockedSentryServer.PeerByIdCalls())
+func (mock *SentryServerMock) PeerByIdCalls() []struct {
+	ContextMoqParam context.Context
+	PeerByIdRequest *PeerByIdRequest
+} {
+	var calls []struct {
+		ContextMoqParam context.Context
+		PeerByIdRequest *PeerByIdRequest
+	}
+	mock.lockPeerById.RLock()
+	calls = mock.calls.PeerById
+	mock.lockPeerById.RUnlock()
 	return calls
 }
 
@@ -775,6 +828,9 @@ var _ SentryClient = &SentryClientMock{}
 // 			NodeInfoFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
 // 				panic("mock out the NodeInfo method")
 // 			},
+// 			PeerByIdFunc: func(ctx context.Context, in *PeerByIdRequest, opts ...grpc.CallOption) (*PeerByIdReply, error) {
+// 				panic("mock out the PeerById method")
+// 			},
 // 			PeerCountFunc: func(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
 // 				panic("mock out the PeerCount method")
 // 			},
@@ -820,6 +876,9 @@ type SentryClientMock struct {
 
 	// NodeInfoFunc mocks the NodeInfo method.
 	NodeInfoFunc func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error)
+
+	// PeerByIdFunc mocks the PeerById method.
+	PeerByIdFunc func(ctx context.Context, in *PeerByIdRequest, opts ...grpc.CallOption) (*PeerByIdReply, error)
 
 	// PeerCountFunc mocks the PeerCount method.
 	PeerCountFunc func(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error)
@@ -877,6 +936,15 @@ type SentryClientMock struct {
 			Ctx context.Context
 			// In is the in argument value.
 			In *emptypb.Empty
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
+		// PeerById holds details about calls to the PeerById method.
+		PeerById []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *PeerByIdRequest
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
@@ -974,6 +1042,7 @@ type SentryClientMock struct {
 	lockHandShake                sync.RWMutex
 	lockMessages                 sync.RWMutex
 	lockNodeInfo                 sync.RWMutex
+	lockPeerById                 sync.RWMutex
 	lockPeerCount                sync.RWMutex
 	lockPeerEvents               sync.RWMutex
 	lockPeerMinBlock             sync.RWMutex
@@ -1112,6 +1181,49 @@ func (mock *SentryClientMock) NodeInfoCalls() []struct {
 	mock.lockNodeInfo.RLock()
 	calls = mock.calls.NodeInfo
 	mock.lockNodeInfo.RUnlock()
+	return calls
+}
+
+// PeerById calls PeerByIdFunc.
+func (mock *SentryClientMock) PeerById(ctx context.Context, in *PeerByIdRequest, opts ...grpc.CallOption) (*PeerByIdReply, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *PeerByIdRequest
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockPeerById.Lock()
+	mock.calls.PeerById = append(mock.calls.PeerById, callInfo)
+	mock.lockPeerById.Unlock()
+	if mock.PeerByIdFunc == nil {
+		var (
+			peerByIdReplyOut *PeerByIdReply
+			errOut           error
+		)
+		return peerByIdReplyOut, errOut
+	}
+	return mock.PeerByIdFunc(ctx, in, opts...)
+}
+
+// PeerByIdCalls gets all the calls that were made to PeerById.
+// Check the length with:
+//     len(mockedSentryClient.PeerByIdCalls())
+func (mock *SentryClientMock) PeerByIdCalls() []struct {
+	Ctx  context.Context
+	In   *PeerByIdRequest
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *PeerByIdRequest
+		Opts []grpc.CallOption
+	}
+	mock.lockPeerById.RLock()
+	calls = mock.calls.PeerById
+	mock.lockPeerById.RUnlock()
 	return calls
 }
 

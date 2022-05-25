@@ -202,6 +202,10 @@ func (c *SentryClientDirect) PeerCount(ctx context.Context, in *sentry.PeerCount
 	return c.server.PeerCount(ctx, in)
 }
 
+func (c *SentryClientDirect) PeerById(ctx context.Context, in *sentry.PeerByIdRequest, opts ...grpc.CallOption) (*sentry.PeerByIdReply, error) {
+	return c.server.PeerById(ctx, in)
+}
+
 // -- start Messages
 
 func (c *SentryClientDirect) Messages(ctx context.Context, in *sentry.MessagesRequest, opts ...grpc.CallOption) (sentry.Sentry_MessagesClient, error) {

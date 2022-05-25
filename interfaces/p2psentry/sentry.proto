@@ -131,7 +131,12 @@ message PeerCountRequest {}
 
 message PeerCountReply {uint64 count = 1;}
 
+message PeerByIdRequest {types.H512 peer_id = 1;}
+
+message PeerByIdReply {optional types.PeerInfo peer = 1;}
+
 message PeerEventsRequest {}
+
 message PeerEvent {
   enum PeerEventId {
     // Happens after after a successful sub-protocol handshake.
@@ -165,6 +170,7 @@ service Sentry {
 
   rpc Peers(google.protobuf.Empty) returns (PeersReply);
   rpc PeerCount(PeerCountRequest) returns (PeerCountReply);
+  rpc PeerById(PeerByIdRequest) returns (PeerByIdReply);
   // Subscribe to notifications about connected or lost peers.
   rpc PeerEvents(PeerEventsRequest) returns (stream PeerEvent);
 
