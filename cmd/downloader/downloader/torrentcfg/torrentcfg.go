@@ -118,9 +118,9 @@ func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, 
 	}
 
 	// debug
-	if lg.Debug == verbosity {
-		torrentConfig.Debug = true
-	}
+	//if lg.Debug == verbosity {
+	//	torrentConfig.Debug = true
+	//}
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 
