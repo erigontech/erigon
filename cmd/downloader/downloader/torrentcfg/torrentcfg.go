@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -41,9 +40,18 @@ func Default() *torrent.ClientConfig {
 	//torrentConfig.DisableWebseeds = true
 
 	// Reduce defaults - to avoid peers with very bad geography
-	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
+	//torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
+	//torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
+	//torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
+
+	// see: https://en.wikipedia.org/wiki/TCP_half-open
+	//torrentConfig.TotalHalfOpenConns = 100     // default: 100
+	//torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
+	//torrentConfig.TorrentPeersHighWater = 500 // default: 500
+	//torrentConfig.TorrentPeersLowWater = 50   // default: 50
+
+	torrentConfig.Seed = true
+	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	return torrentConfig
 }
@@ -52,17 +60,7 @@ func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, 
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
-
-	// see: https://en.wikipedia.org/wiki/TCP_half-open
-	torrentConfig.TotalHalfOpenConns = 100     // default: 100
-	torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
-
-	torrentConfig.TorrentPeersHighWater = 500 // default: 500
-	torrentConfig.TorrentPeersLowWater = 50   // default: 50
-
-	torrentConfig.Seed = true
 	torrentConfig.DataDir = snapDir
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	torrentConfig.ListenPort = port
 	// check if ipv6 is enabled
