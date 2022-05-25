@@ -14,6 +14,8 @@ import (
 	"github.com/urfave/cli"
 )
 
+const DevPeriod = 5
+
 func RunNode() {
 	defer func() {
 		panicResult := recover()
@@ -26,7 +28,7 @@ func RunNode() {
 	}()
 
 	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags) // change to erigoncli.DefaultFlags later on
-	customArgs := []string{"./build/bin/devnettest", "--datadir=./dev", "--chain=dev", "--mine", "--dev.period=5", "--verbosity=0"}
+	customArgs := []string{"./build/bin/devnettest", "--datadir=./dev", "--chain=dev", "--mine", fmt.Sprintf("--dev.period=%d", DevPeriod), "--verbosity=0"}
 	if err := app.Run(customArgs); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

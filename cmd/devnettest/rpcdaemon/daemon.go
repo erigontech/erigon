@@ -17,7 +17,7 @@ func RunDaemon() {
 	setupCfg(cfg)
 	rootCtx, rootCancel := common.RootContext()
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		args = append(args, "--verbosity=0")
+		args = append(args, "--verbosity=0", "--http.api=eth,erigon,web3,net,debug,trace,txpool")
 		ctx := cmd.Context()
 		logger := log.New()
 		time.Sleep(100 * time.Millisecond)
@@ -48,4 +48,5 @@ func RunDaemon() {
 
 func setupCfg(cfg *httpcfg.HttpCfg) {
 	cfg.WebsocketEnabled = true
+	cfg.API = []string{"eth", "erigon", "web3", "net", "debug", "trace", "txpool"}
 }

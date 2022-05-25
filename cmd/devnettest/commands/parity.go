@@ -16,11 +16,11 @@ var (
 )
 
 func init() {
-	listStorageKeysCmd.Flags().StringVar(&services.DevAddress, "addr", "", "String address to list keys")
-	listStorageKeysCmd.MarkFlagRequired("addr")
-	listStorageKeysCmd.Flags().StringVar(&offsetAddr, "offset", "", "Offset storage key from which the batch should start")
-	listStorageKeysCmd.Flags().IntVar(&quantity, "quantity", 10, "Integer number of addresses to display in a batch")
-	listStorageKeysCmd.Flags().StringVar(&blockNum, "block", "latest", "Integer block number, or the string 'latest', 'earliest' or 'pending'; now only 'latest' is available")
+	//listStorageKeysCmd.Flags().StringVar(&services.DevAddress, "addr", "", "String address to list keys")
+	//listStorageKeysCmd.MarkFlagRequired("addr")
+	//listStorageKeysCmd.Flags().StringVar(&offsetAddr, "offset", "", "Offset storage key from which the batch should start")
+	//listStorageKeysCmd.Flags().IntVar(&quantity, "quantity", 10, "Integer number of addresses to display in a batch")
+	//listStorageKeysCmd.Flags().StringVar(&blockNum, "block", "latest", "Integer block number, or the string 'latest', 'earliest' or 'pending'; now only 'latest' is available")
 
 	rootCmd.AddCommand(listStorageKeysCmd)
 }

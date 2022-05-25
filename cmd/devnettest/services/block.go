@@ -109,7 +109,8 @@ func SearchBlockForTx(txnHash common.Hash) (uint64, error) {
 		return 0, fmt.Errorf("failed to dial websocket: %v", clientErr)
 	}
 
-	blockN, err := subscribeToNewHeads(client, "eth_newHeads", txnHash)
+	fmt.Printf("\nSearching for tx %q in new blocks...\n", txnHash)
+	blockN, err := subscribeToNewHeadsAndSearch(client, "eth_newHeads", txnHash)
 	if err != nil {
 		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
 	}
@@ -130,8 +131,7 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (uin
 
 	for _, txnHash := range currentBlock.Transactions {
 		if txnHash == hash {
-			fmt.Println()
-			fmt.Printf("Block number %q was mined and includes transaction with hash: %q\n", blockNumber, hash)
+			fmt.Printf("SUCCESS => Tx with hash %q is in mined block with number %q\n", hash, blockNumber)
 			return utils.HexToInt(blockNumber), true, nil
 		}
 	}
@@ -153,12 +153,19 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 		return fmt.Errorf("failed to sign transaction: %v", err)
 	}
 
+	fmt.Printf("\nSending Fallback tx from contract...\n")
 	hash, err := requests.SendTx(reqId, &signedTx)
 	if err != nil {
 		return fmt.Errorf("failed to send transaction: %v", err)
 	}
-	fmt.Printf("Transaction mined with hash: %v\n", hash)
+	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
+	fmt.Println()
+	if err := requests.TxpoolContent(reqId); err != nil {
+		fmt.Printf("error getting txpool content: %v\n", err)
+	}
+
+	time.Sleep(2 * time.Second)
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)

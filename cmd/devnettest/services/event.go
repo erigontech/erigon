@@ -20,7 +20,7 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 
 	namespace, subMethod, splitErr = utils.NamespaceAndSubMethodFromMethod(method)
 	if splitErr != nil {
-		return nil, nil, fmt.Errorf("cannot get namespace and method from method: %v", splitErr)
+		return nil, nil, fmt.Errorf("cannot get namespace and submethod from method: %v", splitErr)
 	}
 
 	ch := make(chan interface{})
@@ -35,20 +35,23 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 	return sub, ch, nil
 }
 
-// subscribeToNewHeads makes a ws subscription for eth_newHeads
-func subscribeToNewHeads(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
+// subscribeToNewHeadsAndSearch makes a ws subscription for eth_newHeads and searches each new header for the tx hash
+func subscribeToNewHeadsAndSearch(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
 	sub, ch, err := subscribe(client, method)
 	if err != nil {
 		return uint64(0), fmt.Errorf("error subscribing to newHeads: %v", err)
 	}
 	defer sub.Unsubscribe()
 
+	fmt.Println("GUN ==================================================================== Finished subbing")
+
 	var (
 		blockCount int
 		blockN     uint64
 	)
-ForLoop:
+mark:
 	for {
+		fmt.Println("GUN ==================================== count: ", blockCount)
 		select {
 		case v := <-ch:
 			blockCount++
@@ -59,7 +62,7 @@ ForLoop:
 			}
 			if foundTx || blockCount == numberOfIterations {
 				blockN = num
-				break ForLoop
+				break mark
 			}
 		case err := <-sub.Err():
 			return uint64(0), fmt.Errorf("subscription error from client: %v", err)

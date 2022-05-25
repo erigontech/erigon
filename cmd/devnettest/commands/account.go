@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
+const (
 	devAddress = "0x67b1d87101671b127f5f8714789C7192f7ad340e"
 	blockNum   = "latest"
 )
@@ -25,7 +25,6 @@ var getBalanceCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		blockNum = "latest"
 		callGetBalance(devAddress, blockNum)
 	},
 }
@@ -42,19 +41,21 @@ var getTransactionCountCmd = &cobra.Command{
 }
 
 func callGetBalance(addr, blockNum string) {
+	fmt.Printf("Getting balance for address: %q...\n", addr)
 	address := common.HexToAddress(addr)
 	bal, err := requests.GetBalance(reqId, address, blockNum)
 	if err != nil {
-		fmt.Printf("could not get balance: %v\n", err)
+		fmt.Printf("FAILURE => %v\n", err)
 	}
-	fmt.Printf("Balance for account with address %q is: %s\n", addr, bal)
+	fmt.Printf("SUCCESS => Balance: %s\n", bal)
 }
 
 func callGetTransactionCount(addr, blockNum string) {
+	fmt.Printf("Getting nonce for address: %q...\n", addr)
 	address := common.HexToAddress(addr)
 	nonce, err := requests.GetTransactionCountCmd(reqId, address, blockNum)
 	if err != nil {
 		fmt.Printf("could not get transaction count: %v\n", err)
 	}
-	fmt.Printf("Nonce for account with address %q is: %s\n", addr, nonce)
+	fmt.Printf("SUCCESS => Nonce: %s\n", nonce)
 }

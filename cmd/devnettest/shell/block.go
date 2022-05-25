@@ -24,8 +24,6 @@ func sendTx(ctx *ishell.Context, s *ishell.Shell) {
 	sendAddr := ctx.ReadLine()
 	ctx.Printf("Address to send %d ETH to is %s\n", sendValue, sendAddr)
 
-	//erigon.StartProcess(&utils.RPCFlags{WebsocketEnabled: false})
-
 	nonce, err := services.GetNonce(reqId)
 	if err != nil {
 		ctx.Printf("failed to get latest nonce: %v\n", err)
@@ -66,6 +64,4 @@ func sendTx(ctx *ishell.Context, s *ishell.Shell) {
 			return
 		}
 	}
-
-	//erigon.Stop()
 }

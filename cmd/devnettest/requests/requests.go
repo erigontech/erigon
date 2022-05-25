@@ -51,7 +51,7 @@ func GetBalance(reqId int, address common.Address, blockNum string) (string, err
 		fmt.Println(err)
 	}
 
-	balStr := string(bal)[3:len(bal) - 1]
+	balStr := string(bal)[3 : len(bal)-1]
 	balance, err := strconv.ParseInt(balStr, 16, 64)
 	if err != nil {
 		return "", fmt.Errorf("cannot convert balance to decimal: %v", err)
@@ -83,6 +83,9 @@ func TxpoolContent(reqId int) error {
 	if res := reqGen.Erigon("txpool_content", reqGen.txpoolContent(), &b); res.Err != nil {
 		return fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
+
+	//fmt.Printf("Pending: %+v\n", b.Result.(map[string]interface{})["pending"].(map[string]interface{})["hash"])
+	//fmt.Printf("Type: %T\n", b.Result.(map[string]interface{})["pending"])
 
 	s, err := utils.ParseResponse(b)
 	if err != nil {
@@ -144,7 +147,7 @@ func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) 
 		fmt.Println(err)
 	}
 
-	nonceStr := string(n)[3:len(n) - 1]
+	nonceStr := string(n)[3 : len(n)-1]
 
 	nonce, err := strconv.ParseInt(nonceStr, 16, 64)
 	if err != nil {
