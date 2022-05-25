@@ -785,18 +785,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	sentries := s.sentriesClient.Sentries()
-	for i := range sentries {
-		go func(i int) {
-			sentry.RecvMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-		go func(i int) {
-			sentry.RecvUploadMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-		go func(i int) {
-			sentry.RecvUploadHeadersMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-	}
+	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
 	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)

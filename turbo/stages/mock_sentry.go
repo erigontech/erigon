@@ -349,13 +349,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	)
 
 	mock.StreamWg.Add(1)
-	go sentry.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.sentriesClient, &mock.ReceiveWg)
+	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go sentry.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.sentriesClient, &mock.ReceiveWg)
+	go mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go sentry.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.sentriesClient, &mock.ReceiveWg)
+	go mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 
 	return mock

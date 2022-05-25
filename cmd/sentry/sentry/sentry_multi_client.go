@@ -3,6 +3,7 @@ package sentry
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -35,236 +36,133 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// 3 streams:
+// StartStreamLoops starts message processing loops for all sentries.
+// The processing happens in several streams:
 // RecvMessage - processing incoming headers/bodies
+// RecvUploadMessage - sending bodies/receipts - may be heavy, it's ok to not process this messages enough fast, it's also ok to drop some of these messages if we can't process.
 // RecvUploadHeadersMessage - sending headers - dedicated stream because headers propagation speed important for network health
-// RecvUploadMessage - sending bodies/receipts - may be heavy, it's ok to not process this messages enough fast, it's also ok to drop some of this messages if can't process.
-
-func RecvUploadMessageLoop(ctx context.Context,
-	sentry direct.SentryClient,
-	cs *MultiClient,
-	wg *sync.WaitGroup,
-) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := RecvUploadMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
-			if isPeerNotFoundErr(err) {
-				continue
-			}
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Debug("[RecvUploadMessage]", "err", err)
-			continue
-		}
+func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
+	sentries := cs.Sentries()
+	for i := range sentries {
+		sentry := sentries[i]
+		go cs.RecvMessageLoop(ctx, sentry, nil)
+		go cs.RecvUploadMessageLoop(ctx, sentry, nil)
+		go cs.RecvUploadHeadersMessageLoop(ctx, sentry, nil)
 	}
 }
 
-func RecvUploadMessage(ctx context.Context,
-	sentry direct.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
-	wg *sync.WaitGroup,
-) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-		}
-	}() // avoid crash because Erigon's core does many things
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
-		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
-	}}, grpc.WaitForReady(true))
-	if err != nil {
-		return err
-	}
-	var req *proto_sentry.InboundMessage
-	for req, err = stream.Recv(); ; req, err = stream.Recv() {
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			return err
-		}
-		if req == nil {
-			return
-		}
-		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Debug("[RecvUploadMessage]: Handling incoming message", "err", err)
-
-		}
-		if wg != nil {
-			wg.Done()
-		}
-
-	}
-}
-
-func RecvUploadHeadersMessageLoop(ctx context.Context,
-	sentry direct.SentryClient,
-	cs *MultiClient,
-	wg *sync.WaitGroup,
-) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvUploadMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := RecvUploadHeadersMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
-			if isPeerNotFoundErr(err) {
-				continue
-			}
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvUploadMessage]", "err", err)
-			continue
-		}
-	}
-}
-
-func RecvUploadHeadersMessage(ctx context.Context,
-	sentry direct.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
-	wg *sync.WaitGroup,
-) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
-		}
-	}() // avoid crash because Erigon's core does many things
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
-	}}, grpc.WaitForReady(true))
-	if err != nil {
-		return err
-	}
-	var req *proto_sentry.InboundMessage
-	for req, err = stream.Recv(); ; req, err = stream.Recv() {
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			return err
-		}
-		if req == nil {
-			return
-		}
-		if err = handleInboundMessage(ctx, req, sentry); err != nil {
-			log.Debug("[RecvUploadHeadersMessage] Handling incoming message", "err", err)
-		}
-		if wg != nil {
-			wg.Done()
-		}
-
-	}
-}
-
-func RecvMessageLoop(ctx context.Context,
-	sentry direct.SentryClient,
-	cs *MultiClient,
-	wg *sync.WaitGroup,
-) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := SentrySetStatus(ctx, sentry, cs); err != nil {
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvMessage] sentry not ready yet", "err", err)
-			time.Sleep(time.Second)
-			continue
-		}
-		if err := RecvMessage(ctx, sentry, cs.HandleInboundMessage, wg); err != nil {
-			if isPeerNotFoundErr(err) {
-				continue
-			}
-			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
-				time.Sleep(3 * time.Second)
-				continue
-			}
-			log.Warn("[RecvMessage]", "err", err)
-			continue
-		}
-	}
-}
-
-// RecvMessage is normally run in a separate go-routine because it only exists when there a no more messages
-// to be received (end of process, or interruption, or end of test)
-// wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil
-func RecvMessage(
+func (cs *MultiClient) RecvUploadMessageLoop(
 	ctx context.Context,
 	sentry direct.SentryClient,
-	handleInboundMessage func(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
+	ids := []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH66][eth.GetBlockBodiesMsg],
+		eth.ToProto[eth.ETH66][eth.GetReceiptsMsg],
+	}
+	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (proto_sentry.Sentry_MessagesClient, error) {
+		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
+	}
+
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, cs.HandleInboundMessage, wg)
+}
+
+func (cs *MultiClient) RecvUploadHeadersMessageLoop(
+	ctx context.Context,
+	sentry direct.SentryClient,
+	wg *sync.WaitGroup,
+) {
+	ids := []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH66][eth.GetBlockHeadersMsg],
+	}
+	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (proto_sentry.Sentry_MessagesClient, error) {
+		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
+	}
+
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadHeadersMessage", streamFactory, cs.HandleInboundMessage, wg)
+}
+
+func (cs *MultiClient) RecvMessageLoop(
+	ctx context.Context,
+	sentry direct.SentryClient,
+	wg *sync.WaitGroup,
+) {
+	ids := []proto_sentry.MessageId{
+		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
+		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
+		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
+		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
+	}
+	streamFactory := func(streamCtx context.Context, sentry direct.SentryClient) (proto_sentry.Sentry_MessagesClient, error) {
+		return sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
+	}
+
+	sentryReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvMessage", streamFactory, cs.HandleInboundMessage, wg)
+}
+
+func sentryReconnectAndPumpStreamLoop(
+	ctx context.Context,
+	sentry direct.SentryClient,
+	statusDataFactory func() *proto_sentry.StatusData,
+	streamName string,
+	streamFactory func(context.Context, direct.SentryClient) (proto_sentry.Sentry_MessagesClient, error),
+	handleInboundMessage func(context.Context, *proto_sentry.InboundMessage, direct.SentryClient) error,
+	wg *sync.WaitGroup,
+) {
+	for ctx.Err() == nil {
+		if _, err := sentry.HandShake(ctx, &emptypb.Empty{}, grpc.WaitForReady(true)); err != nil {
+			if errors.Is(err, context.Canceled) {
+				continue
+			}
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			log.Warn("HandShake error, sentry not ready yet", "stream", streamName, "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		if _, err := sentry.SetStatus(ctx, statusDataFactory()); err != nil {
+			if errors.Is(err, context.Canceled) {
+				continue
+			}
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			log.Warn("Status error, sentry not ready yet", "stream", streamName, "err", err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		if err := pumpStreamLoop(ctx, sentry, streamName, streamFactory, handleInboundMessage, wg); err != nil {
+			if errors.Is(err, context.Canceled) {
+				continue
+			}
+			if isPeerNotFoundErr(err) {
+				continue
+			}
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+			log.Warn("pumpStreamLoop failure", "stream", streamName, "err", err)
+			continue
+		}
+	}
+}
+
+// pumpStreamLoop is normally run in a separate go-routine.
+// It only exists until there are no more messages
+// to be received (end of process, or interruption, or end of test).
+// wg is used only in tests to avoid using waits, which is brittle. For non-test code wg == nil.
+func pumpStreamLoop(
+	ctx context.Context,
+	sentry direct.SentryClient,
+	streamName string,
+	streamFactory func(context.Context, direct.SentryClient) (proto_sentry.Sentry_MessagesClient, error),
+	handleInboundMessage func(context.Context, *proto_sentry.InboundMessage, direct.SentryClient) error,
 	wg *sync.WaitGroup,
 ) (err error) {
 	defer func() {
@@ -272,6 +170,7 @@ func RecvMessage(
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
+
 	streamCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
@@ -281,25 +180,21 @@ func RecvMessage(
 	// - can have slow processing
 	reqs := make(chan *proto_sentry.InboundMessage, 256)
 	defer close(reqs)
+
 	go func() {
 		for req := range reqs {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
 			if err := handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
-					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
+					log.Debug("Kick peer for invalid RLP", "stream", streamName, "err", err)
 					outreq := proto_sentry.PenalizePeerRequest{
 						PeerId:  req.PeerId,
 						Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
 					}
 					if _, err1 := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err1 != nil {
-						log.Error("Could not send penalty", "err", err1)
+						log.Error("Could not send penalty", "stream", streamName, "err", err1)
 					}
 				} else {
-					log.Warn("[RecvMessage] Handling incoming message", "err", err)
+					log.Warn("Handling incoming message", "stream", streamName, "err", err)
 				}
 			}
 			if wg != nil {
@@ -308,36 +203,24 @@ func RecvMessage(
 		}
 	}()
 
-	stream, err := sentry.Messages(streamCtx, &proto_sentry.MessagesRequest{Ids: []proto_sentry.MessageId{
-		eth.ToProto[eth.ETH66][eth.BlockHeadersMsg],
-		eth.ToProto[eth.ETH66][eth.BlockBodiesMsg],
-		eth.ToProto[eth.ETH66][eth.NewBlockHashesMsg],
-		eth.ToProto[eth.ETH66][eth.NewBlockMsg],
-	}}, grpc.WaitForReady(true))
+	stream, err := streamFactory(streamCtx, sentry)
 	if err != nil {
 		return err
 	}
 
-	var req *proto_sentry.InboundMessage
-	for req, err = stream.Recv(); ; req, err = stream.Recv() {
-		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
+	for ctx.Err() == nil {
+		req, err := stream.Recv()
+		if req == nil {
 			return err
 		}
-		if req == nil {
-			return
-		}
-		reqs <- req
-	}
-}
 
-func SentrySetStatus(ctx context.Context, sentry direct.SentryClient, controlServer *MultiClient) error {
-	_, err := sentry.SetStatus(ctx, makeStatusData(controlServer))
-	return err
+		select {
+		case reqs <- req:
+		case <-ctx.Done():
+		}
+	}
+
+	return ctx.Err()
 }
 
 // MultiClient - does handle request/response/subscriptions to multiple sentries
@@ -586,7 +469,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	return nil
 }
 
-func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
@@ -596,7 +479,7 @@ func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, sentry 
 	return nil
 }
 
-func (cs *MultiClient) receipts66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+func (cs *MultiClient) receipts66(_ context.Context, _ *proto_sentry.InboundMessage, _ direct.SentryClient) error {
 	return nil
 }
 
@@ -743,7 +626,8 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, inreq *proto_se
 	}
 }
 
-func makeStatusData(s *MultiClient) *proto_sentry.StatusData {
+func (cs *MultiClient) makeStatusData() *proto_sentry.StatusData {
+	s := cs
 	return &proto_sentry.StatusData{
 		NetworkId:       s.networkId,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(s.headTd),

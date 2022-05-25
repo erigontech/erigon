@@ -24,7 +24,7 @@ func (cs *MultiClient) UpdateHead(ctx context.Context, height uint64, hash commo
 	cs.headHeight = height
 	cs.headHash = hash
 	cs.headTd = td
-	statusMsg := makeStatusData(cs)
+	statusMsg := cs.makeStatusData()
 	for _, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue
