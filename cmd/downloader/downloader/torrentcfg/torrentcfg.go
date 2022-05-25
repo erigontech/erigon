@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"time"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -41,9 +40,9 @@ func Default() *torrent.ClientConfig {
 	//torrentConfig.DisableWebseeds = true
 
 	// Reduce defaults - to avoid peers with very bad geography
-	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
+	//torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
+	//torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
+	//torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
 
 	return torrentConfig
 }

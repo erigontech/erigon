@@ -31,7 +31,6 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
@@ -1391,9 +1390,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			panic(err)
 		}
 
-		var err error
+		lvl, err := torrentcfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
+		if err != nil {
+			panic(err)
+		}
 		cfg.Torrent, err = torrentcfg.New(cfg.SnapDir,
-			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
+			lvl,
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
@@ -1525,15 +1527,6 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 	}
 
 	return tagsMap
-}
-
-// MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(logger log.Logger, cfg *node.Config) kv.RwDB {
-	chainDb, err := node.OpenDatabase(cfg, logger, kv.ChainDB)
-	if err != nil {
-		Fatalf("Could not open database: %v", err)
-	}
-	return chainDb
 }
 
 // MakeConsolePreloads retrieves the absolute paths for the console JavaScript
