@@ -256,7 +256,7 @@ func NewStagedSync(
 	db kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
-	controlServer *sentry.MultyClient,
+	controlServer *sentry.MultiClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,

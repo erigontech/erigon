@@ -64,7 +64,7 @@ type MockSentry struct {
 	MiningSync     *stagedsync.Sync
 	PendingBlocks  chan *types.Block
 	MinedBlocks    chan *types.Block
-	sentriesClient *sentry.MultyClient
+	sentriesClient *sentry.MultiClient
 	Key            *ecdsa.PrivateKey
 	Genesis        *types.Block
 	SentryClient   direct.SentryClient
@@ -267,7 +267,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.sentriesClient, err = sentry.NewMultyClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow, blockReader)
+	mock.sentriesClient, err = sentry.NewMultiClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow, blockReader)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
