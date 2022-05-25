@@ -25,7 +25,7 @@ var getBalanceCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		callGetBalance(devAddress, blockNum)
+		callGetBalance(devAddress, blockNum, 0)
 	},
 }
 
@@ -36,26 +36,40 @@ var getTransactionCountCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		callGetTransactionCount(devAddress, blockNum)
+		callGetTransactionCount(devAddress, blockNum, 0)
 	},
 }
 
-func callGetBalance(addr, blockNum string) {
+func callGetBalance(addr, blockNum string, checkBal uint64) {
 	fmt.Printf("Getting balance for address: %q...\n", addr)
 	address := common.HexToAddress(addr)
 	bal, err := requests.GetBalance(reqId, address, blockNum)
 	if err != nil {
 		fmt.Printf("FAILURE => %v\n", err)
+		return
 	}
-	fmt.Printf("SUCCESS => Balance: %s\n", bal)
+
+	if checkBal > 0 && checkBal != bal {
+		fmt.Printf("FAILURE => Balance should be %d, got %d\n", checkBal, bal)
+		return
+	}
+
+	fmt.Printf("SUCCESS => Balance: %d\n", bal)
 }
 
-func callGetTransactionCount(addr, blockNum string) {
+func callGetTransactionCount(addr, blockNum string, checkNonce uint64) {
 	fmt.Printf("Getting nonce for address: %q...\n", addr)
 	address := common.HexToAddress(addr)
 	nonce, err := requests.GetTransactionCountCmd(reqId, address, blockNum)
 	if err != nil {
 		fmt.Printf("could not get transaction count: %v\n", err)
+		return
 	}
-	fmt.Printf("SUCCESS => Nonce: %s\n", nonce)
+
+	if checkNonce > 0 && checkNonce != nonce {
+		fmt.Printf("FAILURE => Nonce should be %d, got %d\n", checkNonce, nonce)
+		return
+	}
+
+	fmt.Printf("SUCCESS => Nonce: %d\n", nonce)
 }

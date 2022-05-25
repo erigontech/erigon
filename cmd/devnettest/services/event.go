@@ -43,15 +43,12 @@ func subscribeToNewHeadsAndSearch(client *rpc.Client, method string, hash common
 	}
 	defer sub.Unsubscribe()
 
-	fmt.Println("GUN ==================================================================== Finished subbing")
-
 	var (
 		blockCount int
 		blockN     uint64
 	)
 mark:
 	for {
-		fmt.Println("GUN ==================================== count: ", blockCount)
 		select {
 		case v := <-ch:
 			blockCount++

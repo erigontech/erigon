@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	eventAddrs  = []string{devAddress, sendAddr}
+	eventAddrs  = []string{devAddress, recvAddr}
 	eventTopics []string
 )
 
@@ -31,6 +31,4 @@ func callLogs() {
 	}()
 
 	callContractTx()
-
-	select {}
 }

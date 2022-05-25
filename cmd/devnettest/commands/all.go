@@ -20,21 +20,37 @@ var allCmd = &cobra.Command{
 			defer services.ClearDevDB()
 		}
 
-		callGetBalance(sendAddr, blockNum)
-		fmt.Println()
-		callSendRegularTxAndSearchBlock(sendValue, devAddress, sendAddr, true)
-		fmt.Println()
-		callGetBalance(sendAddr, blockNum)
-		fmt.Println()
-		callGetTransactionCount(devAddress, blockNum)
-		fmt.Println()
-		go callLogs()
-		time.Sleep(erigon.DevPeriod * 2 * time.Second)
-		callGetTransactionCount(devAddress, blockNum)
-		fmt.Println()
+		// Test connection to JSON RPC
 		fmt.Println("Mocking get requests to JSON RPC...")
 		callMockGetRequest()
 		fmt.Println()
+
+		// First get balance of the receiver's account
+		callGetBalance(recvAddr, blockNum, 0)
+		fmt.Println()
+
+		// Send a token from the dev address to the receiver's address
+		callSendRegularTxAndSearchBlock(sendValue, devAddress, recvAddr, true)
+		fmt.Println()
+
+		// Check the balance to make sure the receiver received such token
+		callGetBalance(recvAddr, blockNum, sendValue)
+		fmt.Println()
+
+		// Get the nonce of the devAddress, it should be 1
+		callGetTransactionCount(devAddress, blockNum, 1)
+		fmt.Println()
+
+		// Create a contract transaction signed by the dev address and emit a log for it
+		go callContractTx()
+		time.Sleep(erigon.DevPeriod * 2 * time.Second)
+		fmt.Println()
+
+		// Get the nonce of the devAddress, check that it is 3
+		callGetTransactionCount(devAddress, blockNum, 3)
+		fmt.Println()
+
+		// Confirm that the txpool is empty (meaning all txs have been mined)
 		fmt.Println("Confirming the tx pool is empty...")
 		showTxPoolContent()
 	},

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	sendAddr         = "0x71562b71999873DB5b286dF957af199Ec94617F7"
+	recvAddr         = "0x71562b71999873DB5b286dF957af199Ec94617F7"
 	sendValue uint64 = 10000
 )
 
@@ -25,7 +25,7 @@ var sendTxCmd = &cobra.Command{
 			defer services.ClearDevDB()
 		}
 
-		callSendRegularTxAndSearchBlock(sendValue, sendAddr, devAddress, true)
+		callSendRegularTxAndSearchBlock(sendValue, recvAddr, devAddress, true)
 	},
 }
 
@@ -88,11 +88,6 @@ func callContractTx() {
 		return
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
-
-	_, err = services.SearchBlockForTx(*hash)
-	if err != nil {
-		fmt.Printf("error searching block for tx: %v", err)
-	}
 
 	if err := services.EmitEventAndGetLogs(reqId, subscriptionContract, transactOpts, address); err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)

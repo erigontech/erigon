@@ -1,7 +1,6 @@
 package shell
 
 import (
-	"fmt"
 	"github.com/abiosoft/ishell/v2"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/common"
@@ -22,7 +21,7 @@ func getBalance(ctx *ishell.Context, s *ishell.Shell) {
 	address := common.HexToAddress(addr)
 	bal, err := requests.GetBalance(reqId, address, blockNum)
 	if err != nil {
-		bal = fmt.Sprintf("could not get balance: %v\n", err)
+		ctx.Printf("could not get balance: %v\n", err)
 	}
-	ctx.Printf("Balance is: \n", bal)
+	ctx.Printf("Balance is: %d\n", bal)
 }

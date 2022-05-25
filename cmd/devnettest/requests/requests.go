@@ -38,12 +38,12 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	return nil
 }
 
-func GetBalance(reqId int, address common.Address, blockNum string) (string, error) {
+func GetBalance(reqId int, address common.Address, blockNum string) (uint64, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
 	if res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b); res.Err != nil {
-		return "", fmt.Errorf("failed to get balance: %v", res.Err)
+		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
 	bal, err := json.Marshal(b.Balance)
@@ -54,10 +54,10 @@ func GetBalance(reqId int, address common.Address, blockNum string) (string, err
 	balStr := string(bal)[3 : len(bal)-1]
 	balance, err := strconv.ParseInt(balStr, 16, 64)
 	if err != nil {
-		return "", fmt.Errorf("cannot convert balance to decimal: %v", err)
+		return 0, fmt.Errorf("cannot convert balance to decimal: %v", err)
 	}
 
-	return strconv.FormatInt(balance, 10), nil
+	return uint64(balance), nil
 }
 
 func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
@@ -113,7 +113,7 @@ func ParityList(reqId int, account common.Address, quantity int, offset []byte, 
 	return nil
 }
 
-func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error {
+func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address, show bool) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetLogs
 
@@ -126,20 +126,23 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
 
-	fmt.Printf("Logs: %v\n", s)
+	if show {
+		fmt.Printf("Logs: %v\n", s)
+	}
+
 	return nil
 }
 
-func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) (string, error) {
+func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) (uint64, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
 	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
-		return "", fmt.Errorf("error getting transaction count: %v\n", res.Err)
+		return 0, fmt.Errorf("error getting transaction count: %v\n", res.Err)
 	}
 
 	if b.Error != nil {
-		return "", fmt.Errorf("error populating response object: %v", b.Error)
+		return 0, fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
 	n, err := json.Marshal(b.Result)
@@ -151,10 +154,10 @@ func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) 
 
 	nonce, err := strconv.ParseInt(nonceStr, 16, 64)
 	if err != nil {
-		return "", fmt.Errorf("cannot convert nonce to decimal: %v", err)
+		return 0, fmt.Errorf("cannot convert nonce to decimal: %v", err)
 	}
 
-	return strconv.FormatInt(nonce, 10), nil
+	return uint64(nonce), nil
 }
 
 func GetTransactionCount(reqId int, address common.Address, blockNum string) (rpctest.EthGetTransactionCount, error) {

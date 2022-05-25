@@ -160,18 +160,12 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
-	fmt.Println()
-	if err := requests.TxpoolContent(reqId); err != nil {
-		fmt.Printf("error getting txpool content: %v\n", err)
-	}
-
-	time.Sleep(2 * time.Second)
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)
 	}
 
-	if err = requests.GetLogs(reqId, blockN, blockN, address); err != nil {
+	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
 
