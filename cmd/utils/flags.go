@@ -642,7 +642,7 @@ var (
 	TorrentVerbosityFlag = cli.StringFlag{
 		Name:  "torrent.verbosity",
 		Value: lg.Warning.LogString(),
-		Usage: "DEBUG | INFO | WARN | ERROR (must set --verbosity to equal or higher level)",
+		Usage: "DBG | INF | WRN | ERR (must set --verbosity to equal or higher level)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
