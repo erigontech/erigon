@@ -57,7 +57,7 @@ type MockSentry struct {
 	cancel         context.CancelFunc
 	DB             kv.RwDB
 	tmpdir         string
-	snapshotDir    string
+	snapDir        string
 	Engine         consensus.Engine
 	ChainConfig    *params.ChainConfig
 	Sync           *stagedsync.Sync
@@ -176,7 +176,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	} else {
 		tmpdir = os.TempDir()
 	}
-	snapshotDir := filepath.Join(tmpdir, "snapshots")
+	snapDir := filepath.Join(tmpdir, "snapshots")
 	var err error
 
 	db := memdb.New()
@@ -188,7 +188,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		t:           t,
 		Log:         log.New(),
 		tmpdir:      tmpdir,
-		snapshotDir: snapshotDir,
+		snapDir:     snapDir,
 		Engine:      engine,
 		ChainConfig: gspec.Config,
 		Key:         key,

@@ -288,7 +288,7 @@ func RecvMessage(
 				return
 			default:
 			}
-			if err = handleInboundMessage(ctx, req, sentry); err != nil {
+			if err := handleInboundMessage(ctx, req, sentry); err != nil {
 				if rlp.IsInvalidRLPError(err) {
 					log.Debug("[RecvMessage] Kick peer for invalid RLP", "err", err)
 					outreq := proto_sentry.PenalizePeerRequest{
@@ -488,7 +488,7 @@ func (cs *MultyClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		})
 	}
 	if cs.Hd.POSSync() {
-		sort.Sort(headerdownload.HeadersByHeightAndHash(csHeaders)) // Sorting by reverse order of block heights
+		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
 		defer tx.Rollback()
 		if err != nil {
@@ -502,6 +502,7 @@ func (cs *MultyClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			cs.Penalize(ctx, penalties)
 		}
 	} else {
+		sort.Sort(headerdownload.HeadersSort(csHeaders)) // Sorting by order of block heights
 		canRequestMore := cs.Hd.ProcessHeaders(csHeaders, false /* newBlock */, ConvertH512ToPeerID(peerID))
 
 		if canRequestMore {

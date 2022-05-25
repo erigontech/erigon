@@ -61,32 +61,44 @@ type Interface interface {
 //     "upnp"               uses the Universal Plug and Play protocol
 //     "pmp"                uses NAT-PMP with an auto-detected gateway address
 //     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+//     "stun"               uses STUN to detect an external IP using a default server
+//     "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
 func Parse(spec string) (Interface, error) {
 	var (
 		parts = strings.SplitN(spec, ":", 2)
 		mech  = strings.ToLower(parts[0])
-		ip    net.IP
 	)
-	if len(parts) > 1 {
-		ip = net.ParseIP(parts[1])
-		if ip == nil {
-			return nil, errors.New("invalid IP address")
-		}
-	}
 	switch mech {
 	case "", "none", "off":
 		return nil, nil
 	case "any", "auto", "on":
 		return Any(), nil
 	case "extip", "ip":
-		if ip == nil {
+		if len(parts) < 2 {
 			return nil, errors.New("missing IP address")
+		}
+		ip := net.ParseIP(parts[1])
+		if ip == nil {
+			return nil, errors.New("invalid IP address")
 		}
 		return ExtIP(ip), nil
 	case "upnp":
 		return UPnP(), nil
 	case "pmp", "natpmp", "nat-pmp":
+		var ip net.IP
+		if len(parts) > 1 {
+			ip = net.ParseIP(parts[1])
+			if ip == nil {
+				return nil, errors.New("invalid IP address")
+			}
+		}
 		return PMP(ip), nil
+	case "stun":
+		var addr string
+		if len(parts) > 1 {
+			addr = parts[1]
+		}
+		return NewSTUN(addr), nil
 	default:
 		return nil, fmt.Errorf("unknown mechanism %q", parts[0])
 	}

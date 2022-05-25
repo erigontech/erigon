@@ -63,6 +63,12 @@ func BytesToHash(b []byte) Hash {
 	return h
 }
 
+// CastToHash - sets b to hash
+// If b is larger than len(h), b will be cropped from the left.
+// panics if input is shorter than 32 bytes, see https://go.dev/doc/go1.17#language
+// faster than BytesToHash
+func CastToHash(b []byte) Hash { return *(*Hash)(b) }
+
 // BigToHash sets byte representation of b to hash.
 // If b is larger than len(h), b will be cropped from the left.
 func BigToHash(b *big.Int) Hash { return BytesToHash(b.Bytes()) }
@@ -199,6 +205,9 @@ func BytesToAddress(b []byte) Address {
 	a.SetBytes(b)
 	return a
 }
+
+// BytesToAddressNoCopy - see https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
+func BytesToAddressNoCopy(b []byte) Address { return *(*Address)(b) }
 
 // BigToAddress returns Address with byte values of b.
 // If b is larger than len(h), b will be cropped from the left.

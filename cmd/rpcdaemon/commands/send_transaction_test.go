@@ -79,7 +79,6 @@ func TestSendRawTransaction(t *testing.T) {
 	require.NoError(err)
 
 	txsCh := make(chan []types.Transaction, 1)
-	defer close(txsCh)
 	id := ff.SubscribePendingTxs(txsCh)
 	defer ff.UnsubscribePendingTxs(id)
 

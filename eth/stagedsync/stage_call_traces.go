@@ -136,7 +136,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
@@ -184,7 +184,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
@@ -333,7 +333,7 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
@@ -432,7 +432,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			select {
 			case <-logEvery.C:
 				var m runtime.MemStats
-				runtime.ReadMemStats(&m)
+				libcommon.ReadMemStats(&m)
 				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			case <-ctx.Done():
 				return libcommon.ErrStopped

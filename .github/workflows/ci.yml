@@ -33,8 +33,8 @@ jobs:
             ~/.cache/go-build
             ~/Library/Caches/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+          key: go-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ matrix.os }}-
 
       - name: Build
         run: make all
@@ -61,7 +61,10 @@ jobs:
         run: make test
 
   tests-windows:
-    runs-on: windows-2019
+    strategy:
+      matrix:
+        os: [ windows-2022 ]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v3
@@ -75,7 +78,7 @@ jobs:
           path: |
             C:\ProgramData\chocolatey\lib\mingw
             C:\ProgramData\chocolatey\lib\cmake
-          key: chocolatey
+          key: chocolatey-${{ matrix.os }}
       - name: Install dependencies
         run: |
           choco upgrade mingw -y --no-progress --version 11.2.0.07112021
@@ -86,8 +89,8 @@ jobs:
           path: |
             ~\AppData\Local\go-build
             ~\go\pkg\mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: ${{ runner.os }}-go-
+          key: go-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: go-${{ matrix.os }}-
 
       - name: Build
         run: .\wmake.ps1 all
@@ -99,5 +102,6 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
-      - run: git submodule update --init --recursive --force
-      - run: docker build .
+        with:
+          fetch-depth: 0 # fetch git tags for "git describe"
+      - run: make docker

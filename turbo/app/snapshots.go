@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
@@ -120,7 +119,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer cancel()
 
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := filepath.Join(datadir, "snapshots")
+	snapDir := filepath.Join(datadir, "snapshots")
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
@@ -137,7 +136,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		if workers > 4 {
 			workers = 4
 		}
-		if err := rebuildIndices(ctx, chainDB, cfg, snapshotDir, tmpDir, from, workers); err != nil {
+		if err := rebuildIndices(ctx, chainDB, cfg, snapDir, tmpDir, from, workers); err != nil {
 			log.Error("Error", "err", err)
 		}
 	}
@@ -237,7 +236,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer cancel()
 
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := filepath.Join(datadir, "snapshots")
+	snapDir := filepath.Join(datadir, "snapshots")
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
@@ -249,8 +248,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	cfg := ethconfig.NewSnapshotCfg(true, true)
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	snapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
-	snapshots.Reopen()
+	snapshots := snapshotsync.NewRoSnapshots(cfg, snapDir)
+	if err := snapshots.Reopen(); err != nil {
+		return err
+	}
 
 	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
@@ -280,23 +281,25 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 		return fmt.Errorf("too small --segment.size %d", segmentSize)
 	}
 	datadir := cliCtx.String(utils.DataDirFlag.Name)
-	snapshotDir := filepath.Join(datadir, "snapshots")
+	snapDir := filepath.Join(datadir, "snapshots")
+	dir.MustExist(snapDir)
+	dir.MustExist(filepath.Join(snapDir, "db")) // this folder will be checked on existance - to understand that snapshots are ready
 	tmpDir := filepath.Join(datadir, etl.TmpDirName)
 	dir.MustExist(tmpDir)
 
 	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(filepath.Join(datadir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
-	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapshotDir, tmpDir); err != nil {
+	if err := snapshotBlocks(ctx, chainDB, fromBlock, toBlock, segmentSize, snapDir, tmpDir); err != nil {
 		log.Error("Error", "err", err)
 	}
 	return nil
 }
-func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapshotDir, tmpDir string, from uint64, workers int) error {
+func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot, snapDir, tmpDir string, from uint64, workers int) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapshotDir)
+	allSnapshots := snapshotsync.NewRoSnapshots(cfg, snapDir)
 	if err := allSnapshots.Reopen(); err != nil {
 		return err
 	}
@@ -306,7 +309,7 @@ func rebuildIndices(ctx context.Context, chainDB kv.RoDB, cfg ethconfig.Snapshot
 	return nil
 }
 
-func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapshotDir, tmpDir string) error {
+func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, blocksPerFile uint64, snapDir, tmpDir string) error {
 	var last uint64
 
 	if toBlock > 0 {
@@ -339,59 +342,13 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 		}
 	}
 
-	dir.MustExist(snapshotDir)
-
 	log.Info("Last body number", "last", last)
 	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
 		workers = 1
 	}
-	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapshotDir, chainDB, workers, log.LvlInfo); err != nil {
+	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, chainDB, workers, log.LvlInfo); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
-	}
-	return nil
-}
-
-//nolint
-func checkBlockSnapshot(chaindata string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
-	datadir := path.Dir(chaindata)
-	chainConfig := tool.ChainConfigFromDB(database)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	_ = chainID
-
-	cfg := ethconfig.NewSnapshotCfg(true, true)
-	snapshots := snapshotsync.NewRoSnapshots(cfg, filepath.Join(datadir, "snapshots"))
-	snapshots.Reopen()
-	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
-	//	panic(err)
-	//}
-
-	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	tx, err := database.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	for i := uint64(0); i < snapshots.BlocksAvailable(); i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, i)
-		if err != nil {
-			return err
-		}
-		blockFromDB := rawdb.ReadBlock(tx, hash, i)
-		blockFromSnapshot, _, err := snBlockReader.BlockWithSenders(context.Background(), tx, hash, i)
-		if err != nil {
-			return err
-		}
-
-		if blockFromSnapshot.Hash() != blockFromDB.Hash() {
-			panic(i)
-		}
-		if i%1_000 == 0 {
-			log.Info(fmt.Sprintf("Block Num: %dK", i/1_000))
-		}
 	}
 	return nil
 }

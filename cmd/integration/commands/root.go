@@ -3,6 +3,7 @@ package commands
 import (
 	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -57,6 +58,9 @@ func openDB(path string, logger log.Logger, applyMigrations bool) kv.RwDB {
 
 func openKV(label kv.Label, logger log.Logger, path string, exclusive bool) kv.RwDB {
 	opts := kv2.NewMDBX(logger).Path(path).Label(label)
+	if label == kv.ChainDB {
+		opts = opts.MapSize(8 * datasize.TB)
+	}
 	if exclusive {
 		opts = opts.Exclusive()
 	}

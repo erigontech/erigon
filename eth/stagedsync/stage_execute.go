@@ -366,7 +366,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
 
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	common.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
 		"blk/s", fmt.Sprintf("%.1f", speed),

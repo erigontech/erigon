@@ -1,7 +1,9 @@
 package torrentcfg
 
 import (
-	"time"
+	"fmt"
+	"net"
+	"strings"
 
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
@@ -38,29 +40,41 @@ func Default() *torrent.ClientConfig {
 	//torrentConfig.DisableWebseeds = true
 
 	// Reduce defaults - to avoid peers with very bad geography
-	torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
-	torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
-	torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
+	//torrentConfig.MinDialTimeout = 1 * time.Second      // default: 3sec
+	//torrentConfig.NominalDialTimeout = 10 * time.Second // default: 20sec
+	//torrentConfig.HandshakesTimeout = 1 * time.Second   // default: 4sec
+
+	// see: https://en.wikipedia.org/wiki/TCP_half-open
+	//torrentConfig.TotalHalfOpenConns = 100     // default: 100
+	//torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
+	//torrentConfig.TorrentPeersHighWater = 500 // default: 500
+	//torrentConfig.TorrentPeersLowWater = 50   // default: 50
+
+	torrentConfig.Seed = true
+	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
 
 	return torrentConfig
 }
 
-func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, downloadSlots int) (*Cfg, error) {
+func New(snapDir string, verbosity lg.Level, natif nat.Interface, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile int, downloadSlots int) (*Cfg, error) {
 	torrentConfig := Default()
 	// We would-like to reduce amount of goroutines in Erigon, so reducing next params
 	torrentConfig.EstablishedConnsPerTorrent = connsPerFile // default: 50
-
-	// see: https://en.wikipedia.org/wiki/TCP_half-open
-	torrentConfig.TotalHalfOpenConns = 100     // default: 100
-	torrentConfig.HalfOpenConnsPerTorrent = 25 // default: 25
-
-	torrentConfig.TorrentPeersHighWater = 500 // default: 500
-	torrentConfig.TorrentPeersLowWater = 50   // default: 50
+	torrentConfig.DataDir = snapDir
 
 	torrentConfig.ListenPort = port
-	torrentConfig.Seed = true
-	torrentConfig.DataDir = snapshotsDir
-	torrentConfig.UpnpID = torrentConfig.UpnpID + "leecher"
+	// check if ipv6 is enabled
+	torrentConfig.DisableIPv6 = true
+	l, err := net.Listen("tcp6", fmt.Sprintf(":%d", port))
+	if err != nil {
+		isDisabled := strings.Contains(err.Error(), "cannot assign requested address") || strings.Contains(err.Error(), "address family not supported by protocol")
+		if !isDisabled {
+			log.Warn("can't enable ipv6", "err", err)
+		}
+	} else {
+		l.Close()
+		torrentConfig.DisableIPv6 = false
+	}
 
 	switch natif.(type) {
 	case nil:
@@ -68,17 +82,27 @@ func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadR
 	case nat.ExtIP:
 		// ExtIP doesn't block, set the IP right away.
 		ip, _ := natif.ExternalIP()
-		torrentConfig.PublicIp4 = ip
-		log.Info("[torrent] Public IP", "ip", torrentConfig.PublicIp4)
-		// how to set ipv6?
-		//torrentConfig.PublicIp6 = net.ParseIP(ip)
+		if ip != nil {
+			if ip.To4() != nil {
+				torrentConfig.PublicIp4 = ip
+			} else {
+				torrentConfig.PublicIp6 = ip
+			}
+		}
+		log.Info("[torrent] Public IP", "ip", ip)
 
 	default:
 		// Ask the router about the IP. This takes a while and blocks startup,
 		// do it in the background.
 		if ip, err := natif.ExternalIP(); err == nil {
-			torrentConfig.PublicIp4 = ip
-			log.Info("[torrent] Public IP", "ip", torrentConfig.PublicIp4)
+			if ip != nil {
+				if ip.To4() != nil {
+					torrentConfig.PublicIp4 = ip
+				} else {
+					torrentConfig.PublicIp6 = ip
+				}
+			}
+			log.Info("[torrent] Public IP", "ip", ip)
 		}
 	}
 	// rates are divided by 2 - I don't know why it works, maybe bug inside torrent lib accounting
@@ -92,9 +116,9 @@ func New(snapshotsDir string, verbosity lg.Level, natif nat.Interface, downloadR
 	}
 
 	// debug
-	if lg.Debug == verbosity {
-		torrentConfig.Debug = true
-	}
+	//if lg.Debug == verbosity {
+	//	torrentConfig.Debug = true
+	//}
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -92,7 +91,7 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	}, nil
 }
 
-func (d *Downloader) SnapshotsDir() string {
+func (d *Downloader) SnapDir() string {
 	d.clientLock.RLock()
 	defer d.clientLock.RUnlock()
 	return d.cfg.DataDir
@@ -151,7 +150,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 // onComplete - only once - after download of all files fully done:
 // - closing torrent client, closing downloader db
-// - removing _tmp suffix from snapshotDir
+// - removing _tmp suffix from snapDir
 // - open new torrentClient and db
 func (d *Downloader) onComplete() {
 	if !strings.HasSuffix(d.cfg.DataDir, "_tmp") {
@@ -167,11 +166,11 @@ func (d *Downloader) onComplete() {
 	d.db.Close()
 
 	// rename _tmp folder
-	snapshotDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
-	if err := os.Rename(d.cfg.DataDir, snapshotDir); err != nil {
+	snapDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
+	if err := os.Rename(d.cfg.DataDir, snapDir); err != nil {
 		panic(err)
 	}
-	d.cfg.DataDir = snapshotDir
+	d.cfg.DataDir = snapDir
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
@@ -223,13 +222,13 @@ func (d *Downloader) Torrent() *torrent.Client {
 }
 
 func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
-	snapshotDir := cfg.DataDir
+	snapDir := cfg.DataDir
 	db, err = mdbx.NewMDBX(log.New()).
 		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
 		Label(kv.DownloaderDB).
 		WithTablessCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
-		Path(filepath.Join(snapshotDir, "db")).
+		Path(filepath.Join(snapDir, "db")).
 		Open()
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -238,14 +237,14 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}
-	m = storage.NewMMapWithCompletion(snapshotDir, c)
+	m = storage.NewMMapWithCompletion(snapDir, c)
 	cfg.DefaultStorage = m
 	torrentClient, err = torrent.NewClient(cfg)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrent.NewClient: %w", err)
 	}
 
-	if err := BuildTorrentsAndAdd(context.Background(), snapshotDir, torrentClient); err != nil {
+	if err := BuildTorrentsAndAdd(context.Background(), snapDir, torrentClient); err != nil {
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("BuildTorrentsAndAdd: %w", err)
 		}
@@ -283,19 +282,18 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 		}
 	}()
 
-	var m runtime.MemStats
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	interval := 10 * time.Second
-	statEvery := time.NewTicker(interval)
+	statInterval := 20 * time.Second
+	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-statEvery.C:
-			d.ReCalcStats(interval)
+			d.ReCalcStats(statInterval)
 
 		case <-logEvery.C:
 			if silent {
@@ -309,14 +307,12 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 				continue
 			}
 
-			runtime.ReadMemStats(&m)
 			if stats.Completed {
 				log.Info("[Snapshots] Seeding",
 					"up", common2.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
 					"connections", stats.ConnectionsTotal,
-					"files", stats.FilesTotal,
-					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					"files", stats.FilesTotal)
 				continue
 			}
 
@@ -326,8 +322,7 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 				"upload", common2.ByteCount(stats.UploadRate)+"/s",
 				"peers", stats.PeersUnique,
 				"connections", stats.ConnectionsTotal,
-				"files", stats.FilesTotal,
-				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				"files", stats.FilesTotal)
 			if stats.PeersUnique == 0 {
 				ips := d.Torrent().BadPeerIPs()
 				if len(ips) > 0 {

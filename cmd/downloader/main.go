@@ -112,10 +112,10 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapshotDir := filepath.Join(datadir, "snapshots")
-	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
-	if !ok {
-		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
+	snapDir := filepath.Join(datadir, "snapshots")
+	torrentLogLevel, err := torrentcfg.Str2LogLevel(torrentVerbosity)
+	if err != nil {
+		return err
 	}
 
 	var downloadRate, uploadRate datasize.ByteSize
@@ -132,7 +132,7 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := torrentcfg.New(snapshotDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	cfg, err := torrentcfg.New(snapDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
@@ -164,16 +164,16 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		snapshotDir := filepath.Join(datadir, "snapshots")
+		snapDir := filepath.Join(datadir, "snapshots")
 		ctx := cmd.Context()
 
 		if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-			return downloader.VerifyDtaFiles(ctx, snapshotDir)
+			return downloader.VerifyDtaFiles(ctx, snapDir)
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
-			//removePieceCompletionStorage(snapshotDir)
-			files, err := downloader.AllTorrentPaths(snapshotDir)
+			//removePieceCompletionStorage(snapDir)
+			files, err := downloader.AllTorrentPaths(snapDir)
 			if err != nil {
 				return err
 			}
@@ -182,13 +182,13 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapshotDir); err != nil {
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapDir); err != nil {
 				return err
 			}
 		}
 
 		res := map[string]string{}
-		files, err := downloader.AllTorrentPaths(snapshotDir)
+		files, err := downloader.AllTorrentPaths(snapDir)
 		if err != nil {
 			return err
 		}
@@ -233,12 +233,12 @@ var printTorrentHashes = &cobra.Command{
 }
 
 //nolint
-func removePieceCompletionStorage(snapshotDir string) {
-	_ = os.RemoveAll(filepath.Join(snapshotDir, "db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.bolt.db"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-shm"))
-	_ = os.RemoveAll(filepath.Join(snapshotDir, ".torrent.db-wal"))
+func removePieceCompletionStorage(snapDir string) {
+	_ = os.RemoveAll(filepath.Join(snapDir, "db"))
+	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db"))
+	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.bolt.db"))
+	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db-shm"))
+	_ = os.RemoveAll(filepath.Join(snapDir, ".torrent.db-wal"))
 }
 
 func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials) (*grpc.Server, error) {

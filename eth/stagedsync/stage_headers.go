@@ -150,6 +150,7 @@ func HeadersPOS(
 	onlyNewRequests := cfg.hd.PosStatus() == headerdownload.Syncing
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(onlyNewRequests)
 
+	cfg.hd.SetPOSSync(true)
 	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
@@ -179,7 +180,7 @@ func HeadersPOS(
 	cfg.hd.ClearPendingPayloadStatus()
 
 	if forkChoiceInsteadOfNewPayload {
-		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter); err != nil {
+		if err := startHandlingForkChoice(forkChoiceMessage, status, requestId, s, u, ctx, tx, cfg, headerInserter, cfg.blockReader); err != nil {
 			return err
 		}
 	} else {
@@ -205,7 +206,7 @@ func safeAndFinalizedBlocksAreCanonical(
 	if err != nil {
 		return false, err
 	}
-	if !safeIsCanonical {
+	if (!safeIsCanonical && forkChoice.SafeBlockHash != common.Hash{}) {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -219,7 +220,7 @@ func safeAndFinalizedBlocksAreCanonical(
 	if err != nil {
 		return false, err
 	}
-	if !finalizedIsCanonical {
+	if (!finalizedIsCanonical && forkChoice.FinalizedBlockHash != common.Hash{}) {
 		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 		if sendErrResponse {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -242,6 +243,7 @@ func startHandlingForkChoice(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
+	headerReader interfaces.HeaderReader,
 ) error {
 	headerHash := forkChoice.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
@@ -307,7 +309,10 @@ func startHandlingForkChoice(
 
 	forkingPoint := uint64(0)
 	if headerNumber > 0 {
-		parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+		parent, err := headerReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+		if err != nil {
+			return err
+		}
 		forkingPoint, err = headerInserter.ForkingPoint(tx, header, parent)
 		if err != nil {
 			if requestStatus == engineapi.New {
@@ -439,7 +444,10 @@ func handleNewPayload(
 		return nil
 	}
 
-	parent := rawdb.ReadHeader(tx, header.ParentHash, headerNumber-1)
+	parent, err := cfg.blockReader.Header(ctx, tx, header.ParentHash, headerNumber-1)
+	if err != nil {
+		return err
+	}
 	if parent == nil {
 		log.Info(fmt.Sprintf("[%s] New payload missing parent", s.LogPrefix()))
 		hashToDownload := header.ParentHash
@@ -702,6 +710,7 @@ func HeadersPOW(
 	var skeletonReqMin, skeletonReqMax, reqMin, reqMax uint64 // min and max block height for skeleton and non-skeleton requests
 	var noProgressCounter int
 	var wasProgress bool
+	var lastSkeletonTime time.Time
 Loop:
 	for !stopped {
 
@@ -757,17 +766,20 @@ Loop:
 		}
 
 		// Send skeleton request if required
-		req = cfg.hd.RequestSkeleton()
-		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
-			if sentToPeer {
-				log.Trace("Sent skeleton request", "height", req.Number)
-				skeletonReqCount++
-				if skeletonReqMin == 0 || req.Number < skeletonReqMin {
-					skeletonReqMin = req.Number
-				}
-				if req.Number+req.Length*req.Skip > skeletonReqMax {
-					skeletonReqMax = req.Number + req.Length*req.Skip
+		if time.Since(lastSkeletonTime) > 1*time.Second {
+			req = cfg.hd.RequestSkeleton()
+			if req != nil {
+				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				if sentToPeer {
+					log.Trace("Sent skeleton request", "height", req.Number)
+					skeletonReqCount++
+					if skeletonReqMin == 0 || req.Number < skeletonReqMin {
+						skeletonReqMin = req.Number
+					}
+					if req.Number+req.Length*req.Skip > skeletonReqMax {
+						skeletonReqMax = req.Number + req.Length*req.Skip
+					}
+					lastSkeletonTime = time.Now()
 				}
 			}
 		}
@@ -809,7 +821,7 @@ Loop:
 				log.Info("Req/resp stats", "req", reqCount, "reqMin", reqMin, "reqMax", reqMax,
 					"skel", skeletonReqCount, "skelMin", skeletonReqMin, "skelMax", skeletonReqMax,
 					"resp", respCount, "respMin", respMin, "respMax", respMax)
-
+				cfg.hd.LogAnchorState()
 				if noProgressCounter >= 5 && wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
 					break Loop
@@ -999,7 +1011,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	speed := float64(now-prev) / float64(logInterval/time.Second)
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block headers", logPrefix),
 		"number", now,
 		"blk/second", speed,
@@ -1091,63 +1103,58 @@ func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg HeadersCfg, initialCycle bool) error {
-	if cfg.snapshots == nil {
+	if cfg.snapshots == nil || !cfg.snapshots.Cfg().Enabled || !initialCycle {
 		return nil
 	}
 
-	if initialCycle {
-		if err := WaitForDownloader(ctx, tx, cfg); err != nil {
+	if err := WaitForDownloader(ctx, cfg); err != nil {
+		return err
+	}
+	if err := cfg.snapshots.Reopen(); err != nil {
+		return fmt.Errorf("ReopenSegments: %w", err)
+	}
+	expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
+	if cfg.snapshots.SegmentsMax() < expect {
+		k, err := rawdb.SecondKey(tx, kv.Headers) // genesis always first
+		if err != nil {
 			return err
 		}
-		if err := cfg.snapshots.Reopen(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
+		var hasInDB uint64 = 1
+		if k != nil {
+			hasInDB = binary.BigEndian.Uint64(k)
+		}
+		if cfg.snapshots.SegmentsMax() < hasInDB {
+			return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
+		} else {
+			log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
+		}
+	}
+
+	var m runtime.MemStats
+	libcommon.ReadMemStats(&m)
+	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+
+	// Create .idx files
+	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+		if !cfg.snapshots.SegmentsReady() {
+			return fmt.Errorf("not all snapshot segments are available")
 		}
 
-		expect := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).ExpectBlocks
-		if cfg.snapshots.SegmentsMax() < expect {
-			c, err := tx.Cursor(kv.Headers)
-			if err != nil {
+		// wait for Downloader service to download all expected snapshots
+		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
+			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
+			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
 				return err
-			}
-			defer c.Close()
-			firstK, _, err := c.First()
-			if err != nil {
-				return err
-			}
-			c.Close()
-			hasInDB := binary.BigEndian.Uint64(firstK)
-			if cfg.snapshots.SegmentsMax() < hasInDB {
-				return fmt.Errorf("not enough snapshots available: snapshots=%d, blockInDB=%d, expect=%d", cfg.snapshots.SegmentsMax(), hasInDB, expect)
-			} else {
-				log.Warn(fmt.Sprintf("not enough snapshots available: %d < %d, but we can re-generate them because DB has historical blocks up to: %d", cfg.snapshots.SegmentsMax(), expect, hasInDB))
 			}
 		}
+
 		if err := cfg.snapshots.Reopen(); err != nil {
 			return fmt.Errorf("ReopenIndices: %w", err)
 		}
-
-		// Create .idx files
-		if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-			if !cfg.snapshots.SegmentsReady() {
-				return fmt.Errorf("not all snapshot segments are available")
-			}
-
-			// wait for Downloader service to download all expected snapshots
-			if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
-				chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-				workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
-				if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-					return err
-				}
-			}
-
-			if err := cfg.snapshots.Reopen(); err != nil {
-				return fmt.Errorf("ReopenIndices: %w", err)
-			}
-		}
-		if cfg.dbEventNotifier != nil {
-			cfg.dbEventNotifier.OnNewSnapshot()
-		}
+	}
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 
 	if s.BlockNumber < cfg.snapshots.BlocksAvailable() { // allow genesis
@@ -1210,7 +1217,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		s.BlockNumber = cfg.snapshots.BlocksAvailable()
 	}
-	if err := cfg.hd.AddHeaderFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
+
+	if err := cfg.hd.AddHeadersFromSnapshot(tx, cfg.snapshots.BlocksAvailable(), cfg.blockReader); err != nil {
 		return err
 	}
 
@@ -1219,11 +1227,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
-	snapshotsCfg := snapshothashes.KnownConfig(cfg.chainConfig.ChainName)
-
+func WaitForDownloader(ctx context.Context, cfg HeadersCfg) error {
 	// send all hashes to the Downloader service
-	preverified := snapshotsCfg.Preverified
+	preverified := snapshothashes.KnownConfig(cfg.chainConfig.ChainName).Preverified
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(preverified))}
 	i := 0
 	for _, p := range preverified {
@@ -1250,6 +1256,11 @@ func WaitForDownloader(ctx context.Context, tx kv.RwTx, cfg HeadersCfg) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
+	// Check once without delay, for faster erigon re-start
+	if stats, err := cfg.snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err == nil && stats.Completed {
+		return nil
+	}
+
 	var m runtime.MemStats
 	// Print download progress until all segments are available
 Loop:
@@ -1267,7 +1278,7 @@ Loop:
 					log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
 					continue
 				}
-				runtime.ReadMemStats(&m)
+				libcommon.ReadMemStats(&m)
 				log.Info("[Snapshots] download",
 					"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, libcommon.ByteCount(stats.BytesCompleted), libcommon.ByteCount(stats.BytesTotal)),
 					"download", libcommon.ByteCount(stats.DownloadRate)+"/s",

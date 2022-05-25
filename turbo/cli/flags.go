@@ -63,8 +63,8 @@ var (
 	r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 	t - prune transaction by it's hash index
 	c - prune call traces (used by trace_filter method)
-	Does delete data older than 90K block (can set another value by '--prune.*.older' flags). 
-	If item is NOT in the list - means NO pruning for this data.s
+	Does delete data older than 90K blocks, --prune=h is shortcut for: --prune.h.older=90_000 
+	If item is NOT in the list - means NO pruning for this data.
 	Example: --prune=hrtc`,
 		Value: "disabled",
 	}
