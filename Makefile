@@ -3,7 +3,7 @@ GOBIN = $(CURDIR)/build/bin
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags --dirty)
+GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
