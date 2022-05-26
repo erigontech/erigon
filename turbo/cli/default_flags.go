@@ -14,8 +14,6 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolDisableFlag,
 	utils.TxPoolLocalsFlag,
 	utils.TxPoolNoLocalsFlag,
-	utils.TxPoolJournalFlag,
-	utils.TxPoolRejournalFlag,
 	utils.TxPoolPriceLimitFlag,
 	utils.TxPoolPriceBumpFlag,
 	utils.TxPoolAccountSlotsFlag,

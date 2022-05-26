@@ -232,7 +232,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.BodyDownloadTimeoutSeconds = 10
 	cfg.DeprecatedTxPool.Disable = !withTxPool
-	cfg.DeprecatedTxPool.Journal = ""
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
