@@ -26,8 +26,6 @@ var (
 		utils.TxPoolDisableFlag,
 		utils.TxPoolLocalsFlag,
 		utils.TxPoolNoLocalsFlag,
-		utils.TxPoolJournalFlag,
-		utils.TxPoolRejournalFlag,
 		utils.TxPoolPriceLimitFlag,
 		utils.TxPoolPriceBumpFlag,
 		utils.TxPoolAccountSlotsFlag,
@@ -83,7 +81,6 @@ var (
 		utils.TxpoolApiAddrFlag,
 		utils.TraceMaxtracesFlag,
 
-		utils.SnapshotKeepBlocksFlag,
 		utils.DbPageSizeFlag,
 		utils.TorrentPortFlag,
 		utils.TorrentUploadRateFlag,

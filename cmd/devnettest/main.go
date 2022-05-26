@@ -1,22 +1,19 @@
 package main
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/ledgerwatch/erigon/cmd/devnettest/commands"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
-	"time"
 )
 
 func main() {
 	erigon.StartProcess()
 
-	/*
-		Execute all eth_methods here
+	time.Sleep(10 * time.Second)
 
-		Start with running get-balance: this is the balance of the account
-		Run send-tx: Send Ether to account provided in code, with tx mining
-		Run get-balance: Check that amount returned from get-balance is updated
-	*/
-	time.Sleep(3 * time.Second)
+	fmt.Printf("SUCCESS => Started!\n\n")
 	err := commands.Execute()
 	if err != nil {
 		panic(err)

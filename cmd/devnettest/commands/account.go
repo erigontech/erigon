@@ -62,7 +62,7 @@ func callGetTransactionCount(addr, blockNum string, checkNonce uint64) {
 	address := common.HexToAddress(addr)
 	nonce, err := requests.GetTransactionCountCmd(reqId, address, blockNum)
 	if err != nil {
-		fmt.Printf("could not get transaction count: %v\n", err)
+		fmt.Printf("FAILURE => %v\n", err)
 		return
 	}
 
