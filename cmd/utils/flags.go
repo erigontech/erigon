@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -50,7 +51,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/metrics"
-	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
@@ -322,22 +322,22 @@ var (
 	HTTPListenAddrFlag = cli.StringFlag{
 		Name:  "http.addr",
 		Usage: "HTTP-RPC server listening interface",
-		Value: node.DefaultHTTPHost,
+		Value: nodecfg.DefaultHTTPHost,
 	}
 	HTTPPortFlag = cli.IntFlag{
 		Name:  "http.port",
 		Usage: "HTTP-RPC server listening port",
-		Value: node.DefaultHTTPPort,
+		Value: nodecfg.DefaultHTTPPort,
 	}
 	EngineAddr = cli.StringFlag{
 		Name:  "engine.addr",
 		Usage: "HTTP-RPC server listening interface for engineAPI",
-		Value: node.DefaultHTTPHost,
+		Value: nodecfg.DefaultHTTPHost,
 	}
 	EnginePort = cli.UintFlag{
 		Name:  "engine.port",
 		Usage: "HTTP-RPC server listening port for the engineAPI",
-		Value: node.DefaultEngineHTTPPort,
+		Value: nodecfg.DefaultEngineHTTPPort,
 	}
 
 	JWTSecretPath = cli.StringFlag{
@@ -362,7 +362,7 @@ var (
 	HTTPVirtualHostsFlag = cli.StringFlag{
 		Name:  "http.vhosts",
 		Usage: "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.",
-		Value: strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","),
+		Value: strings.Join(nodecfg.DefaultConfig.HTTPVirtualHosts, ","),
 	}
 	HTTPApiFlag = cli.StringFlag{
 		Name:  "http.api",
@@ -446,12 +446,12 @@ var (
 	WSListenAddrFlag = cli.StringFlag{
 		Name:  "ws.addr",
 		Usage: "WS-RPC server listening interface",
-		Value: node.DefaultWSHost,
+		Value: nodecfg.DefaultWSHost,
 	}
 	WSPortFlag = cli.IntFlag{
 		Name:  "ws.port",
 		Usage: "WS-RPC server listening port",
-		Value: node.DefaultWSPort,
+		Value: nodecfg.DefaultWSPort,
 	}
 	WSApiFlag = cli.StringFlag{
 		Name:  "ws.api",
@@ -490,12 +490,12 @@ var (
 	MaxPeersFlag = cli.IntFlag{
 		Name:  "maxpeers",
 		Usage: "Maximum number of network peers (network disabled if set to 0)",
-		Value: node.DefaultConfig.P2P.MaxPeers,
+		Value: nodecfg.DefaultConfig.P2P.MaxPeers,
 	}
 	MaxPendingPeersFlag = cli.IntFlag{
 		Name:  "maxpendpeers",
 		Usage: "Maximum number of TCP connections pending to become connected peers",
-		Value: node.DefaultConfig.P2P.MaxPendingPeers,
+		Value: nodecfg.DefaultConfig.P2P.MaxPendingPeers,
 	}
 	ListenPortFlag = cli.IntFlag{
 		Name:  "port",
@@ -634,13 +634,13 @@ var (
 		Value: "",
 	}
 
-	SnapshotKeepBlocksFlag = cli.BoolFlag{
+	SnapKeepBlocksFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
 	}
-	SnapshotProduceFlag = cli.BoolFlag{
+	SnapStopFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapStop,
-		Usage: "Produce new snapshots",
+		Usage: "Stop producing new snapshots",
 	}
 	TorrentVerbosityFlag = cli.StringFlag{
 		Name:  "torrent.verbosity",
@@ -719,12 +719,12 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, datadir string) {
 }
 
 // setNodeUserIdent creates the user identifier from CLI flags.
-func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
+func setNodeUserIdent(ctx *cli.Context, cfg *nodecfg.Config) {
 	if identity := ctx.GlobalString(IdentityFlag.Name); len(identity) > 0 {
 		cfg.UserIdent = identity
 	}
 }
-func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *node.Config) {
+func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	if identity := f.String(IdentityFlag.Name, IdentityFlag.Value, IdentityFlag.Usage); identity != nil && len(*identity) > 0 {
 		cfg.UserIdent = *identity
 	}
@@ -1021,7 +1021,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 }
 
 // SetNodeConfig applies node-related command line flags to the config.
-func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
+func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setDataDir(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
@@ -1029,7 +1029,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
 }
 
-func SetNodeConfigCobra(cmd *cobra.Command, cfg *node.Config) {
+func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	flags := cmd.Flags()
 	//SetP2PConfig(ctx, &cfg.P2P)
 	setNodeUserIdentCobra(flags, cfg)
@@ -1067,7 +1067,7 @@ func DataDirForNetwork(datadir string, network string) string {
 	return datadir
 }
 
-func setDataDir(ctx *cli.Context, cfg *node.Config) {
+func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.GlobalIsSet(DataDirFlag.Name) {
 		cfg.DataDir = ctx.GlobalString(DataDirFlag.Name)
 	} else {
@@ -1090,7 +1090,7 @@ func isPowerOfTwo(n uint64) bool {
 	return n&(n-1) == 0
 }
 
-func setDataDirCobra(f *pflag.FlagSet, cfg *node.Config) {
+func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	dirname, err := f.GetString(DataDirFlag.Name)
 	if err != nil {
 		panic(err)
@@ -1379,11 +1379,11 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 }
 
 // SetEthConfig applies eth-related command line flags to the config.
-func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Config) {
+func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
 	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
 	cfg.SnapDir = filepath.Join(nodeConfig.DataDir, "snapshots")
-	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
-	cfg.Snapshot.Produce = ctx.GlobalBool(SnapshotProduceFlag.Name)
+	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
+	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.GlobalString(TorrentUploadRateFlag.Name)

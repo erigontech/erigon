@@ -71,8 +71,8 @@ var DefaultFlags = []cli.Flag{
 	utils.TxpoolApiAddrFlag,
 	utils.TraceMaxtracesFlag,
 
-	utils.SnapshotKeepBlocksFlag,
-	utils.SnapshotProduceFlag,
+	utils.SnapKeepBlocksFlag,
+	utils.SnapStopFlag,
 	utils.DbPageSizeFlag,
 	utils.TorrentPortFlag,
 	utils.TorrentMaxPeersFlag,

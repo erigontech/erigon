@@ -14,13 +14,15 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package node
+package nodecfg
 
 import (
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	node2 "github.com/ledgerwatch/erigon/node"
 )
 
 // Tests that datadirs can be successfully created, be them manually configured
@@ -31,7 +33,7 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Create a temporary data dir and check that it can be used by a node
 	dir := t.TempDir()
-	node, err := New(&Config{DataDir: dir})
+	node, err := node2.New(&Config{DataDir: dir})
 	if err != nil {
 		t.Fatalf("failed to create stack with existing datadir: %v", err)
 	}
@@ -40,7 +42,7 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Generate a long non-existing datadir path and check that it gets created by a node
 	dir = filepath.Join(dir, "a", "b", "c", "d", "e", "f")
-	node, err = New(&Config{DataDir: dir})
+	node, err = node2.New(&Config{DataDir: dir})
 	if err != nil {
 		t.Fatalf("failed to create stack with creatable datadir: %v", err)
 	}
@@ -58,7 +60,7 @@ func TestDataDirCreation(t *testing.T) {
 	defer os.Remove(file.Name())
 
 	dir = filepath.Join(file.Name(), "invalid/path")
-	node, err = New(&Config{DataDir: dir})
+	node, err = node2.New(&Config{DataDir: dir})
 	if err == nil {
 		t.Fatalf("protocol stack created with an invalid datadir")
 		if err := node.Close(); err != nil {

@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -171,7 +172,7 @@ func (api *privateAdminAPI) StartRPC(host *string, port *int, cors *string, apis
 
 	// Determine host and port.
 	if host == nil {
-		h := DefaultHTTPHost
+		h := nodecfg.DefaultHTTPHost
 		if api.node.config.HTTPHost != "" {
 			h = api.node.config.HTTPHost
 		}
@@ -231,7 +232,7 @@ func (api *privateAdminAPI) StartWS(host *string, port *int, allowedOrigins *str
 
 	// Determine host and port.
 	if host == nil {
-		h := DefaultWSHost
+		h := nodecfg.DefaultWSHost
 		if api.node.config.WSHost != "" {
 			h = api.node.config.WSHost
 		}
