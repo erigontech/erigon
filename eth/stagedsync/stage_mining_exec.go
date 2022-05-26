@@ -5,9 +5,9 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -29,7 +29,7 @@ type MiningExecCfg struct {
 	notifier    ChainEventNotifier
 	chainConfig params.ChainConfig
 	engine      consensus.Engine
-	blockReader interfaces.FullBlockReader
+	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
 	tmpdir      string
 }

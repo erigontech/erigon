@@ -23,10 +23,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -222,7 +222,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		}
 	}()
 
-	var blockReader interfaces.FullBlockReader
+	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	syncMode, err := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
 	if err != nil {
