@@ -70,11 +70,11 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (c
 	go func() {
 		for {
 			select {
-			case log, ok := <-logs:
+			case lg, ok := <-logs:
 				if !ok {
 					return
 				}
-				api.filters.AddLogs(id, log)
+				api.filters.AddLogs(id, lg)
 			default:
 			}
 		}

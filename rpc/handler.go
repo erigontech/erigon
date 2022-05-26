@@ -64,7 +64,8 @@ type handler struct {
 	log            log.Logger
 	allowSubscribe bool
 
-	allowList AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
+	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
+	forbiddenList ForbiddenList
 
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
@@ -78,6 +79,7 @@ type callProc struct {
 
 func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *serviceRegistry, allowList AllowList, maxBatchConcurrency uint) *handler {
 	rootCtx, cancelRoot := context.WithCancel(connCtx)
+	forbiddenList := newForbiddenList()
 	h := &handler{
 		reg:            reg,
 		idgen:          idgen,
@@ -90,9 +92,11 @@ func newHandler(connCtx context.Context, conn jsonWriter, idgen func() ID, reg *
 		serverSubs:     make(map[ID]*Subscription),
 		log:            log.Root(),
 		allowList:      allowList,
+		forbiddenList:  forbiddenList,
 
 		maxBatchConcurrency: maxBatchConcurrency,
 	}
+
 	if conn.remoteAddr() != "" {
 		h.log = h.log.New("conn", conn.remoteAddr())
 	}
@@ -360,9 +364,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *json
 }
 
 func (h *handler) isMethodAllowedByGranularControl(method string) bool {
+	_, isForbidden := h.forbiddenList[method]
 	if len(h.allowList) == 0 {
+		if isForbidden {
+			return false
+		}
 		return true
 	}
+
 	_, ok := h.allowList[method]
 	return ok
 }
@@ -510,4 +519,14 @@ func (id idForLog) String() string {
 		return s
 	}
 	return string(id.RawMessage)
+}
+
+func newForbiddenList() ForbiddenList {
+	return ForbiddenList{
+		"eth_newFilter":                   struct{}{},
+		"eth_newPendingTransactionFilter": struct{}{},
+		"eth_newBlockFilter":              struct{}{},
+		"eth_getFilterChanges":            struct{}{},
+		"eth_uninstallFilter":             struct{}{},
+	}
 }

@@ -33,3 +33,5 @@ func (a *AllowList) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(keys)
 }
+
+type ForbiddenList map[string]struct{}
