@@ -54,13 +54,12 @@ func TestCreate2Revive(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},
@@ -247,13 +246,12 @@ func TestCreate2Polymorth(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},
@@ -494,13 +492,12 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},
@@ -644,13 +641,12 @@ func TestReorgOverStateChange(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -796,13 +792,12 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		funds        = big.NewInt(1000000000)
 		gspec        = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -929,15 +924,14 @@ func TestEip2200Gas(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				PetersburgBlock:     big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-				IstanbulBlock:       big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				PetersburgBlock:       big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
+				IstanbulBlock:         big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -1026,11 +1020,10 @@ func TestWrongIncarnation(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP150Block:    new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},
@@ -1140,11 +1133,10 @@ func TestWrongIncarnation2(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP150Block:    new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},
@@ -1600,13 +1592,12 @@ func TestTxLookupUnwind(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: core.GenesisAccount{Balance: funds},

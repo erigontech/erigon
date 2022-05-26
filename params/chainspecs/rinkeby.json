@@ -7,7 +7,6 @@
   "eip150Block": 2,
   "eip150Hash": "0x9b095b36c15eaf13044373aef8ee0bd3a382a5abb92e402afa44b8249c3a90e9",
   "eip155Block": 3,
-  "eip158Block": 3,
   "byzantiumBlock": 1035301,
   "constantinopleBlock": 3660663,
   "petersburgBlock": 4321234,
