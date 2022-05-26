@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
