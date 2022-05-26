@@ -355,7 +355,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		return 0, ErrGasUintOverflow
 	}
 
-	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -380,7 +380,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, 
 	if gas, overflow = math.SafeAdd(gas, memoryGas); overflow {
 		return 0, ErrGasUintOverflow
 	}
-	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -395,7 +395,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	if err != nil {
 		return 0, err
 	}
-	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -411,7 +411,7 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 	if err != nil {
 		return 0, err
 	}
-	evm.callGasTemp, err = callGas(evm.ChainRules().IsEIP150, contract.Gas, gas, stack.Back(0))
+	evm.callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	if err != nil {
 		return 0, err
 	}
@@ -424,8 +424,8 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory
 
 func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	var gas uint64
-	// EIP150 homestead gas reprice fork:
-	if evm.ChainRules().IsEIP150 {
+	// TangerineWhistle (EIP150) gas reprice fork:
+	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
 		var address = common.Address(stack.Back(0).Bytes20())
 

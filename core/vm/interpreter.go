@@ -102,7 +102,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &byzantiumInstructionSet
 	case evm.ChainRules().IsEIP158:
 		jt = &spuriousDragonInstructionSet
-	case evm.ChainRules().IsEIP150:
+	case evm.ChainRules().IsTangerineWhistle:
 		jt = &tangerineWhistleInstructionSet
 	case evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet
@@ -143,7 +143,7 @@ func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
 		jt = &byzantiumInstructionSet
 	case vm.evm.ChainRules().IsEIP158:
 		jt = &spuriousDragonInstructionSet
-	case vm.evm.ChainRules().IsEIP150:
+	case vm.evm.ChainRules().IsTangerineWhistle:
 		jt = &tangerineWhistleInstructionSet
 	case vm.evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet

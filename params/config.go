@@ -115,49 +115,49 @@ var (
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Ethash consensus.
 	AllEthashProtocolChanges = &ChainConfig{
-		ChainID:             big.NewInt(1337),
-		Consensus:           EtHashConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
-		EIP150Block:         big.NewInt(0),
-		EIP150Hash:          common.Hash{},
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         nil,
-		ArrowGlacierBlock:   nil,
-		Ethash:              new(EthashConfig),
-		Clique:              nil,
+		ChainID:               big.NewInt(1337),
+		Consensus:             EtHashConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		DAOForkBlock:          nil,
+		DAOForkSupport:        false,
+		TangerineWhistleBlock: big.NewInt(0),
+		TangerineWhistleHash:  common.Hash{},
+		EIP155Block:           big.NewInt(0),
+		EIP158Block:           big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           nil,
+		ArrowGlacierBlock:     nil,
+		Ethash:                new(EthashConfig),
+		Clique:                nil,
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
 	AllCliqueProtocolChanges = &ChainConfig{
-		ChainID:             big.NewInt(1337),
-		Consensus:           CliqueConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
-		EIP150Block:         big.NewInt(0),
-		EIP150Hash:          common.Hash{},
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		ArrowGlacierBlock:   nil,
-		Ethash:              nil,
-		Clique:              &CliqueConfig{Period: 0, Epoch: 30000},
+		ChainID:               big.NewInt(1337),
+		Consensus:             CliqueConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		DAOForkBlock:          nil,
+		DAOForkSupport:        false,
+		TangerineWhistleBlock: big.NewInt(0),
+		TangerineWhistleHash:  common.Hash{},
+		EIP155Block:           big.NewInt(0),
+		EIP158Block:           big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           big.NewInt(0),
+		ArrowGlacierBlock:     nil,
+		Ethash:                nil,
+		Clique:                &CliqueConfig{Period: 0, Epoch: 30000},
 	}
 
 	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")
@@ -167,46 +167,46 @@ var (
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
 	TestChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(1),
-		Consensus:           EtHashConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
-		EIP150Block:         big.NewInt(0),
-		EIP150Hash:          common.Hash{},
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         nil,
-		ArrowGlacierBlock:   nil,
-		Ethash:              new(EthashConfig),
-		Clique:              nil,
+		ChainID:               big.NewInt(1),
+		Consensus:             EtHashConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		DAOForkBlock:          nil,
+		DAOForkSupport:        false,
+		TangerineWhistleBlock: big.NewInt(0),
+		TangerineWhistleHash:  common.Hash{},
+		EIP155Block:           big.NewInt(0),
+		EIP158Block:           big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           nil,
+		ArrowGlacierBlock:     nil,
+		Ethash:                new(EthashConfig),
+		Clique:                nil,
 	}
 
 	TestChainAuraConfig = &ChainConfig{
-		ChainID:             big.NewInt(1),
-		Consensus:           AuRaConsensus,
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      false,
-		EIP150Block:         big.NewInt(0),
-		EIP150Hash:          common.Hash{},
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    big.NewInt(0),
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         nil,
-		ArrowGlacierBlock:   nil,
-		Aura:                &AuRaConfig{},
+		ChainID:               big.NewInt(1),
+		Consensus:             AuRaConsensus,
+		HomesteadBlock:        big.NewInt(0),
+		DAOForkBlock:          nil,
+		DAOForkSupport:        false,
+		TangerineWhistleBlock: big.NewInt(0),
+		TangerineWhistleHash:  common.Hash{},
+		EIP155Block:           big.NewInt(0),
+		EIP158Block:           big.NewInt(0),
+		ByzantiumBlock:        big.NewInt(0),
+		ConstantinopleBlock:   big.NewInt(0),
+		PetersburgBlock:       big.NewInt(0),
+		IstanbulBlock:         big.NewInt(0),
+		MuirGlacierBlock:      big.NewInt(0),
+		BerlinBlock:           big.NewInt(0),
+		LondonBlock:           nil,
+		ArrowGlacierBlock:     nil,
+		Aura:                  &AuRaConfig{},
 	}
 
 	TestRules = TestChainConfig.Rules(0)
@@ -228,9 +228,9 @@ type ChainConfig struct {
 	DAOForkBlock   *big.Int `json:"daoForkBlock,omitempty"`   // TheDAO hard-fork switch block (nil = no fork)
 	DAOForkSupport bool     `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
 
-	// EIP150 implements the Gas price changes (https://github.com/ethereum/EIPs/issues/150)
-	EIP150Block *big.Int    `json:"eip150Block,omitempty"` // EIP150 HF block (nil = no fork)
-	EIP150Hash  common.Hash `json:"eip150Hash,omitempty"`  // EIP150 HF hash (needed for header only clients as only gas pricing changed)
+	// Tangerine Whistle (EIP150) implements the Gas price changes (https://github.com/ethereum/EIPs/issues/150)
+	TangerineWhistleBlock *big.Int    `json:"eip150Block,omitempty"` // EIP150 HF block (nil = no fork)
+	TangerineWhistleHash  common.Hash `json:"eip150Hash,omitempty"`  // EIP150 HF hash (needed for header only clients as only gas pricing changed)
 
 	EIP155Block *big.Int `json:"eip155Block,omitempty"` // EIP155 HF block
 	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
@@ -393,12 +393,12 @@ func (c *ChainConfig) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAOSupport: %v EIP150: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAO Support: %v Tangerine Whistle: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
 		c.DAOForkSupport,
-		c.EIP150Block,
+		c.TangerineWhistleBlock,
 		c.EIP155Block,
 		c.EIP158Block,
 		c.ByzantiumBlock,
@@ -452,9 +452,9 @@ func (c *ChainConfig) IsDAOFork(num uint64) bool {
 	return isForked(c.DAOForkBlock, num)
 }
 
-// IsEIP150 returns whether num is either equal to the EIP150 fork block or greater.
-func (c *ChainConfig) IsEIP150(num uint64) bool {
-	return isForked(c.EIP150Block, num)
+// IsTangerineWhistle returns whether num is either equal to the Tangerine Whistle (EIP150) fork block or greater.
+func (c *ChainConfig) IsTangerineWhistle(num uint64) bool {
+	return isForked(c.TangerineWhistleBlock, num)
 }
 
 // IsEIP155 returns whether num is either equal to the EIP155 fork block or greater.
@@ -582,7 +582,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 	for _, cur := range []fork{
 		{name: "homesteadBlock", block: c.HomesteadBlock},
 		{name: "daoForkBlock", block: c.DAOForkBlock, optional: true},
-		{name: "eip150Block", block: c.EIP150Block},
+		{name: "eip150Block", block: c.TangerineWhistleBlock},
 		{name: "eip155Block", block: c.EIP155Block},
 		{name: "eip158Block", block: c.EIP158Block},
 		{name: "byzantiumBlock", block: c.ByzantiumBlock},
@@ -625,8 +625,8 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if c.IsDAOFork(head) && c.DAOForkSupport != newcfg.DAOForkSupport {
 		return newCompatError("DAO fork support flag", c.DAOForkBlock, newcfg.DAOForkBlock)
 	}
-	if isForkIncompatible(c.EIP150Block, newcfg.EIP150Block, head) {
-		return newCompatError("EIP150 fork block", c.EIP150Block, newcfg.EIP150Block)
+	if isForkIncompatible(c.TangerineWhistleBlock, newcfg.TangerineWhistleBlock, head) {
+		return newCompatError("Tangerine Whistle fork block", c.TangerineWhistleBlock, newcfg.TangerineWhistleBlock)
 	}
 	if isForkIncompatible(c.EIP155Block, newcfg.EIP155Block, head) {
 		return newCompatError("EIP155 fork block", c.EIP155Block, newcfg.EIP155Block)
@@ -730,7 +730,7 @@ func (err *ConfigCompatError) Error() string {
 // phases.
 type Rules struct {
 	ChainID                                                 *big.Int
-	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
+	IsHomestead, IsTangerineWhistle, IsEIP155, IsEIP158     bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsParlia                            bool
 }
@@ -742,18 +742,18 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		chainID = new(big.Int)
 	}
 	return Rules{
-		ChainID:          new(big.Int).Set(chainID),
-		IsHomestead:      c.IsHomestead(num),
-		IsEIP150:         c.IsEIP150(num),
-		IsEIP155:         c.IsEIP155(num),
-		IsEIP158:         c.IsEIP158(num),
-		IsByzantium:      c.IsByzantium(num),
-		IsConstantinople: c.IsConstantinople(num),
-		IsPetersburg:     c.IsPetersburg(num),
-		IsIstanbul:       c.IsIstanbul(num),
-		IsBerlin:         c.IsBerlin(num),
-		IsLondon:         c.IsLondon(num),
-		IsParlia:         c.Parlia != nil,
+		ChainID:            new(big.Int).Set(chainID),
+		IsHomestead:        c.IsHomestead(num),
+		IsTangerineWhistle: c.IsTangerineWhistle(num),
+		IsEIP155:           c.IsEIP155(num),
+		IsEIP158:           c.IsEIP158(num),
+		IsByzantium:        c.IsByzantium(num),
+		IsConstantinople:   c.IsConstantinople(num),
+		IsPetersburg:       c.IsPetersburg(num),
+		IsIstanbul:         c.IsIstanbul(num),
+		IsBerlin:           c.IsBerlin(num),
+		IsLondon:           c.IsLondon(num),
+		IsParlia:           c.Parlia != nil,
 	}
 }
 

@@ -57,12 +57,12 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		ctx           = context.Background()
 		configNoFork  = &params.ChainConfig{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 		configProFork = &params.ChainConfig{
-			ChainID:        big.NewInt(1),
-			HomesteadBlock: big.NewInt(1),
-			EIP150Block:    big.NewInt(2),
-			EIP155Block:    big.NewInt(2),
-			EIP158Block:    big.NewInt(2),
-			ByzantiumBlock: big.NewInt(3),
+			ChainID:               big.NewInt(1),
+			HomesteadBlock:        big.NewInt(1),
+			TangerineWhistleBlock: big.NewInt(2),
+			EIP155Block:           big.NewInt(2),
+			EIP158Block:           big.NewInt(2),
+			ByzantiumBlock:        big.NewInt(3),
 		}
 		dbNoFork  = memdb.NewTestDB(t)
 		dbProFork = memdb.NewTestDB(t)
