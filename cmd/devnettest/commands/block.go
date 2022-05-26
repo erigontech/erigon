@@ -3,9 +3,11 @@ package commands
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
+	"time"
 )
 
 const (
@@ -88,6 +90,8 @@ func callContractTx() {
 		return
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
+
+	time.Sleep(erigon.DevPeriod * time.Second)
 
 	if err := services.EmitEventAndGetLogs(reqId, subscriptionContract, transactOpts, address); err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)

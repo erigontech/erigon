@@ -160,6 +160,7 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
+	// TODO: Mining does not happen because node is stuck in StageSync
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)
@@ -168,6 +169,8 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
+
+	//keepReads()
 
 	return nil
 }
@@ -190,5 +193,26 @@ func ClearDevDB() {
 	if err != nil {
 		fmt.Println("Error occurred clearing Dev DB")
 		panic("could not clear dev DB")
+	}
+}
+
+func keepReads() {
+	var count int
+
+ForLoop:
+	for {
+		select {
+		case v := <-ch:
+			count++
+			_map := v.(map[string]interface{})
+			for k, val := range _map {
+				fmt.Printf("%s: %+v, ", k, val)
+			}
+			fmt.Println()
+			fmt.Println()
+			if count == numberOfIterations {
+				break ForLoop
+			}
+		}
 	}
 }

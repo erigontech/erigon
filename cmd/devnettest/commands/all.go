@@ -42,7 +42,7 @@ var allCmd = &cobra.Command{
 		fmt.Println()
 
 		// Create a contract transaction signed by the dev address and emit a log for it
-		go callContractTx()
+		callContractTx()
 		time.Sleep(erigon.DevPeriod * 2 * time.Second)
 		fmt.Println()
 
