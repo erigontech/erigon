@@ -376,18 +376,20 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 
 	// With snapsync - can prune old data only after snapshot for this data created: CanDeleteTo()
 	if cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled {
-		if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
-			canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
-			if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
-				return nil
+		if cfg.blockRetire.Snapshots().Cfg().Produce {
+			if !cfg.blockRetire.Snapshots().Cfg().KeepBlocks {
+				canDeleteTo := snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.blockRetire.Snapshots())
+				if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
+					return nil
+				}
+				if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 100); err != nil {
+					return err
+				}
 			}
-			if err = PruneTable(tx, kv.Senders, canDeleteTo, ctx, 100); err != nil {
-				return err
-			}
-		}
 
-		if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
-			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
+			if err := retireBlocksInSingleBackgroundThread(s, cfg, ctx); err != nil {
+				return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
+			}
 		}
 	} else if cfg.prune.TxIndex.Enabled() {
 		if err = PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {

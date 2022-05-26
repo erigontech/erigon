@@ -2,10 +2,8 @@
 package node
 
 import (
-	"path/filepath"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -53,7 +51,7 @@ type Params struct {
 	CustomBuckets kv.TableCfg
 }
 
-func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
+func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	// If we're running a known preset, log it for convenience.
 	chain := ctx.GlobalString(utils.ChainFlag.Name)
 	switch chain {
@@ -88,10 +86,11 @@ func NewNodConfigUrfave(ctx *cli.Context) *node.Config {
 	erigoncli.ApplyFlagsForNodeConfig(ctx, nodeConfig)
 	return nodeConfig
 }
-func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *node.Config) *ethconfig.Config {
+func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig.Config {
 	ethConfig := &ethconfig.Defaults
 	utils.SetEthConfig(ctx, nodeConfig, ethConfig)
 	erigoncli.ApplyFlagsForEthConfig(ctx, ethConfig)
+
 	return ethConfig
 }
 
@@ -100,7 +99,7 @@ func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *node.Config) *ethconfig.Co
 // * sync - `stagedsync.StagedSync`, an instance of staged sync, setup just as needed.
 // * optionalParams - additional parameters for running a node.
 func New(
-	nodeConfig *node.Config,
+	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
 	logger log.Logger,
 ) (*ErigonNode, error) {
@@ -115,14 +114,11 @@ func New(
 
 // RegisterEthService adds an Ethereum client to the stack.
 func RegisterEthService(stack *node.Node, cfg *ethconfig.Config, logger log.Logger) (*eth.Ethereum, error) {
-	txpoolCfg := core.DefaultTxPool2Config(cfg.TxPool)
-	txpoolCfg.DBDir = filepath.Join(stack.Config().DataDir, "txpool")
-
-	return eth.New(stack, cfg, txpoolCfg, logger)
+	return eth.New(stack, cfg, logger)
 }
 
-func NewNodeConfig() *node.Config {
-	nodeConfig := node.DefaultConfig
+func NewNodeConfig() *nodecfg.Config {
+	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit, "")
@@ -138,7 +134,7 @@ func MakeConfigNodeDefault() *node.Node {
 	return makeConfigNode(NewNodeConfig())
 }
 
-func makeConfigNode(config *node.Config) *node.Node {
+func makeConfigNode(config *nodecfg.Config) *node.Node {
 	stack, err := node.New(config)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)

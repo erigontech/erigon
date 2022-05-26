@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -62,15 +63,15 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
-	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.PersistentFlags().IntVar(&cfg.EnginePort, "engine.port", node.DefaultEngineHTTPPort, "HTTP-RPC server listening port for the engineAPI")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", nodecfg.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.PersistentFlags().IntVar(&cfg.EnginePort, "engine.port", nodecfg.DefaultEngineHTTPPort, "HTTP-RPC server listening port for the engineAPI")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon", "engine"}, "API's offered over the HTTP-RPC interface: eth,engine,erigon,web3,net,debug,trace,txpool,db,starknet. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50000000, "Sets a cap on gas that can be used in eth_call/estimateGas")
@@ -84,11 +85,10 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
 	rootCmd.PersistentFlags().StringVar(&cfg.SyncModeCli, "syncmode", "", utils.SyncModeFlag.Usage)
-	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, ethconfig.FlagSnapshot, false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
-	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
-	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
+	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
 	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, utils.JWTSecretPath.Name, utils.JWTSecretPath.Value, "Token to ensure safe connection between CL and EL")
@@ -304,7 +304,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if err != nil {
 				return err
 			}
-			cfg.Snapshot.Enabled, err = snap.Enabled(tx)
+			cfg.Snap.Enabled, err = snap.Enabled(tx)
 			if err != nil {
 				return err
 			}
@@ -315,12 +315,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
-
-		if cfg.Snapshot.Enabled {
-			cfg.SyncMode = ethconfig.SnapSync
-		} else {
-			cfg.SyncMode = ethconfig.FullSync
-		}
+		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.SyncMode == ethconfig.SnapSync
 
 		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
 		if cc.TerminalTotalDifficulty != nil {
@@ -348,8 +343,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
-		if cfg.Snapshot.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
+		if cfg.Snap.Enabled {
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, filepath.Join(cfg.DataDir, "snapshots"))
 			if err := allSnapshots.Reopen(); err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
 			}
