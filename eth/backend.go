@@ -342,7 +342,18 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.sentriesClient, err = sentry.NewMultiClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.Sync, blockReader)
+	backend.sentriesClient, err = sentry.NewMultiClient(
+		chainKv,
+		stack.Config().NodeName(),
+		chainConfig,
+		genesis.Hash(),
+		backend.engine,
+		backend.config.NetworkID,
+		sentries,
+		config.Sync,
+		blockReader,
+		stack.Config().SentryLogPeerInfo,
+	)
 	if err != nil {
 		return nil, err
 	}

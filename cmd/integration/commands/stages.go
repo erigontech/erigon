@@ -1203,7 +1203,18 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	}
 
 	br := getBlockReader(chainConfig, db)
-	sentryControlServer, err := sentry.NewMultiClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, ethconfig.Defaults.Sync, br)
+	sentryControlServer, err := sentry.NewMultiClient(
+		db,
+		"",
+		chainConfig,
+		genesisBlock.Hash(),
+		engine,
+		1,
+		nil,
+		ethconfig.Defaults.Sync,
+		br,
+		false,
+	)
 	if err != nil {
 		panic(err)
 	}
