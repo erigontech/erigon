@@ -143,7 +143,7 @@ type Ethereum struct {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, logger log.Logger) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -218,10 +218,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
-
-	if config.TxPool.Journal != "" {
-		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
-	}
 
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
@@ -353,7 +349,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 	config.BodyDownloadTimeoutSeconds = 30
 
 	var miningRPC txpool_proto.MiningServer
-	if config.TxPool.Disable {
+	if config.DeprecatedTxPool.Disable {
 		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
 	} else {
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
@@ -363,7 +359,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		backend.newTxs2 = make(chan types2.Hashes, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, txpoolCfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
+			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
 		)
 		if err != nil {
 			return nil, err
@@ -445,7 +441,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		}
 	}
 
-	if !config.TxPool.Disable {
+	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()
 		backend.txPool2Fetch.ConnectSentries()
 		var newTxsBroadcaster *txpool2.NewSlotsStreams
@@ -590,7 +586,7 @@ func (s *Ethereum) isLocalBlock(block *types.Block) bool { //nolint
 	s.lock.RLock()
 	etherbase := s.etherbase
 	s.lock.RUnlock()
-	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.TxPool.Locals, block.Header())
+	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.DeprecatedTxPool.Locals, block.Header())
 }
 
 // shouldPreserve checks whether we should preserve the given block

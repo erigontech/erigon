@@ -231,9 +231,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.BodyDownloadTimeoutSeconds = 10
-	cfg.TxPool.Disable = !withTxPool
-	cfg.TxPool.Journal = ""
-	cfg.TxPool.StartOnInit = true
+	cfg.DeprecatedTxPool.Disable = !withTxPool
+	cfg.DeprecatedTxPool.Journal = ""
+	cfg.DeprecatedTxPool.StartOnInit = true
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
@@ -241,7 +241,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
-	if !cfg.TxPool.Disable {
+	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpool.DefaultConfig
 		newTxs := make(chan types2.Hashes, 1024)
 		if t != nil {

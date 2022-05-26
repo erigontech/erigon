@@ -176,17 +176,17 @@ var (
 	TxPoolJournalFlag = cli.StringFlag{
 		Name:  "txpool.journal",
 		Usage: "Disk journal for local transaction to survive node restarts",
-		Value: core.DefaultTxPoolConfig.Journal,
+		Value: core.DeprecatedDefaultTxPoolConfig.Journal,
 	}
 	TxPoolRejournalFlag = cli.DurationFlag{
 		Name:  "txpool.rejournal",
 		Usage: "Time interval to regenerate the local transaction journal",
-		Value: core.DefaultTxPoolConfig.Rejournal,
+		Value: core.DeprecatedDefaultTxPoolConfig.Rejournal,
 	}
 	TxPoolPriceLimitFlag = cli.Uint64Flag{
 		Name:  "txpool.pricelimit",
 		Usage: "Minimum gas price (fee cap) limit to enforce for acceptance into the pool",
-		Value: ethconfig.Defaults.TxPool.PriceLimit,
+		Value: ethconfig.Defaults.DeprecatedTxPool.PriceLimit,
 	}
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
@@ -196,32 +196,32 @@ var (
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
 		Usage: "Minimum number of executable transaction slots guaranteed per account",
-		Value: ethconfig.Defaults.TxPool.AccountSlots,
+		Value: ethconfig.Defaults.DeprecatedTxPool.AccountSlots,
 	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.TxPool.GlobalSlots,
+		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalSlots,
 	}
 	TxPoolGlobalBaseFeeSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalbasefeeslots",
 		Usage: "Maximum number of non-executable transactions where only not enough baseFee",
-		Value: ethconfig.Defaults.TxPool.GlobalQueue,
+		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
 	}
 	TxPoolAccountQueueFlag = cli.Uint64Flag{
 		Name:  "txpool.accountqueue",
 		Usage: "Maximum number of non-executable transaction slots permitted per account",
-		Value: ethconfig.Defaults.TxPool.AccountQueue,
+		Value: ethconfig.Defaults.DeprecatedTxPool.AccountQueue,
 	}
 	TxPoolGlobalQueueFlag = cli.Uint64Flag{
 		Name:  "txpool.globalqueue",
 		Usage: "Maximum number of non-executable transaction slots for all accounts",
-		Value: ethconfig.Defaults.TxPool.GlobalQueue,
+		Value: ethconfig.Defaults.DeprecatedTxPool.GlobalQueue,
 	}
 	TxPoolLifetimeFlag = cli.DurationFlag{
 		Name:  "txpool.lifetime",
 		Usage: "Maximum amount of time non-executable transaction are queued",
-		Value: ethconfig.Defaults.TxPool.Lifetime,
+		Value: ethconfig.Defaults.DeprecatedTxPool.Lifetime,
 	}
 	TxPoolTraceSendersFlag = cli.StringFlag{
 		Name:  "txpool.trace.senders",
@@ -1420,7 +1420,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
-	setTxPool(ctx, &cfg.TxPool)
+
+	setTxPool(ctx, &cfg.DeprecatedTxPool)
+	cfg.TxPool = core.DefaultTxPool2Config(cfg.DeprecatedTxPool)
+	cfg.TxPool.DBDir = filepath.Join(nodeConfig.DataDir, "txpool")
+
 	setEthash(ctx, nodeConfig.DataDir, cfg)
 	setClique(ctx, &cfg.Clique, nodeConfig.DataDir)
 	setAuRa(ctx, &cfg.Aura, nodeConfig.DataDir)

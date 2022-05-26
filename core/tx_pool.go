@@ -81,9 +81,9 @@ type TxPoolConfig struct {
 	TracedSenders []string // List of senders for which tx pool should print out debugging info
 }
 
-// DefaultTxPoolConfig contains the default configurations for the transaction
+// DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
 // pool.
-var DefaultTxPoolConfig = TxPoolConfig{
+var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
 	Journal:   "transactions.rlp",
 	Rejournal: time.Hour,
 
