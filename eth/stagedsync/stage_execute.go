@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	commonold "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -33,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -59,7 +59,7 @@ type ExecuteBlockCfg struct {
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
-	blockReader   interfaces.FullBlockReader
+	blockReader   services.FullBlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -73,7 +73,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
-	blockReader interfaces.FullBlockReader,
+	blockReader services.FullBlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,

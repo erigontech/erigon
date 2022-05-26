@@ -19,7 +19,6 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -27,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -240,12 +240,12 @@ type MultiClient struct {
 	networkId   uint64
 	db          kv.RwDB
 	Engine      consensus.Engine
-	blockReader interfaces.HeaderAndCanonicalReader
+	blockReader services.HeaderAndCanonicalReader
 }
 
 func NewMultiClient(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig,
 	genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient,
-	window int, blockReader interfaces.HeaderAndCanonicalReader) (*MultiClient, error) {
+	window int, blockReader services.HeaderAndCanonicalReader) (*MultiClient, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */

@@ -1,4 +1,4 @@
-package filters
+package rpcservices
 
 import (
 	"sync"

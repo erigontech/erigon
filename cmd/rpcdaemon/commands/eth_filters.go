@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	filters2 "github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	filters2 "github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 
 	"github.com/ledgerwatch/erigon/common"
 
