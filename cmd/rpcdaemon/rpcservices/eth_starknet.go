@@ -1,4 +1,4 @@
-package services
+package rpcservices
 
 import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"

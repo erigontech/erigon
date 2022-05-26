@@ -25,10 +25,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -39,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
@@ -210,10 +210,10 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader services.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
 	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
 ) (
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error,
+	eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpcservices.Filters, err error,
 ) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.New(stateCacheCfg)
@@ -227,10 +227,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
-	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
+	eth = rpcservices.NewRemoteBackend(directClient, erigonDB, blockReader)
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-	ff = filters.New(ctx, eth, txPool, mining, func() {})
+	ff = rpcservices.New(ctx, eth, txPool, mining, func() {})
 	return
 }
 
@@ -238,10 +238,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, borDb kv.RoDB,
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	starknet *services.StarknetService,
-	stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
-	ff *filters.Filters, err error) {
+	eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet *rpcservices.StarknetService,
+	stateCache kvcache.Cache, blockReader services.BlockAndTxnReader,
+	ff *rpcservices.Filters, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
 	}
@@ -385,7 +385,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
 	}
-	remoteEth := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
+	remoteEth := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
 	blockReader = remoteEth
 
 	txpoolConn := conn
@@ -397,9 +397,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	mining = txpool.NewMiningClient(txpoolConn)
-	miningService := services.NewMiningService(mining)
+	miningService := rpcservices.NewMiningService(mining)
 	txPool = txpool.NewTxpoolClient(txpoolConn)
-	txPoolService := services.NewTxPoolService(txPool)
+	txPoolService := rpcservices.NewTxPoolService(txPool)
 	if db == nil {
 		db = remoteKv
 	}
@@ -424,10 +424,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to starknet api: %w", err)
 		}
-		starknet = services.NewStarknetService(starknetConn)
+		starknet = rpcservices.NewStarknetService(starknetConn)
 	}
 
-	ff = filters.New(ctx, eth, txPool, mining, onNewSnapshot)
+	ff = rpcservices.New(ctx, eth, txPool, mining, onNewSnapshot)
 
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }

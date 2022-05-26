@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -32,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
@@ -1104,9 +1104,9 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 }
 
 var openBlockReaderOnce sync.Once
-var _blockReaderSingleton interfaces.FullBlockReader
+var _blockReaderSingleton services.FullBlockReader
 
-func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockReader) {
+func getBlockReader(cc *params.ChainConfig) (blockReader services.FullBlockReader) {
 	openBlockReaderOnce.Do(func() {
 		_blockReaderSingleton = snapshotsync.NewBlockReader()
 		if sn := allSnapshots(cc); sn != nil {

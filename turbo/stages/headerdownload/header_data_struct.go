@@ -8,13 +8,13 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type QueueID uint8
@@ -283,7 +283,7 @@ type HeaderDownload struct {
 	respMax            uint64
 
 	consensusHeaderReader consensus.ChainHeaderReader
-	headerReader          interfaces.HeaderReader
+	headerReader          services.HeaderReader
 
 	// Proof of Stake (PoS)
 	topSeenHeightPoS     uint64
@@ -311,7 +311,7 @@ func NewHeaderDownload(
 	anchorLimit int,
 	linkLimit int,
 	engine consensus.Engine,
-	headerReader interfaces.HeaderAndCanonicalReader,
+	headerReader services.HeaderAndCanonicalReader,
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
@@ -406,10 +406,10 @@ type HeaderInserter struct {
 	highest          uint64
 	highestTimestamp uint64
 	canonicalCache   *lru.Cache
-	headerReader     interfaces.HeaderAndCanonicalReader
+	headerReader     services.HeaderAndCanonicalReader
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader interfaces.HeaderAndCanonicalReader) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
 	hi := &HeaderInserter{
 		logPrefix:    logPrefix,
 		localTd:      localTd,
