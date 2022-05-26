@@ -11,9 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -24,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -54,11 +54,11 @@ type EthAPI interface {
 	GetUncleCountByBlockHash(ctx context.Context, hash common.Hash) (*hexutil.Uint, error)
 
 	// Filter related (see ./eth_filters.go)
-	NewPendingTransactionFilter(_ context.Context) (hexutil.Uint64, error)
-	NewBlockFilter(_ context.Context) (hexutil.Uint64, error)
-	NewFilter(_ context.Context, filter interface{}) (hexutil.Uint64, error)
-	UninstallFilter(_ context.Context, index hexutil.Uint64) (bool, error)
-	GetFilterChanges(_ context.Context, index hexutil.Uint64) ([]interface{}, error)
+	NewPendingTransactionFilter(_ context.Context) (common.Hash, error)
+	NewBlockFilter(_ context.Context) (common.Hash, error)
+	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (common.Hash, error)
+	UninstallFilter(_ context.Context, index string) (bool, error)
+	GetFilterChanges(_ context.Context, index string) ([]interface{}, error)
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
@@ -96,18 +96,18 @@ type EthAPI interface {
 type BaseAPI struct {
 	stateCache   kvcache.Cache // thread-safe
 	blocksLRU    *lru.Cache    // thread-safe
-	filters      *filters.Filters
+	filters      *rpcservices.Filters
 	_chainConfig *params.ChainConfig
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader  interfaces.BlockReader
+	_blockReader  services.BlockReader
 	_headerReader interfaces.HeaderReader
-	_txnReader    interfaces.TxnReader
+	_txnReader    services.TxnReader
 	TevmEnabled   bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockTxnAndHeaderReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpcservices.Filters, stateCache kvcache.Cache, blockReader services.BlockTxnAndHeaderReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -243,7 +243,7 @@ func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend services.ApiBackend
+	ethBackend rpcinterfaces.ApiBackend
 	txPool     txpool.TxpoolClient
 	mining     txpool.MiningClient
 	db         kv.RoDB
@@ -251,7 +251,7 @@ type APIImpl struct {
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}

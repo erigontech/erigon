@@ -1,4 +1,4 @@
-package filters
+package rpcservices
 
 import (
 	"sync"
@@ -51,13 +51,16 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender chan *types2.Log) (LogsSu
 	return filterId, filter
 }
 
-func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) {
+func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	if filter, ok := a.logsFilters[filterId]; ok {
 		a.subtractLogFilters(filter)
+		close(filter.sender)
 		delete(a.logsFilters, filterId)
+		return true
 	}
+	return false
 }
 
 func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {

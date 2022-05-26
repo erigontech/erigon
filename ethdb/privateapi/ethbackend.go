@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
@@ -23,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -49,7 +49,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RoDB
-	blockReader interfaces.BlockTxnAndHeaderReader
+	blockReader services.BlockTxnAndHeaderReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
@@ -88,7 +88,7 @@ type pendingPayload struct {
 	built bool
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockTxnAndHeaderReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockTxnAndHeaderReader,
 	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
 	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
@@ -222,7 +222,8 @@ func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remote.TxnLookupR
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
+		// Not a perfect solution, assumes there are no transactions in block 0
+		return &remote.TxnLookupReply{BlockNumber: 0}, nil
 	}
 	return &remote.TxnLookupReply{BlockNumber: blockNum}, nil
 }
@@ -333,7 +334,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK}, nil
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID}, nil
 	}
 	tx.Rollback()
 
@@ -453,15 +454,15 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
 		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_TERMINAL_BLOCK},
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID},
 		}, nil
 	}
-	tx1.Rollback()
 
 	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
 	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
 	// (i.e. it references an old block).
 	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
+	tx1.Rollback()
 
 	if s.stageLoopIsBusy() {
 		log.Trace("[ForkChoiceUpdated] stage loop is busy")
@@ -507,6 +508,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
 	}
 
+	if headHeader.Time > req.PayloadAttributes.Timestamp {
+		return nil, fmt.Errorf("timestamp is too low")
+	}
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
@@ -518,8 +522,11 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 
 	// successfully assembled the payload and assigned the correct id
 	return &remote.EngineForkChoiceUpdatedReply{
-		PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_VALID},
-		PayloadId:     s.payloadId,
+		PayloadStatus: &remote.EnginePayloadStatus{
+			Status:          remote.EngineStatus_VALID,
+			LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+		},
+		PayloadId: s.payloadId,
 	}, nil
 }
 

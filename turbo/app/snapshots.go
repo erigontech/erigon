@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
@@ -250,7 +249,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapDir)
-	snapshots.Reopen()
+	if err := snapshots.Reopen(); err != nil {
+		return err
+	}
 
 	workers := runtime.GOMAXPROCS(-1) - 1
 	if workers < 1 {
@@ -348,50 +349,6 @@ func snapshotBlocks(ctx context.Context, chainDB kv.RoDB, fromBlock, toBlock, bl
 	}
 	if err := snapshotsync.DumpBlocks(ctx, fromBlock, last, blocksPerFile, tmpDir, snapDir, chainDB, workers, log.LvlInfo); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
-	}
-	return nil
-}
-
-//nolint
-func checkBlockSnapshot(chaindata string) error {
-	database := mdbx.MustOpen(chaindata)
-	defer database.Close()
-	datadir := path.Dir(chaindata)
-	chainConfig := tool.ChainConfigFromDB(database)
-	chainID, _ := uint256.FromBig(chainConfig.ChainID)
-	_ = chainID
-
-	cfg := ethconfig.NewSnapshotCfg(true, true)
-	snapshots := snapshotsync.NewRoSnapshots(cfg, filepath.Join(datadir, "snapshots"))
-	snapshots.Reopen()
-	//if err := snapshots.BuildIndices(context.Background(), *chainID); err != nil {
-	//	panic(err)
-	//}
-
-	snBlockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	tx, err := database.BeginRo(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	for i := uint64(0); i < snapshots.BlocksAvailable(); i++ {
-		hash, err := rawdb.ReadCanonicalHash(tx, i)
-		if err != nil {
-			return err
-		}
-		blockFromDB := rawdb.ReadBlock(tx, hash, i)
-		blockFromSnapshot, _, err := snBlockReader.BlockWithSenders(context.Background(), tx, hash, i)
-		if err != nil {
-			return err
-		}
-
-		if blockFromSnapshot.Hash() != blockFromDB.Hash() {
-			panic(i)
-		}
-		if i%1_000 == 0 {
-			log.Info(fmt.Sprintf("Block Num: %dK", i/1_000))
-		}
 	}
 	return nil
 }

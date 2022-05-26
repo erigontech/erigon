@@ -17,6 +17,7 @@ import (
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -612,7 +613,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 					return
 				case <-logEvery.C:
 					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
+					if lvl >= log.LvlInfo {
+						common2.ReadMemStats(&m)
+					}
 					log.Log(lvl, "[snapshots] HeadersIdx", "blockNum", blockTo,
 						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
@@ -659,7 +662,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 					return
 				case <-logEvery.C:
 					var m runtime.MemStats
-					runtime.ReadMemStats(&m)
+					if lvl >= log.LvlInfo {
+						common2.ReadMemStats(&m)
+					}
 					log.Log(lvl, "[snapshots] BodiesIdx", "blockNum", blockTo,
 						"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 				default:
@@ -713,7 +718,9 @@ func BuildIndices(ctx context.Context, s *RoSnapshots, chainID uint256.Int, tmpD
 						return
 					case <-logEvery.C:
 						var m runtime.MemStats
-						runtime.ReadMemStats(&m)
+						if lvl >= log.LvlInfo {
+							common2.ReadMemStats(&m)
+						}
 						log.Log(lvl, "[Snapshots Indexing] TransactionsIdx", "blockNum", blockTo,
 							"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 					default:
@@ -882,6 +889,10 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	return blockFrom, blockTo, blockTo-blockFrom >= 1_000
 }
 func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
+	if curBlockNum+999 < params.FullImmutabilityThreshold {
+		// To prevent overflow of uint64 below
+		return snapshots.BlocksAvailable() + 1
+	}
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
@@ -990,6 +1001,8 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockFrom, blockTo uint64, workers int, lvl log.Lvl) (firstTxID uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+	warmupCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	chainConfig := tool.ChainConfigFromDB(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
@@ -1070,10 +1083,10 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return true, nil
 		}
 		if doWarmup && !warmupSenders.Load() && blockNum%1_000 == 0 {
-			kv.ReadAhead(ctx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
+			kv.ReadAhead(warmupCtx, db, warmupSenders, kv.Senders, dbutils.EncodeBlockNumber(blockNum), 10_000)
 		}
 		if doWarmup && !warmupTxs.Load() && blockNum%1_000 == 0 {
-			kv.ReadAhead(ctx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
+			kv.ReadAhead(warmupCtx, db, warmupTxs, kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId), 100*10_000)
 		}
 		senders, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
@@ -1129,7 +1142,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			if lvl >= log.LvlInfo {
+				common2.ReadMemStats(&m)
+			}
 			log.Log(lvl, "[snapshots] Dumping txs", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
@@ -1197,7 +1212,9 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			if lvl >= log.LvlInfo {
+				common2.ReadMemStats(&m)
+			}
 			log.Log(lvl, "[snapshots] Dumping headers", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
@@ -1252,7 +1269,9 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 			return false, ctx.Err()
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			if lvl >= log.LvlInfo {
+				common2.ReadMemStats(&m)
+			}
 			log.Log(lvl, "[snapshots] Wrote into file", "block num", blockNum,
 				"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys),
 			)
@@ -1274,7 +1293,7 @@ var EmptyTxHash = common.Hash{}
 func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v", blockFrom, blockTo, rec)
+			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
 	var expectedCount, firstTxID uint64
@@ -1439,7 +1458,14 @@ RETRY:
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) error {
+func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			_, fName := filepath.Split(segmentFilePath)
+			err = fmt.Errorf("HeadersIdx: at=%s, %v, %s", fName, rec, dbg.Stack())
+		}
+	}()
+
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
@@ -1463,7 +1489,14 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) error {
+func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, lvl log.Lvl) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			_, fName := filepath.Split(segmentFilePath)
+			err = fmt.Errorf("BodiesIdx: at=%s, %v, %s", fName, rec, dbg.Stack())
+		}
+	}()
+
 	num := make([]byte, 8)
 
 	d, err := compress.NewDecompressor(segmentFilePath)

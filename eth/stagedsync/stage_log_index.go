@@ -126,7 +126,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, cfg.bufLimit) {

@@ -113,7 +113,6 @@ var rootCmd = &cobra.Command{
 
 		cfg := txpool.DefaultConfig
 		cfg.DBDir = filepath.Join(datadir, "txpool")
-		cfg.LogEvery = 30 * time.Second
 		cfg.CommitEvery = 30 * time.Second
 		cfg.PendingSubPoolLimit = pendingPoolLimit
 		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit

@@ -1069,6 +1069,9 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*HeimdallSpan, error) {
 			c.spanCache.ReplaceOrInsert(span)
 		}
 	}
+	for c.spanCache.Len() > 128 {
+		c.spanCache.DeleteMin()
+	}
 	return span, nil
 }
 

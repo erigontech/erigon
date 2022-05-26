@@ -27,13 +27,13 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -302,6 +302,20 @@ func ReadStorageBody(db kv.Getter, hash common.Hash, number uint64) (types.BodyF
 		return types.BodyForStorage{}, err
 	}
 	return *bodyForStorage, nil
+}
+
+func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
+	txIdKey := make([]byte, 8)
+	binary.BigEndian.PutUint64(txIdKey, id)
+	v, err := db.GetOne(kv.EthTx, txIdKey)
+	if err != nil {
+		return nil, err
+	}
+	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), uint64(len(v))))
+	if err != nil {
+		return nil, err
+	}
+	return txn, nil
 }
 
 func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]types.Transaction, error) {
@@ -1112,17 +1126,18 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if b == nil {
-			return fmt.Errorf("DeleteAncientBlocks: block body not found for block %d", n)
-		}
-		txIDBytes := make([]byte, 8)
-		for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
-			binary.BigEndian.PutUint64(txIDBytes, txID)
-			bucket := kv.EthTx
-			if !isCanonical {
-				bucket = kv.NonCanonicalTxs
-			}
-			if err := db.Delete(bucket, txIDBytes, nil); err != nil {
-				return err
+			log.Warn("DeleteAncientBlocks: block body not found", "height", n)
+		} else {
+			txIDBytes := make([]byte, 8)
+			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
+				binary.BigEndian.PutUint64(txIDBytes, txID)
+				bucket := kv.EthTx
+				if !isCanonical {
+					bucket = kv.NonCanonicalTxs
+				}
+				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+					return err
+				}
 			}
 		}
 		if err := db.Delete(kv.Headers, k, nil); err != nil {
@@ -1136,6 +1151,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	return nil
 }
 
+// LastKey - candidate on move to kv.Tx interface
 func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
 	if err != nil {
@@ -1149,6 +1165,7 @@ func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	return k, nil
 }
 
+// FirstKey - candidate on move to kv.Tx interface
 func FirstKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
 	if err != nil {
@@ -1156,6 +1173,24 @@ func FirstKey(tx kv.Tx, table string) ([]byte, error) {
 	}
 	defer c.Close()
 	k, _, err := c.First()
+	if err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+// SecondKey - useful if table always has zero-key (for example genesis block)
+func SecondKey(tx kv.Tx, table string) ([]byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	_, _, err = c.First()
+	if err != nil {
+		return nil, err
+	}
+	k, _, err := c.Next()
 	if err != nil {
 		return nil, err
 	}
@@ -1333,7 +1368,7 @@ func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	return ReadHeader(db, hash, *number), nil
 }
 
-func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64, blockReader interfaces.HeaderAndCanonicalReader) (common.Hash, uint64) {
+func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64, blockReader services.HeaderAndCanonicalReader) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
 	}

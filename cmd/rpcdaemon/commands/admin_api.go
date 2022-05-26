@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/p2p"
 )
 
@@ -21,11 +21,11 @@ type AdminAPI interface {
 
 // AdminAPIImpl data structure to store things needed for admin_* commands.
 type AdminAPIImpl struct {
-	ethBackend services.ApiBackend
+	ethBackend rpcinterfaces.ApiBackend
 }
 
 // NewAdminAPI returns AdminAPIImpl instance.
-func NewAdminAPI(eth services.ApiBackend) *AdminAPIImpl {
+func NewAdminAPI(eth rpcinterfaces.ApiBackend) *AdminAPIImpl {
 	return &AdminAPIImpl{
 		ethBackend: eth,
 	}

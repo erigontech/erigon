@@ -9,7 +9,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -19,17 +18,18 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type IssuanceCfg struct {
 	db              kv.RwDB
 	chainConfig     *params.ChainConfig
-	blockReader     interfaces.FullBlockReader
+	blockReader     services.FullBlockReader
 	enabledIssuance bool
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader interfaces.FullBlockReader, enabledIssuance bool) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader services.FullBlockReader, enabledIssuance bool) IssuanceCfg {
 	return IssuanceCfg{
 		db:              db,
 		chainConfig:     chainConfig,

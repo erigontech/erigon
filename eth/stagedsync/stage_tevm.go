@@ -256,7 +256,7 @@ func logTEVMProgress(logPrefix string, prevContract uint64, prevTime time.Time, 
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentContract-prevContract) / float64(interval/time.Second)
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentContract,
 		"contracts/s", speed,

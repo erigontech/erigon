@@ -154,7 +154,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush64(updates, cfg.bufLimit) {
@@ -291,7 +291,7 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-quitCh:
 			return libcommon.ErrStopped

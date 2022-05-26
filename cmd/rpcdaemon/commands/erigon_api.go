@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -39,11 +39,11 @@ type ErigonAPI interface {
 type ErigonImpl struct {
 	*BaseAPI
 	db         kv.RoDB
-	ethBackend services.ApiBackend
+	ethBackend rpcinterfaces.ApiBackend
 }
 
 // NewErigonAPI returns ErigonImpl instance
-func NewErigonAPI(base *BaseAPI, db kv.RoDB, eth services.ApiBackend) *ErigonImpl {
+func NewErigonAPI(base *BaseAPI, db kv.RoDB, eth rpcinterfaces.ApiBackend) *ErigonImpl {
 	return &ErigonImpl{
 		BaseAPI:    base,
 		db:         db,

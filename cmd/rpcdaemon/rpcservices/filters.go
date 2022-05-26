@@ -1,4 +1,4 @@
-package filters
+package rpcservices
 
 import (
 	"bytes"
@@ -13,15 +13,14 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/eth/filters"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -48,18 +47,26 @@ type Filters struct {
 	logsSubs         *LogsFilterAggregator
 	logsRequestor    atomic.Value
 	onNewSnapshot    func()
+
+	storeMu            sync.Mutex
+	logsStores         map[LogsSubID][]*types.Log
+	pendingBlockStores map[PendingBlockSubID][]*types.Block
+	pendingTxsStores   map[PendingTxsSubID][][]types.Transaction
 }
 
-func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
+func New(ctx context.Context, ethBackend rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
 	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
-		headsSubs:        make(map[HeadsSubID]chan *types.Header),
-		pendingTxsSubs:   make(map[PendingTxsSubID]chan []types.Transaction),
-		pendingLogsSubs:  make(map[PendingLogsSubID]chan types.Logs),
-		pendingBlockSubs: make(map[PendingBlockSubID]chan *types.Block),
-		logsSubs:         NewLogsFilterAggregator(),
-		onNewSnapshot:    onNewSnapshot,
+		headsSubs:          make(map[HeadsSubID]chan *types.Header),
+		pendingTxsSubs:     make(map[PendingTxsSubID]chan []types.Transaction),
+		pendingLogsSubs:    make(map[PendingLogsSubID]chan types.Logs),
+		pendingBlockSubs:   make(map[PendingBlockSubID]chan *types.Block),
+		logsSubs:           NewLogsFilterAggregator(),
+		onNewSnapshot:      onNewSnapshot,
+		logsStores:         make(map[LogsSubID][]*types.Log),
+		pendingBlockStores: make(map[PendingBlockSubID][]*types.Block),
+		pendingTxsStores:   make(map[PendingTxsSubID][][]types.Transaction),
 	}
 
 	go func() {
@@ -338,10 +345,18 @@ func (ff *Filters) SubscribePendingBlock(f chan *types.Block) PendingBlockSubID 
 	return id
 }
 
-func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	delete(ff.pendingBlockSubs, id)
+	if ch, ok := ff.pendingBlockSubs[id]; ok {
+		close(ch)
+		delete(ff.pendingBlockSubs, id)
+		ff.storeMu.Lock()
+		defer ff.storeMu.Unlock()
+		delete(ff.pendingBlockStores, id)
+		return true
+	}
+	return false
 }
 
 func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
@@ -352,10 +367,18 @@ func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsS
 	return id
 }
 
-func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) {
+func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
-	delete(ff.pendingTxsSubs, id)
+	if ch, ok := ff.pendingTxsSubs[id]; ok {
+		close(ch)
+		delete(ff.pendingTxsSubs, id)
+		ff.storeMu.Lock()
+		defer ff.storeMu.Unlock()
+		delete(ff.pendingTxsStores, id)
+		return true
+	}
+	return false
 }
 
 func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteria) LogsSubID {
@@ -402,8 +425,8 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 	return id
 }
 
-func (ff *Filters) UnsubscribeLogs(id LogsSubID) {
-	ff.logsSubs.removeLogsFilter(id)
+func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
+	isDeleted := ff.logsSubs.removeLogsFilter(id)
 	lfr := &remote.LogsFilterRequest{
 		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs == 1,
 		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics == 1,
@@ -420,9 +443,13 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) {
 	if loaded != nil {
 		if err := loaded.(func(*remote.LogsFilterRequest) error)(lfr); err != nil {
 			log.Warn("Could not update remote logs filter", "err", err)
-			ff.logsSubs.removeLogsFilter(id)
+			return isDeleted || ff.logsSubs.removeLogsFilter(id)
 		}
 	}
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	delete(ff.logsStores, id)
+	return isDeleted
 }
 
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
@@ -529,4 +556,79 @@ func generateSubscriptionID() SubscriptionID {
 	}
 
 	return SubscriptionID(fmt.Sprintf("%x", id))
+}
+
+func (ff *Filters) AddLogs(id LogsSubID, logs *types.Log) {
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	st, ok := ff.logsStores[id]
+	if !ok {
+		st = make([]*types.Log, 0)
+	}
+	st = append(st, logs)
+	ff.logsStores[id] = st
+}
+
+func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	res := make([]*types.Log, 0)
+	st, ok := ff.logsStores[id]
+	if !ok {
+		return res, false
+	}
+	res = append(res, st...)
+	st = make([]*types.Log, 0)
+	ff.logsStores[id] = st
+	return res, true
+}
+
+func (ff *Filters) AddPendingBlock(id PendingBlockSubID, block *types.Block) {
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	st, ok := ff.pendingBlockStores[id]
+	if !ok {
+		st = make([]*types.Block, 0)
+	}
+	st = append(st, block)
+	ff.pendingBlockStores[id] = st
+}
+
+func (ff *Filters) ReadPendingBlocks(id PendingBlockSubID) ([]*types.Block, bool) {
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	res := make([]*types.Block, 0)
+	st, ok := ff.pendingBlockStores[id]
+	if !ok {
+		return res, false
+	}
+	res = append(res, st...)
+	st = make([]*types.Block, 0)
+	ff.pendingBlockStores[id] = st
+	return res, true
+}
+
+func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	st, ok := ff.pendingTxsStores[id]
+	if !ok {
+		st = make([][]types.Transaction, 0)
+	}
+	st = append(st, txs)
+	ff.pendingTxsStores[id] = st
+}
+
+func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
+	ff.storeMu.Lock()
+	defer ff.storeMu.Unlock()
+	res := make([][]types.Transaction, 0)
+	st, ok := ff.pendingTxsStores[id]
+	if !ok {
+		return res, false
+	}
+	res = append(res, st...)
+	st = make([][]types.Transaction, 0)
+	ff.pendingTxsStores[id] = st
+	return res, true
 }

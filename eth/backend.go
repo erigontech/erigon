@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/holiman/uint256"
@@ -52,7 +53,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -118,7 +118,7 @@ type Ethereum struct {
 	// downloader fields
 	sentryCtx      context.Context
 	sentryCancel   context.CancelFunc
-	sentriesClient *sentry.MultyClient
+	sentriesClient *sentry.MultiClient
 	sentryServers  []*sentry.GrpcServer
 
 	stagedSync *stagedsync.Sync
@@ -180,7 +180,10 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, genesisErr
 	}
 
-	config.SyncMode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	config.SyncMode, err = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	if err != nil {
+		return nil, err
+	}
 	config.Snapshot.Enabled = config.SyncMode == ethconfig.SnapSync
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
@@ -272,10 +275,13 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		}()
 	}
 
-	var blockReader interfaces.FullBlockReader
+	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
+		if err = allSnapshots.Reopen(); err != nil {
+			return nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
+		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -340,7 +346,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
-	backend.sentriesClient, err = sentry.NewMultyClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.BlockDownloaderWindow, blockReader)
+	backend.sentriesClient, err = sentry.NewMultiClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.BlockDownloaderWindow, blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -759,7 +765,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	for _, sentryClient := range s.sentriesClient.Sentries() {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
-			return nil, fmt.Errorf("Ethereum backend MultyClient.Peers error: %w", err)
+			return nil, fmt.Errorf("Ethereum backend MultiClient.Peers error: %w", err)
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
@@ -779,18 +785,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	sentries := s.sentriesClient.Sentries()
-	for i := range sentries {
-		go func(i int) {
-			sentry.RecvMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-		go func(i int) {
-			sentry.RecvUploadMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-		go func(i int) {
-			sentry.RecvUploadHeadersMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-	}
+	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
 	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
@@ -854,6 +849,6 @@ func (s *Ethereum) SentryCtx() context.Context {
 	return s.sentryCtx
 }
 
-func (s *Ethereum) SentryControlServer() *sentry.MultyClient {
+func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
 	return s.sentriesClient
 }

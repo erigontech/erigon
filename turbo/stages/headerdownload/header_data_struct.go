@@ -8,13 +8,13 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type QueueID uint8
@@ -34,7 +34,8 @@ const (
 type Link struct {
 	header      *types.Header
 	headerRaw   []byte
-	next        []*Link     // Allows iteration over links in ascending block height order
+	fChild      *Link       // Pointer to the first child, further children can be found by following `next` pointers to the siblings
+	next        *Link       // Pointer to the next sibling, or nil if there are no siblings
 	hash        common.Hash // Hash of the header
 	blockHeight uint64
 	persisted   bool    // Whether this link comes from the database record
@@ -101,7 +102,7 @@ func (lq *LinkQueue) Pop() interface{} {
 // more than one pointer.
 type Anchor struct {
 	peerID        [64]byte
-	links         []*Link     // Links attached immediately to this anchor
+	fLink         *Link       // Links attached immediately to this anchor (pointer to the first one, the rest can be found by following `next` fields)
 	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
 	nextRetryTime uint64 // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
@@ -282,7 +283,7 @@ type HeaderDownload struct {
 	respMax            uint64
 
 	consensusHeaderReader consensus.ChainHeaderReader
-	headerReader          interfaces.HeaderReader
+	headerReader          services.HeaderReader
 
 	// Proof of Stake (PoS)
 	topSeenHeightPoS     uint64
@@ -310,7 +311,7 @@ func NewHeaderDownload(
 	anchorLimit int,
 	linkLimit int,
 	engine consensus.Engine,
-	headerReader interfaces.HeaderAndCanonicalReader,
+	headerReader services.HeaderAndCanonicalReader,
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
@@ -405,10 +406,10 @@ type HeaderInserter struct {
 	highest          uint64
 	highestTimestamp uint64
 	canonicalCache   *lru.Cache
-	headerReader     interfaces.HeaderAndCanonicalReader
+	headerReader     services.HeaderAndCanonicalReader
 }
 
-func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader interfaces.HeaderAndCanonicalReader) *HeaderInserter {
+func NewHeaderInserter(logPrefix string, localTd *big.Int, headerProgress uint64, headerReader services.HeaderAndCanonicalReader) *HeaderInserter {
 	hi := &HeaderInserter{
 		logPrefix:    logPrefix,
 		localTd:      localTd,

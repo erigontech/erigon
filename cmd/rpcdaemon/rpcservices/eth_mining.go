@@ -1,43 +1,35 @@
-package services
+package rpcservices
 
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-type TxPoolService struct {
-	txpool.TxpoolClient
+type MiningService struct {
+	txpool.MiningClient
 	log     log.Logger
 	version gointerfaces.Version
 }
 
-func NewTxPoolService(client txpool.TxpoolClient) *TxPoolService {
-	return &TxPoolService{
-		TxpoolClient: client,
-		version:      gointerfaces.VersionFromProto(privateapi.TxPoolAPIVersion),
-		log:          log.New("remote_service", "tx_pool"),
+func NewMiningService(client txpool.MiningClient) *MiningService {
+	return &MiningService{
+		MiningClient: client,
+		version:      gointerfaces.VersionFromProto(privateapi.MiningAPIVersion),
+		log:          log.New("remote_service", "mining"),
 	}
 }
 
-func (s *TxPoolService) EnsureVersionCompatibility() bool {
-Start:
+func (s *MiningService) EnsureVersionCompatibility() bool {
 	versionReply, err := s.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
-		if grpcutil.ErrIs(err, txpool2.ErrPoolDisabled) {
-			time.Sleep(3 * time.Second)
-			goto Start
-		}
-		s.log.Error("ensure version", "err", err)
+		s.log.Error("getting Version", "err", err)
 		return false
 	}
 	if !gointerfaces.EnsureVersion(s.version, versionReply) {

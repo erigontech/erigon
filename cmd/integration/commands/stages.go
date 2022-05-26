@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -32,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
@@ -745,7 +745,7 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	}
-	integrity.Trie(tx, integritySlow, ctx)
+	integrity.Trie(db, tx, integritySlow, ctx)
 	return tx.Commit()
 }
 
@@ -1088,7 +1088,10 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
 func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
-		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
+		syncmode, err := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
+		if err != nil {
+			panic(err)
+		}
 		if syncmode == ethconfig.SnapSync {
 			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
@@ -1101,9 +1104,9 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 }
 
 var openBlockReaderOnce sync.Once
-var _blockReaderSingleton interfaces.FullBlockReader
+var _blockReaderSingleton services.FullBlockReader
 
-func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockReader) {
+func getBlockReader(cc *params.ChainConfig) (blockReader services.FullBlockReader) {
 	openBlockReaderOnce.Do(func() {
 		_blockReaderSingleton = snapshotsync.NewBlockReader()
 		if sn := allSnapshots(cc); sn != nil {
@@ -1184,7 +1187,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	br := getBlockReader(chainConfig)
 	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewMultyClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
+	sentryControlServer, err := sentry.NewMultiClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
 	if err != nil {
 		panic(err)
 	}

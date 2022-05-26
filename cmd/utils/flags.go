@@ -31,7 +31,6 @@ import (
 
 	lg "github.com/anacrolix/log"
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
@@ -368,7 +367,7 @@ var (
 	HTTPApiFlag = cli.StringFlag{
 		Name:  "http.api",
 		Usage: "API's offered over the HTTP-RPC interface",
-		Value: "eth,erigon",
+		Value: "eth,erigon,engine",
 	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
@@ -536,13 +535,15 @@ var (
 	}
 	NATFlag = cli.StringFlag{
 		Name: "nat",
-		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|extip:<IP>)
+		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
 	     "" or "none"         default - do not nat
 	     "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
 	     "any"                uses the first auto-detected mechanism
 	     "upnp"               uses the Universal Plug and Play protocol
 	     "pmp"                uses NAT-PMP with an auto-detected gateway address
 	     "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
+	     "stun"               uses STUN to detect an external IP using a default server
+	     "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
 `,
 		Value: "",
 	}
@@ -640,7 +641,7 @@ var (
 	TorrentVerbosityFlag = cli.StringFlag{
 		Name:  "torrent.verbosity",
 		Value: lg.Warning.LogString(),
-		Usage: "DEBUG | INFO | WARN | ERROR (must set --verbosity to equal or higher level)",
+		Usage: "DBG | INF | WRN | ERR (must set --verbosity to equal or higher level)",
 	}
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
@@ -955,7 +956,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		networkname.RialtoChainName:  true,
 		networkname.ChapelChainName:  true,
 	}
-	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok {
+	if _, ok := chainsWithValidatorMode[ctx.GlobalString(ChainFlag.Name)]; ok || ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.GlobalIsSet(MiningEnabledFlag.Name) && !ctx.GlobalIsSet(MinerSigningKeyFileFlag.Name) {
 			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
 		}
@@ -1389,9 +1390,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 			panic(err)
 		}
 
-		var err error
+		lvl, err := torrentcfg.Str2LogLevel(ctx.GlobalString(TorrentVerbosityFlag.Name))
+		if err != nil {
+			panic(err)
+		}
 		cfg.Torrent, err = torrentcfg.New(cfg.SnapDir,
-			torrentcfg.String2LogLevel[ctx.GlobalString(TorrentVerbosityFlag.Name)],
+			lvl,
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,
 			ctx.GlobalInt(TorrentPortFlag.Name),
@@ -1523,15 +1527,6 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 	}
 
 	return tagsMap
-}
-
-// MakeChainDatabase open a database using the flags passed to the client and will hard crash if it fails.
-func MakeChainDatabase(logger log.Logger, cfg *node.Config) kv.RwDB {
-	chainDb, err := node.OpenDatabase(cfg, logger, kv.ChainDB)
-	if err != nil {
-		Fatalf("Could not open database: %v", err)
-	}
-	return chainDb
 }
 
 // MakeConsolePreloads retrieves the absolute paths for the console JavaScript

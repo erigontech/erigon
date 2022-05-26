@@ -64,7 +64,7 @@ type MockSentry struct {
 	MiningSync     *stagedsync.Sync
 	PendingBlocks  chan *types.Block
 	MinedBlocks    chan *types.Block
-	sentriesClient *sentry.MultyClient
+	sentriesClient *sentry.MultiClient
 	Key            *ecdsa.PrivateKey
 	Genesis        *types.Block
 	SentryClient   direct.SentryClient
@@ -267,7 +267,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.sentriesClient, err = sentry.NewMultyClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow, blockReader)
+	mock.sentriesClient, err = sentry.NewMultiClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow, blockReader)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -349,13 +349,13 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	)
 
 	mock.StreamWg.Add(1)
-	go sentry.RecvMessageLoop(mock.Ctx, mock.SentryClient, mock.sentriesClient, &mock.ReceiveWg)
+	go mock.sentriesClient.RecvMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go sentry.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, mock.sentriesClient, &mock.ReceiveWg)
+	go mock.sentriesClient.RecvUploadMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 	mock.StreamWg.Add(1)
-	go sentry.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, mock.sentriesClient, &mock.ReceiveWg)
+	go mock.sentriesClient.RecvUploadHeadersMessageLoop(mock.Ctx, mock.SentryClient, &mock.ReceiveWg)
 	mock.StreamWg.Wait()
 
 	return mock

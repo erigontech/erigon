@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"fmt"
 	"math/big"
 	"os"
 	"os/user"
@@ -224,17 +225,19 @@ const (
 	SnapSync SyncMode = "snap"
 )
 
-func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
+func SyncModeByChainName(chain, syncCliFlag string) (SyncMode, error) {
 	if syncCliFlag == "full" {
-		return FullSync
+		return FullSync, nil
 	} else if syncCliFlag == "snap" {
-		return SnapSync
+		return SnapSync, nil
+	} else if syncCliFlag != "" {
+		return FullSync, fmt.Errorf("unexpected syncmode: %s, only next options are valid: %s, %s", syncCliFlag, FullSync, SnapSync)
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
 		networkname.RopstenChainName:
-		return SnapSync
+		return SnapSync, nil
 	default:
-		return FullSync
+		return FullSync, nil
 	}
 }
