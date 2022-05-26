@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
+	"sync"
 )
 
 var (
-	eventAddrs  = []string{devAddress, recvAddr}
+	//eventAddrs  = []string{devAddress, recvAddr}
 	eventTopics []string
 )
 
@@ -23,12 +24,17 @@ var LogsCmd = &cobra.Command{
 	},
 }
 
+var wg sync.WaitGroup
+
 func callLogs() {
+	wg.Add(1)
 	go func() {
-		if err := services.Logs(eventAddrs, eventTopics); err != nil {
+		if err := services.Logs([]string{}, eventTopics); err != nil {
 			fmt.Printf("could not subscribe to log events: %v\n", err)
 		}
+		defer wg.Done()
 	}()
+	wg.Wait()
 
 	callContractTx()
 }

@@ -10,8 +10,10 @@ import (
 
 const numberOfIterations = 128
 
+var ch = make(chan interface{})
+
 // subscribe connects to a websocket and returns the subscription handler and a channel buffer
-func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.ClientSubscription, chan interface{}, error) {
+func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.ClientSubscription, error) {
 	var (
 		namespace string
 		subMethod string
@@ -20,28 +22,27 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 
 	namespace, subMethod, splitErr = utils.NamespaceAndSubMethodFromMethod(method)
 	if splitErr != nil {
-		return nil, nil, fmt.Errorf("cannot get namespace and submethod from method: %v", splitErr)
+		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", splitErr)
 	}
 
-	ch := make(chan interface{})
 	var arr = []interface{}{subMethod}
 	arr = append(arr, args...)
 
 	sub, err := client.Subscribe(context.Background(), namespace, ch, arr...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("client failed to subscribe: %v", err)
+		return nil, fmt.Errorf("client failed to subscribe: %v", err)
 	}
 
-	return sub, ch, nil
+	return sub, nil
 }
 
 // subscribeToNewHeadsAndSearch makes a ws subscription for eth_newHeads and searches each new header for the tx hash
 func subscribeToNewHeadsAndSearch(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
-	sub, ch, err := subscribe(client, method)
+	sub, err := subscribe(client, method)
 	if err != nil {
 		return uint64(0), fmt.Errorf("error subscribing to newHeads: %v", err)
 	}
-	defer sub.Unsubscribe()
+	defer unSubscribe(sub)
 
 	var (
 		blockCount int
@@ -90,32 +91,39 @@ func subscribeToLogs(client *rpc.Client, method string, addresses []string, topi
 		"topics":  topics,
 	}
 
-	sub, ch, err := subscribe(client, method, params)
+	_, err := subscribe(client, method, params)
 	if err != nil {
 		return fmt.Errorf("error subscribing to logs: %v", err)
 	}
-	defer sub.Unsubscribe()
+	//defer unSubscribe(sub)
 
-	var count int
+	//var count int
 
-ForLoop:
-	for {
-		select {
-		case v := <-ch:
-			count++
-			_map := v.(map[string]interface{})
-			for k, val := range _map {
-				fmt.Printf("%s: %+v, ", k, val)
-			}
-			fmt.Println()
-			fmt.Println()
-			if count == numberOfIterations {
-				break ForLoop
-			}
-		case err := <-sub.Err():
-			return fmt.Errorf("subscription error from client: %v", err)
-		}
-	}
+	//ForLoop:
+	//	for {
+	//		select {
+	//		case v := <-ch:
+	//			count++
+	//			_map := v.(map[string]interface{})
+	//			for k, val := range _map {
+	//				fmt.Printf("%s: %+v, ", k, val)
+	//			}
+	//			fmt.Println()
+	//			fmt.Println()
+	//			if count == numberOfIterations {
+	//				break ForLoop
+	//			}
+	//		case err := <-sub.Err():
+	//			return fmt.Errorf("subscription error from client: %v", err)
+	//		}
+	//	}
 
 	return nil
+}
+
+func unSubscribe(sub *rpc.ClientSubscription) {
+	sub.Unsubscribe()
+	for len(ch) > 0 {
+		<-ch
+	}
 }
