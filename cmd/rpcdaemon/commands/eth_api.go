@@ -102,7 +102,7 @@ type BaseAPI struct {
 	_genesisLock sync.RWMutex
 
 	_blockReader  services.BlockReader
-	_headerReader interfaces.HeaderReader
+	_headerReader services.HeaderReader
 	_txnReader    services.TxnReader
 	TevmEnabled   bool // experiment
 }
