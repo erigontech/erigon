@@ -1095,14 +1095,14 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	defer c.Close()
 
 	// find first non-genesis block
-	k, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
+	firstK, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
 	if err != nil {
 		return err
 	}
-	if k == nil { //nothing to delete
+	if firstK == nil { //nothing to delete
 		return nil
 	}
-	blockFrom := binary.BigEndian.Uint64(k)
+	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := libcommon.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
@@ -1126,7 +1126,7 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 		if b == nil {
-			log.Warn("DeleteAncientBlocks: block body not found", "height", n)
+			log.Debug("DeleteAncientBlocks: block body not found", "height", n)
 		} else {
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
