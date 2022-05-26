@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package nodecfg
+package nodecfg_test
 
 import (
 	"os"
@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	node2 "github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 )
 
 // Tests that datadirs can be successfully created, be them manually configured
@@ -33,7 +34,7 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Create a temporary data dir and check that it can be used by a node
 	dir := t.TempDir()
-	node, err := node2.New(&Config{DataDir: dir})
+	node, err := node2.New(&nodecfg.Config{DataDir: dir})
 	if err != nil {
 		t.Fatalf("failed to create stack with existing datadir: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestDataDirCreation(t *testing.T) {
 	}
 	// Generate a long non-existing datadir path and check that it gets created by a node
 	dir = filepath.Join(dir, "a", "b", "c", "d", "e", "f")
-	node, err = node2.New(&Config{DataDir: dir})
+	node, err = node2.New(&nodecfg.Config{DataDir: dir})
 	if err != nil {
 		t.Fatalf("failed to create stack with creatable datadir: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestDataDirCreation(t *testing.T) {
 	defer os.Remove(file.Name())
 
 	dir = filepath.Join(file.Name(), "invalid/path")
-	node, err = node2.New(&Config{DataDir: dir})
+	node, err = node2.New(&nodecfg.Config{DataDir: dir})
 	if err == nil {
 		t.Fatalf("protocol stack created with an invalid datadir")
 		if err := node.Close(); err != nil {
@@ -94,7 +95,7 @@ func TestIPCPathResolution(t *testing.T) {
 	for i, test := range tests {
 		// Only run when platform/test match
 		if (runtime.GOOS == "windows") == test.Windows {
-			if endpoint := (&Config{DataDir: test.DataDir, IPCPath: test.IPCPath}).IPCEndpoint(); endpoint != test.Endpoint {
+			if endpoint := (&nodecfg.Config{DataDir: test.DataDir, IPCPath: test.IPCPath}).IPCEndpoint(); endpoint != test.Endpoint {
 				t.Errorf("test %d: IPC endpoint mismatch: have %s, want %s", i, endpoint, test.Endpoint)
 			}
 		}
