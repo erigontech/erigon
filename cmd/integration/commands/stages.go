@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -502,6 +503,24 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 
+		if reset {
+			// ensure no grabage records left (it may happen if db is inconsistent)
+			if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k, nil) }); err != nil {
+				return err
+			}
+			if err := tx.ClearBucket(kv.NonCanonicalTxs); err != nil {
+				return err
+			}
+			if err := tx.ClearBucket(kv.EthTx); err != nil {
+				return err
+			}
+			if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
+				return err
+			}
+			if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
+				return err
+			}
+		}
 		log.Info("Progress", "headers", progress)
 		return nil
 	})
