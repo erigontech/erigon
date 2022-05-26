@@ -10,12 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -26,10 +26,10 @@ type TrieCfg struct {
 	checkRoot         bool
 	tmpDir            string
 	saveNewHashesToDB bool // no reason to save changes when calculating root for mining
-	blockReader       interfaces.FullBlockReader
+	blockReader       services.FullBlockReader
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader interfaces.FullBlockReader) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB bool, tmpDir string, blockReader services.FullBlockReader) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,

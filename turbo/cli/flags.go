@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -271,13 +271,13 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 	}
 }
 
-func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *node.Config) {
+func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg)
 	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
 }
 
-func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
+func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	jwtSecretPath := ctx.GlobalString(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.DataDir + "/jwt.hex"
@@ -338,7 +338,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *node.Config) {
 
 // setPrivateApi populates configuration fields related to the remote
 // read-only interface to the database
-func setPrivateApi(ctx *cli.Context, cfg *node.Config) {
+func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
 	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))
 	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P

@@ -113,9 +113,9 @@ var rootCmd = &cobra.Command{
 
 func Downloader(ctx context.Context) error {
 	snapDir := filepath.Join(datadir, "snapshots")
-	torrentLogLevel, ok := torrentcfg.String2LogLevel[torrentVerbosity]
-	if !ok {
-		panic(fmt.Errorf("unexpected torrent.verbosity level: %s", torrentVerbosity))
+	torrentLogLevel, err := torrentcfg.Str2LogLevel(torrentVerbosity)
+	if err != nil {
+		return err
 	}
 
 	var downloadRate, uploadRate datasize.ByteSize

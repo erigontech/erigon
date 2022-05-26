@@ -3,7 +3,7 @@ GOBIN = $(CURDIR)/build/bin
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags --dirty)
+GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
@@ -110,7 +110,7 @@ lintci:
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.2
 
 clean:
 	go clean -cache
@@ -148,4 +148,5 @@ git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true

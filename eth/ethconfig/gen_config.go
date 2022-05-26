@@ -60,7 +60,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.Clique = c.Clique
 	enc.Aura = c.Aura
 	enc.Parlia = c.Parlia
-	enc.TxPool = c.TxPool
+	enc.TxPool = c.DeprecatedTxPool
 	enc.GPO = c.GPO
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
@@ -154,7 +154,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Parlia = *dec.Parlia
 	}
 	if dec.TxPool != nil {
-		c.TxPool = *dec.TxPool
+		c.DeprecatedTxPool = *dec.TxPool
 	}
 	if dec.GPO != nil {
 		c.GPO = *dec.GPO

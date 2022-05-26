@@ -870,6 +870,31 @@ func (ss *GrpcServer) PeerCount(_ context.Context, req *proto_sentry.PeerCountRe
 	return &proto_sentry.PeerCountReply{Count: uint64(ss.SimplePeerCount())}, nil
 }
 
+func (ss *GrpcServer) PeerById(_ context.Context, req *proto_sentry.PeerByIdRequest) (*proto_sentry.PeerByIdReply, error) {
+	peerID := ConvertH512ToPeerID(req.PeerId)
+
+	var rpcPeer *proto_types.PeerInfo
+	sentryPeer := ss.getPeer(peerID)
+
+	if sentryPeer != nil {
+		peer := sentryPeer.peer.Info()
+		rpcPeer = &proto_types.PeerInfo{
+			Id:             peer.ID,
+			Name:           peer.Name,
+			Enode:          peer.Enode,
+			Enr:            peer.ENR,
+			Caps:           peer.Caps,
+			ConnLocalAddr:  peer.Network.LocalAddress,
+			ConnRemoteAddr: peer.Network.RemoteAddress,
+			ConnIsInbound:  peer.Network.Inbound,
+			ConnIsTrusted:  peer.Network.Trusted,
+			ConnIsStatic:   peer.Network.Static,
+		}
+	}
+
+	return &proto_sentry.PeerByIdReply{Peer: rpcPeer}, nil
+}
+
 // setupDiscovery creates the node discovery source for the `eth` and `snap`
 // protocols.
 func setupDiscovery(urls []string) (enode.Iterator, error) {

@@ -34,7 +34,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-20220523035115-a36ebfc60970
+	github.com/ledgerwatch/erigon-lib v0.0.0-20220525112105-b544bfe85dee
 	github.com/ledgerwatch/log/v3 v3.4.1
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/pelletier/go-toml v1.9.5
@@ -47,7 +47,7 @@ require (
 	github.com/stretchr/testify v1.7.1
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.11
-	github.com/torquem-ch/mdbx-go v0.24.1
+	github.com/torquem-ch/mdbx-go v0.24.2
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli v1.22.8
@@ -64,7 +64,7 @@ require (
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
 	google.golang.org/protobuf v1.28.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
-	modernc.org/sqlite v1.17.0
+	modernc.org/sqlite v1.17.3
 	pgregory.net/rapid v0.4.7
 )
 
@@ -150,11 +150,11 @@ require (
 	google.golang.org/genproto v0.0.0-20200825200019-8632dd797987 // indirect
 	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
 	lukechampine.com/uint128 v1.1.1 // indirect
-	modernc.org/cc/v3 v3.35.26 // indirect
-	modernc.org/ccgo/v3 v3.16.2 // indirect
-	modernc.org/libc v1.15.0 // indirect
+	modernc.org/cc/v3 v3.36.0 // indirect
+	modernc.org/ccgo/v3 v3.16.6 // indirect
+	modernc.org/libc v1.16.7 // indirect
 	modernc.org/mathutil v1.4.1 // indirect
-	modernc.org/memory v1.0.7 // indirect
+	modernc.org/memory v1.1.1 // indirect
 	modernc.org/opt v0.1.1 // indirect
 	modernc.org/strutil v1.1.1 // indirect
 	modernc.org/token v1.0.0 // indirect

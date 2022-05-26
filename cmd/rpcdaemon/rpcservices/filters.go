@@ -1,4 +1,4 @@
-package filters
+package rpcservices
 
 import (
 	"bytes"
@@ -54,7 +54,7 @@ type Filters struct {
 	pendingTxsStores   map[PendingTxsSubID][][]types.Transaction
 }
 
-func New(ctx context.Context, ethBackend services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
+func New(ctx context.Context, ethBackend rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
 	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
