@@ -92,7 +92,6 @@ enum EngineStatus {
   SYNCING = 2;
   ACCEPTED = 3;
   INVALID_BLOCK_HASH = 4;
-  INVALID_TERMINAL_BLOCK = 5;
 }
 
 message EnginePayloadStatus {
