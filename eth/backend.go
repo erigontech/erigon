@@ -175,7 +175,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		panic(err)
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlockWithOverride(chainKv, config.Genesis, config.OverrideMergeForkBlock, config.OverrideTerminalTotalDifficulty)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}

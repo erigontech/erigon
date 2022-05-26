@@ -228,6 +228,11 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
+
+	// FORK_NEXT_VALUE (see EIP-3675) block override
+	OverrideMergeForkBlock *big.Int `toml:",omitempty"`
+
+	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
 }
 
 type SyncMode string

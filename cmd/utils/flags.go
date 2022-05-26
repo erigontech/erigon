@@ -1486,10 +1486,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	}
 
 	if ctx.GlobalIsSet(OverrideTerminalTotalDifficulty.Name) {
-		cfg.Genesis.Config.TerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
+		cfg.OverrideTerminalTotalDifficulty = GlobalBig(ctx, OverrideTerminalTotalDifficulty.Name)
 	}
 	if ctx.GlobalIsSet(OverrideMergeForkBlock.Name) {
-		cfg.Genesis.Config.MergeForkBlock = GlobalBig(ctx, OverrideMergeForkBlock.Name)
+		cfg.OverrideMergeForkBlock = GlobalBig(ctx, OverrideMergeForkBlock.Name)
 	}
 }
 

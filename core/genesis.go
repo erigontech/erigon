@@ -173,12 +173,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+	return CommitGenesisBlockWithOverride(db, genesis, nil, nil)
+}
+
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty)
 	if err != nil {
 		return c, b, err
 	}
@@ -197,7 +201,7 @@ func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, 
 	return c, b
 }
 
-func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -212,6 +216,12 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 			log.Info("Writing default main-net genesis block")
 			genesis = DefaultGenesisBlock()
 			custom = false
+		}
+		if overrideMergeForkBlock != nil {
+			genesis.Config.MergeForkBlock = overrideMergeForkBlock
+		}
+		if overrideTerminalTotalDifficulty != nil {
+			genesis.Config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
 		}
 		block, _, err1 := genesis.Write(db)
 		if err1 != nil {
@@ -240,6 +250,12 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	}
 	// Get the existing chain configuration.
 	newcfg := genesis.configOrDefault(stored)
+	if overrideMergeForkBlock != nil {
+		newcfg.MergeForkBlock = overrideMergeForkBlock
+	}
+	if overrideTerminalTotalDifficulty != nil {
+		newcfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+	}
 	if err := newcfg.CheckConfigForkOrder(); err != nil {
 		return newcfg, nil, err
 	}
@@ -259,6 +275,12 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
 	// if we just continued here.
 	if genesis == nil && stored != params.MainnetGenesisHash {
+		if overrideMergeForkBlock != nil {
+			storedcfg.MergeForkBlock = overrideMergeForkBlock
+		}
+		if overrideTerminalTotalDifficulty != nil {
+			storedcfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+		}
 		return storedcfg, storedBlock, nil
 	}
 	// Check config compatibility and write the config. Compatibility errors
