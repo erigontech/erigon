@@ -35,3 +35,13 @@ func (a *AllowList) MarshalJSON() ([]byte, error) {
 }
 
 type ForbiddenList map[string]struct{}
+
+func newForbiddenList() ForbiddenList {
+	return ForbiddenList{
+		"eth_newFilter":                   struct{}{},
+		"eth_newPendingTransactionFilter": struct{}{},
+		"eth_newBlockFilter":              struct{}{},
+		"eth_getFilterChanges":            struct{}{},
+		"eth_uninstallFilter":             struct{}{},
+	}
+}
