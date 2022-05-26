@@ -6,9 +6,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/rpcdaemon"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/params"
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli"
@@ -27,7 +27,7 @@ func RunNode() {
 		os.Exit(1)
 	}()
 
-	app := erigonapp.MakeApp(runDevnet, utils.DefaultFlags) // change to erigoncli.DefaultFlags later on
+	app := erigonapp.MakeApp(runDevnet, erigoncli.DefaultFlags) // change to erigoncli.DefaultFlags later on
 	customArgs := []string{"./build/bin/devnettest", "--datadir=./dev", "--chain=dev", "--mine", fmt.Sprintf("--dev.period=%d", DevPeriod), "--verbosity=0"}
 	if err := app.Run(customArgs); err != nil {
 		fmt.Fprintln(os.Stderr, err)

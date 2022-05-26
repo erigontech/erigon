@@ -1,7 +1,7 @@
 package shell
 
 import (
-	"github.com/abiosoft/ishell/v2"
+	ishell "github.com/abiosoft/ishell/v2"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/common"
 )

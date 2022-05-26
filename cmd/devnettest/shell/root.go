@@ -1,7 +1,7 @@
 package shell
 
 import (
-	"github.com/abiosoft/ishell/v2"
+	ishell "github.com/abiosoft/ishell/v2"
 )
 
 var (
