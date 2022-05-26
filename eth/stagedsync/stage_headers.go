@@ -1145,7 +1145,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
 			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-				return err
+				return fmt.Errorf("BuildIndices: %w", err)
 			}
 		}
 

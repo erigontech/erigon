@@ -1417,7 +1417,7 @@ RETRY:
 				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
 			} else {
 				if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, nil, true /* hasEnvelope */, nil); err != nil {
-					return err
+					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
 
