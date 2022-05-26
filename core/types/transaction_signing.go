@@ -56,7 +56,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 		signer.accesslist = true
 		signer.chainID.Set(&chainId)
 		signer.chainIDMul.Mul(&chainId, u256.Num2)
-	case config.IsEIP155(blockNumber):
+	case config.IsSpuriousDragon(blockNumber):
 		signer.protected = true
 		signer.chainID.Set(&chainId)
 		signer.chainIDMul.Mul(&chainId, u256.Num2)
@@ -98,7 +98,7 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 		if config.BerlinBlock != nil {
 			signer.accesslist = true
 		}
-		if config.EIP155Block != nil {
+		if config.SpuriousDragonBlock != nil {
 			signer.protected = true
 		}
 	}

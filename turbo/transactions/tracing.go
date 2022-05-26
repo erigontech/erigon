@@ -64,7 +64,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
-		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
+		// Only delete empty objects if EIP161 (part of Spurious Dragon) is in effect
 		_ = statedb.FinalizeTx(vmenv.ChainRules(), reader)
 
 		if idx+1 == len(block.Transactions()) {

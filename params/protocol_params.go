@@ -93,7 +93,7 @@ const (
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.
-	CallGasEIP150                uint64 = 700 // Static portion of gas for CALL-derivates after EIP 150 (Tangerine)
+	CallGasEIP150                uint64 = 700 // Static portion of gas for CALL-derivatives after EIP 150 (Tangerine)
 	BalanceGasFrontier           uint64 = 20  // The cost of a BALANCE operation
 	BalanceGasEIP150             uint64 = 400 // The cost of a BALANCE operation after Tangerine
 	BalanceGasEIP1884            uint64 = 700 // The cost of a BALANCE operation after EIP 1884 (part of Istanbul)
@@ -109,7 +109,7 @@ const (
 
 	// EXP has a dynamic portion depending on the size of the exponent
 	ExpByteFrontier uint64 = 10 // was set to 10 in Frontier
-	ExpByteEIP158   uint64 = 50 // was raised to 50 during Eip158 (Spurious Dragon)
+	ExpByteEIP160   uint64 = 50 // was raised to 50 during EIP 160 (Spurious Dragon)
 
 	// Extcodecopy has a dynamic AND a static cost. This represents only the
 	// static portion of the gas. It was changed during EIP 150 (Tangerine)
