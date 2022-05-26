@@ -128,7 +128,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	if rebuild {
-		cfg := ethconfig.NewSnapshotCfg(true, true)
+		cfg := ethconfig.NewSnapshotCfg(true, true, false)
 		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
@@ -245,7 +245,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(path.Join(datadir, "chaindata")).Readonly().MustOpen()
 	defer chainDB.Close()
 
-	cfg := ethconfig.NewSnapshotCfg(true, true)
+	cfg := ethconfig.NewSnapshotCfg(true, true, true)
 	chainConfig := tool.ChainConfigFromDB(chainDB)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, snapDir)

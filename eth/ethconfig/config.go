@@ -131,7 +131,7 @@ func (s Snapshot) String() string {
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
 	}
-	if s.Produce {
+	if !s.Produce {
 		out = append(out, "--"+FlagSnapStop+"=true")
 	}
 	return strings.Join(out, " ")
