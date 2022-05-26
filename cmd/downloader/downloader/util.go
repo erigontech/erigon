@@ -382,7 +382,7 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			j++
 			if !good {
 				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", f)
-				return fmt.Errorf("invalid file")
+				return nil
 			}
 			select {
 			case <-logEvery.C:

@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -69,7 +69,7 @@ type EngineAPI interface {
 type EngineImpl struct {
 	*BaseAPI
 	db  kv.RoDB
-	api services.ApiBackend
+	api rpcinterfaces.ApiBackend
 }
 
 func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} {
@@ -253,7 +253,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 }
 
 // NewEngineAPI returns EngineImpl instance
-func NewEngineAPI(base *BaseAPI, db kv.RoDB, api services.ApiBackend) *EngineImpl {
+func NewEngineAPI(base *BaseAPI, db kv.RoDB, api rpcinterfaces.ApiBackend) *EngineImpl {
 	return &EngineImpl{
 		BaseAPI: base,
 		db:      db,

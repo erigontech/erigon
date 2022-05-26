@@ -9,11 +9,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -30,7 +30,7 @@ type BodiesCfg struct {
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
 	snapshots       *snapshotsync.RoSnapshots
-	blockReader     interfaces.FullBlockReader
+	blockReader     services.FullBlockReader
 }
 
 func StageBodiesCfg(
@@ -43,7 +43,7 @@ func StageBodiesCfg(
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
 	snapshots *snapshotsync.RoSnapshots,
-	blockReader interfaces.FullBlockReader,
+	blockReader services.FullBlockReader,
 ) BodiesCfg {
 	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}
 }
