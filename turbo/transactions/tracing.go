@@ -44,6 +44,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 
 	BlockContext := core.NewEVMBlockContext(block.Header(), getHeader, engine, nil, contractHasTEVM)
 	vmenv := vm.NewEVM(BlockContext, vm.TxContext{}, statedb, cfg, vm.Config{})
+	rules := vmenv.ChainRules()
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -53,7 +54,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		statedb.Prepare(tx.Hash(), blockHash, idx)
 
 		// Assemble the transaction call message and return if the requested offset
-		msg, _ := tx.AsMessage(*signer, block.BaseFee())
+		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == int(txIndex) {
 			return msg, BlockContext, TxContext, statedb, reader, nil
@@ -65,7 +66,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP161 (part of Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(vmenv.ChainRules(), reader)
+		_ = statedb.FinalizeTx(rules, reader)
 
 		if idx+1 == len(block.Transactions()) {
 			// Return the state from evaluating all txs in the block, note no msg or TxContext in this case

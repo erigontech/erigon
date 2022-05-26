@@ -146,7 +146,7 @@ type EVM struct {
 	// chainConfig contains information about the current chain
 	chainConfig *params.ChainConfig
 	// chain rules contains the chain rules for the current epoch
-	chainRules params.Rules
+	chainRules *params.Rules
 	// virtual machine configuration options used to initialise the
 	// evm.
 	config Config
@@ -612,7 +612,7 @@ func (evm *EVM) ChainConfig() *params.ChainConfig {
 	return evm.chainConfig
 }
 
-func (evm *EVM) ChainRules() params.Rules {
+func (evm *EVM) ChainRules() *params.Rules {
 	return evm.chainRules
 }
 

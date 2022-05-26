@@ -85,7 +85,8 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
-	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee)
+	rules := evm.ChainRules()
+	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,7 +104,7 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = statedb.FinalizeTx(evm.ChainRules(), stateWriter); err != nil {
+	if err = statedb.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
 

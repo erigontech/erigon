@@ -717,7 +717,7 @@ func printAccount(EIP161Enabled bool, addr common.Address, stateObject *stateObj
 }
 
 // FinalizeTx should be called after every transaction.
-func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) FinalizeTx(chainRules *params.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)
@@ -748,7 +748,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) CommitBlock(chainRules *params.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)

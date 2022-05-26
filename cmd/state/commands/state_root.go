@@ -92,7 +92,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		return err4
 	}
 	w := state.NewPlainStateWriter(rwTx, nil, 0)
-	if err = genesisIbs.CommitBlock(params.Rules{}, w); err != nil {
+	if err = genesisIbs.CommitBlock(&params.Rules{}, w); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
 	if err = rwTx.Commit(); err != nil {

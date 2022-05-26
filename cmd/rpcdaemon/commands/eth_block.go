@@ -108,7 +108,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	// Get a new instance of the EVM
 	signer := types.MakeSigner(chainConfig, blockNumber)
-	firstMsg, err := txs[0].AsMessage(*signer, nil)
+	rules := chainConfig.Rules(blockNumber)
+	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +154,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	bundleHash := sha3.NewLegacyKeccak256()
 	for _, txn := range txs {
-		msg, err := txn.AsMessage(*signer, nil)
+		msg, err := txn.AsMessage(*signer, nil, rules)
 		if err != nil {
 			return nil, err
 		}

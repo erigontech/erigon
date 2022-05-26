@@ -176,7 +176,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if err = w.Reset(0, rwTx); err != nil {
 			return err
 		}
-		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
+		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper{w: w}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 		if err = w.FinishTx(0, false); err != nil {

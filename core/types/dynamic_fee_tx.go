@@ -18,6 +18,7 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -26,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -430,7 +432,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
+func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -441,6 +443,9 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, 
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+	}
+	if !rules.IsLondon {
+		return msg, errors.New("eip-1559 transactions require London")
 	}
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)

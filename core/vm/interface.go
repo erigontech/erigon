@@ -17,8 +17,9 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/erigon/params"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/holiman/uint256"
 
@@ -95,7 +96,7 @@ type VMInterface interface {
 	Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error)
 	Config() Config
 	ChainConfig() *params.ChainConfig
-	ChainRules() params.Rules
+	ChainRules() *params.Rules
 	Context() BlockContext
 	IntraBlockState() IntraBlockState
 	TxContext() TxContext
