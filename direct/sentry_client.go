@@ -19,6 +19,7 @@ package direct
 import (
 	"context"
 	"fmt"
+	"google.golang.org/protobuf/proto"
 	"io"
 	"sync"
 
@@ -235,7 +236,9 @@ func (s *SentryMessagesStreamS) Send(m *sentry.InboundMessage) error {
 	s.ch <- &inboundMessageReply{r: m}
 	return nil
 }
+
 func (s *SentryMessagesStreamS) Context() context.Context { return s.ctx }
+
 func (s *SentryMessagesStreamS) Err(err error) {
 	if err == nil {
 		return
@@ -256,7 +259,18 @@ func (c *SentryMessagesStreamC) Recv() (*sentry.InboundMessage, error) {
 	}
 	return m.r, m.err
 }
+
 func (c *SentryMessagesStreamC) Context() context.Context { return c.ctx }
+
+func (c *SentryMessagesStreamC) RecvMsg(anyMessage interface{}) error {
+	m, err := c.Recv()
+	if err != nil {
+		return err
+	}
+	outMessage := anyMessage.(*sentry.InboundMessage)
+	proto.Merge(outMessage, m)
+	return nil
+}
 
 // -- end Messages
 // -- start Peers
@@ -287,7 +301,9 @@ func (s *SentryPeersStreamS) Send(m *sentry.PeerEvent) error {
 	s.ch <- &peersReply{r: m}
 	return nil
 }
+
 func (s *SentryPeersStreamS) Context() context.Context { return s.ctx }
+
 func (s *SentryPeersStreamS) Err(err error) {
 	if err == nil {
 		return
@@ -308,7 +324,18 @@ func (c *SentryPeersStreamC) Recv() (*sentry.PeerEvent, error) {
 	}
 	return m.r, m.err
 }
+
 func (c *SentryPeersStreamC) Context() context.Context { return c.ctx }
+
+func (c *SentryPeersStreamC) RecvMsg(anyMessage interface{}) error {
+	m, err := c.Recv()
+	if err != nil {
+		return err
+	}
+	outMessage := anyMessage.(*sentry.PeerEvent)
+	proto.Merge(outMessage, m)
+	return nil
+}
 
 // -- end Peers
 
