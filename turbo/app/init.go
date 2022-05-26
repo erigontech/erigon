@@ -35,7 +35,6 @@ It expects the genesis file as argument.`,
 func initGenesis(ctx *cli.Context) error {
 	// Make sure we have a valid genesis JSON
 	genesisPath := ctx.Args().First()
-	fmt.Println(genesisPath)
 	if len(genesisPath) == 0 {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
