@@ -228,6 +228,25 @@ func Main(ctx *cli.Context) error {
 		}
 	}
 
+	// Sanity check, to not `panic` in state_transition
+	if prestate.Env.Random != nil && !chainConfig.IsLondon(prestate.Env.Number) {
+		return NewError(ErrorVMConfig, errors.New("can only apply RANDOM on top of London chainrules"))
+	}
+	if env := prestate.Env; env.Difficulty == nil {
+		// If difficulty was not provided by caller, we need to calculate it.
+		switch {
+		case env.ParentDifficulty == nil:
+			return NewError(ErrorVMConfig, errors.New("currentDifficulty was not provided, and cannot be calculated due to missing parentDifficulty"))
+		case env.Number == 0:
+			return NewError(ErrorVMConfig, errors.New("currentDifficulty needs to be provided for block number 0"))
+		case env.Timestamp <= env.ParentTimestamp:
+			return NewError(ErrorVMConfig, fmt.Errorf("currentDifficulty cannot be calculated -- currentTime (%d) needs to be after parent time (%d)",
+				env.Timestamp, env.ParentTimestamp))
+		}
+		prestate.Env.Difficulty = calcDifficulty(chainConfig, env.Number, env.Timestamp,
+			env.ParentTimestamp, env.ParentDifficulty, env.ParentUncleHash)
+	}
+
 	// Run the test and aggregate the result
 	db, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
 	if err1 != nil {
