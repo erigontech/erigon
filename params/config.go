@@ -123,7 +123,6 @@ var (
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		EIP155Block:           big.NewInt(0),
-		EIP158Block:           big.NewInt(0),
 		ByzantiumBlock:        big.NewInt(0),
 		ConstantinopleBlock:   big.NewInt(0),
 		PetersburgBlock:       big.NewInt(0),
@@ -147,7 +146,6 @@ var (
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		EIP155Block:           big.NewInt(0),
-		EIP158Block:           big.NewInt(0),
 		ByzantiumBlock:        big.NewInt(0),
 		ConstantinopleBlock:   big.NewInt(0),
 		PetersburgBlock:       big.NewInt(0),
@@ -175,7 +173,6 @@ var (
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		EIP155Block:           big.NewInt(0),
-		EIP158Block:           big.NewInt(0),
 		ByzantiumBlock:        big.NewInt(0),
 		ConstantinopleBlock:   big.NewInt(0),
 		PetersburgBlock:       big.NewInt(0),
@@ -197,7 +194,6 @@ var (
 		TangerineWhistleBlock: big.NewInt(0),
 		TangerineWhistleHash:  common.Hash{},
 		EIP155Block:           big.NewInt(0),
-		EIP158Block:           big.NewInt(0),
 		ByzantiumBlock:        big.NewInt(0),
 		ConstantinopleBlock:   big.NewInt(0),
 		PetersburgBlock:       big.NewInt(0),
@@ -233,7 +229,6 @@ type ChainConfig struct {
 	TangerineWhistleHash  common.Hash `json:"eip150Hash,omitempty"`  // EIP150 HF hash (needed for header only clients as only gas pricing changed)
 
 	EIP155Block *big.Int `json:"eip155Block,omitempty"` // EIP155 HF block
-	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
 
 	ByzantiumBlock      *big.Int `json:"byzantiumBlock,omitempty"`      // Byzantium switch block (nil = no fork, 0 = already on byzantium)
 	ConstantinopleBlock *big.Int `json:"constantinopleBlock,omitempty"` // Constantinople switch block (nil = no fork, 0 = already activated)
@@ -393,14 +388,13 @@ func (c *ChainConfig) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAO Support: %v Tangerine Whistle: %v EIP155: %v EIP158: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAO Support: %v Tangerine Whistle: %v EIP155: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
 		c.DAOForkSupport,
 		c.TangerineWhistleBlock,
 		c.EIP155Block,
-		c.EIP158Block,
 		c.ByzantiumBlock,
 		c.ConstantinopleBlock,
 		c.PetersburgBlock,
@@ -460,11 +454,6 @@ func (c *ChainConfig) IsTangerineWhistle(num uint64) bool {
 // IsEIP155 returns whether num is either equal to the EIP155 fork block or greater.
 func (c *ChainConfig) IsEIP155(num uint64) bool {
 	return isForked(c.EIP155Block, num)
-}
-
-// IsEIP158 returns whether num is either equal to the EIP158 fork block or greater.
-func (c *ChainConfig) IsEIP158(num uint64) bool {
-	return isForked(c.EIP158Block, num)
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
@@ -584,7 +573,6 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "daoForkBlock", block: c.DAOForkBlock, optional: true},
 		{name: "eip150Block", block: c.TangerineWhistleBlock},
 		{name: "eip155Block", block: c.EIP155Block},
-		{name: "eip158Block", block: c.EIP158Block},
 		{name: "byzantiumBlock", block: c.ByzantiumBlock},
 		{name: "constantinopleBlock", block: c.ConstantinopleBlock},
 		{name: "petersburgBlock", block: c.PetersburgBlock},
@@ -631,11 +619,8 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.EIP155Block, newcfg.EIP155Block, head) {
 		return newCompatError("EIP155 fork block", c.EIP155Block, newcfg.EIP155Block)
 	}
-	if isForkIncompatible(c.EIP158Block, newcfg.EIP158Block, head) {
-		return newCompatError("EIP158 fork block", c.EIP158Block, newcfg.EIP158Block)
-	}
-	if c.IsEIP158(head) && !configNumEqual(c.ChainID, newcfg.ChainID) {
-		return newCompatError("EIP158 chain ID", c.EIP158Block, newcfg.EIP158Block)
+	if c.IsEIP155(head) && !configNumEqual(c.ChainID, newcfg.ChainID) {
+		return newCompatError("EIP155 chain ID", c.EIP155Block, newcfg.EIP155Block)
 	}
 	if isForkIncompatible(c.ByzantiumBlock, newcfg.ByzantiumBlock, head) {
 		return newCompatError("Byzantium fork block", c.ByzantiumBlock, newcfg.ByzantiumBlock)
@@ -730,7 +715,7 @@ func (err *ConfigCompatError) Error() string {
 // phases.
 type Rules struct {
 	ChainID                                                 *big.Int
-	IsHomestead, IsTangerineWhistle, IsEIP155, IsEIP158     bool
+	IsHomestead, IsTangerineWhistle, IsEIP155               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsParlia                            bool
 }
@@ -746,7 +731,6 @@ func (c *ChainConfig) Rules(num uint64) Rules {
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),
 		IsEIP155:           c.IsEIP155(num),
-		IsEIP158:           c.IsEIP158(num),
 		IsByzantium:        c.IsByzantium(num),
 		IsConstantinople:   c.IsConstantinople(num),
 		IsPetersburg:       c.IsPetersburg(num),

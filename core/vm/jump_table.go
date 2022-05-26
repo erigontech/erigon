@@ -200,7 +200,7 @@ func newByzantiumInstructionSet() JumpTable {
 // EIP 158 a.k.a Spurious Dragon
 func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet := newTangerineWhistleInstructionSet()
-	instructionSet[EXP].dynamicGas = gasExpEIP158
+	instructionSet[EXP].dynamicGas = gasExpEIP160
 	return instructionSet
 
 }

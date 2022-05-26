@@ -109,7 +109,7 @@ const (
 
 	// EXP has a dynamic portion depending on the size of the exponent
 	ExpByteFrontier uint64 = 10 // was set to 10 in Frontier
-	ExpByteEIP158   uint64 = 50 // was raised to 50 during Eip158 (Spurious Dragon)
+	ExpByteEIP160   uint64 = 50 // was raised to 50 during EIP 160 (Spurious Dragon)
 
 	// Extcodecopy has a dynamic AND a static cost. This represents only the
 	// static portion of the gas. It was changed during EIP 150 (Tangerine)

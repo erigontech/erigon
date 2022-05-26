@@ -877,8 +877,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
-				EIP155Block:           new(big.Int),
-				EIP158Block:           big.NewInt(2),
+				EIP155Block:           big.NewInt(2),
 			},
 			Alloc: core.GenesisAlloc{address: {Balance: funds}},
 		}
@@ -889,7 +888,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		var (
 			txn    types.Transaction
 			err    error
-			signer = types.LatestSigner(gspec.Config)
+			signer = types.MakeFrontierSigner()
 		)
 		switch i {
 		case 0:

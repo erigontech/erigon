@@ -317,11 +317,11 @@ func gasExpFrontier(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memor
 	return gas, nil
 }
 
-func gasExpEIP158(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasExpEIP160(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	expByteLen := uint64((stack.Data[stack.Len()-2].BitLen() + 7) / 8)
 
 	var (
-		gas      = expByteLen * params.ExpByteEIP158 // no overflow check required. Max is 256 * ExpByte gas
+		gas      = expByteLen * params.ExpByteEIP160 // no overflow check required. Max is 256 * ExpByte gas
 		overflow bool
 	)
 	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
@@ -336,7 +336,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		transfersValue = !stack.Back(2).IsZero()
 		address        = common.Address(stack.Back(1).Bytes20())
 	)
-	if evm.ChainRules().IsEIP158 {
+	if evm.ChainRules().IsEIP155 {
 		if transfersValue && evm.IntraBlockState().Empty(address) {
 			gas += params.CallNewAccountGas
 		}
@@ -429,7 +429,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		gas = params.SelfdestructGasEIP150
 		var address = common.Address(stack.Back(0).Bytes20())
 
-		if evm.ChainRules().IsEIP158 {
+		if evm.ChainRules().IsEIP155 {
 			// if empty and transfers value
 			if evm.IntraBlockState().Empty(address) && !evm.IntraBlockState().GetBalance(contract.Address()).IsZero() {
 				gas += params.CreateBySelfdestructGas

@@ -230,7 +230,6 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 			chainConfig.TangerineWhistleBlock = bigNumber
 		case "spurious":
 			chainConfig.EIP155Block = bigNumber
-			chainConfig.EIP158Block = bigNumber
 		case "byzantium":
 			chainConfig.ByzantiumBlock = bigNumber
 		case "constantinople":

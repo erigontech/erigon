@@ -67,7 +67,6 @@ func setDefaults(cfg *Config) {
 			TangerineWhistleBlock: new(big.Int),
 			TangerineWhistleHash:  common.Hash{},
 			EIP155Block:           new(big.Int),
-			EIP158Block:           new(big.Int),
 			ByzantiumBlock:        new(big.Int),
 			ConstantinopleBlock:   new(big.Int),
 			PetersburgBlock:       new(big.Int),
