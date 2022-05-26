@@ -717,16 +717,17 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsParlia                            bool
+	IsBerlin, IsLondon                                      bool
+	IsParlia, IsStarknet                                    bool
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num uint64) Rules {
+func (c *ChainConfig) Rules(num uint64) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
 	}
-	return Rules{
+	return &Rules{
 		ChainID:            new(big.Int).Set(chainID),
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),

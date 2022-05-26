@@ -327,7 +327,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				statedb.SetIncarnation(addr, 1)
 			}
 		}
-		if err := statedb.FinalizeTx(params.Rules{}, w); err != nil {
+		if err := statedb.FinalizeTx(&params.Rules{}, w); err != nil {
 			panic(err)
 		}
 		root, err = trie.CalcRoot("genesis", tx)
@@ -403,7 +403,7 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 
 	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
-	if err := statedb.CommitBlock(params.Rules{}, blockWriter); err != nil {
+	if err := statedb.CommitBlock(&params.Rules{}, blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 	if err := blockWriter.WriteChangeSets(); err != nil {

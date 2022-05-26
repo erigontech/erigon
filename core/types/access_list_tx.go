@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -521,7 +522,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx AccessListTx) AsMessage(s Signer, _ *big.Int) (Message, error) {
+func (tx AccessListTx) AsMessage(s Signer, _ *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -533,6 +534,10 @@ func (tx AccessListTx) AsMessage(s Signer, _ *big.Int) (Message, error) {
 		data:       tx.Data,
 		accessList: tx.AccessList,
 		checkNonce: true,
+	}
+
+	if !rules.IsBerlin {
+		return msg, errors.New("eip-2930 transactions require Berlin")
 	}
 
 	var err error

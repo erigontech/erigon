@@ -278,7 +278,7 @@ func runCmd(ctx *cli.Context) error {
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		var rules params.Rules
+		rules := &params.Rules{}
 		if chainConfig != nil {
 			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64())
 		}
