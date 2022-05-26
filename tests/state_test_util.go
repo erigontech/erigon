@@ -159,7 +159,7 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(rules, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&params.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -180,7 +180,7 @@ func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSu
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
-	msg, err := txn.AsMessage(*types.MakeSigner(config, 0), baseFee, rules)
+	msg, err := txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0))
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
