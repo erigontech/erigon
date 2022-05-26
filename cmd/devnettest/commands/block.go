@@ -3,11 +3,12 @@ package commands
 import (
 	"context"
 	"fmt"
+	"time"
+	
 	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
-	"time"
 )
 
 const (
