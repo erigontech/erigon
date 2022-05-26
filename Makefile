@@ -148,5 +148,5 @@ git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule sync --recursive
+	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true
