@@ -39,7 +39,7 @@ func (eri *ErigonNode) run() {
 	utils.StartNode(eri.stack)
 	// we don't have accounts locally and we don't do mining
 	// so these parts are ignored
-	// see cmd/geth/main.go#startNode for full implementation
+	// see cmd/geth/daemon.go#startNode for full implementation
 }
 
 // Params contains optional parameters for creating a node.

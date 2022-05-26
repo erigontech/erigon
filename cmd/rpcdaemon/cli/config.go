@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/internal/debug"
+
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -34,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"

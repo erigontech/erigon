@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -18,9 +18,9 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 		splitErr  error
 	)
 
-	namespace, subMethod, splitErr = requests.NamespaceAndSubMethodFromMethod(method)
+	namespace, subMethod, splitErr = utils.NamespaceAndSubMethodFromMethod(method)
 	if splitErr != nil {
-		return nil, nil, fmt.Errorf("cannot get namespace and method from method: %v", splitErr)
+		return nil, nil, fmt.Errorf("cannot get namespace and submethod from method: %v", splitErr)
 	}
 
 	ch := make(chan interface{})
@@ -35,8 +35,8 @@ func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.Cli
 	return sub, ch, nil
 }
 
-// subscribeToNewHeads makes a ws subscription for eth_newHeads
-func subscribeToNewHeads(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
+// subscribeToNewHeadsAndSearch makes a ws subscription for eth_newHeads and searches each new header for the tx hash
+func subscribeToNewHeadsAndSearch(client *rpc.Client, method string, hash common.Hash) (uint64, error) {
 	sub, ch, err := subscribe(client, method)
 	if err != nil {
 		return uint64(0), fmt.Errorf("error subscribing to newHeads: %v", err)
@@ -47,20 +47,19 @@ func subscribeToNewHeads(client *rpc.Client, method string, hash common.Hash) (u
 		blockCount int
 		blockN     uint64
 	)
-ForLoop:
+mark:
 	for {
 		select {
 		case v := <-ch:
 			blockCount++
 			blockNumber := v.(map[string]interface{})["number"]
-			fmt.Printf("Searching for the transaction in block with number: %+v\n", blockNumber.(string))
 			num, foundTx, err := blockHasHash(client, hash, blockNumber.(string))
 			if err != nil {
 				return uint64(0), fmt.Errorf("could not verify if current block contains the tx hash: %v", err)
 			}
 			if foundTx || blockCount == numberOfIterations {
 				blockN = num
-				break ForLoop
+				break mark
 			}
 		case err := <-sub.Err():
 			return uint64(0), fmt.Errorf("subscription error from client: %v", err)
@@ -76,8 +75,6 @@ func Logs(addresses, topics []string) error {
 	if clientErr != nil {
 		return fmt.Errorf("failed to dial websocket: %v", clientErr)
 	}
-	fmt.Println()
-	fmt.Println("Connected to web socket successfully")
 
 	if err := subscribeToLogs(client, "eth_logs", addresses, topics); err != nil {
 		return fmt.Errorf("failed to subscribe to logs: %v", err)
