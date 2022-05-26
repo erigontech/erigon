@@ -60,7 +60,7 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 			ChainID:               big.NewInt(1),
 			HomesteadBlock:        big.NewInt(1),
 			TangerineWhistleBlock: big.NewInt(2),
-			EIP155Block:           big.NewInt(2),
+			SpuriousDragonBlock:   big.NewInt(2),
 			ByzantiumBlock:        big.NewInt(3),
 		}
 		dbNoFork  = memdb.NewTestDB(t)

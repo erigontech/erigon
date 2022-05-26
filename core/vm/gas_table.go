@@ -336,7 +336,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 		transfersValue = !stack.Back(2).IsZero()
 		address        = common.Address(stack.Back(1).Bytes20())
 	)
-	if evm.ChainRules().IsEIP155 {
+	if evm.ChainRules().IsSpuriousDragon {
 		if transfersValue && evm.IntraBlockState().Empty(address) {
 			gas += params.CallNewAccountGas
 		}
@@ -429,7 +429,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 		gas = params.SelfdestructGasEIP150
 		var address = common.Address(stack.Back(0).Bytes20())
 
-		if evm.ChainRules().IsEIP155 {
+		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value
 			if evm.IntraBlockState().Empty(address) && !evm.IntraBlockState().GetBalance(contract.Address()).IsZero() {
 				gas += params.CreateBySelfdestructGas

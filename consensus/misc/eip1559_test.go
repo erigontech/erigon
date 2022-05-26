@@ -35,7 +35,7 @@ func copyConfig(original *params.ChainConfig) *params.ChainConfig {
 		DAOForkSupport:        original.DAOForkSupport,
 		TangerineWhistleBlock: original.TangerineWhistleBlock,
 		TangerineWhistleHash:  original.TangerineWhistleHash,
-		EIP155Block:           original.EIP155Block,
+		SpuriousDragonBlock:   original.SpuriousDragonBlock,
 		ByzantiumBlock:        original.ByzantiumBlock,
 		ConstantinopleBlock:   original.ConstantinopleBlock,
 		PetersburgBlock:       original.PetersburgBlock,

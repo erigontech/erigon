@@ -48,7 +48,7 @@ func TestSelfDestructReceive(t *testing.T) {
 				ByzantiumBlock:        new(big.Int),
 				ConstantinopleBlock:   new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
-				EIP155Block:           new(big.Int),
+				SpuriousDragonBlock:   new(big.Int),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},

@@ -735,7 +735,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsEIP155, stateWriter, addr, so, true); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, stateWriter, addr, so, true); err != nil {
 			return err
 		}
 
@@ -759,7 +759,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(chainRules.IsEIP155, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err
 		}
 	}
@@ -773,7 +773,7 @@ func (sdb *IntraBlockState) Print(chainRules params.Rules) {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		_, isDirty2 := sdb.journal.dirties[addr]
 
-		printAccount(chainRules.IsEIP155, addr, stateObject, isDirty || isDirty2)
+		printAccount(chainRules.IsSpuriousDragon, addr, stateObject, isDirty || isDirty2)
 	}
 }
 

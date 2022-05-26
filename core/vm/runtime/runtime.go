@@ -66,7 +66,7 @@ func setDefaults(cfg *Config) {
 			DAOForkSupport:        false,
 			TangerineWhistleBlock: new(big.Int),
 			TangerineWhistleHash:  common.Hash{},
-			EIP155Block:           new(big.Int),
+			SpuriousDragonBlock:   new(big.Int),
 			ByzantiumBlock:        new(big.Int),
 			ConstantinopleBlock:   new(big.Int),
 			PetersburgBlock:       new(big.Int),

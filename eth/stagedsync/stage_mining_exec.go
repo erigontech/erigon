@@ -232,10 +232,10 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		//
 		// We use the eip155 signer regardless of the env hf.
 		from, _ := txn.Sender(*signer)
-		// Check whether the txn is replay protected. If we're not in the EIP155 hf
+		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
 		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsEIP155(header.Number.Uint64()) {
-			log.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.EIP155Block)
+		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
+			log.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
 
 			txs.Pop()
 			continue

@@ -719,7 +719,7 @@ func getGenesis(funds ...*big.Int) initialData {
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
-				EIP155Block:           big.NewInt(1),
+				SpuriousDragonBlock:   big.NewInt(1),
 				ByzantiumBlock:        big.NewInt(1),
 				ConstantinopleBlock:   big.NewInt(1),
 			},
