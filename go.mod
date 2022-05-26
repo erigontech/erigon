@@ -6,7 +6,6 @@ require (
 	github.com/RoaringBitmap/roaring v1.1.0
 	github.com/VictoriaMetrics/fastcache v1.10.0
 	github.com/VictoriaMetrics/metrics v1.18.1
-	github.com/abiosoft/ishell/v2 v2.0.2
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.13.1
 	github.com/anacrolix/torrent v1.43.1

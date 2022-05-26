@@ -18,8 +18,4 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
-	//Uncomment below line to run shell commands instead
-	//Note: Have to comment commands.Execute()
-	//shell.Execute()
 }
