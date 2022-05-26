@@ -105,18 +105,23 @@ func (ms *MockSentry) Send(req *proto_sentry.InboundMessage) (errs []error) {
 	return errs
 }
 
+func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
+	return &proto_sentry.SetStatusReply{}, nil
+}
+
 func (ms *MockSentry) PenalizePeer(context.Context, *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
 func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, nil
 }
+
+func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
+	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+}
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
 	return nil, nil
-}
-func (ms *MockSentry) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
-	return nil
 }
 func (ms *MockSentry) SendMessageById(_ context.Context, r *proto_sentry.SendMessageByIdRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -133,12 +138,7 @@ func (ms *MockSentry) SendMessageToAll(_ context.Context, r *proto_sentry.Outbou
 func (ms *MockSentry) SentMessage(i int) *proto_sentry.OutboundMessageData {
 	return ms.sentMessages[i]
 }
-func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
-	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
-}
-func (ms *MockSentry) SetStatus(context.Context, *proto_sentry.StatusData) (*proto_sentry.SetStatusReply, error) {
-	return &proto_sentry.SetStatusReply{}, nil
-}
+
 func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_sentry.Sentry_MessagesServer) error {
 	if ms.streams == nil {
 		ms.streams = map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer{}
@@ -154,6 +154,23 @@ func (ms *MockSentry) Messages(req *proto_sentry.MessagesRequest, stream proto_s
 	case <-stream.Context().Done():
 		return nil
 	}
+}
+
+func (ms *MockSentry) Peers(context.Context, *emptypb.Empty) (*proto_sentry.PeersReply, error) {
+	return &proto_sentry.PeersReply{}, nil
+}
+func (ms *MockSentry) PeerCount(context.Context, *proto_sentry.PeerCountRequest) (*proto_sentry.PeerCountReply, error) {
+	return &proto_sentry.PeerCountReply{Count: 0}, nil
+}
+func (ms *MockSentry) PeerById(context.Context, *proto_sentry.PeerByIdRequest) (*proto_sentry.PeerByIdReply, error) {
+	return &proto_sentry.PeerByIdReply{}, nil
+}
+func (ms *MockSentry) PeerEvents(req *proto_sentry.PeerEventsRequest, server proto_sentry.Sentry_PeerEventsServer) error {
+	return nil
+}
+
+func (ms *MockSentry) NodeInfo(context.Context, *emptypb.Empty) (*ptypes.NodeInfoReply, error) {
+	return nil, nil
 }
 
 func MockWithGenesis(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey) *MockSentry {
