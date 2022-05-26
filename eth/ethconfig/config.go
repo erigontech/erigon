@@ -84,6 +84,11 @@ var Defaults = Config{
 	BodyDownloadTimeoutSeconds: 30,
 
 	ImportMode: false,
+	Snapshot: Snapshot{
+		Enabled:    false,
+		KeepBlocks: false,
+		Produce:    true,
+	},
 }
 
 func init() {
@@ -115,6 +120,7 @@ func init() {
 type Snapshot struct {
 	Enabled    bool
 	KeepBlocks bool
+	Produce    bool // produce new snapshots
 }
 
 func (s Snapshot) String() string {
@@ -123,18 +129,21 @@ func (s Snapshot) String() string {
 		out = append(out, "--syncmode=snap")
 	}
 	if s.KeepBlocks {
-		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
+		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
+	}
+	if s.Produce {
+		out = append(out, "--"+FlagSnapStop+"=true")
 	}
 	return strings.Join(out, " ")
 }
 
 var (
-	FlagSnapshot           = "snapshot"
-	FlagSnapshotKeepBlocks = "snap.keepblocks"
+	FlagSnapKeepBlocks = "snap.keepblocks"
+	FlagSnapStop       = "snap.stop"
 )
 
-func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
-	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks}
+func NewSnapshotCfg(enabled, keepBlocks, produce bool) Snapshot {
+	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
 }
 
 // Config contains configuration options for ETH protocol.

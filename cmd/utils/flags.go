@@ -635,8 +635,12 @@ var (
 	}
 
 	SnapshotKeepBlocksFlag = cli.BoolFlag{
-		Name:  ethconfig.FlagSnapshotKeepBlocks,
+		Name:  ethconfig.FlagSnapKeepBlocks,
 		Usage: "Keep ancient blocks in db (useful for debug)",
+	}
+	SnapshotProduceFlag = cli.BoolFlag{
+		Name:  ethconfig.FlagSnapStop,
+		Usage: "Produce new snapshots",
 	}
 	TorrentVerbosityFlag = cli.StringFlag{
 		Name:  "torrent.verbosity",
@@ -1379,6 +1383,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
 	cfg.SnapDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapshotKeepBlocksFlag.Name)
+	cfg.Snapshot.Produce = ctx.GlobalBool(SnapshotProduceFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
 		downloadRateStr := ctx.GlobalString(TorrentDownloadRateFlag.Name)
 		uploadRateStr := ctx.GlobalString(TorrentUploadRateFlag.Name)
@@ -1407,7 +1412,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *node.Config, cfg *ethconfig.Conf
 		}
 	}
 
-	nodeConfig.Http.Snapshot = cfg.Snapshot
+	nodeConfig.Http.Snap = cfg.Snapshot
 
 	if ctx.Command.Name == "import" {
 		cfg.ImportMode = true

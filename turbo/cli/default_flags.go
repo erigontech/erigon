@@ -72,6 +72,7 @@ var DefaultFlags = []cli.Flag{
 	utils.TraceMaxtracesFlag,
 
 	utils.SnapshotKeepBlocksFlag,
+	utils.SnapshotProduceFlag,
 	utils.DbPageSizeFlag,
 	utils.TorrentPortFlag,
 	utils.TorrentMaxPeersFlag,
