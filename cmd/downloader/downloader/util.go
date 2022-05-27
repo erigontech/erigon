@@ -368,6 +368,7 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	}
 
 	j := 0
+	failsAmount := 0
 	for _, f := range files {
 		metaInfo, err := metainfo.LoadFromFile(f)
 		if err != nil {
@@ -381,7 +382,8 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 		err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
 			j++
 			if !good {
-				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", f)
+				failsAmount++
+				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", info.Name)
 				return nil
 			}
 			select {
@@ -397,7 +399,11 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			return err
 		}
 	}
-	log.Info("[Snapshots] Verify succeed")
+	if failsAmount > 0 {
+		return fmt.Errorf("not all files are valid")
+	} else {
+		log.Info("[Snapshots] Verify done")
+	}
 	return nil
 }
 
