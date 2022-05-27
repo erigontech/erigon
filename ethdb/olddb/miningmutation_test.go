@@ -148,4 +148,17 @@ func TestIterateWithNextDupAndCurrentMixed(t *testing.T) {
 		i++
 	}
 	require.Equal(t, i, 5)
+	// Test it with Seek
+	for k, v, _ := c.Seek([]byte{byte(1)}); k != nil; k, v, _ = c.NextDup() {
+		require.True(t, bytes.Compare(k, []byte{byte(i / 5)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
+		currK, currV, err := c.Current()
+		require.NoError(t, err)
+		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
+		i++
+		if i%5 == 0 {
+			k, v, _ = c.Seek([]byte{byte(i / 5)})
+			i++ // this causes total i to be 31
+		}
+	}
+	require.Equal(t, i, 31)
 }

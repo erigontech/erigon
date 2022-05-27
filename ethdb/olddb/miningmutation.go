@@ -231,8 +231,20 @@ func (m *miningmutation) BucketSize(bucket string) (uint64, error) {
 	panic("Not implemented")
 }
 
-func (m *miningmutation) ClearBucket(bucket string) error {
+func (m *miningmutation) DropBucket(bucket string) error {
 	panic("Not implemented")
+}
+
+func (m *miningmutation) ExistsBucket(bucket string) (bool, error) {
+	panic("Not implemented")
+}
+
+func (m *miningmutation) ListBuckets() ([]string, error) {
+	panic("Not implemented")
+}
+
+func (m *miningmutation) ClearBucket(bucket string) error {
+	return nil
 }
 
 func (m *miningmutation) CollectMetrics() {
@@ -243,9 +255,9 @@ func (m *miningmutation) CreateBucket(bucket string) error {
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *miningmutation) Cursor(bucket string) (miningmutationcursor, error) {
-	var c miningmutationcursor
-
+func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
+	c := &miningmutationcursor{}
+	c.dupsortedEntries = make(map[string]struct{})
 	var err error
 	if bucket != kv.HashedStorage {
 		keyMap := make(map[string]bool)
@@ -260,22 +272,40 @@ func (m *miningmutation) Cursor(bucket string) (miningmutationcursor, error) {
 		c.dupCursor, err = m.db.CursorDupSort(bucket)
 		c.cursor = c.dupCursor
 		for key, values := range m.hashedStorage {
-			// We remove duplicated entries using valueMap
-			valueMap := make(map[string]bool)
 			for _, value := range values {
 				dbKey, _, err := c.dupCursor.SeekBothExact([]byte(key), value)
 				if err != nil {
-					return miningmutationcursor{}, err
+					return &miningmutationcursor{}, err
 				}
-				if _, ok := valueMap[string(value)]; dbKey == nil && !ok {
+				if _, ok := c.dupsortedEntries[string(append([]byte(key), value...))]; dbKey == nil && !ok {
 					c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 				}
-				valueMap[string(value)] = true
+				c.dupsortedEntries[string(append([]byte(key), value...))] = struct{}{}
 			}
 		}
 	}
 	sort.Sort(c.pairs)
 	return c, err
+}
+
+// Cursor creates a new cursor (the real fun begins here)
+func (m *miningmutation) RwCursor(bucket string) (kv.RwCursor, error) {
+	return m.RwCursorDupSort(bucket)
+}
+
+// ViewID creates a new cursor (the real fun begins here)
+func (m *miningmutation) ViewID() uint64 {
+	panic("ViewID Not implemented")
+}
+
+// Cursor creates a new cursor (the real fun begins here)
+func (m *miningmutation) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+	return m.RwCursorDupSort(bucket)
+}
+
+// Cursor creates a new cursor (the real fun begins here)
+func (m *miningmutation) Cursor(bucket string) (kv.Cursor, error) {
+	return m.RwCursorDupSort(bucket)
 }
 
 // entry for the cursor
@@ -313,13 +343,15 @@ type miningmutationcursor struct {
 	// we can keep one cursor type if we store 2 of each kind.
 	cursor    kv.Cursor
 	dupCursor kv.CursorDupSort
+	// We use a map to keep track of which elements we got for dupsorted table
+	dupsortedEntries map[string]struct{}
 	// we keep the index in the slice of pairs we are at.
 	current int
 	// current cursor entry
 	currentPair cursorentry
 }
 
-func (m miningmutationcursor) endOfNextDb() (bool, error) {
+func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	dbCurrK, dbCurrV, err := m.cursor.Current()
 	if err != nil {
 		return false, err
@@ -377,12 +409,12 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 }
 
 // Current return the current key and values the cursor is on.
-func (m miningmutationcursor) Current() ([]byte, []byte, error) {
+func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
 	return m.currentPair.key, m.currentPair.value, nil
 }
 
 // isPointingOnDb checks if the cursor is pointing on the db cursor or on the memory slice.
-func (m miningmutationcursor) isPointingOnDb() (bool, error) {
+func (m *miningmutationcursor) isPointingOnDb() (bool, error) {
 	dbKey, dbValue, err := m.cursor.Current()
 	if err != nil {
 		return false, err
@@ -465,7 +497,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 	return m.pairs[m.current].key, m.pairs[m.current].value, nil
 }
 
-// NextDip returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
+// NextDup returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 	currK, _, _ := m.Current()
 
@@ -480,23 +512,156 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 	return nextK, nextV, nil
 }
 
+// Seek move pointer to a key at a certain position.
+func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
+	dbKey, dbValue, err := m.cursor.Seek(seek)
+	if err != nil {
+		return nil, nil, err
+	}
+	m.current = 0
+	// TODO(Giulio2002): Use Golang search
+	for _, pair := range m.pairs {
+		if len(pair.key) >= len(seek) && bytes.Compare(pair.key[:len(seek)], seek) >= 0 {
+			if (dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, pair)) {
+				m.currentPair = cursorentry{dbKey, dbValue}
+				return dbKey, dbValue, nil
+			}
+
+			if !m.isDupsortedEnabled() && bytes.Compare(dbKey, pair.key) == 0 {
+				if _, _, err := m.cursor.Next(); err != nil {
+					return nil, nil, err
+				}
+			}
+			m.currentPair = cursorentry{pair.key, pair.value}
+			// return current
+			return pair.key, pair.value, nil
+		}
+		m.current++
+	}
+
+	return dbKey, dbValue, nil
+}
+
+// Seek move pointer to a key at a certain position.
+func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
+	current := sort.Search(len(m.pairs), func(i int) bool {
+		return bytes.Compare(m.pairs[i].key, seek) == 0
+	})
+
+	if current >= 0 && current < len(m.pairs) && bytes.Compare(m.pairs[current].key, seek) == 0 {
+		m.current = current
+		_, _, err := m.cursor.Seek(seek)
+		if err != nil {
+			return nil, nil, err
+		}
+		m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
+		return m.pairs[m.current].key, m.pairs[m.current].value, nil
+	}
+
+	dbKey, dbValue, err := m.cursor.SeekExact(seek)
+	if err != nil {
+		return nil, nil, err
+	}
+	if dbKey != nil {
+		m.currentPair = cursorentry{dbKey, dbValue}
+		m.current = len(m.pairs)
+	}
+	return dbKey, dbValue, err
+}
+
+func (m *miningmutationcursor) Put(k, v []byte) error {
+	if _, ok := m.dupsortedEntries[string(append(k, v...))]; ok {
+		return nil
+	} else if !m.isDupsortedEnabled() {
+		for i := range m.pairs {
+			if bytes.Compare(m.pairs[i].key, k) == 0 {
+				m.pairs[i].value = v
+				return nil
+			}
+		}
+	}
+
+	m.pairs = append(m.pairs, cursorentry{k, v})
+	sort.Sort(m.pairs)
+	return nil
+}
+
+func (m *miningmutationcursor) Append(k []byte, v []byte) error {
+	m.pairs = append(m.pairs, cursorentry{k, v})
+	return nil
+}
+
+func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
+	m.pairs = append(m.pairs, cursorentry{k, v})
+	return nil
+}
+
+func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {
+	panic("DeleteCurrentDuplicates Not implemented")
+}
+
+func (m *miningmutationcursor) Delete(k, v []byte) error {
+	panic("Delete Not implemented")
+}
+
+func (m *miningmutationcursor) DeleteCurrent() error {
+	panic("DeleteCurrent Not implemented")
+}
+
+func (m *miningmutationcursor) DeleteCurrentDuplicates() error {
+	panic("DeleteCurrentDuplicates Not implemented")
+}
+
+func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
+	panic("SeekBothRange Not implemented")
+}
+
 func (m *miningmutationcursor) Last() ([]byte, []byte, error) {
-	panic("Last is not implemented!")
+	m.current = len(m.pairs)
+	dbKey, dbValue, err := m.cursor.Last()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if m.current == 0 {
+		m.currentPair = cursorentry{dbKey, dbValue}
+		return dbKey, dbValue, nil
+	}
+
+	if (compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current-1])) {
+		m.currentPair = cursorentry{dbKey, dbValue}
+		return dbKey, dbValue, nil
+	}
+	m.current--
+	m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
+	return m.pairs[m.current].key, m.pairs[m.current].value, nil
 }
 
 func (m *miningmutationcursor) Prev() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
 
-func (m miningmutationcursor) Close() {
+func (m *miningmutationcursor) Close() {
 	return
 }
 
-func (m miningmutationcursor) Count() (uint64, error) {
+func (m *miningmutationcursor) Count() (uint64, error) {
 	panic("Not implemented")
 }
 
-func (m miningmutationcursor) CountDuplicates() (uint64, error) {
+func (m *miningmutationcursor) FirstDup() ([]byte, error) {
+	panic("Not implemented")
+}
+
+func (m *miningmutationcursor) NextNoDup() ([]byte, []byte, error) {
+	panic("Not implemented")
+}
+
+func (m *miningmutationcursor) LastDup() ([]byte, error) {
+	panic("Not implemented")
+}
+
+func (m *miningmutationcursor) CountDuplicates() (uint64, error) {
 	panic("Not implemented")
 }
 
