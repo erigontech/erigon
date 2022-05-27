@@ -24,7 +24,9 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -116,8 +118,8 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
-func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
-	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+func (gpo *Oracle) SuggestTipCap(ctx context.Context, db kv.Tx) (*big.Int, error) {
+	head := rawdb.ReadCurrentHeader(db)
 	headHash := head.Hash()
 
 	// If the latest gasprice is still available, return it.

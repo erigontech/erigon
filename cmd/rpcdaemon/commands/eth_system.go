@@ -113,7 +113,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 		return nil, err
 	}
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
-	tipcap, err := oracle.SuggestTipCap(ctx)
+	tipcap, err := oracle.SuggestTipCap(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 		return nil, err
 	}
 	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
-	tipcap, err := oracle.SuggestTipCap(ctx)
+	tipcap, err := oracle.SuggestTipCap(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
