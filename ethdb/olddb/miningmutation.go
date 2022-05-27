@@ -30,8 +30,9 @@ type miningmutation struct {
 // batch.Commit()
 func NewMiningBatch(tx kv.Tx) *miningmutation {
 	return &miningmutation{
-		db:   tx,
-		puts: make(map[string]map[string][]byte),
+		db:            tx,
+		puts:          make(map[string]map[string][]byte),
+		hashedStorage: make(map[string][][]byte),
 	}
 }
 
@@ -247,17 +248,27 @@ func (m *miningmutation) Cursor(bucket string) (miningmutationcursor, error) {
 
 	var err error
 	if bucket != kv.HashedStorage {
-		c.cursor, err = m.db.Cursor(bucket)
 		for key, value := range m.puts[bucket] {
 			c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 		}
+		c.cursor, err = m.db.Cursor(bucket)
 	} else {
+		c.dupCursor, err = m.db.CursorDupSort(bucket)
+		c.cursor = c.dupCursor
 		for key, values := range m.hashedStorage {
+			// We remove duplicated entries using valueMap
+			valueMap := make(map[string]bool)
 			for _, value := range values {
-				c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
+				dbKey, _, err := c.dupCursor.SeekBothExact([]byte(key), value)
+				if err != nil {
+					return miningmutationcursor{}, err
+				}
+				if _, ok := valueMap[string(value)]; dbKey == nil && !ok {
+					c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
+				}
+				valueMap[string(value)] = true
 			}
 		}
-		c.dupCursor, err = m.db.CursorDupSort(bucket)
 	}
 	sort.Sort(c.pairs)
 	return c, err
@@ -271,9 +282,9 @@ type cursorentry struct {
 
 func compareEntries(a, b cursorentry) bool {
 	if bytes.Compare(a.key, b.key) == 0 {
-		return bytes.Compare(a.value, b.value) < 0
+		return bytes.Compare(a.value, b.value) <= 0
 	}
-	return bytes.Compare(a.key, b.key) < 0
+	return bytes.Compare(a.key, b.key) <= 0
 }
 
 type cursorentries []cursorentry
@@ -300,13 +311,35 @@ type miningmutationcursor struct {
 	dupCursor kv.CursorDupSort
 	// we keep the index in the slice of pairs we are at.
 	current int
-	// check if we are at the end of the disk db.
-	endOfDb bool
+	// current cursor entry
+	currentPair cursorentry
+}
+
+func (m miningmutationcursor) endOfNextDb() (bool, error) {
+	dbCurrK, dbCurrV, err := m.cursor.Current()
+	if err != nil {
+		return false, err
+	}
+
+	lastK, lastV, err := m.cursor.Last()
+	if err != nil {
+		return false, err
+	}
+
+	currK, currV, _ := m.Current()
+	if m.dupCursor != nil {
+		_, err = m.dupCursor.SeekBothRange(dbCurrK, dbCurrV)
+	} else {
+		_, _, err = m.cursor.Seek(dbCurrK)
+	}
+	return bytes.Compare(append(lastK, lastV...), append(currK, currV...)) <= 0, err
+
 }
 
 // First move cursor to first position and return key and value accordingly.
-func (m miningmutationcursor) First() ([]byte, []byte, error) {
+func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 	if m.pairs.Len() == 0 {
+		m.current = 0
 		return m.cursor.First()
 	}
 
@@ -316,34 +349,18 @@ func (m miningmutationcursor) First() ([]byte, []byte, error) {
 	}
 
 	m.current = 0
-	m.endOfDb = false
 	// is this db less than memory?
 	if (compareEntries(cursorentry{dbKey, dbValue}, m.pairs[0])) {
+		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
+	m.currentPair = cursorentry{m.pairs[0].key, m.pairs[0].value}
 	return m.pairs[0].key, m.pairs[0].value, nil
 }
 
 // Current return the current key and values the cursor is on.
 func (m miningmutationcursor) Current() ([]byte, []byte, error) {
-	if m.pairs.Len()-1 < m.current {
-		return m.cursor.Current()
-	}
-
-	if m.endOfDb {
-		return m.pairs[m.current].key, m.pairs[m.current].value, nil
-	}
-
-	dbKey, dbValue, err := m.cursor.Current()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// is this db less than memory?
-	if (compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current])) {
-		return dbKey, dbValue, nil
-	}
-	return m.pairs[m.current].key, m.pairs[m.current].value, nil
+	return m.currentPair.key, m.currentPair.value, nil
 }
 
 // isPointingOnDb checks if the cursor is pointing on the db cursor or on the memory slice.
@@ -359,15 +376,29 @@ func (m miningmutationcursor) isPointingOnDb() (bool, error) {
 // Next returns the next element of the mutation.
 func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 	if m.pairs.Len()-1 < m.current {
-		return m.cursor.Next()
+		nextK, nextV, err := m.cursor.Next()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if nextK != nil {
+			m.currentPair = cursorentry{nextK, nextV}
+		}
+		return nextK, nextV, nil
 	}
 
-	if m.endOfDb {
-		m.current++
+	isEndDb, err := m.endOfNextDb()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if isEndDb {
 		if m.current > m.pairs.Len()-1 {
 			return nil, nil, nil
 		}
-		return m.pairs[m.current].key, m.pairs[m.current].value, nil
+		m.current++
+		m.currentPair = cursorentry{m.pairs[m.current-1].key, m.pairs[m.current-1].value}
+		return m.pairs[m.current-1].key, m.pairs[m.current-1].value, nil
 	}
 
 	isOnDb, err := m.isPointingOnDb()
@@ -382,11 +413,10 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 		}
 		// is this db less than memory?
 		if (dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current])) {
+			m.currentPair = cursorentry{dbKey, dbValue}
 			return dbKey, dbValue, nil
 		}
-		if dbKey == nil {
-			m.endOfDb = true
-		}
+		m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
 		// return current
 		return m.pairs[m.current].key, m.pairs[m.current].value, nil
 	}
@@ -399,12 +429,27 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 	m.current++
 	// is this db less than memory?
 	if (m.current > m.pairs.Len()-1) || (dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current])) {
+		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
-	if dbKey == nil {
-		m.endOfDb = true
-	}
+
+	m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
 	return m.pairs[m.current].key, m.pairs[m.current].value, nil
+}
+
+// NextDip returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
+func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
+	currK, _, _ := m.Current()
+
+	nextK, nextV, err := m.Next()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if bytes.Compare(currK, nextK) != 0 {
+		return nil, nil, nil
+	}
+	return nextK, nextV, nil
 }
 
 func (m *miningmutationcursor) Last() ([]byte, []byte, error) {

@@ -20,7 +20,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -31,66 +30,6 @@ import (
 var testBucketA = kv.HashedAccounts
 var testBucketDup = kv.HashedStorage
 
-func TestIterateWithNextAndCurrent(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-
-	for i := 0; i < 30; i++ {
-		err := tx.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
-		require.NoError(t, err)
-	}
-
-	mut := NewMiningBatch(tx)
-
-	for i := 0; i < 30; i++ {
-		err := mut.Put(testBucketA, []byte{byte(30 + i)}, []byte{byte(30 + i)})
-		require.NoError(t, err)
-	}
-
-	c, err := mut.Cursor(testBucketA)
-
-	require.NoError(t, err)
-	i := 0
-	for k, v, _ := c.First(); k != nil; k, v, _ = c.Next() {
-		fmt.Println(k)
-		require.True(t, bytes.Compare(k, []byte{byte(i)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
-		currK, currV, err := c.Current()
-		require.NoError(t, err)
-		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
-		i++
-	}
-	require.Equal(t, i, 60)
-}
-
-func TestIterateWithNextAndCurrentReverse(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
-
-	for i := 0; i < 30; i++ {
-		err := tx.Put(testBucketA, []byte{byte(30 + i)}, []byte{byte(30 + i)})
-		require.NoError(t, err)
-	}
-
-	mut := NewMiningBatch(tx)
-
-	for i := 0; i < 30; i++ {
-		err := mut.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
-		require.NoError(t, err)
-	}
-
-	c, err := mut.Cursor(testBucketA)
-
-	require.NoError(t, err)
-	i := 0
-	for k, v, _ := c.First(); k != nil; k, v, _ = c.Next() {
-		fmt.Println(k)
-		require.True(t, bytes.Compare(k, []byte{byte(i)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
-		currK, currV, err := c.Current()
-		require.NoError(t, err)
-		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
-		i++
-	}
-	require.Equal(t, i, 60)
-}
-
 func TestIterateWithNextAndCurrentMixed(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
@@ -98,7 +37,6 @@ func TestIterateWithNextAndCurrentMixed(t *testing.T) {
 		err := tx.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
 		require.NoError(t, err)
 	}
-
 	mut := NewMiningBatch(tx)
 
 	for i := 1; i < 30; i += 2 {
@@ -111,11 +49,83 @@ func TestIterateWithNextAndCurrentMixed(t *testing.T) {
 	require.NoError(t, err)
 	i := 0
 	for k, v, _ := c.First(); k != nil; k, v, _ = c.Next() {
-		fmt.Println(k)
 		require.True(t, bytes.Compare(k, []byte{byte(i)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
 		currK, currV, err := c.Current()
 		require.NoError(t, err)
 		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
 		i++
 	}
+}
+
+func TestIterateWithNextAndCurrentMixedDup(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	cu, _ := tx.RwCursorDupSort(testBucketDup)
+	for i := 1; i < 30; i += 2 {
+		err := cu.AppendDup([]byte{byte(i / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	cu.Close()
+
+	mut := NewMiningBatch(tx)
+
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
+	c, err := mut.Cursor(testBucketDup)
+
+	require.NoError(t, err)
+	i := 0
+	var currK, currV []byte
+	for k, v, _ := c.First(); k != nil; k, v, _ = c.Next() {
+		require.True(t, bytes.Compare(k, []byte{byte(i / 5)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
+		currK, currV, err = c.Current()
+		require.NoError(t, err)
+		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
+		i++
+	}
+	require.True(t, currK != nil && currV != nil)
+	require.Equal(t, i, 30)
+}
+
+func TestIterateWithNextDupAndCurrentMixed(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	cu, _ := tx.RwCursorDupSort(testBucketDup)
+	for i := 1; i < 30; i += 2 {
+		err := cu.AppendDup([]byte{byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	cu.Close()
+
+	mut := NewMiningBatch(tx)
+
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	// Let us account for repeated entries
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
+	c, err := mut.Cursor(testBucketDup)
+
+	require.NoError(t, err)
+	i := 0
+	for k, v, _ := c.First(); k != nil; k, v, _ = c.NextDup() {
+		require.True(t, bytes.Compare(k, []byte{byte(i / 5)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
+		currK, currV, err := c.Current()
+		require.NoError(t, err)
+		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
+		i++
+	}
+	require.Equal(t, i, 5)
 }
