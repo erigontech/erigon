@@ -401,9 +401,8 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	}
 	if failsAmount > 0 {
 		return fmt.Errorf("not all files are valid")
-	} else {
-		log.Info("[Snapshots] Verify done")
 	}
+	log.Info("[Snapshots] Verify done")
 	return nil
 }
 
