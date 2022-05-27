@@ -1,4 +1,4 @@
-package interfaces
+package services
 
 import (
 	"context"
@@ -8,6 +8,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 )
+
+type All struct {
+	BlockReader FullBlockReader
+}
 
 type BlockReader interface {
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)

@@ -146,7 +146,7 @@ type EVM struct {
 	// chainConfig contains information about the current chain
 	chainConfig *params.ChainConfig
 	// chain rules contains the chain rules for the current epoch
-	chainRules params.Rules
+	chainRules *params.Rules
 	// virtual machine configuration options used to initialise the
 	// evm.
 	config Config
@@ -244,7 +244,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		snapshot = evm.intraBlockState.Snapshot()
 	)
 	if !evm.intraBlockState.Exist(addr) {
-		if !isPrecompile && evm.chainRules.IsEIP158 && value.IsZero() {
+		if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 			return nil, gas, nil
 		}
 		evm.intraBlockState.CreateAccount(addr, false)
@@ -527,7 +527,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
-	if evm.chainRules.IsEIP158 {
+	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
 	evm.context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
@@ -544,7 +544,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	ret, err = run(evm, contract, nil, false)
 
 	// check whether the max code size has been exceeded
-	maxCodeSizeExceeded := evm.chainRules.IsEIP158 && len(ret) > params.MaxCodeSize
+	maxCodeSizeExceeded := evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.
 	if err == nil && !maxCodeSizeExceeded {
@@ -612,7 +612,7 @@ func (evm *EVM) ChainConfig() *params.ChainConfig {
 	return evm.chainConfig
 }
 
-func (evm *EVM) ChainRules() params.Rules {
+func (evm *EVM) ChainRules() *params.Rules {
 	return evm.chainRules
 }
 

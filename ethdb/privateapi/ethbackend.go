@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
@@ -23,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -49,7 +49,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RoDB
-	blockReader interfaces.BlockAndTxnReader
+	blockReader services.BlockAndTxnReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
@@ -88,7 +88,7 @@ type pendingPayload struct {
 	built bool
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockAndTxnReader,
 	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
 	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {

@@ -3,94 +3,94 @@ package commands
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/common"
-
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
 )
 
-var (
-	sendAddr    string
-	sendValue   uint64
-	searchBlock bool
-	txType      string
+const (
+	recvAddr         = "0x71562b71999873DB5b286dF957af199Ec94617F7"
+	sendValue uint64 = 10000
 )
 
 func init() {
-	sendTxCmd.Flags().StringVar(&txType, "tx-type", "", "type of transaction, specify 'contract' or 'regular'")
-	sendTxCmd.MarkFlagRequired("tx-type")
-
-	sendTxCmd.Flags().StringVar(&sendAddr, "addr", "", "String address to send to")
-	sendTxCmd.Flags().Uint64Var(&sendValue, "value", 0, "Uint64 Value to send")
-	sendTxCmd.Flags().BoolVar(&searchBlock, "search-block", false, "Boolean look for tx in mined blocks")
-
 	rootCmd.AddCommand(sendTxCmd)
 }
 
 var sendTxCmd = &cobra.Command{
 	Use:   "send-tx",
 	Short: "Sends a transaction",
-	Args: func(cmd *cobra.Command, args []string) error {
-		if txType != "regular" && txType != "contract" {
-			return fmt.Errorf("tx type to create must either be 'contract' or 'regular'")
-		}
-		if txType == "regular" {
-			if sendValue == 0 {
-				return fmt.Errorf("value must be > 0")
-			}
-			if sendAddr == "" {
-				return fmt.Errorf("string address to send to must be present")
-			}
-			if !common.IsHexAddress(sendAddr) {
-				return fmt.Errorf("address: %v, is not a valid hex address\n", sendAddr)
-			}
-		}
-		return nil
-	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if clearDev {
 			defer services.ClearDevDB()
 		}
 
-		nonce, err := services.GetNonce(reqId)
-		if err != nil {
-			fmt.Printf("failed to get latest nonce: %v\n", err)
-			return
-		}
-
-		// subscriptionContract is the handler to the contract for further operations
-		signedTx, address, subscriptionContract, transactOpts, err := services.CreateTransaction(txType, sendAddr, sendValue, nonce, searchBlock)
-		if err != nil {
-			fmt.Printf("failed to create transaction: %v\n", err)
-			return
-		}
-
-		hash, err := requests.SendTx(reqId, signedTx)
-		if err != nil {
-			fmt.Printf("failed to send transaction: %v\n", err)
-			return
-		}
-
-		if searchBlock {
-			if _, err := services.SearchBlockForTx(*hash); err != nil {
-				fmt.Printf("error searching block for tx: %v\n", err)
-				return
-			}
-		}
-
-		// if the contract is not nil, then the initial transaction created a contract. Emit an event
-		if subscriptionContract != nil {
-			if err := services.EmitEventAndGetLogs(reqId, subscriptionContract, transactOpts, address); err != nil {
-				fmt.Printf("failed to emit events: %v\n", err)
-				return
-			}
-		} else {
-			err := services.ApplyTransaction(context.Background(), *signedTx)
-			if err != nil {
-				fmt.Printf("failed to apply transaction: %v\n", err)
-				return
-			}
-		}
+		callSendRegularTxAndSearchBlock(sendValue, recvAddr, devAddress, true)
 	},
+}
+
+func callSendRegularTxAndSearchBlock(value uint64, fromAddr, toAddr string, search bool) {
+	fmt.Printf("Sending %d ETH from %q to %q...\n", value, fromAddr, toAddr)
+
+	nonce, err := services.GetNonce(reqId)
+	if err != nil {
+		fmt.Printf("failed to get latest nonce: %v\n", err)
+		return
+	}
+
+	// subscriptionContract is the handler to the contract for further operations
+	signedTx, _, _, _, err := services.CreateTransaction("regular", toAddr, value, nonce)
+	if err != nil {
+		fmt.Printf("failed to create transaction: %v\n", err)
+		return
+	}
+
+	hash, err := requests.SendTx(reqId, signedTx)
+	if err != nil {
+		fmt.Printf("failed to send transaction: %v\n", err)
+		return
+	}
+
+	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
+
+	if search {
+		if _, err := services.SearchBlockForTx(*hash); err != nil {
+			fmt.Printf("error searching block for tx: %v\n", err)
+			return
+		}
+	}
+
+	err = services.ApplyTransaction(context.Background(), *signedTx)
+	if err != nil {
+		fmt.Printf("failed to apply transaction: %v\n", err)
+		return
+	}
+}
+
+func callContractTx() {
+	nonce, err := services.GetNonce(reqId)
+	if err != nil {
+		fmt.Printf("failed to get latest nonce: %v\n", err)
+		return
+	}
+
+	// subscriptionContract is the handler to the contract for further operations
+	signedTx, address, subscriptionContract, transactOpts, err := services.CreateTransaction("contract", "", 0, nonce)
+	if err != nil {
+		fmt.Printf("failed to create transaction: %v\n", err)
+		return
+	}
+
+	fmt.Println("Creating contract tx...")
+	hash, err := requests.SendTx(reqId, signedTx)
+	if err != nil {
+		fmt.Printf("failed to send transaction: %v\n", err)
+		return
+	}
+	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
+
+	if err := services.EmitEventAndGetLogs(reqId, subscriptionContract, transactOpts, address); err != nil {
+		fmt.Printf("failed to emit events: %v\n", err)
+		return
+	}
 }

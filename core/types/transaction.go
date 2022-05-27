@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -61,7 +62,7 @@ type Transaction interface {
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *common.Address
-	AsMessage(s Signer, baseFee *big.Int) (Message, error)
+	AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	FakeSign(address common.Address) (Transaction, error)
 	Hash() common.Hash

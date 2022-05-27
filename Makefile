@@ -110,7 +110,7 @@ lintci:
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.2
 
 clean:
 	go clean -cache
@@ -148,5 +148,5 @@ git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule sync --recursive
+	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true

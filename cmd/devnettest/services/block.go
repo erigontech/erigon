@@ -3,7 +3,9 @@ package services
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"math/big"
+	"os/exec"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -27,8 +29,8 @@ const (
 var (
 	devnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
 	signer                  = types.LatestSigner(params.AllCliqueProtocolChanges)
-	devAddress              = "67b1d87101671b127f5f8714789C7192f7ad340e"
-	gspec                   = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(devAddress))
+	DevAddress              = "67b1d87101671b127f5f8714789C7192f7ad340e"
+	gspec                   = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(DevAddress))
 	contractBackend         = backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
 )
 
@@ -38,7 +40,7 @@ type Block struct {
 }
 
 // CreateTransaction returns transaction details depending on what transaction type is given
-func CreateTransaction(transactionType, addr string, value, nonce uint64, searchBlock bool) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
+func CreateTransaction(transactionType, addr string, value, nonce uint64) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	if transactionType == "regular" {
 		tx, address, err := createNonContractTx(addr, value, nonce)
 		if err != nil {
@@ -106,10 +108,9 @@ func SearchBlockForTx(txnHash common.Hash) (uint64, error) {
 	if clientErr != nil {
 		return 0, fmt.Errorf("failed to dial websocket: %v", clientErr)
 	}
-	fmt.Println()
-	fmt.Println("Connected to web socket successfully")
 
-	blockN, err := subscribeToNewHeads(client, "eth_newHeads", txnHash)
+	fmt.Printf("\nSearching for tx %q in new blocks...\n", txnHash)
+	blockN, err := subscribeToNewHeadsAndSearch(client, "eth_newHeads", txnHash)
 	if err != nil {
 		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
 	}
@@ -130,10 +131,8 @@ func blockHasHash(client *rpc.Client, hash common.Hash, blockNumber string) (uin
 
 	for _, txnHash := range currentBlock.Transactions {
 		if txnHash == hash {
-			fmt.Println()
-			fmt.Printf("Block with number: %v was mined and included transaction with hash: %v ==> %+v\n", blockNumber, hash, currentBlock)
-			fmt.Println()
-			return requests.HexToInt(blockNumber), true, nil
+			fmt.Printf("SUCCESS => Tx with hash %q is in mined block with number %q\n", hash, blockNumber)
+			return utils.HexToInt(blockNumber), true, nil
 		}
 	}
 
@@ -154,17 +153,19 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 		return fmt.Errorf("failed to sign transaction: %v", err)
 	}
 
+	fmt.Printf("\nSending Fallback tx from contract...\n")
 	hash, err := requests.SendTx(reqId, &signedTx)
 	if err != nil {
 		return fmt.Errorf("failed to send transaction: %v", err)
 	}
+	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)
 	}
 
-	if err = requests.GetLogs(reqId, blockN, blockN, address); err != nil {
+	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
 
@@ -182,5 +183,12 @@ func ApplyTransaction(ctx context.Context, tx types.Transaction) error {
 
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB() {
-	fmt.Printf("Clearing ~/dev\n")
+	fmt.Printf("Clearing ./dev\n")
+
+	cmd := exec.Command("rm", "-rf", "./dev")
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println("Error occurred clearing Dev DB")
+		panic("could not clear dev DB")
+	}
 }

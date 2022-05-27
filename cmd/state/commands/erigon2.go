@@ -23,10 +23,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -176,7 +176,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if err = w.Reset(0, rwTx); err != nil {
 			return err
 		}
-		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
+		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper{w: w}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 		if err = w.FinishTx(0, false); err != nil {
@@ -222,14 +222,14 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		}
 	}()
 
-	var blockReader interfaces.FullBlockReader
+	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	syncMode, err := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
 	if err != nil {
 		return err
 	}
 	if syncMode == ethconfig.SnapSync {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		if err := allSnapshots.Reopen(); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)

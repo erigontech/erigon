@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -76,14 +77,19 @@ var Defaults = Config{
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
-	TxPool:      core.DefaultTxPoolConfig,
-	RPCGasCap:   50000000,
-	GPO:         FullNodeGPO,
-	RPCTxFeeCap: 1, // 1 ether
+	DeprecatedTxPool: core.DeprecatedDefaultTxPoolConfig,
+	RPCGasCap:        50000000,
+	GPO:              FullNodeGPO,
+	RPCTxFeeCap:      1, // 1 ether
 
 	BodyDownloadTimeoutSeconds: 30,
 
 	ImportMode: false,
+	Snapshot: Snapshot{
+		Enabled:    false,
+		KeepBlocks: false,
+		Produce:    true,
+	},
 }
 
 func init() {
@@ -115,6 +121,7 @@ func init() {
 type Snapshot struct {
 	Enabled    bool
 	KeepBlocks bool
+	Produce    bool // produce new snapshots
 }
 
 func (s Snapshot) String() string {
@@ -123,22 +130,26 @@ func (s Snapshot) String() string {
 		out = append(out, "--syncmode=snap")
 	}
 	if s.KeepBlocks {
-		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
+		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
+	}
+	if !s.Produce {
+		out = append(out, "--"+FlagSnapStop+"=true")
 	}
 	return strings.Join(out, " ")
 }
 
 var (
-	FlagSnapshot           = "snapshot"
-	FlagSnapshotKeepBlocks = "snap.keepblocks"
+	FlagSnapKeepBlocks = "snap.keepblocks"
+	FlagSnapStop       = "snap.stop"
 )
 
-func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
-	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks}
+func NewSnapshotCfg(enabled, keepBlocks, produce bool) Snapshot {
+	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
 }
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
+	txpoolCfg   txpool2.Config
 	SyncModeCli string
 	SyncMode    SyncMode
 
@@ -188,7 +199,8 @@ type Config struct {
 	Bor    params.BorConfig
 
 	// Transaction pool options
-	TxPool core.TxPoolConfig
+	DeprecatedTxPool core.TxPoolConfig
+	TxPool           txpool2.Config
 
 	// Gas Price Oracle options
 	GPO gasprice.Config
@@ -216,6 +228,11 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
+
+	// FORK_NEXT_VALUE (see EIP-3675) block override
+	OverrideMergeForkBlock *big.Int `toml:",omitempty"`
+
+	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
 }
 
 type SyncMode string

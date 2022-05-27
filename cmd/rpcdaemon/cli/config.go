@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/internal/debug"
+
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -25,20 +27,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices/rpcinterfaces"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
@@ -62,15 +64,15 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
 	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
-	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
-	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", node.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
+	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCACert, "tls.cacert", "", "CA certificate for client side TLS handshake")
-	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", node.DefaultHTTPPort, "HTTP-RPC server listening port")
-	rootCmd.PersistentFlags().IntVar(&cfg.EnginePort, "engine.port", node.DefaultEngineHTTPPort, "HTTP-RPC server listening port for the engineAPI")
+	rootCmd.PersistentFlags().IntVar(&cfg.HttpPort, "http.port", nodecfg.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.PersistentFlags().IntVar(&cfg.EnginePort, "engine.port", nodecfg.DefaultEngineHTTPPort, "HTTP-RPC server listening port for the engineAPI")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpCORSDomain, "http.corsdomain", []string{}, "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
-	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", node.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.PersistentFlags().StringSliceVar(&cfg.HttpVirtualHost, "http.vhosts", nodecfg.DefaultConfig.HTTPVirtualHosts, "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
 	rootCmd.PersistentFlags().BoolVar(&cfg.HttpCompression, "http.compression", true, "Disable http compression")
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon", "engine"}, "API's offered over the HTTP-RPC interface: eth,engine,erigon,web3,net,debug,trace,txpool,db,starknet. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50000000, "Sets a cap on gas that can be used in eth_call/estimateGas")
@@ -84,11 +86,10 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
 	rootCmd.PersistentFlags().StringVar(&cfg.SyncModeCli, "syncmode", "", utils.SyncModeFlag.Usage)
-	rootCmd.PersistentFlags().BoolVar(&cfg.Snapshot.Enabled, ethconfig.FlagSnapshot, false, "Enables Snapshot Sync")
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
-	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", node.DefaultGRPCHost, "GRPC server listening interface")
-	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", node.DefaultGRPCPort, "GRPC server listening port")
+	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
+	rootCmd.PersistentFlags().IntVar(&cfg.GRPCPort, "grpc.port", nodecfg.DefaultGRPCPort, "GRPC server listening port")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCHealthCheckEnabled, "grpc.healthcheck", false, "Enable GRPC health check")
 	rootCmd.PersistentFlags().StringVar(&cfg.StarknetGRPCAddress, "starknet.grpc.address", "127.0.0.1:6066", "Starknet GRPC address")
 	rootCmd.PersistentFlags().StringVar(&cfg.JWTSecretPath, utils.JWTSecretPath.Name, utils.JWTSecretPath.Value, "Token to ensure safe connection between CL and EL")
@@ -210,10 +211,10 @@ func checkDbCompatibility(ctx context.Context, db kv.RoDB) error {
 	return nil
 }
 
-func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader interfaces.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
+func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcache.CoherentConfig, blockReader services.BlockAndTxnReader, ethBackendServer remote.ETHBACKENDServer,
 	txPoolServer txpool.TxpoolServer, miningServer txpool.MiningServer,
 ) (
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *services.StarknetService, stateCache kvcache.Cache, ff *filters.Filters, err error,
+	eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, starknet *rpcservices.StarknetService, stateCache kvcache.Cache, ff *rpcservices.Filters, err error,
 ) {
 	if stateCacheCfg.KeysLimit > 0 {
 		stateCache = kvcache.New(stateCacheCfg)
@@ -227,10 +228,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 
 	directClient := direct.NewEthBackendClientDirect(ethBackendServer)
 
-	eth = services.NewRemoteBackend(directClient, erigonDB, blockReader)
+	eth = rpcservices.NewRemoteBackend(directClient, erigonDB, blockReader)
 	txPool = direct.NewTxPoolClient(txPoolServer)
 	mining = direct.NewMiningClient(miningServer)
-	ff = filters.New(ctx, eth, txPool, mining, func() {})
+	ff = rpcservices.New(ctx, eth, txPool, mining, func() {})
 	return
 }
 
@@ -238,10 +239,10 @@ func EmbeddedServices(ctx context.Context, erigonDB kv.RoDB, stateCacheCfg kvcac
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
 func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, borDb kv.RoDB,
-	eth services.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
-	starknet *services.StarknetService,
-	stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader,
-	ff *filters.Filters, err error) {
+	eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
+	starknet *rpcservices.StarknetService,
+	stateCache kvcache.Cache, blockReader services.BlockAndTxnReader,
+	ff *rpcservices.Filters, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("either remote db or local db must be specified")
 	}
@@ -304,7 +305,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			if err != nil {
 				return err
 			}
-			cfg.Snapshot.Enabled, err = snap.Enabled(tx)
+			cfg.Snap.Enabled, err = snap.Enabled(tx)
 			if err != nil {
 				return err
 			}
@@ -315,12 +316,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
-
-		if cfg.Snapshot.Enabled {
-			cfg.SyncMode = ethconfig.SnapSync
-		} else {
-			cfg.SyncMode = ethconfig.FullSync
-		}
+		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.SyncMode == ethconfig.SnapSync
 
 		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
 		if cc.TerminalTotalDifficulty != nil {
@@ -348,8 +344,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
-		if cfg.Snapshot.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, filepath.Join(cfg.DataDir, "snapshots"))
+		if cfg.Snap.Enabled {
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, filepath.Join(cfg.DataDir, "snapshots"))
 			if err := allSnapshots.Reopen(); err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
 			}
@@ -385,7 +381,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
 	}
-	remoteEth := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
+	remoteEth := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
 	blockReader = remoteEth
 
 	txpoolConn := conn
@@ -397,9 +393,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	mining = txpool.NewMiningClient(txpoolConn)
-	miningService := services.NewMiningService(mining)
+	miningService := rpcservices.NewMiningService(mining)
 	txPool = txpool.NewTxpoolClient(txpoolConn)
-	txPoolService := services.NewTxPoolService(txPool)
+	txPoolService := rpcservices.NewTxPoolService(txPool)
 	if db == nil {
 		db = remoteKv
 	}
@@ -424,10 +420,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("could not connect to starknet api: %w", err)
 		}
-		starknet = services.NewStarknetService(starknetConn)
+		starknet = rpcservices.NewStarknetService(starknetConn)
 	}
 
-	ff = filters.New(ctx, eth, txPool, mining, onNewSnapshot)
+	ff = rpcservices.New(ctx, eth, txPool, mining, onNewSnapshot)
 
 	return db, borDb, eth, txPool, mining, starknet, stateCache, blockReader, ff, err
 }

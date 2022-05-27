@@ -33,7 +33,7 @@ type HttpCfg struct {
 	TxPoolApiAddr           string
 	TevmEnabled             bool
 	StateCache              kvcache.CoherentConfig
-	Snapshot                ethconfig.Snapshot
+	Snap                    ethconfig.Snapshot
 	SyncModeCli             string
 	SyncMode                ethconfig.SyncMode
 	GRPCServerEnabled       bool

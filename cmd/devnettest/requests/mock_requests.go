@@ -8,6 +8,6 @@ func MockGetRequest(reqId int) error {
 	if res.Err != nil {
 		return fmt.Errorf("failed to make get request: %v", res.Err)
 	}
-	fmt.Printf("OK\n")
+	fmt.Printf("SUCCESS => OK\n")
 	return nil
 }

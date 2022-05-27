@@ -14,8 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
@@ -502,6 +503,24 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			return err
 		}
 
+		if reset {
+			// ensure no grabage records left (it may happen if db is inconsistent)
+			if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k, nil) }); err != nil {
+				return err
+			}
+			if err := tx.ClearBucket(kv.NonCanonicalTxs); err != nil {
+				return err
+			}
+			if err := tx.ClearBucket(kv.EthTx); err != nil {
+				return err
+			}
+			if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
+				return err
+			}
+			if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
+				return err
+			}
+		}
 		log.Info("Progress", "headers", progress)
 		return nil
 	})
@@ -1093,7 +1112,7 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 			panic(err)
 		}
 		if syncmode == ethconfig.SnapSync {
-			snapshotCfg := ethconfig.NewSnapshotCfg(true, true)
+			snapshotCfg := ethconfig.NewSnapshotCfg(true, true, true)
 			_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapshotCfg, filepath.Join(datadir, "snapshots"))
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
@@ -1104,9 +1123,9 @@ func allSnapshots(cc *params.ChainConfig) *snapshotsync.RoSnapshots {
 }
 
 var openBlockReaderOnce sync.Once
-var _blockReaderSingleton interfaces.FullBlockReader
+var _blockReaderSingleton services.FullBlockReader
 
-func getBlockReader(cc *params.ChainConfig) (blockReader interfaces.FullBlockReader) {
+func getBlockReader(cc *params.ChainConfig) (blockReader services.FullBlockReader) {
 	openBlockReaderOnce.Do(func() {
 		_blockReaderSingleton = snapshotsync.NewBlockReader()
 		if sn := allSnapshots(cc); sn != nil {
@@ -1158,7 +1177,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg := ethconfig.Defaults
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
-	cfg.TxPool.Disable = true
+	cfg.DeprecatedTxPool.Disable = true
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
@@ -1187,7 +1206,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	br := getBlockReader(chainConfig)
 	blockDownloaderWindow := 65536
-	sentryControlServer, err := sentry.NewMultyClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
+	sentryControlServer, err := sentry.NewMultiClient(db, "", chainConfig, genesisBlock.Hash(), engine, 1, nil, blockDownloaderWindow, br)
 	if err != nil {
 		panic(err)
 	}

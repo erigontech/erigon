@@ -9,7 +9,7 @@ import (
 // GetNonce fetches the latest nonce of the developer account by making an JSONRPC request
 func GetNonce(reqId int) (uint64, error) {
 	blockNum := "latest"
-	address := common.HexToAddress(devAddress)
+	address := common.HexToAddress(DevAddress)
 
 	res, err := requests.GetTransactionCount(reqId, address, blockNum)
 	if err != nil {

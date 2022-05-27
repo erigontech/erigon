@@ -13,7 +13,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -25,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
@@ -45,10 +45,21 @@ func StageLoop(
 	initialCycle := true
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+		if !hd.POSSync() {
+			// Wait for delivery of any p2p headers here to resume the stage loop
+			// Since StageLoopStep creates RW database transaction, the mining loop can only do its work (it also requires creating RW transaction)
+			// when the control flow is outside StageLoopStep function. Therefore wait here to give mining loop this opportunity
+			select {
+			case <-ctx.Done():
+				return
+			case <-hd.DeliveryNotify:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 		}
 		start := time.Now()
 
@@ -100,16 +111,6 @@ func StageLoop(
 			case <-ctx.Done():
 				return
 			case <-c:
-			}
-		}
-		if !hd.POSSync() {
-			// Wait for delivery of any p2p headers here to resume the stage loop
-			// Since StageLoopStep creates RW database transaction, the mining loop can only do its work (it also requires creating RW transaction)
-			// when the control flow is outside StageLoopStep function. Therefore wait here to give mining loop this opportunity
-			select {
-			case <-ctx.Done():
-				return
-			case <-hd.DeliveryNotify:
 			}
 		}
 	}
@@ -255,14 +256,14 @@ func NewStagedSync(
 	db kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg ethconfig.Config,
-	controlServer *sentry.MultyClient,
+	controlServer *sentry.MultiClient,
 	tmpdir string,
 	notifications *stagedsync.Notifications,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
 	headCh chan *types.Block,
 ) (*stagedsync.Sync, error) {
-	var blockReader interfaces.FullBlockReader
+	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {

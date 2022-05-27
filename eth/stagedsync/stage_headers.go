@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -27,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -52,7 +52,7 @@ type HeadersCfg struct {
 
 	snapshots          *snapshotsync.RoSnapshots
 	snapshotDownloader proto_downloader.DownloaderClient
-	blockReader        interfaces.FullBlockReader
+	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
 }
 
@@ -68,7 +68,7 @@ func StageHeadersCfg(
 	noP2PDiscovery bool,
 	snapshots *snapshotsync.RoSnapshots,
 	snapshotDownloader proto_downloader.DownloaderClient,
-	blockReader interfaces.FullBlockReader,
+	blockReader services.FullBlockReader,
 	tmpdir string,
 	dbEventNotifier snapshotsync.DBEventNotifier) HeadersCfg {
 	return HeadersCfg{
@@ -243,7 +243,7 @@ func startHandlingForkChoice(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 	headerInserter *headerdownload.HeaderInserter,
-	headerReader interfaces.HeaderReader,
+	headerReader services.HeaderReader,
 ) error {
 	headerHash := forkChoice.HeadBlockHash
 	log.Info(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
@@ -871,7 +871,7 @@ Loop:
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx, headerReader interfaces.FullBlockReader) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader) error {
 	if height == 0 {
 		return nil
 	}
@@ -1024,7 +1024,7 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 type chainReader struct {
 	config      *params.ChainConfig
 	tx          kv.RwTx
-	blockReader interfaces.FullBlockReader
+	blockReader services.FullBlockReader
 }
 
 func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
@@ -1145,7 +1145,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
 			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-				return err
+				return fmt.Errorf("BuildIndices: %w", err)
 			}
 		}
 
@@ -1161,6 +1161,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
+		h2n := etl.NewCollector("[Snapshots]", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer h2n.Close()
+
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
 		td := big.NewInt(0)
@@ -1173,7 +1176,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 				return err
 			}
-			if err := rawdb.WriteHeaderNumber(tx, blockHash, blockNum); err != nil {
+			if err := h2n.Collect(blockHash[:], dbutils.EncodeBlockNumber(blockNum)); err != nil {
 				return err
 			}
 			select {
@@ -1187,7 +1190,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}); err != nil {
 			return err
 		}
-
+		if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
 		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
 			lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())

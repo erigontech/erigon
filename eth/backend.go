@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/holiman/uint256"
@@ -52,7 +53,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -118,7 +118,7 @@ type Ethereum struct {
 	// downloader fields
 	sentryCtx      context.Context
 	sentryCancel   context.CancelFunc
-	sentriesClient *sentry.MultyClient
+	sentriesClient *sentry.MultiClient
 	sentryServers  []*sentry.GrpcServer
 
 	stagedSync *stagedsync.Sync
@@ -143,7 +143,7 @@ type Ethereum struct {
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, logger log.Logger) (*Ethereum, error) {
+func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
 	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
@@ -175,7 +175,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		panic(err)
 	}
 
-	chainConfig, genesis, genesisErr := core.CommitGenesisBlock(chainKv, config.Genesis)
+	chainConfig, genesis, genesisErr := core.CommitGenesisBlockWithOverride(chainKv, config.Genesis, config.OverrideMergeForkBlock, config.OverrideTerminalTotalDifficulty)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -218,10 +218,6 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		},
 	}
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
-
-	if config.TxPool.Journal != "" {
-		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
-	}
 
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
@@ -275,7 +271,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		}()
 	}
 
-	var blockReader interfaces.FullBlockReader
+	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
 	if config.Snapshot.Enabled {
 		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
@@ -346,14 +342,14 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		return nil, err
 	}
 
-	backend.sentriesClient, err = sentry.NewMultyClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.BlockDownloaderWindow, blockReader)
+	backend.sentriesClient, err = sentry.NewMultiClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.BlockDownloaderWindow, blockReader)
 	if err != nil {
 		return nil, err
 	}
 	config.BodyDownloadTimeoutSeconds = 30
 
 	var miningRPC txpool_proto.MiningServer
-	if config.TxPool.Disable {
+	if config.DeprecatedTxPool.Disable {
 		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
 	} else {
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
@@ -363,7 +359,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		backend.newTxs2 = make(chan types2.Hashes, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, txpoolCfg, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
+			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
 		)
 		if err != nil {
 			return nil, err
@@ -445,7 +441,7 @@ func New(stack *node.Node, config *ethconfig.Config, txpoolCfg txpool2.Config, l
 		}
 	}
 
-	if !config.TxPool.Disable {
+	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()
 		backend.txPool2Fetch.ConnectSentries()
 		var newTxsBroadcaster *txpool2.NewSlotsStreams
@@ -590,7 +586,7 @@ func (s *Ethereum) isLocalBlock(block *types.Block) bool { //nolint
 	s.lock.RLock()
 	etherbase := s.etherbase
 	s.lock.RUnlock()
-	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.TxPool.Locals, block.Header())
+	return ethutils.IsLocalBlock(s.engine, etherbase, s.config.DeprecatedTxPool.Locals, block.Header())
 }
 
 // shouldPreserve checks whether we should preserve the given block
@@ -765,7 +761,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	for _, sentryClient := range s.sentriesClient.Sentries() {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
-			return nil, fmt.Errorf("Ethereum backend MultyClient.Peers error: %w", err)
+			return nil, fmt.Errorf("Ethereum backend MultiClient.Peers error: %w", err)
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
@@ -785,18 +781,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	sentries := s.sentriesClient.Sentries()
-	for i := range sentries {
-		go func(i int) {
-			sentry.RecvMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-		go func(i int) {
-			sentry.RecvUploadMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-		go func(i int) {
-			sentry.RecvUploadHeadersMessageLoop(s.sentryCtx, sentries[i], s.sentriesClient, nil)
-		}(i)
-	}
+	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
 	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
@@ -860,6 +845,6 @@ func (s *Ethereum) SentryCtx() context.Context {
 	return s.sentryCtx
 }
 
-func (s *Ethereum) SentryControlServer() *sentry.MultyClient {
+func (s *Ethereum) SentryControlServer() *sentry.MultiClient {
 	return s.sentriesClient
 }

@@ -14,8 +14,6 @@ var DefaultFlags = []cli.Flag{
 	utils.TxPoolDisableFlag,
 	utils.TxPoolLocalsFlag,
 	utils.TxPoolNoLocalsFlag,
-	utils.TxPoolJournalFlag,
-	utils.TxPoolRejournalFlag,
 	utils.TxPoolPriceLimitFlag,
 	utils.TxPoolPriceBumpFlag,
 	utils.TxPoolAccountSlotsFlag,
@@ -71,7 +69,8 @@ var DefaultFlags = []cli.Flag{
 	utils.TxpoolApiAddrFlag,
 	utils.TraceMaxtracesFlag,
 
-	utils.SnapshotKeepBlocksFlag,
+	utils.SnapKeepBlocksFlag,
+	utils.SnapStopFlag,
 	utils.DbPageSizeFlag,
 	utils.TorrentPortFlag,
 	utils.TorrentMaxPeersFlag,

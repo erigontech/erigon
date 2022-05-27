@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	filters2 "github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
-
+	filters2 "github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
-
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -70,11 +68,11 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (c
 	go func() {
 		for {
 			select {
-			case log, ok := <-logs:
+			case lg, ok := <-logs:
 				if !ok {
 					return
 				}
-				api.filters.AddLogs(id, log)
+				api.filters.AddLogs(id, lg)
 			default:
 			}
 		}
