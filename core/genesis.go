@@ -206,11 +206,11 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, ove
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
-	stored, storedErr := rawdb.ReadCanonicalHash(db, 0)
+	storedHash, storedErr := rawdb.ReadCanonicalHash(db, 0)
 	if storedErr != nil {
 		return nil, nil, storedErr
 	}
-	if (stored == common.Hash{}) {
+	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
@@ -240,64 +240,56 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, ove
 			return genesis.Config, nil, err1
 		}
 		hash := block.Hash()
-		if hash != stored {
-			return genesis.Config, block, &GenesisMismatchError{stored, hash}
+		if hash != storedHash {
+			return genesis.Config, block, &GenesisMismatchError{storedHash, hash}
 		}
 	}
-	storedBlock, err := rawdb.ReadBlockByHash(db, stored)
+	storedBlock, err := rawdb.ReadBlockByHash(db, storedHash)
 	if err != nil {
 		return genesis.Config, nil, err
 	}
 	// Get the existing chain configuration.
-	newcfg := genesis.configOrDefault(stored)
+	newCfg := genesis.configOrDefault(storedHash)
 	if overrideMergeForkBlock != nil {
-		newcfg.MergeForkBlock = overrideMergeForkBlock
+		newCfg.MergeForkBlock = overrideMergeForkBlock
 	}
 	if overrideTerminalTotalDifficulty != nil {
-		newcfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+		newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
 	}
-	if err := newcfg.CheckConfigForkOrder(); err != nil {
-		return newcfg, nil, err
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return newCfg, nil, err
 	}
-	storedcfg, storedErr := rawdb.ReadChainConfig(db, stored)
+	storedCfg, storedErr := rawdb.ReadChainConfig(db, storedHash)
 	if storedErr != nil {
-		return newcfg, nil, storedErr
+		return newCfg, nil, storedErr
 	}
-	if storedcfg == nil {
+	if storedCfg == nil {
 		log.Warn("Found genesis block without chain config")
-		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
+		err1 := rawdb.WriteChainConfig(db, storedHash, newCfg)
 		if err1 != nil {
-			return newcfg, nil, err1
+			return newCfg, nil, err1
 		}
-		return newcfg, storedBlock, nil
+		return newCfg, storedBlock, nil
 	}
 	// Special case: don't change the existing config of a non-mainnet chain if no new
-	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
+	// config is supplied. These chains would get AllProtocolChanges (and a compatibility error)
 	// if we just continued here.
-	if genesis == nil && stored != params.MainnetGenesisHash {
-		if overrideMergeForkBlock != nil {
-			storedcfg.MergeForkBlock = overrideMergeForkBlock
-		}
-		if overrideTerminalTotalDifficulty != nil {
-			storedcfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
-		}
-		return storedcfg, storedBlock, nil
+	if genesis == nil && storedHash != params.MainnetGenesisHash && overrideMergeForkBlock == nil && overrideTerminalTotalDifficulty == nil {
+		return storedCfg, storedBlock, nil
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
-	if height == nil {
-		//return newcfg, storedBlock, fmt.Errorf("missing block number for head header hash")
-	} else {
-		compatErr := storedcfg.CheckCompatible(newcfg, *height)
-		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
-			return newcfg, storedBlock, compatErr
+	if height != nil {
+		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
+		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
+			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
-		return newcfg, nil, err
+	if err := rawdb.WriteChainConfig(db, storedHash, newCfg); err != nil {
+		return newCfg, nil, err
 	}
-	return newcfg, storedBlock, nil
+	return newCfg, storedBlock, nil
 }
 
 func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
