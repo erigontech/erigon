@@ -44,6 +44,16 @@ func TestIterateWithNextAndCurrentMixed(t *testing.T) {
 		require.NoError(t, err)
 	}
 
+	// check for repetions
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
 	c, err := mut.Cursor(testBucketA)
 
 	require.NoError(t, err)
@@ -71,6 +81,16 @@ func TestIterateWithNextAndCurrentMixedDup(t *testing.T) {
 
 	for i := 0; i < 30; i += 2 {
 		err := mut.Put(testBucketDup, []byte{byte(i / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
+	// check for repetions
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
 		require.NoError(t, err)
 	}
 
