@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -44,7 +43,7 @@ func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *Plai
 }
 
 func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	fmt.Printf("UpdateAccount [%x] hashed [%x], balance=%d, nonce=%d\n", address, crypto.Keccak256(address[:]), &account.Balance, account.Nonce)
+	fmt.Printf("balance,%x,%x\n", address, account.Balance.Bytes())
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(address, original, account); err != nil {
 			return err
@@ -59,6 +58,7 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	fmt.Printf("code,%x,%x\n", address, code)
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 			return err
@@ -74,7 +74,7 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 }
 
 func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
-	fmt.Printf("Delete account [%x] hashed [%x]\n", address, crypto.Keccak256(address[:]))
+	fmt.Printf("delete,%x\n", address)
 	if w.csw != nil {
 		if err := w.csw.DeleteAccount(address, original); err != nil {
 			return err
@@ -97,7 +97,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-	fmt.Printf("WriteAccountStorage [%x] hashed [%x],loc [%x] hashed [%x], val [%x]\n", address, crypto.Keccak256(address[:]), *key, crypto.Keccak256((*key)[:]), value.Bytes())
+	fmt.Printf("storage,%xh,%x,%x\n", address, *key, value.Bytes())
 	if w.csw != nil {
 		if err := w.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 			return err
