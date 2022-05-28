@@ -307,7 +307,6 @@ func (sdb *IntraBlockState) GetState(addr common.Address, key *common.Hash, valu
 	} else {
 		value.Clear()
 	}
-	fmt.Printf("GetState [%x|%x]=>[%x]\n", addr, *key, value.Bytes())
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.

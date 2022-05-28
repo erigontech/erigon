@@ -698,7 +698,6 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 	var err error
 	headerNumber := header.Number.Uint64()
 	if headerNumber%c.config.Sprint == 0 {
-		fmt.Printf("Finalizing\n")
 		cx := chainContext{Chain: chain, Bor: c}
 		// check and commit span
 		if err := c.checkAndCommitSpan(state, header, cx, syscall); err != nil {

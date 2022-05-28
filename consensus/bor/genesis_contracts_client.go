@@ -1,7 +1,6 @@
 package bor
 
 import (
-	"fmt"
 	"math/big"
 	"strings"
 
@@ -63,12 +62,10 @@ func (gc *GenesisContractsClient) CommitState(
 		return err
 	}
 	log.Trace("→ committing new state", "eventRecord", event.String())
-	fmt.Printf("Commit state %v\n", event.String())
 	_, err = syscall(common.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("----------\n")
 	return nil
 }
 

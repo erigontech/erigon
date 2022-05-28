@@ -149,7 +149,6 @@ func ApplyTransaction(config *params.ChainConfig, getHeader func(hash common.Has
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
 	var vmenv vm.VMInterface
-	fmt.Printf("tx = %x\n", tx.Hash())
 
 	if tx.IsStarkNet() {
 		vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}

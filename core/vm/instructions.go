@@ -275,7 +275,6 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	if _, err := interpreter.hasher.Read(interpreter.hasherBuf[:]); err != nil {
 		panic(err)
 	}
-	fmt.Printf("sha3 [%x] => [%x]\n", data, interpreter.hasherBuf[:])
 
 	size.SetBytes(interpreter.hasherBuf[:])
 	return nil, nil
@@ -552,7 +551,6 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 	val := scope.Stack.Pop()
 	interpreter.hasherBuf = loc.Bytes32()
 	interpreter.evm.IntraBlockState().SetState(scope.Contract.Address(), &interpreter.hasherBuf, val)
-	fmt.Printf("sstore [%x|%x]<=[%x]\n", scope.Contract.Address(), loc.Bytes32(), val.Bytes())
 	return nil, nil
 }
 
