@@ -354,6 +354,7 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	if isBor {
 		author = &header.Coinbase
 	} else {
+		fmt.Printf("SysCallContract %x\n", *author)
 		author = &state.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
