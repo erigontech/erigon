@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"sort"
 	"sync"
 	"unsafe"
@@ -110,7 +111,6 @@ func (m *miningmutation) GetOne(table string, key []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-
 		return value, nil
 	}
 	return nil, nil
@@ -200,7 +200,7 @@ func (m *miningmutation) Delete(table string, k, v []byte) error {
 }
 
 func (m *miningmutation) Commit() error {
-	panic("unsupported operation!")
+	return nil
 }
 
 func (m *miningmutation) Rollback() {
@@ -258,6 +258,7 @@ func (m *miningmutation) CreateBucket(bucket string) error {
 func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
 	c := &miningmutationcursor{}
 	c.dupsortedEntries = make(map[string]struct{})
+	c.table = bucket
 	var err error
 	if bucket != kv.HashedStorage {
 		keyMap := make(map[string]bool)
@@ -285,6 +286,7 @@ func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, err
 		}
 	}
 	sort.Sort(c.pairs)
+	c.mutation = m
 	return c, err
 }
 
@@ -349,6 +351,9 @@ type miningmutationcursor struct {
 	current int
 	// current cursor entry
 	currentPair cursorentry
+	// we keep the mining mutation so that we can insert new elements in db
+	mutation *miningmutation
+	table    string
 }
 
 func (m *miningmutationcursor) endOfNextDb() (bool, error) {
@@ -544,15 +549,24 @@ func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
-	current := sort.Search(len(m.pairs), func(i int) bool {
-		return bytes.Compare(m.pairs[i].key, seek) == 0
-	})
+	current := -1
+	for i, pair := range m.pairs {
+		if bytes.Compare(pair.key, seek) == 0 {
+			current = i
+			break
+		}
+	}
+	fmt.Println(current)
 
-	if current >= 0 && current < len(m.pairs) && bytes.Compare(m.pairs[current].key, seek) == 0 {
+	if current >= 0 {
 		m.current = current
-		_, _, err := m.cursor.Seek(seek)
+		dbKey, dbValue, err := m.cursor.Seek(seek)
 		if err != nil {
 			return nil, nil, err
+		}
+		if (dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current])) {
+			m.currentPair = cursorentry{dbKey, dbValue}
+			return dbKey, dbValue, nil
 		}
 		m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
 		return m.pairs[m.current].key, m.pairs[m.current].value, nil
@@ -570,30 +584,15 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
-	if _, ok := m.dupsortedEntries[string(append(k, v...))]; ok {
-		return nil
-	} else if !m.isDupsortedEnabled() {
-		for i := range m.pairs {
-			if bytes.Compare(m.pairs[i].key, k) == 0 {
-				m.pairs[i].value = v
-				return nil
-			}
-		}
-	}
-
-	m.pairs = append(m.pairs, cursorentry{k, v})
-	sort.Sort(m.pairs)
-	return nil
+	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) Append(k []byte, v []byte) error {
-	m.pairs = append(m.pairs, cursorentry{k, v})
-	return nil
+	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
-	m.pairs = append(m.pairs, cursorentry{k, v})
-	return nil
+	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {

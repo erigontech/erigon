@@ -20,6 +20,7 @@ package olddb
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -54,7 +55,7 @@ func TestIterateWithNextAndCurrentMixed(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	c, err := mut.Cursor(testBucketA)
+	c, err := mut.RwCursorDupSort(testBucketA)
 
 	require.NoError(t, err)
 	i := 0
@@ -94,7 +95,7 @@ func TestIterateWithNextAndCurrentMixedDup(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	c, err := mut.Cursor(testBucketDup)
+	c, err := mut.RwCursorDupSort(testBucketDup)
 
 	require.NoError(t, err)
 	i := 0
@@ -136,7 +137,7 @@ func TestIterateWithNextDupAndCurrentMixed(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	c, err := mut.Cursor(testBucketDup)
+	c, err := mut.RwCursorDupSort(testBucketDup)
 
 	require.NoError(t, err)
 	i := 0
@@ -161,4 +162,56 @@ func TestIterateWithNextDupAndCurrentMixed(t *testing.T) {
 		}
 	}
 	require.Equal(t, i, 31)
+}
+
+func TestIterateWithNextDupAndCurrentMixedSeekAt(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	cu, _ := tx.RwCursorDupSort(testBucketDup)
+	for i := 1; i < 30; i += 2 {
+		err := cu.AppendDup([]byte{byte((i) / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	cu.Close()
+
+	mut := NewMiningBatch(tx)
+
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	// Let us account for repeated entries
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
+	c, err := mut.RwCursorDupSort(testBucketDup)
+
+	require.NoError(t, err)
+	i := 5
+	// Test it with Seek
+	for k, v, _ := c.SeekExact([]byte{byte(1), byte(1)}); k != nil; k, v, _ = c.NextDup() {
+
+		require.True(t, bytes.Compare(k, []byte{byte(i / 5), byte(i / 5)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
+		currK, currV, err := c.Current()
+		require.NoError(t, err)
+		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
+		i++
+		if i%5 == 0 {
+			k, v, _ = c.Seek([]byte{byte(i / 5)})
+			i++ // this causes total i to be 31
+		}
+	}
+	require.Equal(t, i, 31)
+
+	k, v, _ := c.SeekExact([]byte{byte(1)})
+	fmt.Println(k)
+	fmt.Println(v)
+	require.Equal(t, len(k), 0)
+	require.Equal(t, len(v), 0)
 }
