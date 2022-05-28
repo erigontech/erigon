@@ -275,6 +275,7 @@ func opSha3(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	if _, err := interpreter.hasher.Read(interpreter.hasherBuf[:]); err != nil {
 		panic(err)
 	}
+	fmt.Printf("sha3 [%x] => [%x]\n", data, interpreter.hasherBuf[:])
 
 	size.SetBytes(interpreter.hasherBuf[:])
 	return nil, nil
