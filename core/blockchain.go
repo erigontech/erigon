@@ -339,14 +339,6 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		misc.ApplyDAOHardFork(ibs)
 	}
 
-	msg := types.NewMessage(
-		state.SystemAddress,
-		&contract,
-		0, u256.Num0,
-		50_000_000, u256.Num0,
-		nil, nil,
-		data, nil, false,
-	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	isBor := chainConfig.Bor != nil
@@ -354,9 +346,16 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	if isBor {
 		author = &header.Coinbase
 	} else {
-		fmt.Printf("SysCallContract %x\n", *author)
 		author = &state.SystemAddress
 	}
+	msg := types.NewMessage(
+		*author,
+		&contract,
+		0, u256.Num0,
+		50_000_000, u256.Num0,
+		nil, nil,
+		data, nil, false,
+	)
 	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
 	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
 	if isBor {
