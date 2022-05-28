@@ -20,7 +20,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -210,8 +209,39 @@ func TestIterateWithNextDupAndCurrentMixedSeekAt(t *testing.T) {
 	require.Equal(t, i, 31)
 
 	k, v, _ := c.SeekExact([]byte{byte(1)})
-	fmt.Println(k)
-	fmt.Println(v)
 	require.Equal(t, len(k), 0)
 	require.Equal(t, len(v), 0)
+}
+
+func TestLast(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	cu, _ := tx.RwCursorDupSort(testBucketDup)
+	for i := 1; i < 30; i += 2 {
+		err := cu.AppendDup([]byte{byte((i) / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	cu.Close()
+
+	mut := NewMiningBatch(tx)
+
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	// Let us account for repeated entries
+	for i := 0; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
+	c, _ := mut.RwCursorDupSort(testBucketDup)
+
+	k, v, _ := c.Last()
+	require.Equal(t, k, []byte{0x5, 0x5})
+	require.Equal(t, v, []byte{0x1c})
 }
