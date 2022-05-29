@@ -406,6 +406,9 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 	if err != nil {
 		return err
 	}
+	if syncHeadHeader == nil {
+		return fmt.Errorf("header not found for block number %d", u.UnwindPoint)
+	}
 	expectedRootHash := syncHeadHeader.Root
 
 	logPrefix := s.LogPrefix()
