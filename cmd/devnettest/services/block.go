@@ -186,7 +186,7 @@ func ApplyTransaction(ctx context.Context, tx types.Transaction) error {
 
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB() {
-	fmt.Printf("Clearing ./dev\n")
+	fmt.Printf("\nDeleting ./dev folder\n")
 
 	cmd := exec.Command("rm", "-rf", "./dev")
 	err := cmd.Run()
@@ -194,6 +194,8 @@ func ClearDevDB() {
 		fmt.Println("Error occurred clearing Dev DB")
 		panic("could not clear dev DB")
 	}
+
+	fmt.Printf("SUCCESS => Deleted ./dev\n")
 }
 
 func keepReads() {

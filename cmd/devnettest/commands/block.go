@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"time"
-	
+
 	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
@@ -24,10 +24,6 @@ var sendTxCmd = &cobra.Command{
 	Use:   "send-tx",
 	Short: "Sends a transaction",
 	Run: func(cmd *cobra.Command, args []string) {
-		if clearDev {
-			defer services.ClearDevDB()
-		}
-
 		callSendRegularTxAndSearchBlock(sendValue, recvAddr, devAddress, true)
 	},
 }

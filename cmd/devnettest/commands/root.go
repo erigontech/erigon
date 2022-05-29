@@ -5,12 +5,10 @@ import (
 )
 
 var (
-	clearDev bool
-	reqId    int
+	reqId int
 )
 
 func init() {
-	rootCmd.PersistentFlags().BoolVar(&clearDev, "clear-dev", false, "Determines if service should clear /dev after this call")
 	rootCmd.PersistentFlags().IntVar(&reqId, "req-id", 0, "Defines number of request id")
 }
 
