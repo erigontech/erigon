@@ -2,6 +2,7 @@ package olddb
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -189,6 +190,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 
 // NextDup returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
+	fmt.Println("NextDup " + m.table)
 	currK, _, _ := m.Current()
 
 	nextK, nextV, err := m.Next()
@@ -199,6 +201,7 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 	if bytes.Compare(currK, nextK) != 0 {
 		return nil, nil, nil
 	}
+	fmt.Println(nextK)
 	return nextK, nextV, nil
 }
 
@@ -278,8 +281,33 @@ func (m *miningmutationcursor) DeleteCurrentDuplicates() error {
 	panic("DeleteCurrentDuplicates Not implemented")
 }
 
+// Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
-	panic("SeekBothRange Not implemented")
+	fmt.Println("SeekBothRange " + m.table)
+	if value == nil {
+		fmt.Println("Normal Seek")
+		_, v, err := m.Seek(key)
+		return v, err
+	}
+	dbValue, err := m.dupCursor.SeekBothRange(key, value)
+	if err != nil {
+		return nil, err
+	}
+	m.current = 0
+	// TODO(Giulio2002): Use Golang search
+	for _, pair := range m.pairs {
+		if len(pair.key) >= len(key) && bytes.Compare(pair.key[:len(key)], key) >= 0 {
+			if bytes.Compare(pair.key[:len(key)], key) == 0 && (len(pair.value) < len(value) ||
+				bytes.Compare(pair.value[:len(value)], value) < 0) {
+				m.current++
+				continue
+			}
+			_, retValue, err := m.goForward(key, dbValue)
+			return retValue, err
+		}
+		m.current++
+	}
+	return dbValue, nil
 }
 
 func (m *miningmutationcursor) Last() ([]byte, []byte, error) {

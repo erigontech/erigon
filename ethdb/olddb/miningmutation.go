@@ -13,7 +13,8 @@ import (
 
 type miningmutation struct {
 	puts          map[string]map[string][]byte
-	hashedStorage map[string][][]byte
+	dupsortPuts   map[string]map[string][][]byte
+	dupsortTables map[string]struct{}
 
 	db kv.Tx
 	mu sync.RWMutex
@@ -29,9 +30,13 @@ type miningmutation struct {
 // batch.Commit()
 func NewMiningBatch(tx kv.Tx) *miningmutation {
 	return &miningmutation{
-		db:            tx,
-		puts:          make(map[string]map[string][]byte),
-		hashedStorage: make(map[string][][]byte),
+		db:          tx,
+		puts:        make(map[string]map[string][]byte),
+		dupsortPuts: make(map[string]map[string][][]byte),
+		dupsortTables: map[string]struct{}{
+			kv.HashedStorage: struct{}{},
+			kv.TrieOfStorage: struct{}{},
+		},
 	}
 }
 
@@ -40,6 +45,11 @@ func (m *miningmutation) RwKV() kv.RwDB {
 		return casted.RwKV()
 	}
 	return nil
+}
+
+func (m *miningmutation) isDupsortedTable(table string) bool {
+	_, ok := m.dupsortTables[table]
+	return ok
 }
 
 // getMem Retrieve database entry from memory (hashed storage will be left out for now because it is the only non auto-DupSorted table)
@@ -147,16 +157,20 @@ func (m *miningmutation) Has(table string, key []byte) (bool, error) {
 func (m *miningmutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.puts[table]; !ok {
+	dupsort := m.isDupsortedTable(table)
+	if _, ok := m.puts[table]; !ok && !dupsort {
 		m.puts[table] = make(map[string][]byte)
 	}
 	stringKey := *(*string)(unsafe.Pointer(&key))
 
-	if table == kv.HashedStorage {
-		if _, ok := m.hashedStorage[stringKey]; !ok {
-			m.hashedStorage[stringKey] = [][]byte{}
+	if dupsort {
+		if _, ok := m.dupsortPuts[table]; !ok {
+			m.dupsortPuts[table] = make(map[string][][]byte)
 		}
-		m.hashedStorage[stringKey] = append(m.hashedStorage[stringKey], value)
+		if _, ok := m.dupsortPuts[table][stringKey]; !ok {
+			m.dupsortPuts[table][stringKey] = [][]byte{}
+		}
+		m.dupsortPuts[table][stringKey] = append(m.dupsortPuts[table][stringKey], value)
 		return nil
 	}
 	m.puts[table][stringKey] = value
@@ -258,15 +272,15 @@ func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	filterMap := make(map[string]struct{})
 	c.table = bucket
 	var err error
-	if bucket != kv.HashedStorage {
-		for key, value := range m.puts[bucket] { 
+	if !m.isDupsortedTable(bucket) {
+		for key, value := range m.puts[bucket] {
 			c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 		}
 		c.cursor, err = m.db.Cursor(bucket)
 	} else {
 		c.dupCursor, err = m.db.CursorDupSort(bucket)
 		c.cursor = c.dupCursor
-		for key, values := range m.hashedStorage {
+		for key, values := range m.dupsortPuts[bucket] {
 			for _, value := range values {
 				dbKey, _, err := c.dupCursor.SeekBothExact([]byte(key), value)
 				if err != nil {
