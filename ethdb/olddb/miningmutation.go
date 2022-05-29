@@ -8,6 +8,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -161,7 +162,9 @@ func (m *miningmutation) Put(table string, key []byte, value []byte) error {
 	if _, ok := m.puts[table]; !ok && !dupsort {
 		m.puts[table] = make(map[string][]byte)
 	}
-	stringKey := *(*string)(unsafe.Pointer(&key))
+
+	cValue := common.CopyBytes(value)
+	stringKey := string(key)
 
 	if dupsort {
 		if _, ok := m.dupsortPuts[table]; !ok {
@@ -170,10 +173,10 @@ func (m *miningmutation) Put(table string, key []byte, value []byte) error {
 		if _, ok := m.dupsortPuts[table][stringKey]; !ok {
 			m.dupsortPuts[table][stringKey] = [][]byte{}
 		}
-		m.dupsortPuts[table][stringKey] = append(m.dupsortPuts[table][stringKey], value)
+		m.dupsortPuts[table][stringKey] = append(m.dupsortPuts[table][stringKey], cValue)
 		return nil
 	}
-	m.puts[table][stringKey] = value
+	m.puts[table][stringKey] = cValue
 	return nil
 }
 

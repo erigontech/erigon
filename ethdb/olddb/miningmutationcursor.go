@@ -123,7 +123,7 @@ func (m *miningmutationcursor) isPointingOnDb() (bool, error) {
 
 func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte, error) {
 	// is this db less than memory?
-	if (m.current > m.pairs.Len()-1) || (dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current])) {
+	if m.current > m.pairs.Len()-1 {
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
@@ -133,6 +133,12 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 			return nil, nil, err
 		}
 	}
+
+	if dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]) {
+		m.currentPair = cursorentry{dbKey, dbValue}
+		return dbKey, dbValue, nil
+	}
+
 	m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
 	// return current
 	return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
@@ -190,6 +196,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 
 // NextDup returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
+	fmt.Println("NextDup ")
 	currK, _, _ := m.Current()
 
 	nextK, nextV, err := m.Next()
@@ -205,6 +212,7 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
+	fmt.Println("Seek " + m.table)
 	dbKey, dbValue, err := m.cursor.Seek(seek)
 	if err != nil {
 		return nil, nil, err
@@ -252,15 +260,15 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
-	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
+	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) Append(k []byte, v []byte) error {
-	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
+	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
-	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
+	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {
@@ -281,7 +289,6 @@ func (m *miningmutationcursor) DeleteCurrentDuplicates() error {
 
 // Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
-	fmt.Println(m.pairs)
 	if value == nil {
 		_, v, err := m.SeekExact(key)
 		return v, err
@@ -290,7 +297,6 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(dbValue)
 	m.current = 0
 	// TODO(Giulio2002): Use Golang search
 	for _, pair := range m.pairs {

@@ -20,7 +20,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -70,8 +69,6 @@ func TestIterateWithNextAndCurrentMixed(t *testing.T) {
 	i = 6
 	// Test it with Seek
 	for k, v, _ := c.Seek([]byte{byte(i)}); k != nil; k, v, _ = c.Next() {
-		fmt.Println(k)
-		fmt.Println(v)
 		require.True(t, bytes.Compare(k, []byte{byte(i)}) == 0 && bytes.Compare(v, []byte{byte(i)}) == 0)
 		currK, currV, err := c.Current()
 		require.NoError(t, err)
@@ -278,7 +275,7 @@ func TestSeekBothRange(t *testing.T) {
 
 	c, _ := mut.RwCursorDupSort(testBucketDup)
 
-	i := 10
+	i := 12
 	k := []byte{byte(2), byte(2)}
 	for v, err := c.SeekBothRange([]byte{byte(2), byte(2)}, []byte{byte(i)}); v != nil; k, v, err = c.NextDup() {
 		assert.NoError(t, err)
