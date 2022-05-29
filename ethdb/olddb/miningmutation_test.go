@@ -264,7 +264,7 @@ func TestSeekBothRange(t *testing.T) {
 
 	cu, _ := tx.RwCursorDupSort(testBucketDup)
 	for i := 0; i < 30; i += 2 {
-		err := cu.AppendDup([]byte{byte((i) / 5), byte((i) / 5)}, []byte{byte(i)})
+		err := cu.AppendDup([]byte{byte((i) / 5), byte((i) / 5)}, []byte{byte(i), byte(i)})
 		require.NoError(t, err)
 	}
 	cu.Close()
@@ -272,7 +272,7 @@ func TestSeekBothRange(t *testing.T) {
 	mut := NewMiningBatch(tx)
 
 	for i := 1; i < 30; i += 2 {
-		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i), byte(i)})
 		require.NoError(t, err)
 	}
 
@@ -283,7 +283,7 @@ func TestSeekBothRange(t *testing.T) {
 	for v, err := c.SeekBothRange([]byte{byte(2), byte(2)}, []byte{byte(i)}); v != nil; k, v, err = c.NextDup() {
 		assert.NoError(t, err)
 		assert.Equal(t, k, []byte{byte(2), byte(2)})
-		assert.Equal(t, v, []byte{byte(i)})
+		assert.Equal(t, v, []byte{byte(i), byte(i)})
 		i++
 	}
 	assert.Equal(t, i, 15)

@@ -283,7 +283,7 @@ func (m *miningmutationcursor) DeleteCurrentDuplicates() error {
 func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	fmt.Println(m.pairs)
 	if value == nil {
-		_, v, err := m.Seek(key)
+		_, v, err := m.SeekExact(key)
 		return v, err
 	}
 	dbValue, err := m.dupCursor.SeekBothRange(key, value)
