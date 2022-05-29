@@ -150,7 +150,6 @@ func (m *miningmutation) Put(table string, key []byte, value []byte) error {
 	if _, ok := m.puts[table]; !ok {
 		m.puts[table] = make(map[string][]byte)
 	}
-
 	stringKey := *(*string)(unsafe.Pointer(&key))
 
 	if table == kv.HashedStorage {
@@ -253,18 +252,15 @@ func (m *miningmutation) CreateBucket(bucket string) error {
 }
 
 // Cursor creates a new cursor (the real fun begins here)
-func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
+func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c := &miningmutationcursor{}
-	c.dupsortedEntries = make(map[string]struct{})
+	// We can filter duplicates in dup sorted table
+	filterMap := make(map[string]struct{})
 	c.table = bucket
 	var err error
 	if bucket != kv.HashedStorage {
-		keyMap := make(map[string]bool)
-		for key, value := range m.puts[bucket] {
-			if _, ok := keyMap[string(key)]; !ok {
-				c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
-			}
-			keyMap[string(key)] = true
+		for key, value := range m.puts[bucket] { 
+			c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 		}
 		c.cursor, err = m.db.Cursor(bucket)
 	} else {
@@ -276,10 +272,10 @@ func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, err
 				if err != nil {
 					return &miningmutationcursor{}, err
 				}
-				if _, ok := c.dupsortedEntries[string(append([]byte(key), value...))]; dbKey == nil && !ok {
+				if _, ok := filterMap[string(append([]byte(key), value...))]; dbKey == nil && !ok {
 					c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 				}
-				c.dupsortedEntries[string(append([]byte(key), value...))] = struct{}{}
+				filterMap[string(append([]byte(key), value...))] = struct{}{}
 			}
 		}
 	}
@@ -289,21 +285,26 @@ func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, err
 }
 
 // Cursor creates a new cursor (the real fun begins here)
+func (m *miningmutation) RwCursorDupSort(bucket string) (kv.RwCursorDupSort, error) {
+	return m.makeCursor(bucket)
+}
+
+// Cursor creates a new cursor (the real fun begins here)
 func (m *miningmutation) RwCursor(bucket string) (kv.RwCursor, error) {
-	return m.RwCursorDupSort(bucket)
+	return m.makeCursor(bucket)
+}
+
+// Cursor creates a new cursor (the real fun begins here)
+func (m *miningmutation) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
+	return m.makeCursor(bucket)
+}
+
+// Cursor creates a new cursor (the real fun begins here)
+func (m *miningmutation) Cursor(bucket string) (kv.Cursor, error) {
+	return m.makeCursor(bucket)
 }
 
 // ViewID creates a new cursor (the real fun begins here)
 func (m *miningmutation) ViewID() uint64 {
 	panic("ViewID Not implemented")
-}
-
-// Cursor creates a new cursor (the real fun begins here)
-func (m *miningmutation) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
-	return m.RwCursorDupSort(bucket)
-}
-
-// Cursor creates a new cursor (the real fun begins here)
-func (m *miningmutation) Cursor(bucket string) (kv.Cursor, error) {
-	return m.RwCursorDupSort(bucket)
 }

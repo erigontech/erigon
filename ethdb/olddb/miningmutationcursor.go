@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 // entry for the cursor
@@ -41,8 +42,6 @@ type miningmutationcursor struct {
 	// we can keep one cursor type if we store 2 of each kind.
 	cursor    kv.Cursor
 	dupCursor kv.CursorDupSort
-	// We use a map to keep track of which elements we got for dupsorted table
-	dupsortedEntries map[string]struct{}
 	// we keep the index in the slice of pairs we are at.
 	current int
 	// current cursor entry
@@ -53,10 +52,7 @@ type miningmutationcursor struct {
 }
 
 func (m *miningmutationcursor) endOfNextDb() (bool, error) {
-	dbCurrK, dbCurrV, err := m.cursor.Current()
-	if err != nil {
-		return false, err
-	}
+	dbCurrK, dbCurrV, _ := m.cursor.Current()
 
 	lastK, lastV, err := m.cursor.Last()
 	if err != nil {
@@ -106,7 +102,7 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 	}
 
 	m.currentPair = cursorentry{m.pairs[0].key, m.pairs[0].value}
-	return m.pairs[0].key, m.pairs[0].value, nil
+	return common.CopyBytes(m.pairs[0].key), common.CopyBytes(m.pairs[0].value), nil
 }
 
 // Current return the current key and values the cursor is on.
@@ -138,7 +134,7 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 	}
 	m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
 	// return current
-	return m.pairs[m.current].key, m.pairs[m.current].value, nil
+	return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 }
 
 // Next returns the next element of the mutation.
@@ -166,7 +162,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 		}
 		m.current++
 		m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
-		return m.pairs[m.current].key, m.pairs[m.current].value, nil
+		return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 	}
 
 	isOnDb, err := m.isPointingOnDb()
@@ -255,15 +251,15 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
-	return m.mutation.Put(m.table, k, v)
+	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 }
 
 func (m *miningmutationcursor) Append(k []byte, v []byte) error {
-	return m.mutation.Put(m.table, k, v)
+	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 }
 
 func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
-	return m.mutation.Put(m.table, k, v)
+	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 }
 
 func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {
@@ -271,7 +267,7 @@ func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {
 }
 
 func (m *miningmutationcursor) Delete(k, v []byte) error {
-	panic("Delete Not implemented")
+	return m.mutation.Delete(m.table, k, v)
 }
 
 func (m *miningmutationcursor) DeleteCurrent() error {
@@ -307,6 +303,7 @@ func (m *miningmutationcursor) Prev() ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Close() {
+	m.cursor.Close()
 	return
 }
 
