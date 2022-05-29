@@ -2,7 +2,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -67,6 +66,10 @@ func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	} else {
 		_, _, err = m.cursor.Seek(dbCurrK)
 	}
+	if err != nil {
+		return false, err
+	}
+
 	if bytes.Compare(lastK, currK) == 0 {
 		return bytes.Compare(lastV, currV) <= 0, nil
 	}
@@ -196,7 +199,6 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 
 // NextDup returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
-	fmt.Println("NextDup ")
 	currK, _, _ := m.Current()
 
 	nextK, nextV, err := m.Next()
@@ -212,7 +214,6 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
-	fmt.Println("Seek " + m.table)
 	dbKey, dbValue, err := m.cursor.Seek(seek)
 	if err != nil {
 		return nil, nil, err

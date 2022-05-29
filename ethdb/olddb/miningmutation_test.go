@@ -166,7 +166,7 @@ func TestIterateWithNextDupAndCurrentMixed(t *testing.T) {
 		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
 		i++
 		if i%5 == 0 {
-			k, v, _ = c.Seek([]byte{byte(i / 5)})
+			_, _, _ = c.Seek([]byte{byte(i / 5)})
 			i++ // this causes total i to be 31
 		}
 	}
@@ -212,7 +212,7 @@ func TestIterateWithNextDupAndCurrentMixedSeekAt(t *testing.T) {
 		require.True(t, bytes.Compare(k, currK) == 0 && bytes.Compare(v, currV) == 0)
 		i++
 		if i%5 == 0 {
-			k, v, _ = c.Seek([]byte{byte(i / 5)})
+			_, _, _ = c.Seek([]byte{byte(i / 5)})
 			i++ // this causes total i to be 31
 		}
 	}

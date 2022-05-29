@@ -35,8 +35,8 @@ func NewMiningBatch(tx kv.Tx) *miningmutation {
 		puts:        make(map[string]map[string][]byte),
 		dupsortPuts: make(map[string]map[string][][]byte),
 		dupsortTables: map[string]struct{}{
-			kv.HashedStorage: struct{}{},
-			kv.TrieOfStorage: struct{}{},
+			kv.HashedStorage: {},
+			kv.TrieOfStorage: {},
 		},
 	}
 }
