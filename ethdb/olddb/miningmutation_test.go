@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -256,4 +257,34 @@ func TestLast(t *testing.T) {
 	k, v, _ := c.Last()
 	require.Equal(t, k, []byte{0x5, 0x5})
 	require.Equal(t, v, []byte{0x1c})
+}
+
+func TestSeekBothRange(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	cu, _ := tx.RwCursorDupSort(testBucketDup)
+	for i := 0; i < 30; i += 2 {
+		err := cu.AppendDup([]byte{byte((i) / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	cu.Close()
+
+	mut := NewMiningBatch(tx)
+
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketDup, []byte{byte(i / 5), byte((i) / 5)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+
+	c, _ := mut.RwCursorDupSort(testBucketDup)
+
+	i := 10
+	k := []byte{byte(2), byte(2)}
+	for v, err := c.SeekBothRange([]byte{byte(2), byte(2)}, []byte{byte(i)}); v != nil; k, v, err = c.NextDup() {
+		assert.NoError(t, err)
+		assert.Equal(t, k, []byte{byte(2), byte(2)})
+		assert.Equal(t, v, []byte{byte(i)})
+		i++
+	}
+	assert.Equal(t, i, 15)
 }

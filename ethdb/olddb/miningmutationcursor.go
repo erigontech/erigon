@@ -190,7 +190,6 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 
 // NextDup returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
-	fmt.Println("NextDup " + m.table)
 	currK, _, _ := m.Current()
 
 	nextK, nextV, err := m.Next()
@@ -201,7 +200,6 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 	if bytes.Compare(currK, nextK) != 0 {
 		return nil, nil, nil
 	}
-	fmt.Println(nextK)
 	return nextK, nextV, nil
 }
 
@@ -283,9 +281,8 @@ func (m *miningmutationcursor) DeleteCurrentDuplicates() error {
 
 // Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
-	fmt.Println("SeekBothRange " + m.table)
+	fmt.Println(m.pairs)
 	if value == nil {
-		fmt.Println("Normal Seek")
 		_, v, err := m.Seek(key)
 		return v, err
 	}
@@ -293,15 +290,11 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println(dbValue)
 	m.current = 0
 	// TODO(Giulio2002): Use Golang search
 	for _, pair := range m.pairs {
-		if len(pair.key) >= len(key) && bytes.Compare(pair.key[:len(key)], key) >= 0 {
-			if bytes.Compare(pair.key[:len(key)], key) == 0 && (len(pair.value) < len(value) ||
-				bytes.Compare(pair.value[:len(value)], value) < 0) {
-				m.current++
-				continue
-			}
+		if bytes.Compare(pair.key, key) == 0 && len(pair.value) >= len(value) && bytes.Compare(pair.value[:len(value)], value) >= 0 {
 			_, retValue, err := m.goForward(key, dbValue)
 			return retValue, err
 		}
