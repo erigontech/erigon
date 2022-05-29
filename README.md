@@ -25,7 +25,7 @@ Erigon is an implementation of Ethereum (aka "Ethereum client"), on the efficien
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
     + [Erigon Discord Server](#erigon-discord-server)
-    + [Reporting security issues/concerns](#reporting-security-issues-concerns)
+    + [Reporting security issues/concerns](#reporting-security-issues/concerns)
     + [Team](#team)
 - [Known issues](#known-issues)
     + [`htop` shows incorrect memory usage](#htop-shows-incorrect-memory-usage)
@@ -271,7 +271,7 @@ command, [see this table](./cmd/rpcdaemon/README.md#rpc-implementation-status).
 
 ### Run all components by docker-compose
 
-Next command starts: Erigon on port 30303, rpcdaemon 8545, prometheus 9090, grafana 3000
+Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on port 9090, and grafana on port 3000.
 
 ```sh
 make docker-compose
@@ -283,7 +283,12 @@ Makefile creates the initial directories for erigon, prometheus and grafana. The
 and rpcdaemon which is required to open Erigon's DB from another process (RPCDaemon local-mode).
 See: https://github.com/ledgerwatch/erigon/pull/2392/files
 
-Windows support for docker-compose is not ready yet. Please help us with .ps1 port
+If your docker installation requires the docker daemon to run as root (which is by default), you will need to prefix
+the command above with `sudo`. However, it is sometimes recommended running docker (and therefore its containers) as a
+non-root user for security reasons. For more information about how to do this, refer to
+[this article](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+
+Windows support for docker-compose is not ready yet. Please help us with .ps1 port.
 
 ### Grafana dashboard
 
@@ -315,8 +320,8 @@ Detailed explanation: [./docs/programmers_guide/db_faq.md](./docs/programmers_gu
 | 42069 | TCP & UDP | Snap sync (Bittorrent) |  Public |
 |  6060 |    TCP    | Metrics or Pprof       | Private |
 
-Typically 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
-internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
+Typically, 30303 and 30304 are exposed to the internet to allow incoming peering connections. 9090 is exposed only
+internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon).
 
 #### `RPC` ports
 
@@ -326,8 +331,8 @@ internally for rpcdaemon or other connections, (e.g. rpcdaemon -> erigon)
 |  8550 |    TCP    |       HTTP         | Private |
 |  8551 |    TCP    | HTTP with JWS auth | Private |
 
-Typically 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
-Typically 8550 (unauthenticated) and 8551 (authenticated) are exposed only internally for the Engine API JSON-RPC queries.
+Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same port.
+Typically, 8550 (unauthenticated) and 8551 (authenticated) are exposed only internally for the Engine API JSON-RPC queries.
 
 #### `sentry` ports
 
@@ -336,8 +341,8 @@ Typically 8550 (unauthenticated) and 8551 (authenticated) are exposed only inter
 | 30303 | TCP & UDP |      Peering     |  Public |
 |  9091 |    TCP    | gRPC Connections | Private |
 
-Typically a sentry process will run one eth/xx protocl (e.g. eth/66) and will be exposed to the internet on 30303. Port
-9091 is for internal gRCP connections (e.g erigon -> sentry)
+Typically, a sentry process will run one eth/xx protocol (e.g. eth/66) and will be exposed to the internet on 30303. Port
+9091 is for internal gRCP connections (e.g erigon -> sentry).
 
 #### Other ports
 
