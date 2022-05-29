@@ -3,7 +3,7 @@ GOBIN = $(CURDIR)/build/bin
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags `git rev-list --tags="v*" --max-count=1`)
+GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
@@ -29,8 +29,13 @@ go-version:
 		exit 1 ;\
 	fi
 
-docker:
-	DOCKER_BUILDKIT=1 docker build -t erigon:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
+docker: git-submodules
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
+		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg VERSION=${GIT_TAG} \
+		${DOCKER_FLAGS} \
+		.
 
 xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
@@ -74,7 +79,7 @@ $(COMMANDS): %: %.cmd
 
 all: erigon $(COMMANDS)
 
-db-tools:
+db-tools: git-submodules
 	@echo "Building db-tools"
 
 	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
@@ -91,7 +96,10 @@ db-tools:
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test:
-	$(GOTEST) --timeout 30m
+	$(GOTEST) --timeout 30s
+
+test-integration:
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
@@ -102,7 +110,7 @@ lintci:
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.45.2
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.2
 
 clean:
 	go clean -cache
@@ -137,6 +145,8 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
+	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule sync --quiet --recursive
 	@git submodule update --quiet --init --recursive --force || true

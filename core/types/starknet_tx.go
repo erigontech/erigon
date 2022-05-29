@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -118,7 +120,7 @@ func (tx StarknetTransaction) Cost() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, error) {
+func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -130,6 +132,11 @@ func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int) (Message, er
 		accessList: tx.AccessList,
 		checkNonce: true,
 	}
+
+	if !rules.IsStarknet {
+		return msg, errors.New("starknet tx not supported")
+	}
+
 	if baseFee != nil {
 		overflow := msg.gasPrice.SetFromBig(baseFee)
 		if overflow {

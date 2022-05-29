@@ -558,7 +558,7 @@ func TestEIP155Transition(t *testing.T) {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &core.Genesis{
-			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &params.ChainConfig{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -633,7 +633,7 @@ func TestEIP155Transition(t *testing.T) {
 	}
 
 	// generate an invalid chain id transaction
-	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
+	config := &params.ChainConfig{ChainID: big.NewInt(2), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)}
 	chain, chainErr = core.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
@@ -683,7 +683,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &core.Genesis{
-			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &params.ChainConfig{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -874,11 +874,10 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		theAddr = common.Address{1}
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP150Block:    new(big.Int),
-				EIP158Block:    big.NewInt(2),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(2),
 			},
 			Alloc: core.GenesisAlloc{address: {Balance: funds}},
 		}
@@ -889,7 +888,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		var (
 			txn    types.Transaction
 			err    error
-			signer = types.LatestSigner(gspec.Config)
+			signer = types.MakeFrontierSigner()
 		)
 		switch i {
 		case 0:

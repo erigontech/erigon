@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"sort"
 	"syscall"
 	"time"
@@ -20,8 +21,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -35,6 +39,7 @@ var (
 func init() {
 	withBlock(checkChangeSetsCmd)
 	withDataDir(checkChangeSetsCmd)
+	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
 	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn on writing receipts as the execution ongoing")
@@ -77,7 +82,8 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if chaindata != historyfile {
 		historyDb = kv2.MustOpen(historyfile)
 	}
-	historyTx, err1 := historyDb.BeginRo(context.Background())
+	ctx := context.Background()
+	historyTx, err1 := historyDb.BeginRo(ctx)
 	if err1 != nil {
 		return err1
 	}
@@ -88,7 +94,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	noOpWriter := state.NewNoopWriter()
 
 	interrupt := false
-	rwtx, err := chainDb.BeginRw(context.Background())
+	rwtx, err := chainDb.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
@@ -105,6 +111,25 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
+
+	var blockReader services.FullBlockReader
+	var allSnapshots *snapshotsync.RoSnapshots
+	syncMode, err := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
+	if err != nil {
+		return err
+	}
+	if syncMode == ethconfig.SnapSync {
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false, true), path.Join(datadir, "snapshots"))
+		defer allSnapshots.Close()
+		if err := allSnapshots.Reopen(); err != nil {
+			return fmt.Errorf("reopen snapshot segments: %w", err)
+		}
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+
 	for !interrupt {
 
 		if blockNum > execAt {
@@ -116,12 +141,12 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			break
 		}
 
-		blockHash, err := rawdb.ReadCanonicalHash(rwtx, blockNum)
+		blockHash, err := blockReader.CanonicalHash(ctx, historyTx, blockNum)
 		if err != nil {
 			return err
 		}
 		var b *types.Block
-		b, _, err = rawdb.ReadBlockWithSenders(rwtx, blockHash, blockNum)
+		b, _, err = blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
@@ -142,7 +167,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
 		contractHasTEVM := ethdb.GetHasTEVM(rwtx)
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig)
+		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig)
 		if err1 != nil {
 			return err1
 		}

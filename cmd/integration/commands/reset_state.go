@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -9,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -138,6 +140,9 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
 		return err
 	}
+	if err := tx.ClearBucket(kv.BorReceipts); err != nil {
+		return err
+	}
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
@@ -263,6 +268,27 @@ func printStages(db kv.Tx) error {
 		return err
 	}
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
+
+	{
+		firstNonGenesis, err := rawdb.SecondKey(db, kv.Headers)
+		if err != nil {
+			return err
+		}
+		if firstNonGenesis != nil {
+			fmt.Fprintf(w, "first header in db: %d\n", binary.BigEndian.Uint64(firstNonGenesis))
+		} else {
+			fmt.Fprintf(w, "no headers in db\n")
+		}
+		firstNonGenesis, err = rawdb.SecondKey(db, kv.BlockBody)
+		if err != nil {
+			return err
+		}
+		if firstNonGenesis != nil {
+			fmt.Fprintf(w, "first body in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
+		} else {
+			fmt.Fprintf(w, "no bodies in db\n\n")
+		}
+	}
 
 	return nil
 }

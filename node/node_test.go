@@ -30,6 +30,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
@@ -42,8 +43,8 @@ var (
 	testNodeKey, _ = crypto.GenerateKey()
 )
 
-func testNodeConfig(t *testing.T) *Config {
-	return &Config{
+func testNodeConfig(t *testing.T) *nodecfg.Config {
+	return &nodecfg.Config{
 		Name:    "test node",
 		P2P:     p2p.Config{PrivateKey: testNodeKey},
 		DataDir: t.TempDir(),
@@ -106,7 +107,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a new node based on the data directory
-	original, originalErr := New(&Config{DataDir: dir})
+	original, originalErr := New(&nodecfg.Config{DataDir: dir})
 	if originalErr != nil {
 		t.Fatalf("failed to create original protocol stack: %v", originalErr)
 	}
@@ -116,7 +117,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	}
 
 	// Create a second node based on the same data directory and ensure failure
-	if _, err := New(&Config{DataDir: dir}); !errors.Is(err, ErrDataDirUsed) {
+	if _, err := New(&nodecfg.Config{DataDir: dir}); !errors.Is(err, ErrDataDirUsed) {
 		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDataDirUsed)
 	}
 }
@@ -464,7 +465,7 @@ func TestRegisterHandler_Unsuccessful(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	node, err := New(&DefaultConfig)
+	node, err := New(&nodecfg.DefaultConfig)
 	if err != nil {
 		t.Fatalf("could not create new node: %v", err)
 	}
@@ -576,7 +577,7 @@ func TestNodeRPCPrefix(t *testing.T) {
 		test := test
 		name := fmt.Sprintf("http=%s ws=%s", test.httpPrefix, test.wsPrefix)
 		t.Run(name, func(t *testing.T) {
-			cfg := &Config{
+			cfg := &nodecfg.Config{
 				HTTPHost:       "127.0.0.1",
 				HTTPPathPrefix: test.httpPrefix,
 				WSHost:         "127.0.0.1",
@@ -634,7 +635,7 @@ func (test rpcPrefixTest) check(t *testing.T, node *Node) {
 }
 
 func createNode(t *testing.T, httpPort, wsPort int) *Node {
-	conf := &Config{
+	conf := &nodecfg.Config{
 		HTTPHost: "127.0.0.1",
 		HTTPPort: httpPort,
 		WSHost:   "127.0.0.1",

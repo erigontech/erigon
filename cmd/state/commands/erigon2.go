@@ -17,14 +17,16 @@ import (
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -51,6 +53,7 @@ var (
 	commitmentFrequency int // How many blocks to skip between calculating commitment
 	changesets          bool
 	commitments         bool
+	commitmentTrie      string
 )
 
 var blockExecutionTimer = metrics2.GetOrCreateSummary("chain_execution_seconds")
@@ -64,6 +67,7 @@ func init() {
 	erigon2Cmd.Flags().BoolVar(&changesets, "changesets", false, "set to true to generate changesets")
 	erigon2Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 625, "how many blocks to skip between calculating commitment")
 	erigon2Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
+	erigon2Cmd.Flags().StringVar(&commitmentTrie, "commitments.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	erigon2Cmd.Flags().IntVar(&traceBlock, "traceblock", 0, "block number at which to turn on tracing")
 	rootCmd.AddCommand(erigon2Cmd)
 }
@@ -141,7 +145,21 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, rwTx)
+	var blockRootMismatchExpected bool
+	var trieVariant commitment.TrieVariant
+	switch commitmentTrie {
+	case "bin":
+		logger.Info("using Binary Patricia Hashed Trie for commitments")
+		trieVariant = commitment.VariantBinPatriciaTrie
+		blockRootMismatchExpected = true
+	case "hex":
+		fallthrough
+	default:
+		logger.Info("using Hex Patricia Hashed Trie for commitments")
+		trieVariant = commitment.VariantHexPatriciaTrie
+	}
+
+	agg, err3 := aggregator.NewAggregator(aggPath, unwindLimit, aggregationStep, changesets, commitments, 100_000_000, commitment.InitializeTrie(trieVariant), rwTx)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -158,7 +176,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if err = w.Reset(0, rwTx); err != nil {
 			return err
 		}
-		if err = genesisIbs.CommitBlock(params.Rules{}, &WriterWrapper{w: w}); err != nil {
+		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper{w: w}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 		if err = w.FinishTx(0, false); err != nil {
@@ -172,7 +190,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if err = w.Aggregate(false); err != nil {
 			return err
 		}
-		if commitments {
+		if commitments && !blockRootMismatchExpected {
 			if !bytes.Equal(rootHash, genBlock.Header().Root[:]) {
 				return fmt.Errorf("root hash mismatch for genesis block, expected [%x], was [%x]", genBlock.Header().Root[:], rootHash)
 			}
@@ -204,16 +222,23 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		}
 	}()
 
-	engine := initConsensusEngine(chainConfig, logger)
-	var blockReader interfaces.FullBlockReader
-	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
+	var blockReader services.FullBlockReader
+	var allSnapshots *snapshotsync.RoSnapshots
+	syncMode, err := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
+	if err != nil {
+		return err
+	}
 	if syncMode == ethconfig.SnapSync {
-		allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false), path.Join(datadir, "snapshots"))
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapshotCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
+		if err := allSnapshots.Reopen(); err != nil {
+			return fmt.Errorf("reopen snapshot segments: %w", err)
+		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
+	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 
 	for !interrupt {
 		blockNum++
@@ -279,8 +304,10 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			if rootHash, err = w.ComputeCommitment(trace /* trace */); err != nil {
 				return err
 			}
-			if !bytes.Equal(rootHash, block.Header().Root[:]) {
-				return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, block.Header().Root[:], rootHash)
+			if !blockRootMismatchExpected {
+				if !bytes.Equal(rootHash, block.Header().Root[:]) {
+					return fmt.Errorf("root hash mismatch for block %d, expected [%x], was [%x]", blockNum, block.Header().Root[:], rootHash)
+				}
 			}
 		}
 		if err = w.Aggregate(trace); err != nil {
@@ -349,7 +376,7 @@ func (s *stat) print(aStats aggregator.FilesStats, logger log.Logger) {
 
 func (s *stat) delta(aStats aggregator.FilesStats, blockNum uint64) *stat {
 	currentTime := time.Now()
-	runtime.ReadMemStats(&s.mem)
+	libcommon.ReadMemStats(&s.mem)
 
 	interval := currentTime.Sub(s.prevTime).Seconds()
 	s.blockNum = blockNum
@@ -597,23 +624,23 @@ func (ww *WriterWrapper) CreateContract(address common.Address) error {
 	return nil
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	switch {
 	case chainConfig.Clique != nil:
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Aura != nil:
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Parlia != nil:
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshots)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}

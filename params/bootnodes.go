@@ -72,9 +72,8 @@ var GoerliBootnodes = []string{
 	"enode://a61215641fb8714a373c80edbfa0ea8878243193f57c96eeb44d0bc019ef295abd4e044fd619bfc4c59731a73fb79afe84e9ab6da0c743ceb479cbb6d263fa91@3.11.147.67:30303",
 
 	// Goerli Initiative bootnodes
-	"enode://a869b02cec167211fb4815a82941db2e7ed2936fd90e78619c53eb17753fcf0207463e3419c264e2a1dd8786de0df7e68cf99571ab8aeb7c4e51367ef186b1dd@51.15.116.226:30303",
-	"enode://807b37ee4816ecf407e9112224494b74dd5933625f655962d892f2f0f02d7fbbb3e2a94cf87a96609526f30c998fd71e93e2f53015c558ffc8b03eceaf30ee33@51.15.119.157:30303",
-	"enode://a59e33ccd2b3e52d578f1fbd70c6f9babda2650f0760d6ff3b37742fdcdfdb3defba5d56d315b40c46b70198c7621e63ffa3f987389c7118634b0fefbbdfa7fd@51.15.119.157:40303",
+	"enode://d4f764a48ec2a8ecf883735776fdefe0a3949eb0ca476bd7bc8d0954a9defe8fea15ae5da7d40b5d2d59ce9524a99daedadf6da6283fca492cc80b53689fb3b3@46.4.99.122:32109",
+	"enode://d2b720352e8216c9efc470091aa91ddafc53e222b32780f505c817ceef69e01d5b0b0797b69db254c586f493872352f5a022b4d8479a00fc92ec55f9ad46a27e@88.99.70.182:30303",
 }
 
 var KilnDevNetBootNodes = []string{
@@ -173,9 +172,6 @@ var ChapelStaticPeers = []string{
 var RialtoBootnodes = []string{}
 var RialtoStaticPeers = ChapelStaticPeers
 
-// ErigonBootnodes are the enode URLs of the P2P bootstrap nodes running on the ErigonNodes devnet
-var ErigonBootnodes = []string{}
-
 var SokolBootnodes = []string{
 	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
 	"enode://e08adce358fc26dfbe1f24ee578dceaa29575ca44a39d9041203131db5135aceba6241840a9b57b1540eeaf7b4eff1aead28a74641be43342c35af454abb31b3@199.247.18.10:30313",
@@ -255,8 +251,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return ChapelBootnodes
 	case networkname.RialtoChainName:
 		return RialtoBootnodes
-	case networkname.ErigonMineName:
-		return ErigonBootnodes
 	case networkname.SokolChainName:
 		return SokolBootnodes
 	case networkname.FermionChainName:

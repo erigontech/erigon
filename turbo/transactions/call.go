@@ -9,7 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -32,7 +32,7 @@ func DoCall(
 	block *types.Block, overrides *ethapi.StateOverrides,
 	gasCap uint64,
 	chainConfig *params.ChainConfig,
-	filters *filters.Filters,
+	filters *rpcservices.Filters,
 	stateCache kvcache.Cache,
 	contractHasTEVM func(hash common.Hash) (bool, error),
 ) (*core.ExecutionResult, error) {

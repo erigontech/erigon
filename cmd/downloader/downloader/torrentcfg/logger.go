@@ -13,11 +13,12 @@ func init() {
 	utp.Logger.Handlers = []lg.Handler{noopHandler{}}
 }
 
-var String2LogLevel = map[string]lg.Level{
-	lg.Debug.LogString():   lg.Debug,
-	lg.Info.LogString():    lg.Info,
-	lg.Warning.LogString(): lg.Warning,
-	lg.Error.LogString():   lg.Error,
+func Str2LogLevel(in string) (lg.Level, error) {
+	lvl := lg.Level{}
+	if err := lvl.UnmarshalText([]byte(in)); err != nil {
+		return lvl, err
+	}
+	return lvl, nil
 }
 
 type noopHandler struct{}
@@ -51,6 +52,12 @@ func (b adapterHandler) Handle(r lg.Record) {
 			break
 		}
 		if strings.Contains(str, "TrackerClient closed") { // suppress useless errors
+			break
+		}
+		if strings.Contains(str, "banned ip") { // suppress useless errors
+			break
+		}
+		if strings.Contains(str, "being sole dirtier of piece") { // suppress useless errors
 			break
 		}
 

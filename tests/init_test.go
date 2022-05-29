@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+
 package tests
 
 import (
@@ -25,11 +27,11 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/params"
+	"golang.org/x/exp/slices"
 )
 
 var (
@@ -266,7 +268,7 @@ func sortedMapKeys(m reflect.Value) []string {
 	for i, k := range m.MapKeys() {
 		keys[i] = k.String()
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 

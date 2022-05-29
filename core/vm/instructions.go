@@ -615,7 +615,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
 		gas    = scope.Contract.Gas
 	)
-	if interpreter.evm.ChainRules().IsEIP150 {
+	if interpreter.evm.ChainRules().IsTangerineWhistle {
 		gas -= gas / 64
 	}
 	// reuse size int for stackvalue

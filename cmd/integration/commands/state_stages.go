@@ -14,6 +14,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
@@ -52,7 +52,7 @@ Examples:
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		cfg := &node.DefaultConfig
+		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
@@ -283,7 +283,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			if err := checkChanges(expectedAccountChanges, tx, expectedStorageChanges, execAtBlock, pm.History.PruneTo(execToBlock)); err != nil {
 				return err
 			}
-			integrity.Trie(tx, integritySlow, ctx)
+			integrity.Trie(db, tx, integritySlow, ctx)
 		}
 		//receiptsInDB := rawdb.ReadReceiptsByNumber(tx, progress(tx, stages.Execution)+1)
 

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -199,16 +198,11 @@ func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
-	blockNum, err := getBlockNumber(number, b.tx)
+	block, err := b.baseApi.blockByRPCNumber(number, b.tx)
 	if err != nil {
 		return nil, err
 	}
-
-	header := rawdb.ReadHeaderByNumber(b.tx, blockNum)
-	if header == nil {
-		return nil, fmt.Errorf("header not found: %d", blockNum)
-	}
-	return header, nil
+	return block.Header(), nil
 }
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByRPCNumber(number, b.tx)

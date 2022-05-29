@@ -3,12 +3,12 @@ package snapshothashes
 import (
 	_ "embed"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/pelletier/go-toml/v2"
+	"golang.org/x/exp/slices"
 )
 
 //go:embed erigon-snapshots/mainnet.toml
@@ -22,6 +22,14 @@ var Goerli = fromToml(goerli)
 //go:embed erigon-snapshots/bsc.toml
 var bsc []byte
 var Bsc = fromToml(bsc)
+
+//go:embed erigon-snapshots/ropsten.toml
+var ropsten []byte
+var Ropsten = fromToml(ropsten)
+
+//go:embed erigon-snapshots/mumbai.toml
+var mumbai []byte
+var Mumbai = fromToml(mumbai)
 
 type PreverifiedItem struct {
 	Name string
@@ -42,7 +50,7 @@ func doSort(in preverified) Preverified {
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(i, j PreverifiedItem) bool { return i.Name < j.Name })
 	return out
 }
 
@@ -50,6 +58,8 @@ var (
 	MainnetChainSnapshotConfig = newConfig(Mainnet)
 	GoerliChainSnapshotConfig  = newConfig(Goerli)
 	BscChainSnapshotConfig     = newConfig(Bsc)
+	RopstenChainSnapshotConfig = newConfig(Ropsten)
+	MumbaiChainSnapshotConfig  = newConfig(Mumbai)
 )
 
 func newConfig(preverified Preverified) *Config {
@@ -99,6 +109,10 @@ func KnownConfig(networkName string) *Config {
 		return GoerliChainSnapshotConfig
 	case networkname.BSCChainName:
 		return BscChainSnapshotConfig
+	case networkname.RopstenChainName:
+		return RopstenChainSnapshotConfig
+	case networkname.MumbaiChainName:
+		return MumbaiChainSnapshotConfig
 	default:
 		return newConfig(Preverified{})
 	}

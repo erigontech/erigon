@@ -15,10 +15,8 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-
-	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_cons "github.com/ledgerwatch/erigon-lib/gointerfaces/consensus"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -229,10 +227,9 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		case "homestead":
 			chainConfig.HomesteadBlock = bigNumber
 		case "tangerine":
-			chainConfig.EIP150Block = bigNumber
+			chainConfig.TangerineWhistleBlock = bigNumber
 		case "spurious":
-			chainConfig.EIP155Block = bigNumber
-			chainConfig.EIP158Block = bigNumber
+			chainConfig.SpuriousDragonBlock = bigNumber
 		case "byzantium":
 			chainConfig.ByzantiumBlock = bigNumber
 		case "constantinople":

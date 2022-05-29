@@ -9,13 +9,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -77,7 +77,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader interfaces.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	if blockNum < bd.requestedLow {
 		blockNum = bd.requestedLow
 	}
@@ -133,12 +133,13 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader interfaces.Ful
 				bd.deliveriesB[blockNum-bd.requestedLow] = block.RawBody()
 
 				// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-				var td *big.Int
 				if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
 					log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
 				} else if parent != nil {
-					td = new(big.Int).Add(block.Difficulty(), parent)
-					go blockPropagator(context.Background(), block, td)
+					if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
+						td := new(big.Int).Add(block.Difficulty(), parent)
+						go blockPropagator(context.Background(), block, td)
+					}
 				} else {
 					log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 				}

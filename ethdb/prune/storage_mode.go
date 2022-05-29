@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/params"
@@ -27,54 +28,62 @@ type Experiments struct {
 func FromCli(flags string, exactHistory, exactReceipts, exactTxIndex, exactCallTraces,
 	beforeH, beforeR, beforeT, beforeC uint64, experiments []string) (Mode, error) {
 	mode := DefaultMode
-	if flags == "default" || flags == "disabled" {
-		return DefaultMode, nil
-	}
-	mode.Initialised = true
-	for _, flag := range flags {
-		switch flag {
-		case 'h':
-			mode.History = Distance(params.FullImmutabilityThreshold)
-		case 'r':
-			mode.Receipts = Distance(params.FullImmutabilityThreshold)
-		case 't':
-			mode.TxIndex = Distance(params.FullImmutabilityThreshold)
-		case 'c':
-			mode.CallTraces = Distance(params.FullImmutabilityThreshold)
-		default:
-			return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
+	if flags != "default" && flags != "disabled" {
+		mode.Initialised = true
+		for _, flag := range flags {
+			switch flag {
+			case 'h':
+				mode.History = Distance(params.FullImmutabilityThreshold)
+			case 'r':
+				mode.Receipts = Distance(params.FullImmutabilityThreshold)
+			case 't':
+				mode.TxIndex = Distance(params.FullImmutabilityThreshold)
+			case 'c':
+				mode.CallTraces = Distance(params.FullImmutabilityThreshold)
+			default:
+				return DefaultMode, fmt.Errorf("unexpected flag found: %c", flag)
+			}
 		}
 	}
 
 	if exactHistory > 0 {
+		mode.Initialised = true
 		mode.History = Distance(exactHistory)
 	}
 	if exactReceipts > 0 {
+		mode.Initialised = true
 		mode.Receipts = Distance(exactReceipts)
 	}
 	if exactTxIndex > 0 {
+		mode.Initialised = true
 		mode.TxIndex = Distance(exactTxIndex)
 	}
 	if exactCallTraces > 0 {
+		mode.Initialised = true
 		mode.CallTraces = Distance(exactCallTraces)
 	}
 
 	if beforeH > 0 {
+		mode.Initialised = true
 		mode.History = Before(beforeH)
 	}
 	if beforeR > 0 {
+		mode.Initialised = true
 		mode.Receipts = Before(beforeR)
 	}
 	if beforeT > 0 {
+		mode.Initialised = true
 		mode.TxIndex = Before(beforeT)
 	}
 	if beforeC > 0 {
+		mode.Initialised = true
 		mode.CallTraces = Before(beforeC)
 	}
 
 	for _, ex := range experiments {
 		switch ex {
 		case "tevm":
+			mode.Initialised = true
 			mode.Experiments.TEVM = true
 		case "":
 			// skip
@@ -190,32 +199,33 @@ func (m Mode) String() string {
 	if !m.Initialised {
 		return "default"
 	}
+	const defaultVal uint64 = params.FullImmutabilityThreshold
 	long := ""
-	short := "--prune="
+	short := ""
 	if m.History.Enabled() {
 		if m.History.useDefaultValue() {
-			short += "h"
+			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
 		}
 	}
 	if m.Receipts.Enabled() {
 		if m.Receipts.useDefaultValue() {
-			short += "r"
+			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.toValue())
 		}
 	}
 	if m.TxIndex.Enabled() {
 		if m.TxIndex.useDefaultValue() {
-			short += "t"
+			short += fmt.Sprintf(" --prune.t.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.toValue())
 		}
 	}
 	if m.CallTraces.Enabled() {
 		if m.CallTraces.useDefaultValue() {
-			short += "c"
+			short += fmt.Sprintf(" --prune.c.older=%d", defaultVal)
 		} else {
 			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
 		}
@@ -223,7 +233,8 @@ func (m Mode) String() string {
 	if m.Experiments.TEVM {
 		long += " --experiments.tevm=enabled"
 	}
-	return short + long
+
+	return strings.TrimLeft(short+long, " ")
 }
 
 func Override(db kv.RwTx, sm Mode) error {

@@ -26,6 +26,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/simulations/pipes"
@@ -92,10 +93,11 @@ func (s *SimAdapter) NewNode(config *NodeConfig) (Node, error) {
 		return nil, err
 	}
 
-	n, err := node.New(&node.Config{
+	n, err := node.New(&nodecfg.Config{
 		P2P: p2p.Config{
 			PrivateKey:      config.PrivateKey,
 			MaxPeers:        math.MaxInt32,
+			MaxPendingPeers: 50,
 			NoDiscovery:     true,
 			Dialer:          s,
 			EnableMsgEvents: config.EnableMsgEvents,

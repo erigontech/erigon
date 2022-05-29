@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -22,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 type HistoryCfg struct {
@@ -154,7 +154,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush64(updates, cfg.bufLimit) {
@@ -291,7 +291,7 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-quitCh:
 			return libcommon.ErrStopped
@@ -341,7 +341,7 @@ func truncateBitmaps64(tx kv.RwTx, bucket string, inMem map[string]struct{}, to 
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange64(tx, bucket, []byte(k), to+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/urfave/cli"
 
@@ -94,11 +95,11 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.bytesAllocated = result.AllocedBytesPerOp()
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
-		goruntime.ReadMemStats(&memStatsBefore)
+		common2.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
 		output, gasLeft, err = execFunc()
 		stats.time = time.Since(startTime)
-		goruntime.ReadMemStats(&memStatsAfter)
+		common2.ReadMemStats(&memStatsAfter)
 		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
 		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
@@ -277,7 +278,7 @@ func runCmd(ctx *cli.Context) error {
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		var rules params.Rules
+		rules := &params.Rules{}
 		if chainConfig != nil {
 			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64())
 		}

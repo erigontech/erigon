@@ -59,10 +59,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	err = s.state.FinalizeTx(params.Rules{}, s.w)
+	err = s.state.FinalizeTx(&params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(params.Rules{}, s.w)
+	err = s.state.CommitBlock(&params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -126,15 +126,42 @@ func (s *StateSuite) TestNull(c *checker.C) {
 
 	s.state.SetState(address, &common.Hash{}, value)
 
-	err := s.state.FinalizeTx(params.Rules{}, s.w)
+	err := s.state.FinalizeTx(&params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(params.Rules{}, s.w)
+	err = s.state.CommitBlock(&params.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	s.state.GetCommittedState(address, &common.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
+	}
+}
+
+func (s *StateSuite) TestTouchDelete(c *checker.C) {
+	s.state.GetOrNewStateObject(common.Address{})
+
+	err := s.state.FinalizeTx(&params.Rules{}, s.w)
+	if err != nil {
+		c.Fatal("error while finalize", err)
+	}
+
+	err = s.state.CommitBlock(&params.Rules{}, s.w)
+	if err != nil {
+		c.Fatal("error while commit", err)
+	}
+
+	s.state.Reset()
+
+	snapshot := s.state.Snapshot()
+	s.state.AddBalance(common.Address{}, new(uint256.Int))
+
+	if len(s.state.journal.dirties) != 1 {
+		c.Fatal("expected one dirty state object")
+	}
+	s.state.RevertToSnapshot(snapshot)
+	if len(s.state.journal.dirties) != 0 {
+		c.Fatal("expected no dirty state object")
 	}
 }
 
@@ -199,13 +226,13 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
 
-	err := state.FinalizeTx(params.Rules{}, w)
+	err := state.FinalizeTx(&params.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
 	w = NewPlainState(tx, 2)
 
-	err = state.CommitBlock(params.Rules{}, w)
+	err = state.CommitBlock(&params.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -314,13 +341,13 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = state.FinalizeTx(params.Rules{}, w)
+	err = state.FinalizeTx(&params.Rules{}, w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	err = state.CommitBlock(params.Rules{}, blockWriter)
+	err = state.CommitBlock(&params.Rules{}, blockWriter)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -38,8 +38,8 @@ func (cvm *CVMAdapter) ChainConfig() *params.ChainConfig {
 	return params.FermionChainConfig
 }
 
-func (cvm *CVMAdapter) ChainRules() params.Rules {
-	return params.Rules{}
+func (cvm *CVMAdapter) ChainRules() *params.Rules {
+	return &params.Rules{}
 }
 
 func (cvm *CVMAdapter) Context() BlockContext {

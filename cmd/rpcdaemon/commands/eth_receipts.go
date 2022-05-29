@@ -255,8 +255,17 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, err
 	}
 
-	if chainConfig.Bor != nil {
-		if blockNum == 0 {
+	blockNum, ok, err = api.txnLookup(ctx, tx, hash)
+	if blockNum == 0 {
+		// It is not an ideal solution (ideal solution requires extending TxnLookupReply proto type to include bool flag indicating absense of result),
+		// but 0 block number is used here to mean that the transaction is not found
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		if chainConfig.Bor != nil {
 			var blocN uint64
 			borTx, blockHash, blocN, _, err = rawdb.ReadBorTransaction(tx, hash)
 			if err != nil {
@@ -266,13 +275,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 				return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 			}
 			blockNum = blocN
-		}
-	} else {
-		blockNum, ok, err = api.txnLookup(ctx, tx, hash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
+		} else {
 			return nil, nil // not error, see https://github.com/ledgerwatch/erigon/issues/1645
 		}
 	}

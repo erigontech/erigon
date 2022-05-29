@@ -9,12 +9,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/interfaces"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -31,7 +30,7 @@ type BodiesCfg struct {
 	chanConfig      params.ChainConfig
 	batchSize       datasize.ByteSize
 	snapshots       *snapshotsync.RoSnapshots
-	blockReader     interfaces.FullBlockReader
+	blockReader     services.FullBlockReader
 }
 
 func StageBodiesCfg(
@@ -44,7 +43,7 @@ func StageBodiesCfg(
 	chanConfig params.ChainConfig,
 	batchSize datasize.ByteSize,
 	snapshots *snapshotsync.RoSnapshots,
-	blockReader interfaces.FullBlockReader,
+	blockReader services.FullBlockReader,
 ) BodiesCfg {
 	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader}
 }
@@ -255,13 +254,14 @@ func logProgressBodies(logPrefix string, committed uint64, prevDeliveredCount, d
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	libcommon.ReadMemStats(&m)
 	log.Info(fmt.Sprintf("[%s] Wrote block bodies", logPrefix),
 		"block_num", committed,
-		"delivery/sec", common.StorageSize(speed),
-		"wasted/sec", common.StorageSize(wastedSpeed),
-		"alloc", common.StorageSize(m.Alloc),
-		"sys", common.StorageSize(m.Sys))
+		"delivery/sec", libcommon.ByteCount(uint64(speed)),
+		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
+		"alloc", libcommon.ByteCount(m.Alloc),
+		"sys", libcommon.ByteCount(m.Sys),
+	)
 }
 
 func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Context) (err error) {

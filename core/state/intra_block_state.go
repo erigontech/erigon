@@ -662,8 +662,8 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
-	emptyRemoval := EIP158Enabled && stateObject.empty()
+func updateAccount(EIP161Enabled bool, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+	emptyRemoval := EIP161Enabled && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 			return err
@@ -693,8 +693,8 @@ func updateAccount(EIP158Enabled bool, stateWriter StateWriter, addr common.Addr
 	return nil
 }
 
-func printAccount(EIP158Enabled bool, addr common.Address, stateObject *stateObject, isDirty bool) {
-	emptyRemoval := EIP158Enabled && stateObject.empty()
+func printAccount(EIP161Enabled bool, addr common.Address, stateObject *stateObject, isDirty bool) {
+	emptyRemoval := EIP161Enabled && stateObject.empty()
 	if stateObject.suicided || (isDirty && emptyRemoval) {
 		fmt.Printf("delete: %x\n", addr)
 	}
@@ -717,7 +717,7 @@ func printAccount(EIP158Enabled bool, addr common.Address, stateObject *stateObj
 }
 
 // FinalizeTx should be called after every transaction.
-func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) FinalizeTx(chainRules *params.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)
@@ -735,7 +735,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 			continue
 		}
 
-		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, so, true); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, stateWriter, addr, so, true); err != nil {
 			return err
 		}
 
@@ -748,7 +748,7 @@ func (sdb *IntraBlockState) FinalizeTx(chainRules params.Rules, stateWriter Stat
 
 // CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) CommitBlock(chainRules *params.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			sdb.getStateObject(addr)
@@ -759,7 +759,7 @@ func (sdb *IntraBlockState) CommitBlock(chainRules params.Rules, stateWriter Sta
 	}
 	for addr, stateObject := range sdb.stateObjects {
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		if err := updateAccount(chainRules.IsEIP158, stateWriter, addr, stateObject, isDirty); err != nil {
+		if err := updateAccount(chainRules.IsSpuriousDragon, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err
 		}
 	}
@@ -773,7 +773,7 @@ func (sdb *IntraBlockState) Print(chainRules params.Rules) {
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		_, isDirty2 := sdb.journal.dirties[addr]
 
-		printAccount(chainRules.IsEIP158, addr, stateObject, isDirty || isDirty2)
+		printAccount(chainRules.IsSpuriousDragon, addr, stateObject, isDirty || isDirty2)
 	}
 }
 

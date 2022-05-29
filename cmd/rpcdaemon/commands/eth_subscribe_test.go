@@ -5,9 +5,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/services"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -20,7 +19,7 @@ import (
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 42, func(i int, b *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 21, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
@@ -38,8 +37,8 @@ func TestEthSubscribe(t *testing.T) {
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
-	backend := services.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
-	ff := filters.New(ctx, backend, nil, nil, func() {})
+	backend := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), m.DB, snapshotsync.NewBlockReader())
+	ff := rpcservices.New(ctx, backend, nil, nil, func() {})
 
 	newHeads := make(chan *types.Header)
 	defer close(newHeads)

@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
-	"sort"
 	"time"
 
 	"github.com/RoaringBitmap/roaring"
@@ -20,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -126,7 +126,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, cfg LogIndexCfg
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
+			libcommon.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-checkFlushEvery.C:
 			if needFlush(topics, cfg.bufLimit) {
@@ -322,7 +322,7 @@ func truncateBitmaps(tx kv.RwTx, bucket string, inMem map[string]struct{}, to ui
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange(tx, bucket, []byte(k), uint32(to+1)); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)
@@ -339,7 +339,7 @@ func pruneOldLogChunks(tx kv.RwTx, bucket string, inMem map[string]struct{}, pru
 	for k := range inMem {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	c, err := tx.RwCursor(bucket)
 	if err != nil {
 		return err

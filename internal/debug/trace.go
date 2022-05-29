@@ -15,7 +15,6 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 //go:build go1.5
-// +build go1.5
 
 package debug
 

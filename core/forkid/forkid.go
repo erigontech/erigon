@@ -24,12 +24,12 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 var (
@@ -250,9 +250,7 @@ func GatherForks(config *params.ChainConfig) []uint64 {
 		}
 	}
 	// Sort the fork block numbers to permit chronological XOR
-	sort.Slice(forks, func(i, j int) bool {
-		return forks[i] < forks[j]
-	})
+	slices.Sort(forks)
 	// Deduplicate block numbers applying multiple forks
 	for i := 1; i < len(forks); i++ {
 		if forks[i] == forks[i-1] {

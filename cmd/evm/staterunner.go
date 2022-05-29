@@ -114,7 +114,7 @@ func stateTestCmd(ctx *cli.Context) error {
 			var root common.Hash
 			var calcRootErr error
 
-			statedb, err := test.Run(params.Rules{}, tx, st, cfg)
+			statedb, err := test.Run(&params.Rules{}, tx, st, cfg)
 			// print state root for evmlab tracing
 			root, calcRootErr = trie.CalcRoot("", tx)
 			if err == nil && calcRootErr != nil {

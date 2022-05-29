@@ -73,6 +73,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64())
 	stream.WriteArrayStart()
 	for idx, tx := range block.Transactions() {
 		select {
@@ -82,7 +83,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			return ctx.Err()
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), idx)
-		msg, _ := tx.AsMessage(*signer, block.BaseFee())
+		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
 		txCtx := vm.TxContext{
 			TxHash:   tx.Hash(),
 			Origin:   msg.From(),
@@ -90,7 +91,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
-		_ = ibs.FinalizeTx(chainConfig.Rules(blockCtx.BlockNumber), reader)
+		_ = ibs.FinalizeTx(rules, reader)
 		if idx != len(block.Transactions())-1 {
 			stream.WriteMore()
 		}

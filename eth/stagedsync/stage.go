@@ -110,7 +110,7 @@ func (s *PruneState) DoneAt(db kv.Putter, blockNum uint64) error {
 }
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
-func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context, limit int) error {
+func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
 	c, err := tx.RwCursor(table)
 
 	if err != nil {
@@ -133,8 +133,6 @@ func PruneTable(tx kv.RwTx, table string, logPrefix string, pruneTo uint64, logE
 			break
 		}
 		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", table, "block", blockNum)
 		case <-ctx.Done():
 			return libcommon.ErrStopped
 		default:

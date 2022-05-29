@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/filters"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
@@ -32,7 +32,7 @@ func TestTxPoolContent(t *testing.T) {
 
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpool.NewTxpoolClient(conn)
-	ff := filters.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
+	ff := rpcservices.New(ctx, nil, txPool, txpool.NewMiningClient(conn), func() {})
 	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), snapshotsync.NewBlockReader(), false), m.DB, txPool)
 
 	expectValue := uint64(1234)
