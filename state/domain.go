@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -39,7 +41,9 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-var historyValCountKey = []byte("ValCount")
+var (
+	historyValCountKey = []byte("ValCount")
+)
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
@@ -103,11 +107,12 @@ type Domain struct {
 	valsTable        string
 	historyKeysTable string // Needs to be table with DupSort
 	historyValsTable string
-	historyValsCount string // Table containing just one record - counter of value number (keys in the historyValsTable)
+	settingsTable    string // Table containing just one record - counter of value number (keys in the historyValsTable)
 	indexTable       string // Needs to be table with DupSort
 	tx               kv.RwTx
 	txNum            uint64
 	files            [NumberOfTypes]*btree.BTree // Static files pertaining to this domain, items are of type `filesItem`
+	prefixLen        int                         // Number of bytes in the keys that can be used for prefix iteration
 }
 
 func NewDomain(
@@ -118,8 +123,9 @@ func NewDomain(
 	valsTable string,
 	historyKeysTable string,
 	historyValsTable string,
-	historyValsCount string,
+	settingsTable string,
 	indexTable string,
+	prefixLen int,
 ) (*Domain, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -133,8 +139,9 @@ func NewDomain(
 		valsTable:        valsTable,
 		historyKeysTable: historyKeysTable,
 		historyValsTable: historyValsTable,
-		historyValsCount: historyValsCount,
+		settingsTable:    settingsTable,
 		indexTable:       indexTable,
+		prefixLen:        prefixLen,
 	}
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		d.files[fType] = btree.New(32)
@@ -291,7 +298,7 @@ func (d *Domain) update(key, original []byte) error {
 	historyKey := make([]byte, len(key)+8)
 	copy(historyKey, key)
 	if len(original) > 0 {
-		val, err := d.tx.GetOne(d.historyValsCount, historyValCountKey)
+		val, err := d.tx.GetOne(d.settingsTable, historyValCountKey)
 		if err != nil {
 			return err
 		}
@@ -301,7 +308,7 @@ func (d *Domain) update(key, original []byte) error {
 		}
 		valNum++
 		binary.BigEndian.PutUint64(historyKey[len(key):], valNum)
-		if err = d.tx.Put(d.historyValsCount, historyValCountKey, historyKey[len(key):]); err != nil {
+		if err = d.tx.Put(d.settingsTable, historyValCountKey, historyKey[len(key):]); err != nil {
 			return err
 		}
 		if err = d.tx.Put(d.historyValsTable, historyKey[len(key):], original); err != nil {
@@ -355,28 +362,145 @@ func (d *Domain) Delete(key []byte) error {
 	return nil
 }
 
-// TODO also iterate over files
-func (d *Domain) IteratePrefix(prefix []byte, it func(k []byte)) error {
+type CursorType uint8
+
+const (
+	FILE_CURSOR CursorType = iota
+	DB_CURSOR
+)
+
+// CursorItem is the item in the priority queue used to do merge interation
+// over storage of a given account
+type CursorItem struct {
+	t        CursorType // Whether this item represents state file or DB record, or tree
+	endTxNum uint64
+	key, val []byte
+	dg       *compress.Getter
+	c        kv.CursorDupSort
+}
+
+type CursorHeap []*CursorItem
+
+func (ch CursorHeap) Len() int {
+	return len(ch)
+}
+
+func (ch CursorHeap) Less(i, j int) bool {
+	cmp := bytes.Compare(ch[i].key, ch[j].key)
+	if cmp == 0 {
+		// when keys match, the items with later blocks are preferred
+		return ch[i].endTxNum > ch[j].endTxNum
+	}
+	return cmp < 0
+}
+
+func (ch *CursorHeap) Swap(i, j int) {
+	(*ch)[i], (*ch)[j] = (*ch)[j], (*ch)[i]
+}
+
+func (ch *CursorHeap) Push(x interface{}) {
+	*ch = append(*ch, x.(*CursorItem))
+}
+
+func (ch *CursorHeap) Pop() interface{} {
+	old := *ch
+	n := len(old)
+	x := old[n-1]
+	*ch = old[0 : n-1]
+	return x
+}
+
+func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
+	if len(prefix) != d.prefixLen {
+		return fmt.Errorf("wrong prefix length, this %s domain supports prefixLen %d, given [%x]", d.filenameBase, d.prefixLen, prefix)
+	}
+	var cp CursorHeap
+	heap.Init(&cp)
 	keysCursor, err := d.tx.CursorDupSort(d.keysTable)
 	if err != nil {
 		return err
 	}
 	defer keysCursor.Close()
 	var k, v []byte
-	for k, v, err = keysCursor.Seek(prefix); err == nil && bytes.HasPrefix(k, prefix); k, v, err = keysCursor.NextNoDup() {
+	if k, v, err = keysCursor.Seek(prefix); err != nil {
+		return err
+	}
+	if bytes.HasPrefix(k, prefix) {
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		var v []byte
+		step := ^binary.BigEndian.Uint64(v)
+		txNum := step * d.aggregationStep
 		if v, err = d.tx.GetOne(d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		if len(v) > 0 {
-			it(k)
-		}
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum})
 	}
-	if err != nil {
-		return err
+	d.files[Values].Ascend(func(i btree.Item) bool {
+		item := i.(*filesItem)
+		if item.index.Empty() {
+			return true
+		}
+		offset := item.indexReader.Lookup(prefix)
+		g := item.getter
+		g.Reset(offset)
+		if g.HasNext() {
+			if keyMatch, _ := g.Match(prefix); !keyMatch {
+				return true
+			}
+			g.Skip()
+		}
+		if g.HasNext() {
+			key, _ := g.Next(nil)
+			if bytes.HasPrefix(key, prefix) {
+				val, _ := g.Next(nil)
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum})
+			}
+		}
+		return true
+	})
+	for cp.Len() > 0 {
+		lastKey := common.Copy(cp[0].key)
+		lastVal := common.Copy(cp[0].val)
+		// Advance all the items that have this key (including the top)
+		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
+			ci1 := cp[0]
+			switch ci1.t {
+			case FILE_CURSOR:
+				if ci1.dg.HasNext() {
+					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
+					if bytes.HasPrefix(ci1.key, prefix) {
+						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
+						heap.Fix(&cp, 0)
+					} else {
+						heap.Pop(&cp)
+					}
+				} else {
+					heap.Pop(&cp)
+				}
+			case DB_CURSOR:
+				k, v, err = ci1.c.NextNoDup()
+				if err != nil {
+					return err
+				}
+				if k != nil && bytes.HasPrefix(k, prefix) {
+					ci1.key = common.Copy(k)
+					keySuffix := make([]byte, len(k)+8)
+					copy(keySuffix, k)
+					copy(keySuffix[len(k):], v)
+					if v, err = d.tx.GetOne(d.valsTable, keySuffix); err != nil {
+						return err
+					}
+					ci1.val = common.Copy(v)
+					heap.Fix(&cp, 0)
+				} else {
+					heap.Pop(&cp)
+				}
+			}
+		}
+		if len(lastVal) > 0 {
+			it(lastKey, lastVal)
+		}
 	}
 	return nil
 }
@@ -420,6 +544,7 @@ func (d *Domain) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (Collatio
 		return Collation{}, fmt.Errorf("create %s keys cursor: %w", d.filenameBase, err)
 	}
 	defer keysCursor.Close()
+	var prefix []byte // Track prefix to insert it before entries
 	var k, v []byte
 	valuesCount := 0
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
@@ -434,6 +559,16 @@ func (d *Domain) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (Collatio
 			v, err := roTx.GetOne(d.valsTable, keySuffix)
 			if err != nil {
 				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+			if d.prefixLen > 0 && (prefix == nil || !bytes.HasPrefix(k, prefix)) {
+				prefix = append(prefix[:0], k[:d.prefixLen]...)
+				if err = valuesComp.AddUncompressedWord(prefix); err != nil {
+					return Collation{}, fmt.Errorf("add %s values prefix [%x]: %w", d.filenameBase, prefix, err)
+				}
+				if err = valuesComp.AddUncompressedWord(nil); err != nil {
+					return Collation{}, fmt.Errorf("add %s values prefix val [%x]: %w", d.filenameBase, prefix, err)
+				}
+				valuesCount++
 			}
 			if err = valuesComp.AddUncompressedWord(k); err != nil {
 				return Collation{}, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, k, err)
@@ -504,7 +639,6 @@ func (d *Domain) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (Collatio
 		historyCount: historyCount,
 		indexBitmaps: indexBitmaps,
 	}, nil
-
 }
 
 type StaticFiles struct {
@@ -577,7 +711,7 @@ func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, erro
 	if valuesDecomp, err = compress.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
-	if valuesIdx, err = buildIndex(valuesDecomp, valuesIdxPath, d.dir, collation.valuesCount); err != nil {
+	if valuesIdx, err = buildIndex(valuesDecomp, valuesIdxPath, d.dir, collation.valuesCount, false /* values */); err != nil {
 		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 	}
 	historyIdxPath := filepath.Join(d.dir, fmt.Sprintf("%s-history.%d-%d.idx", d.filenameBase, txNumFrom, txNumTo))
@@ -589,7 +723,7 @@ func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, erro
 	if historyDecomp, err = compress.NewDecompressor(collation.historyPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s history decompressor: %w", d.filenameBase, err)
 	}
-	if historyIdx, err = buildIndex(historyDecomp, historyIdxPath, d.dir, collation.historyCount); err != nil {
+	if historyIdx, err = buildIndex(historyDecomp, historyIdxPath, d.dir, collation.historyCount, true /* values */); err != nil {
 		return StaticFiles{}, fmt.Errorf("build %s history idx: %w", d.filenameBase, err)
 	}
 	// Build history ef
@@ -629,7 +763,7 @@ func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, erro
 		return StaticFiles{}, fmt.Errorf("open %s ef history decompressor: %w", d.filenameBase, err)
 	}
 	efHistoryIdxPath := filepath.Join(d.dir, fmt.Sprintf("%s-efhistory.%d-%d.idx", d.filenameBase, txNumFrom, txNumTo))
-	if efHistoryIdx, err = buildIndex(efHistoryDecomp, efHistoryIdxPath, d.dir, len(keys)); err != nil {
+	if efHistoryIdx, err = buildIndex(efHistoryDecomp, efHistoryIdxPath, d.dir, len(keys), false /* values */); err != nil {
 		return StaticFiles{}, fmt.Errorf("build %s ef history idx: %w", d.filenameBase, err)
 	}
 	closeComp = false
@@ -643,7 +777,7 @@ func (d *Domain) buildFiles(step uint64, collation Collation) (StaticFiles, erro
 	}, nil
 }
 
-func buildIndex(d *compress.Decompressor, idxPath, dir string, count int) (*recsplit.Index, error) {
+func buildIndex(d *compress.Decompressor, idxPath, dir string, count int, values bool) (*recsplit.Index, error) {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -661,17 +795,23 @@ func buildIndex(d *compress.Decompressor, idxPath, dir string, count int) (*recs
 	}
 	defer rs.Close()
 	word := make([]byte, 0, 256)
-	var pos uint64
+	var keyPos, valPos uint64
 	g := d.MakeGetter()
 	for {
 		g.Reset(0)
 		for g.HasNext() {
-			word, _ = g.Next(word[:0])
-			if err = rs.AddKey(word, pos); err != nil {
-				return nil, fmt.Errorf("add idx key [%x]: %w", word, err)
+			word, valPos = g.Next(word[:0])
+			if values {
+				if err = rs.AddKey(word, valPos); err != nil {
+					return nil, fmt.Errorf("add idx key [%x]: %w", word, err)
+				}
+			} else {
+				if err = rs.AddKey(word, keyPos); err != nil {
+					return nil, fmt.Errorf("add idx key [%x]: %w", word, err)
+				}
 			}
 			// Skip value
-			pos = g.Skip()
+			keyPos = g.Skip()
 		}
 		if err = rs.Build(); err != nil {
 			if rs.Collision() {
@@ -816,38 +956,6 @@ func (d *Domain) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
 // historyAfterTxNum searches history for a value of specified key after txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, error) {
-	indexCursor, err := d.tx.CursorDupSort(d.indexTable)
-	if err != nil {
-		return nil, false, err
-	}
-	defer indexCursor.Close()
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], txNum+1)
-	var foundTxNumVal []byte
-	if foundTxNumVal, err = indexCursor.SeekBothRange(key, txKey[:]); err != nil {
-		return nil, false, err
-	}
-	if foundTxNumVal != nil {
-		var historyKeysCursor kv.CursorDupSort
-		if historyKeysCursor, err = d.tx.CursorDupSort(d.historyKeysTable); err != nil {
-			return nil, false, err
-		}
-		defer historyKeysCursor.Close()
-		var vn []byte
-		if vn, err = historyKeysCursor.SeekBothRange(txKey[:], key); err != nil {
-			return nil, false, err
-		}
-		valNum := binary.BigEndian.Uint64(vn[len(vn)-8:])
-		if valNum == 0 {
-			// This is special valNum == 0, which is empty value
-			return nil, true, nil
-		}
-		var v []byte
-		if v, err = d.tx.GetOne(d.historyValsTable, vn[len(vn)-8:]); err != nil {
-			return nil, false, err
-		}
-		return v, true, nil
-	}
 	var search filesItem
 	search.endTxNum = txNum + 1
 	var foundTxNum uint64
@@ -873,7 +981,39 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, erro
 		return true
 	})
 	if !found {
-		// Value not found in history
+		// Value not found in history files, look in the recent history
+		indexCursor, err := d.tx.CursorDupSort(d.indexTable)
+		if err != nil {
+			return nil, false, err
+		}
+		defer indexCursor.Close()
+		var txKey [8]byte
+		binary.BigEndian.PutUint64(txKey[:], txNum+1)
+		var foundTxNumVal []byte
+		if foundTxNumVal, err = indexCursor.SeekBothRange(key, txKey[:]); err != nil {
+			return nil, false, err
+		}
+		if foundTxNumVal != nil {
+			var historyKeysCursor kv.CursorDupSort
+			if historyKeysCursor, err = d.tx.CursorDupSort(d.historyKeysTable); err != nil {
+				return nil, false, err
+			}
+			defer historyKeysCursor.Close()
+			var vn []byte
+			if vn, err = historyKeysCursor.SeekBothRange(foundTxNumVal, key); err != nil {
+				return nil, false, err
+			}
+			valNum := binary.BigEndian.Uint64(vn[len(vn)-8:])
+			if valNum == 0 {
+				// This is special valNum == 0, which is empty value
+				return nil, true, nil
+			}
+			var v []byte
+			if v, err = d.tx.GetOne(d.historyValsTable, vn[len(vn)-8:]); err != nil {
+				return nil, false, err
+			}
+			return v, true, nil
+		}
 		return nil, false, nil
 	}
 	var lookupKey = make([]byte, len(key)+8)
@@ -890,10 +1030,6 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, erro
 	offset := historyItem.indexReader.Lookup(lookupKey)
 	g := historyItem.getter
 	g.Reset(offset)
-	// TODO: for the case of file where keys are removed, do not form key comparison
-	if keyMatch, _ := g.Match(lookupKey); !keyMatch {
-		return nil, false, fmt.Errorf("%s key does not match with file [%x]", d.filenameBase, lookupKey)
-	}
 	v, _ := g.Next(nil)
 	return v, true, nil
 }
