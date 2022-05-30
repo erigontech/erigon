@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -105,7 +105,7 @@ type Config struct {
 
 	// HTTPTimeouts allows for customization of the timeout values used by the HTTP RPC
 	// interface.
-	HTTPTimeouts rpc.HTTPTimeouts
+	HTTPTimeouts rpccfg.HTTPTimeouts
 
 	// HTTPPathPrefix specifies a path prefix on which http-rpc is to be served.
 	HTTPPathPrefix string `toml:",omitempty"`

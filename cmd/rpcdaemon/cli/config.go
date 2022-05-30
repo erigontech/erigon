@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -85,7 +86,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.TraceCompatibility, "trace.compat", false, "Bug for bug compatibility with OE for trace_ routines")
 	rootCmd.PersistentFlags().StringVar(&cfg.TxPoolApiAddr, "txpool.api.addr", "", "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)")
 	rootCmd.PersistentFlags().BoolVar(&cfg.TevmEnabled, utils.TevmFlag.Name, false, utils.TevmFlag.Usage)
-	rootCmd.PersistentFlags().StringVar(&cfg.SyncModeCli, "syncmode", "", utils.SyncModeFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&cfg.Sync.ModeCli, "syncmode", "", utils.SyncModeFlag.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.StateCache.KeysLimit, "state.cache", kvcache.DefaultCoherentConfig.KeysLimit, "Amount of keys to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. 1_000_000 keys ~ equal to 2Gb RAM (maybe we will add RAM accounting in future versions).")
 	rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
 	rootCmd.PersistentFlags().StringVar(&cfg.GRPCListenAddress, "grpc.addr", nodecfg.DefaultGRPCHost, "GRPC server listening interface")
@@ -316,7 +317,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if cc == nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("chain config not found in db. Need start erigon at least once on this db")
 		}
-		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.SyncMode == ethconfig.SnapSync
+		cfg.Snap.Enabled = cfg.Snap.Enabled || cfg.Sync.Mode == ethconfig.SnapSync
 
 		// if chain config has terminal total difficulty then rpc must have eth and engine APIs enableds
 		if cc.TerminalTotalDifficulty != nil {
@@ -486,7 +487,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API) 
 		return err
 	}
 
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpc.DefaultHTTPTimeouts, apiHandler)
+	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, rpccfg.DefaultHTTPTimeouts, apiHandler)
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
@@ -639,7 +640,7 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 		return nil, nil, "", err
 	}
 
-	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpc.DefaultHTTPTimeouts, engineApiHandler)
+	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, rpccfg.DefaultHTTPTimeouts, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
