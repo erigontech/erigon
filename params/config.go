@@ -388,7 +388,7 @@ func (c *ChainConfig) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v Homestead: %v DAO: %v DAO Support: %v Tangerine Whistle: %v Spurious Dragon: %v Byzantium: %v Constantinople: %v Petersburg: %v Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Terminal Total Difficulty: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
