@@ -52,7 +52,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.ImportMode = c.ImportMode
 	enc.BadBlockHash = c.BadBlockHash
 	enc.Snapshot = c.Snapshot
-	enc.BlockDownloaderWindow = c.BlockDownloaderWindow
 	enc.ExternalSnapshotDownloaderAddr = c.ExternalSnapshotDownloaderAddr
 	enc.Whitelist = c.Whitelist
 	enc.Miner = c.Miner
@@ -65,8 +64,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCGasCap = c.RPCGasCap
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
-	enc.BodyDownloadTimeoutSeconds = c.BodyDownloadTimeoutSeconds
-	enc.SyncLoopThrottle = c.SyncLoopThrottle
 	return &enc, nil
 }
 
@@ -129,9 +126,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Snapshot != nil {
 		c.Snapshot = *dec.Snapshot
 	}
-	if dec.BlockDownloaderWindow != nil {
-		c.BlockDownloaderWindow = *dec.BlockDownloaderWindow
-	}
 	if dec.ExternalSnapshotDownloaderAddr != nil {
 		c.ExternalSnapshotDownloaderAddr = *dec.ExternalSnapshotDownloaderAddr
 	}
@@ -167,12 +161,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.StateStream != nil {
 		c.StateStream = *dec.StateStream
-	}
-	if dec.BodyDownloadTimeoutSeconds != nil {
-		c.BodyDownloadTimeoutSeconds = *dec.BodyDownloadTimeoutSeconds
-	}
-	if dec.SyncLoopThrottle != nil {
-		c.SyncLoopThrottle = *dec.SyncLoopThrottle
 	}
 	return nil
 }

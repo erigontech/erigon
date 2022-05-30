@@ -1364,7 +1364,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
-	cfg.SyncModeCli = ctx.GlobalString(SyncModeFlag.Name)
+	cfg.Sync.ModeCli = ctx.GlobalString(SyncModeFlag.Name)
 	cfg.SnapDir = filepath.Join(nodeConfig.DataDir, "snapshots")
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)

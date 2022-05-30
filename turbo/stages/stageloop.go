@@ -286,7 +286,7 @@ func NewStagedSync(
 				controlServer.SendBodyRequest,
 				controlServer.Penalize,
 				controlServer.BroadcastNewBlock,
-				cfg.BodyDownloadTimeoutSeconds,
+				cfg.Sync.BodyDownloadTimeoutSeconds,
 				*controlServer.ChainConfig,
 				cfg.BatchSize,
 				snapshots,

@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -258,7 +259,7 @@ type MultiClient struct {
 
 func NewMultiClient(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig,
 	genesisHash common.Hash, engine consensus.Engine, networkID uint64, sentries []direct.SentryClient,
-	window int, blockReader services.HeaderAndCanonicalReader) (*MultiClient, error) {
+	syncCfg ethconfig.Sync, blockReader services.HeaderAndCanonicalReader) (*MultiClient, error) {
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
 		1024*1024, /* linkLimit */
@@ -269,7 +270,7 @@ func NewMultiClient(db kv.RwDB, nodeName string, chainConfig *params.ChainConfig
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(window /* outstandingLimit */, engine)
+	bd := bodydownload.NewBodyDownload(syncCfg.BlockDownloaderWindow /* outstandingLimit */, engine)
 
 	cs := &MultiClient{
 		nodeName:    nodeName,
