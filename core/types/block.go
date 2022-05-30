@@ -1226,7 +1226,7 @@ func (b *Block) Body() *Body {
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {
-	if senders == nil {
+	if len(senders) == 0 {
 		return
 	}
 	for i, tx := range b.transactions {
