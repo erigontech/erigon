@@ -31,6 +31,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -124,7 +125,7 @@ func New(conf *nodecfg.Config) (*Node, error) {
 
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
-	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
+	node.ws = newHTTPServer(node.log, rpccfg.DefaultHTTPTimeouts)
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
 	//debug.CheckForCrashes(conf.DataDir)

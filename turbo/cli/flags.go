@@ -41,7 +41,7 @@ var (
 	BlockDownloaderWindowFlag = cli.IntFlag{
 		Name:  "blockDownloaderWindow",
 		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: 32768,
+		Value: ethconfig.Defaults.Sync.BlockDownloaderWindow,
 	}
 
 	PrivateApiAddr = cli.StringFlag{
@@ -188,14 +188,14 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.StateStream = !ctx.GlobalBool(StateStreamDisableFlag.Name)
-	cfg.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
+	cfg.Sync.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
 
 	if ctx.GlobalString(SyncLoopThrottleFlag.Name) != "" {
 		syncLoopThrottle, err := time.ParseDuration(ctx.GlobalString(SyncLoopThrottleFlag.Name))
 		if err != nil {
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
-		cfg.SyncLoopThrottle = syncLoopThrottle
+		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
 	if ctx.GlobalString(BadBlockFlag.Name) != "" {

@@ -180,11 +180,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 
-	config.SyncMode, err = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.SyncModeCli)
+	config.Sync.Mode, err = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.Sync.ModeCli)
 	if err != nil {
 		return nil, err
 	}
-	config.Snapshot.Enabled = config.SyncMode == ethconfig.SnapSync
+	config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
@@ -342,11 +342,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
-	backend.sentriesClient, err = sentry.NewMultiClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.BlockDownloaderWindow, blockReader)
+	backend.sentriesClient, err = sentry.NewMultiClient(chainKv, stack.Config().NodeName(), chainConfig, genesis.Hash(), backend.engine, backend.config.NetworkID, sentries, config.Sync, blockReader)
 	if err != nil {
 		return nil, err
 	}
-	config.BodyDownloadTimeoutSeconds = 30
 
 	var miningRPC txpool_proto.MiningServer
 	if config.DeprecatedTxPool.Disable {
@@ -784,7 +783,7 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.SyncLoopThrottle)
+	go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.notifications, s.sentriesClient.UpdateHead, s.waitForStageLoopStop, s.config.Sync.LoopThrottle)
 
 	return nil
 }

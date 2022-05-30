@@ -29,6 +29,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/stretchr/testify/assert"
@@ -238,7 +239,7 @@ func Test_checkPath(t *testing.T) {
 func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsConfig) *httpServer {
 	t.Helper()
 
-	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpc.DefaultHTTPTimeouts)
+	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
 	assert.NoError(t, srv.enableRPC(nil, *conf, nil))
 	if ws {
 		assert.NoError(t, srv.enableWS(nil, *wsConf, nil))
@@ -251,7 +252,7 @@ func createAndStartServer(t *testing.T, conf *httpConfig, ws bool, wsConf *wsCon
 func createAndStartServerWithAllowList(t *testing.T, conf httpConfig, ws bool, wsConf wsConfig) *httpServer {
 	t.Helper()
 
-	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpc.DefaultHTTPTimeouts)
+	srv := newHTTPServer(testlog.Logger(t, log.LvlError), rpccfg.DefaultHTTPTimeouts)
 
 	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
 
