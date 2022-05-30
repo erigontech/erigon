@@ -233,7 +233,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	c, err = torrentcfg.NewMdbxPieceCompletion(db)
+	c, err = NewMdbxPieceCompletion(db)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}

@@ -1,4 +1,4 @@
-package torrentcfg
+package downloader
 
 import (
 	"testing"
