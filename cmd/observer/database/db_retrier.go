@@ -88,6 +88,18 @@ func (db DBRetrier) UpdateClientID(ctx context.Context, id NodeID, clientID stri
 	return err
 }
 
+func (db DBRetrier) FindClientID(ctx context.Context, id NodeID) (*string, error) {
+	resultAny, err := db.retry(ctx, "FindClientID", func(ctx context.Context) (interface{}, error) {
+		return db.db.FindClientID(ctx, id)
+	})
+
+	if resultAny == nil {
+		return nil, err
+	}
+	result := resultAny.(*string)
+	return result, err
+}
+
 func (db DBRetrier) UpdateNetworkID(ctx context.Context, id NodeID, networkID uint) error {
 	_, err := db.retry(ctx, "UpdateNetworkID", func(ctx context.Context) (interface{}, error) {
 		return nil, db.db.UpdateNetworkID(ctx, id, networkID)

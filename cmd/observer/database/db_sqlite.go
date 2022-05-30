@@ -116,6 +116,10 @@ UPDATE nodes SET
 WHERE id = ?
 `
 
+	sqlFindClientID = `
+SELECT client_id FROM nodes WHERE id = ?
+`
+
 	sqlUpdateNetworkID = `
 UPDATE nodes SET 
 	network_id = ?, 
@@ -428,6 +432,22 @@ func (db *DBSQLite) UpdateClientID(ctx context.Context, id NodeID, clientID stri
 		return fmt.Errorf("UpdateClientID failed to update a node: %w", err)
 	}
 	return nil
+}
+
+func (db *DBSQLite) FindClientID(ctx context.Context, id NodeID) (*string, error) {
+	row := db.db.QueryRowContext(ctx, sqlFindClientID, id)
+	var clientID sql.NullString
+	err := row.Scan(&clientID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("FindClientID failed: %w", err)
+	}
+	if clientID.Valid {
+		return &clientID.String, nil
+	}
+	return nil, nil
 }
 
 func (db *DBSQLite) UpdateNetworkID(ctx context.Context, id NodeID, networkID uint) error {

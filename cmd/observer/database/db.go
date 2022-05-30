@@ -36,6 +36,7 @@ type DB interface {
 	CountPingErrors(ctx context.Context, id NodeID) (*uint, error)
 
 	UpdateClientID(ctx context.Context, id NodeID, clientID string) error
+	FindClientID(ctx context.Context, id NodeID) (*string, error)
 	UpdateNetworkID(ctx context.Context, id NodeID, networkID uint) error
 	UpdateEthVersion(ctx context.Context, id NodeID, ethVersion uint) error
 	UpdateHandshakeTransientError(ctx context.Context, id NodeID, hasTransientErr bool) error

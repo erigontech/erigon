@@ -77,6 +77,15 @@ func reportWithFlags(ctx context.Context, flags reports.CommandFlags) error {
 		return nil
 	}
 
+	if flags.SentryCandidates {
+		report, err := reports.CreateSentryCandidatesReport(ctx, db, flags.ErigonLogPath)
+		if err != nil {
+			return err
+		}
+		fmt.Println(report)
+		return nil
+	}
+
 	statusReport, err := reports.CreateStatusReport(ctx, db, flags.MaxPingTries, networkID)
 	if err != nil {
 		return err
