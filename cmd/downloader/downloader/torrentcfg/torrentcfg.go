@@ -25,8 +25,6 @@ const DefaultNetworkChunkSize = DefaultPieceSize
 
 type Cfg struct {
 	*torrent.ClientConfig
-	//DB kv.RwDB
-	//CompletionCloser io.Closer
 	DownloadSlots int
 }
 

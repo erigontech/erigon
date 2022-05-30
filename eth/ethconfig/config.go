@@ -143,7 +143,7 @@ var (
 	FlagSnapStop       = "snap.stop"
 )
 
-func NewSnapshotCfg(enabled, keepBlocks, produce bool) Snapshot {
+func NewSnapCfg(enabled, keepBlocks, produce bool) Snapshot {
 	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
 }
 
