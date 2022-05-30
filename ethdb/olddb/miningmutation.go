@@ -16,6 +16,7 @@ type miningmutation struct {
 	puts          map[string]map[string][]byte
 	dupsortPuts   map[string]map[string][][]byte
 	dupsortTables map[string]struct{}
+	clearedTables map[string]struct{}
 
 	db kv.Tx
 	mu sync.RWMutex
@@ -35,9 +36,11 @@ func NewMiningBatch(tx kv.Tx) *miningmutation {
 		puts:        make(map[string]map[string][]byte),
 		dupsortPuts: make(map[string]map[string][][]byte),
 		dupsortTables: map[string]struct{}{
-			kv.HashedStorage: {},
-			kv.TrieOfStorage: {},
+			kv.AccountChangeSet: {},
+			kv.StorageChangeSet: {},
+			kv.HashedStorage:    {},
 		},
+		clearedTables: make(map[string]struct{}),
 	}
 }
 
@@ -114,7 +117,7 @@ func (m *miningmutation) GetOne(table string, key []byte) ([]byte, error) {
 		}
 		return value, nil
 	}
-	if m.db != nil {
+	if m.db != nil && !m.isBucketCleared(table) {
 		// TODO: simplify when tx can no longer be parent of mutation
 		value, err := m.db.GetOne(table, key)
 		if err != nil {
@@ -258,7 +261,15 @@ func (m *miningmutation) ListBuckets() ([]string, error) {
 }
 
 func (m *miningmutation) ClearBucket(bucket string) error {
+	m.clearedTables[bucket] = struct{}{}
+	m.puts[bucket] = make(map[string][]byte)
+	m.dupsortPuts[bucket] = make(map[string][][]byte)
 	return nil
+}
+
+func (m *miningmutation) isBucketCleared(bucket string) bool {
+	_, ok := m.clearedTables[bucket]
+	return ok
 }
 
 func (m *miningmutation) CollectMetrics() {
@@ -279,15 +290,22 @@ func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 		for key, value := range m.puts[bucket] {
 			c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 		}
-		c.cursor, err = m.db.Cursor(bucket)
+		if !m.isBucketCleared(bucket) {
+			c.cursor, err = m.db.Cursor(bucket)
+		}
 	} else {
-		c.dupCursor, err = m.db.CursorDupSort(bucket)
-		c.cursor = c.dupCursor
+		if !m.isBucketCleared(bucket) {
+			c.dupCursor, err = m.db.CursorDupSort(bucket)
+			c.cursor = c.dupCursor
+		}
 		for key, values := range m.dupsortPuts[bucket] {
 			for _, value := range values {
-				dbKey, _, err := c.dupCursor.SeekBothExact([]byte(key), value)
-				if err != nil {
-					return &miningmutationcursor{}, err
+				var dbKey []byte
+				if !m.isBucketCleared(bucket) {
+					dbKey, _, err = c.dupCursor.SeekBothExact([]byte(key), value)
+					if err != nil {
+						return nil, err
+					}
 				}
 				if _, ok := filterMap[string(append([]byte(key), value...))]; dbKey == nil && !ok {
 					c.pairs = append(c.pairs, cursorentry{[]byte(key), value})

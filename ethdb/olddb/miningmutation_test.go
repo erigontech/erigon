@@ -285,3 +285,25 @@ func TestSeekBothRange(t *testing.T) {
 	}
 	assert.Equal(t, i, 15)
 }
+
+func TestIterateWithNextAndCurrentMixedClear(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+
+	for i := 0; i < 30; i += 2 {
+		err := tx.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	mut := NewMiningBatch(tx)
+
+	for i := 1; i < 30; i += 2 {
+		err := mut.Put(testBucketA, []byte{byte(i)}, []byte{byte(i)})
+		require.NoError(t, err)
+	}
+	mut.ClearBucket(testBucketA)
+
+	c, err := mut.RwCursorDupSort(testBucketA)
+
+	require.NoError(t, err)
+	k, _, _ := c.First()
+	assert.Equal(t, len(k), 0)
+}

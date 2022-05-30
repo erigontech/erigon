@@ -82,6 +82,11 @@ func (m miningmutationcursor) isDupsortedEnabled() bool {
 
 // First move cursor to first position and return key and value accordingly.
 func (m *miningmutationcursor) First() ([]byte, []byte, error) {
+	m.current = 0
+
+	if m.cursor == nil {
+		return m.goForward(nil, nil)
+	}
 	if m.pairs.Len() == 0 {
 		m.current = 0
 		return m.cursor.First()
@@ -92,7 +97,6 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	m.current = 0
 	// is this db less than memory?
 	if (compareEntries(cursorentry{dbKey, dbValue}, m.pairs[0])) {
 		m.currentPair = cursorentry{dbKey, dbValue}
@@ -105,13 +109,13 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 		}
 	}
 
-	m.currentPair = cursorentry{m.pairs[0].key, m.pairs[0].value}
+	m.currentPair = cursorentry{common.CopyBytes(m.pairs[0].key), common.CopyBytes(m.pairs[0].value)}
 	return common.CopyBytes(m.pairs[0].key), common.CopyBytes(m.pairs[0].value), nil
 }
 
 // Current return the current key and values the cursor is on.
 func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
-	return m.currentPair.key, m.currentPair.value, nil
+	return common.CopyBytes(m.currentPair.key), common.CopyBytes(m.currentPair.value), nil
 }
 
 // isPointingOnDb checks if the cursor is pointing on the db cursor or on the memory slice.
@@ -130,9 +134,9 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
-
+	var err error
 	if !m.isDupsortedEnabled() && bytes.Compare(dbKey, m.pairs[m.current].key) == 0 {
-		if _, _, err := m.cursor.Next(); err != nil {
+		if dbKey, dbValue, err = m.cursor.Next(); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -142,13 +146,17 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 		return dbKey, dbValue, nil
 	}
 
-	m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
+	m.currentPair = cursorentry{common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value)}
 	// return current
 	return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 }
 
 // Next returns the next element of the mutation.
 func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
+	if m.cursor == nil {
+		return m.goForward(nil, nil)
+	}
+
 	if m.pairs.Len()-1 < m.current {
 		nextK, nextV, err := m.cursor.Next()
 		if err != nil {
@@ -171,7 +179,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 			return nil, nil, nil
 		}
 		m.current++
-		m.currentPair = cursorentry{m.pairs[m.current].key, m.pairs[m.current].value}
+		m.currentPair = cursorentry{common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value)}
 		return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 	}
 
@@ -218,15 +226,14 @@ func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	m.current = 0
 	// TODO(Giulio2002): Use Golang search
-	for _, pair := range m.pairs {
-		if len(pair.key) >= len(seek) && bytes.Compare(pair.key[:len(seek)], seek) >= 0 {
+	for i := range m.pairs {
+		if len(m.pairs[i].key) >= len(seek) && bytes.Compare(m.pairs[i].key[:len(seek)], seek) >= 0 {
+			m.current = i
 			return m.goForward(dbKey, dbValue)
 		}
-		m.current++
 	}
-
+	m.current = len(m.pairs)
 	return dbKey, dbValue, nil
 }
 
@@ -311,18 +318,23 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 }
 
 func (m *miningmutationcursor) Last() ([]byte, []byte, error) {
-	m.current = len(m.pairs)
+	m.current = len(m.pairs) - 1
+	if m.cursor == nil {
+		if m.current == -1 {
+			return nil, nil, nil
+		}
+		return m.goForward(nil, nil)
+	}
 	dbKey, dbValue, err := m.cursor.Last()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if m.current == 0 {
+	if m.current == -1 {
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
 
-	m.current--
 	return m.goForward(dbKey, dbValue)
 }
 
@@ -331,7 +343,9 @@ func (m *miningmutationcursor) Prev() ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Close() {
-	m.cursor.Close()
+	if m.cursor != nil {
+		m.cursor.Close()
+	}
 	return
 }
 
