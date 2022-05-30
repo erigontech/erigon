@@ -74,6 +74,10 @@ func TestState(t *testing.T) {
 					defer tx.Rollback()
 					_, err = test.Run(rules, tx, subtest, vmconfig)
 					tx.Rollback()
+					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
 					return st.checkFailure(t, err)
 				})
 			})
