@@ -275,6 +275,18 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	return nil
 }
 
+func CheckEip1559TxGasFeeCap(from common.Address, gasFeeCap, tip, baseFee *uint256.Int) error {
+	if gasFeeCap.Cmp(tip) < 0 {
+		return fmt.Errorf("%w: address %v, tip: %s, gasFeeCap: %s", ErrTipAboveFeeCap,
+			from.Hex(), gasFeeCap, tip)
+	}
+	if baseFee != nil && gasFeeCap.Cmp(baseFee) < 0 {
+		return fmt.Errorf("%w: address %v, gasFeeCap: %s baseFee: %s", ErrFeeCapTooLow,
+			from.Hex(), gasFeeCap, baseFee)
+	}
+	return nil
+}
+
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck(gasBailout bool) error {
 	// Make sure this transaction's nonce is correct.
@@ -305,21 +317,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
-			if l := st.gasFeeCap.BitLen(); l > 256 {
-				return fmt.Errorf("%w: address %v, gasFeeCap bit length: %d", ErrFeeCapVeryHigh,
-					st.msg.From().Hex(), l)
-			}
-			if l := st.tip.BitLen(); l > 256 {
-				return fmt.Errorf("%w: address %v, tip bit length: %d", ErrTipVeryHigh,
-					st.msg.From().Hex(), l)
-			}
-			if st.gasFeeCap.Cmp(st.tip) < 0 {
-				return fmt.Errorf("%w: address %v, tip: %s, gasFeeCap: %s", ErrTipAboveFeeCap,
-					st.msg.From().Hex(), st.gasFeeCap, st.tip)
-			}
-			if st.gasFeeCap.Cmp(st.evm.Context().BaseFee) < 0 {
-				return fmt.Errorf("%w: address %v, gasFeeCap: %d baseFee: %d", ErrFeeCapTooLow,
-					st.msg.From().Hex(), st.gasFeeCap.Uint64(), st.evm.Context().BaseFee.Uint64())
+			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context().BaseFee); err != nil {
+				return err
 			}
 		}
 	}
