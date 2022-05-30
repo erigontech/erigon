@@ -1073,7 +1073,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		h := common.BytesToHash(v)
 		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
 		if dataRLP == nil {
-			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
+			log.Debug("DumpTxs block body not found", "height", blockNum, "hash", h)
+			return true, nil
 		}
 		var body types.BodyForStorage
 		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
