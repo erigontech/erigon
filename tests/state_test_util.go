@@ -64,9 +64,10 @@ type stJSON struct {
 }
 
 type stPostState struct {
-	Root common.Hash   `json:"hash"`
-	Logs common.Hash   `json:"logs"`
-	Tx   hexutil.Bytes `json:"txbytes"`
+	Root            common.Hash   `json:"hash"`
+	Logs            common.Hash   `json:"logs"`
+	Tx              hexutil.Bytes `json:"txbytes"`
+	ExpectException string        `json:"expectException"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
