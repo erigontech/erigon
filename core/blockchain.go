@@ -95,7 +95,8 @@ func (st *InsertStats) Report(logPrefix string, chain []*types.Block, index int,
 func ExecuteBlockEphemerallyForBSC(
 	chainConfig *params.ChainConfig,
 	vmConfig *vm.Config,
-	getHeader func(hash common.Hash, number uint64) *types.Header,
+	blockHashFunc func(n uint64) common.Hash,
+	//getHeader func(hash common.Hash, number uint64) *types.Header,
 	engine consensus.Engine,
 	block *types.Block,
 	stateReader state.StateReader,
@@ -141,7 +142,7 @@ func ExecuteBlockEphemerallyForBSC(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {
@@ -221,12 +222,12 @@ func ExecuteBlockEphemerallyForBSC(
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
 	chainConfig *params.ChainConfig,
-	vmConfig *vm.Config,
-	getHeader func(hash common.Hash, number uint64) *types.Header,
+	vmConfig *vm.Config, // configuration options for the interpreter
+	blockHashFunc func(n uint64) common.Hash,
 	engine consensus.Engine,
 	block *types.Block,
 	stateReader state.StateReader,
-	stateWriter state.WriterWithChangeSets, // writes are done by block finalization -> ibs.CommitBlock which updates the world state + changesets
+	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
@@ -259,7 +260,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
 			if err1 != nil {
@@ -356,15 +357,9 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 	} else {
 		author = &state.SystemAddress
 	}
-	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
-	var txContext vm.TxContext
-	if isBor {
-		txContext = vm.TxContext{}
-	} else {
-		txContext = NewEVMTxContext(msg)
-	}
-	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
-	if isBor {
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, nil)
+	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
+	if chainConfig.Bor != nil {
 		ret, _, err := evm.Call(
 			vm.AccountRef(msg.From()),
 			*msg.To(),
@@ -406,7 +401,7 @@ func CallContract(contract common.Address, data []byte, chainConfig params.Chain
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, nil, engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}

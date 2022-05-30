@@ -335,6 +335,35 @@ func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAll
 	return statedb
 }
 
+func MakePreState2(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
+	var blockNr uint64 = 0
+	stateReader, stateWriter := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
+	statedb := state.New(stateReader) //ibs
+	for addr, a := range accounts {
+		statedb.SetCode(addr, a.Code)
+		statedb.SetNonce(addr, a.Nonce)
+		balance, _ := uint256.FromBig(a.Balance)
+		statedb.SetBalance(addr, balance)
+		for k, v := range a.Storage {
+			key := k
+			val := uint256.NewInt(0).SetBytes(v.Bytes())
+			statedb.SetState(addr, &key, *val)
+		}
+
+		if len(a.Code) > 0 || len(a.Storage) > 0 {
+			statedb.SetIncarnation(addr, 1)
+		}
+	}
+	// Commit and re-open to start with a clean state.
+	if err := statedb.FinalizeTx(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
+		panic(err)
+	}
+	if err := statedb.CommitBlock(chainRules, state.NewPlainStateWriter(tx, tx, blockNr+1)); err != nil {
+		panic(err)
+	}
+	return stateReader, stateWriter
+}
+
 func rlpHash(x interface{}) (h common.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	rlp.Encode(hw, x) //nolint:errcheck

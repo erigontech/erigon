@@ -28,9 +28,12 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -221,15 +224,16 @@ func Main(ctx *cli.Context) error {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
 	}
 
+	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
 	// Sanity check, to not `panic` in state_transition
-	if chainConfig.IsLondon(prestate.Env.Number) {
+	if eip1559 {
 		if prestate.Env.BaseFee == nil {
 			return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))
 		}
 	}
 
 	// Sanity check, to not `panic` in state_transition
-	if prestate.Env.Random != nil && !chainConfig.IsLondon(prestate.Env.Number) {
+	if prestate.Env.Random != nil && !eip1559 {
 		return NewError(ErrorVMConfig, errors.New("can only apply RANDOM on top of London chainrules"))
 	}
 	if env := prestate.Env; env.Difficulty == nil {
@@ -247,23 +251,73 @@ func Main(ctx *cli.Context) error {
 			env.ParentTimestamp, env.ParentDifficulty, env.ParentUncleHash)
 	}
 
-	// Run the test and aggregate the result
-	db, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
-	if err1 != nil {
-		return err1
+	// manufacture block from above inputs
+	fmt.Println(getTracer) // temp statement to madatorily use getTracer
+	header := NewHeader(prestate.Env, chainConfig.IsLondon(prestate.Env.Number))
+
+	block := types.NewBlock(header, txs, nil, nil)
+
+	var hashError error
+	getHash := func(num uint64) common.Hash {
+		if prestate.Env.BlockHashes == nil {
+			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
+			return common.Hash{}
+		}
+		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
+		if !ok {
+			hashError = fmt.Errorf("getHash(%d) invoked, blockhash for that block not provided", num)
+		}
+		return h
 	}
-	body, _ := rlp.EncodeToBytes(txs)
-	// Dump the excution result
-	collector := make(Alloc)
+	db := memdb.New()
+
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
+	defer tx.Commit()
 
-	defer tx.Commit() // mostly empty
+	reader, writer := MakePreState2(chainConfig.Rules(0), tx, prestate.Pre)
+	engine := ethash.NewFaker()
+
+	_, _, err = core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil)
+
+	if hashError != nil {
+		return hashError
+	}
+
+	if err != nil {
+		return err
+	}
+
+	body, _ := rlp.EncodeToBytes(txs)
+
+	// Dump the excution result
+	collector := make(Alloc)
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
-	return dispatchOutput(ctx, baseDir, result, collector, body)
+	//return dispatchOutput(ctx, baseDir, result, collector, body)
+	return dispatchOutput(ctx, baseDir, nil, collector, body)
+
+	// // earlier logic
+
+	// // Run the test and aggregate the result
+	// db, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
+	// if err1 != nil {
+	// 	return err1
+	// }
+	// body, _ := rlp.EncodeToBytes(txs)
+	// // Dump the excution result
+	// collector := make(Alloc)
+	// tx, err := db.BeginRw(context.Background())
+	// if err != nil {
+	// 	return err
+	// }
+
+	// defer tx.Commit() // mostly empty
+	// dumper := state.NewDumper(tx, prestate.Env.Number)
+	// dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
+	// return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
@@ -433,4 +487,29 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *ExecutionResult, a
 		os.Stderr.Write(b)
 	}
 	return nil
+}
+
+func NewHeader(env stEnv, Eip1559 bool) *types.Header {
+	var header types.Header
+	//header.ParentHash =
+	header.UncleHash = env.ParentUncleHash
+	header.Coinbase = env.Coinbase
+	//header.Root =  //stateRoot
+	//header.TxHash =
+	// header.ReceiptHash =
+	//header.Bloom
+	header.Difficulty = env.Difficulty
+	header.Number = big.NewInt(int64(env.Number))
+	header.GasLimit = env.GasLimit
+	//header.GasUsed =
+	header.Time = env.Timestamp
+	//header.Extra
+	//header.MixDigest =
+	//header.Nonce =
+	header.BaseFee = env.BaseFee
+	header.Eip1559 = Eip1559
+	//header.Seal =
+	//header.WithSeal=
+
+	return &header
 }
