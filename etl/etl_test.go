@@ -18,6 +18,7 @@ package etl
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
-	"github.com/ugorji/go/codec"
 )
 
 func decodeHex(in string) []byte {
@@ -278,29 +278,19 @@ func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 }
 
 func testExtractToMapFunc(k, v []byte, next ExtractNextFunc) error {
-	var cbor codec.CborHandle
-	buf := bytes.NewBuffer(nil)
-	encoder := codec.NewEncoder(nil, &cbor)
-
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = v
-	encoder.Reset(buf)
-	encoder.MustEncode(valueMap)
-	return next(k, k, buf.Bytes())
+	out, _ := json.Marshal(valueMap)
+	return next(k, k, out)
 }
 
 func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
-	var cbor codec.CborHandle
-	buf := bytes.NewBuffer(nil)
-	encoder := codec.NewEncoder(nil, &cbor)
-
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
 	k1 := append(k, 0xAA)
-	encoder.Reset(buf)
-	encoder.MustEncode(valueMap)
+	out, _ := json.Marshal(valueMap)
 
-	err := next(k, k1, buf.Bytes())
+	err := next(k, k1, out)
 	if err != nil {
 		return err
 	}
@@ -308,18 +298,13 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
-	buf.Reset()
-	encoder.Reset(buf)
-	encoder.MustEncode(valueMap)
-	return next(k, k2, buf.Bytes())
+	out, _ = json.Marshal(valueMap)
+	return next(k, k2, out)
 }
 
 func testLoadFromMapFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
-	var cbor codec.CborHandle
-	decoder := codec.NewDecoder(nil, &cbor)
-	decoder.ResetBytes(v)
 	valueMap := make(map[string][]byte)
-	err := decoder.Decode(&valueMap)
+	err := json.Unmarshal(v, &valueMap)
 	if err != nil {
 		return err
 	}
@@ -328,12 +313,8 @@ func testLoadFromMapFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNext
 }
 
 func testLoadFromMapDoubleFunc(k []byte, v []byte, _ CurrentTableReader, next LoadNextFunc) error {
-	var cbor codec.CborHandle
-	decoder := codec.NewDecoder(nil, &cbor)
-	decoder.ResetBytes(v)
-
 	valueMap := make(map[string][]byte)
-	err := decoder.Decode(valueMap)
+	err := json.Unmarshal(v, &valueMap)
 	if err != nil {
 		return err
 	}
