@@ -26,6 +26,7 @@ import (
 	"math/bits"
 	"os"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -66,15 +67,16 @@ type RecSplit struct {
 	baseDataID        uint64          // Minimal app-specific ID of entries of this index - helps app understand what data stored in given shard - persistent field
 	bucketCount       uint64          // Number of buckets
 	hasher            murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
-	bucketCollector   *etl.Collector  // Collector that sorts by buckets
-	enums             bool            // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
-	offsetCollector   *etl.Collector  // Collector that sorts by offsets
-	built             bool            // Flag indicating that the hash function has been built and no more keys can be added
-	currentBucketIdx  uint64          // Current bucket being accumulated
-	currentBucket     []uint64        // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
-	currentBucketOffs []uint64        // Index offsets for the current bucket
-	maxOffset         uint64          // Maximum value of index offset to later decide how many bytes to use for the encoding
-	gr                GolombRice      // Helper object to encode the tree of hash function salts using Golomb-Rice code.
+	etlBufLimit       datasize.ByteSize
+	bucketCollector   *etl.Collector // Collector that sorts by buckets
+	enums             bool           // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	offsetCollector   *etl.Collector // Collector that sorts by offsets
+	built             bool           // Flag indicating that the hash function has been built and no more keys can be added
+	currentBucketIdx  uint64         // Current bucket being accumulated
+	currentBucket     []uint64       // 64-bit fingerprints of keys in the current bucket accumulated before the recsplit is performed for that bucket
+	currentBucketOffs []uint64       // Index offsets for the current bucket
+	maxOffset         uint64         // Maximum value of index offset to later decide how many bytes to use for the encoding
+	gr                GolombRice     // Helper object to encode the tree of hash function salts using Golomb-Rice code.
 	// Helper object to encode the sequence of cumulative number of keys in the buckets
 	// and the sequence of of cumulative bit offsets of buckets in the Golomb-Rice code.
 	ef                 eliasfano16.DoubleEliasFano
@@ -104,15 +106,16 @@ type RecSplit struct {
 }
 
 type RecSplitArgs struct {
-	KeyCount   int
-	BucketSize int
-	Salt       uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
-	LeafSize   uint16
-	IndexFile  string // File name where the index and the minimal perfect hash function will be written to
-	TmpDir     string
-	StartSeed  []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
-	Enums      bool     // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
-	BaseDataID uint64
+	KeyCount    int
+	BucketSize  int
+	Salt        uint32 // Hash seed (salt) for the hash function used for allocating the initial buckets - need to be generated randomly
+	LeafSize    uint16
+	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
+	TmpDir      string
+	StartSeed   []uint64 // For each level of recursive split, the hash seed (salt) used for that level - need to be generated randomly and be large enough to accomodate all the levels
+	Enums       bool     // Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
+	BaseDataID  uint64
+	EtlBufLimit datasize.ByteSize
 }
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
@@ -139,10 +142,14 @@ func NewRecSplit(args RecSplitArgs) (*RecSplit, error) {
 	rs.tmpDir = args.TmpDir
 	rs.indexFile = args.IndexFile
 	rs.baseDataID = args.BaseDataID
-	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.etlBufLimit = args.EtlBufLimit
+	if rs.etlBufLimit == 0 {
+		rs.etlBufLimit = etl.BufferOptimalSize
+	}
+	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
 	rs.enums = args.Enums
 	if args.Enums {
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -215,10 +222,10 @@ func (rs *RecSplit) ResetNextSalt() {
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
-	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
 	if rs.offsetCollector != nil {
 		rs.offsetCollector.Close()
-		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit))
 	}
 	rs.currentBucket = rs.currentBucket[:0]
 	rs.currentBucketOffs = rs.currentBucketOffs[:0]
