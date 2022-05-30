@@ -18,9 +18,11 @@ package tests
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -67,6 +69,7 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 			return nil, nil, 0, err
 		}
 		sender := msg.From()
+
 		// Intrinsic gas
 		requiredGas, err := core.IntrinsicGas(msg.Data(), msg.AccessList(), msg.To() == nil, rules.IsHomestead, rules.IsIstanbul)
 		if err != nil {
@@ -75,6 +78,21 @@ func (tt *TransactionTest) Run(chainID *big.Int) error {
 		if requiredGas > msg.Gas() {
 			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), requiredGas)
 		}
+
+		if rules.IsLondon {
+			// EIP-1559 gas fee cap
+			err = core.CheckEip1559TxGasFeeCap(sender, msg.FeeCap(), msg.Tip(), nil)
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			// A corollary check of the following assert from EIP-1559:
+			// signer.balance >= transaction.gas_limit * transaction.max_fee_per_gas
+			_, overflow := new(uint256.Int).MulOverflow(uint256.NewInt(msg.Gas()), msg.FeeCap())
+			if overflow {
+				return nil, nil, 0, errors.New("GasLimitPriceProductOverflow")
+			}
+		}
+
 		// EIP-2681: Limit account nonce to 2^64-1
 		if msg.Nonce()+1 < msg.Nonce() {
 			return nil, nil, requiredGas, fmt.Errorf("%w: nonce: %d", core.ErrNonceMax, msg.Nonce())
