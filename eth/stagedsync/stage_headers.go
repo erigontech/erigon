@@ -202,32 +202,36 @@ func safeAndFinalizedBlocksAreCanonical(
 	cfg HeadersCfg,
 	sendErrResponse bool,
 ) (bool, error) {
-	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
-	if err != nil {
-		return false, err
-	}
-	if (!safeIsCanonical && forkChoice.SafeBlockHash != common.Hash{}) {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("safe block is not an ancestor of head block"),
-			}
+	if forkChoice.SafeBlockHash != (common.Hash{}) {
+		safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+		if err != nil {
+			return false, err
 		}
-		return false, nil
+		if !safeIsCanonical {
+			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+			if sendErrResponse {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}
+			}
+			return false, nil
+		}
 	}
 
-	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
-	if err != nil {
-		return false, err
-	}
-	if (!finalizedIsCanonical && forkChoice.FinalizedBlockHash != common.Hash{}) {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("finalized block is not an ancestor of head block"),
-			}
+	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+		finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+		if err != nil {
+			return false, err
 		}
-		return false, nil
+		if !finalizedIsCanonical {
+			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+			if sendErrResponse {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}
+			}
+			return false, nil
+		}
 	}
 
 	return true, nil
