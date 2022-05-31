@@ -1,12 +1,13 @@
 package olddb
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"sort"
 	"sync"
 	"unsafe"
-
+ 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -42,7 +43,6 @@ func NewMiningBatch(tx kv.Tx) *miningmutation {
 		dupsortTables: map[string]struct{}{
 			kv.AccountChangeSet: {},
 			kv.StorageChangeSet: {},
-			kv.HashedStorage:    {},
 		},
 		clearedTables:   make(map[string]struct{}),
 		ignoreDbEntries: make(map[string]map[string]struct{}),
@@ -302,7 +302,14 @@ func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	filterMap := make(map[string]struct{})
 	c.table = bucket
 	var err error
-	if !m.isDupsortedTable(bucket) {
+	if bucket == kv.HashedStorage {
+		for key, value := range m.puts[bucket] {
+			byteKey := []byte(key)
+			c.pairs = append(c.pairs, cursorentry{byteKey[:40], append(byteKey[40:], value...)})
+		}
+		c.dupCursor, err = m.db.CursorDupSort(bucket)
+		c.cursor = c.dupCursor
+	} else if !m.isDupsortedTable(bucket) {
 		for key, value := range m.puts[bucket] {
 			c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 		}
@@ -316,19 +323,22 @@ func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 		}
 		for key, values := range m.dupsortPuts[bucket] {
 			for _, value := range values {
-				var dbKey []byte
+				var dbValue []byte
 				if !m.isBucketCleared(bucket) {
-					dbKey, _, err = c.dupCursor.SeekBothExact([]byte(key), value)
+					dbValue, err = c.dupCursor.SeekBothRange([]byte(key), value)
 					if err != nil {
 						return nil, err
 					}
 				}
-				if _, ok := filterMap[string(append([]byte(key), value...))]; dbKey == nil && !ok {
+				if _, ok := filterMap[string(append([]byte(key), value...))]; bytes.Compare(dbValue, value) != 0 && !ok {
 					c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
 				}
 				filterMap[string(append([]byte(key), value...))] = struct{}{}
 			}
 		}
+	}
+	if err != nil {
+		return nil, err
 	}
 	sort.Sort(c.pairs)
 	c.mutation = m

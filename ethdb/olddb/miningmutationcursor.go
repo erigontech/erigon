@@ -2,6 +2,7 @@ package olddb
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -53,7 +54,7 @@ type miningmutationcursor struct {
 
 func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	dbCurrK, dbCurrV, _ := m.cursor.Current()
-
+	fmt.Println()
 	lastK, lastV, err := m.cursor.Last()
 	if err != nil {
 		return false, err
@@ -61,6 +62,9 @@ func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	if m.table == kv.HashedStorage && len(dbCurrK) == 72 {
 		dbCurrK = dbCurrK[:40]
 		dbCurrV = append(dbCurrK[40:], dbCurrV...)
+		fmt.Println("enddb")
+		fmt.Println(common.Bytes2Hex(dbCurrK))
+		fmt.Println(common.Bytes2Hex(dbCurrV))
 	}
 
 	if m.table == kv.HashedStorage && len(lastK) == 72 {
@@ -115,16 +119,6 @@ func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
 	return common.CopyBytes(m.currentPair.key), common.CopyBytes(m.currentPair.value), nil
 }
 
-// isPointingOnDb checks if the cursor is pointing on the db cursor or on the memory slice.
-func (m *miningmutationcursor) isPointingOnDb() (bool, error) {
-	dbKey, dbValue, err := m.cursor.Current()
-	if err != nil {
-		return false, err
-	}
-	// if current pointer in memory is lesser than pointer in db then we are in memory and viceversa
-	return compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]), nil
-}
-
 func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte, error) {
 	// is this db less than memory?
 	if m.current > m.pairs.Len()-1 {
@@ -137,7 +131,17 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 		if dbKey, dbValue, err = m.cursor.Next(); err != nil {
 			return nil, nil, err
 		}
+	} else if m.isDupsortedEnabled() && bytes.Compare(dbValue, m.pairs[m.current].value) == 0 {
+		if dbKey, dbValue, err = m.dupCursor.NextDup(); err != nil {
+			return nil, nil, err
+		}
+	} else if m.table == kv.HashedStorage && len(dbKey) == 40 && len(dbValue) >= 32 &&
+		bytes.Compare(append(dbKey, dbValue[:32]...), append(m.pairs[m.current].key, m.pairs[m.current].value[:32]...)) == 0 {
+		if dbKey, dbValue, err = m.dupCursor.NextDup(); err != nil {
+			return nil, nil, err
+		}
 	}
+
 	if dbKey != nil && dbValue != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]) {
 		m.isPrevFromDb = true
 		m.currentPair = cursorentry{dbKey, dbValue}
@@ -155,11 +159,22 @@ func (m *miningmutationcursor) goNext(nextDup bool) ([]byte, []byte, error) {
 	}
 	var err error
 	if m.pairs.Len()-1 < m.current {
+		if m.table == kv.HashedStorage {
+			fmt.Println("almost dead 2")
+		}
 		var nextK, nextV []byte
-		if nextDup {
-			nextK, nextV, err = m.dupCursor.NextDup()
+		if m.isPrevFromDb {
+			if nextDup {
+				nextK, nextV, err = m.dupCursor.NextDup()
+			} else {
+				nextK, nextV, err = m.cursor.Next()
+			}
 		} else {
-			nextK, nextV, err = m.cursor.Next()
+			nextK, nextV, err = m.cursor.Current()
+			if m.table == kv.HashedStorage && len(nextK) == 72 {
+				nextK = nextK[:40]
+				nextV = append(nextK[40:], nextV...)
+			}
 		}
 		if err != nil {
 			return nil, nil, err
@@ -189,26 +204,35 @@ func (m *miningmutationcursor) goNext(nextDup bool) ([]byte, []byte, error) {
 		return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 	}
 
-	isOnDb, err := m.isPointingOnDb()
-	if err != nil {
-		return nil, nil, err
-	}
-	if isOnDb {
+	if m.isPrevFromDb {
 		var dbKey, dbValue []byte
 		// we check current of memory against next in db
-		dbKey, dbValue, err = m.cursor.Next()
+		if nextDup {
+			dbKey, dbValue, err = m.dupCursor.NextDup()
+		} else {
+			dbKey, dbValue, err = m.cursor.Next()
+		}
 		if err != nil {
 			return nil, nil, err
 		}
 		return m.goForward(dbKey, dbValue)
 	}
 	// We check current of memory, against next in db
-	dbKey, dbValue, err := m.cursor.Current()
+	var dbKey, dbValue []byte
+	if nextDup {
+		dbKey, dbValue, err = m.dupCursor.Current()
+	} else {
+		dbKey, dbValue, err = m.cursor.Current()
+	}
+
 	if err != nil {
 		return nil, nil, err
 	}
 
 	m.current++
+	if m.table == kv.HashedStorage && len(dbKey) == 72 {
+		return m.goForward(common.CopyBytes(dbKey[:40]), append(dbKey[40:], dbValue...))
+	}
 	return m.goForward(dbKey, dbValue)
 }
 
@@ -286,9 +310,6 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
-	if m.table == kv.HashedStorage && len(k) == 72 {
-		return m.mutation.Put(m.table, k[:40], append(k[40:], v...))
-	}
 	return m.mutation.Put(m.table, k, v)
 }
 
@@ -321,6 +342,7 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	if value == nil {
 		k, v, err := m.SeekExact(key)
 		m.currentPair = cursorentry{common.CopyBytes(k), common.CopyBytes(v)}
+		m.isPrevFromDb = true
 		return v, err
 	}
 	dbValue, err := m.dupCursor.SeekBothRange(key, value)
@@ -337,6 +359,7 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	}
 	m.currentPair = cursorentry{common.CopyBytes(key), common.CopyBytes(dbValue)}
 	m.current = len(m.pairs)
+	m.isPrevFromDb = true
 	return dbValue, nil
 }
 
