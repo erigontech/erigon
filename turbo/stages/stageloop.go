@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -238,12 +239,13 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	tx, err := kv.BeginRw(ctx)
+	tx, err := kv.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if err = mining.Run(nil, tx, false); err != nil {
+
+	if err = mining.Run(nil, olddb.NewMiningBatch(tx), false); err != nil {
 		return err
 	}
 	tx.Rollback()
