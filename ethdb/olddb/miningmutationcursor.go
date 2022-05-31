@@ -140,8 +140,7 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 			return nil, nil, err
 		}
 	}
-
-	if dbKey != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]) {
+	if dbKey != nil && dbValue != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]) {
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
@@ -222,10 +221,15 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 
 // Seek move pointer to a key at a certain position.
 func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
-	dbKey, dbValue, err := m.cursor.Seek(seek)
-	if err != nil {
-		return nil, nil, err
+	var dbKey, dbValue []byte
+	var err error
+	if m.cursor != nil {
+		dbKey, dbValue, err = m.cursor.Seek(seek)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
+
 	// TODO(Giulio2002): Use Golang search
 	for i := range m.pairs {
 		if len(m.pairs[i].key) >= len(seek) && bytes.Compare(m.pairs[i].key[:len(seek)], seek) >= 0 {
@@ -268,15 +272,18 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
+	if m.table == kv.HashedStorage && len(k) == 72 {
+		return m.mutation.Put(m.table, k[:40], append(k[40:], v...))
+	}
 	return m.mutation.Put(m.table, k, v)
 }
 
 func (m *miningmutationcursor) Append(k []byte, v []byte) error {
-	return m.mutation.Put(m.table, k, v)
+	return m.Put(k, v)
 }
 
 func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
-	return m.mutation.Put(m.table, k, v)
+	return m.Put(k, v)
 }
 
 func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {
@@ -305,15 +312,15 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	m.current = 0
 	// TODO(Giulio2002): Use Golang search
-	for _, pair := range m.pairs {
-		if bytes.Compare(pair.key, key) == 0 && len(pair.value) >= len(value) && bytes.Compare(pair.value[:len(value)], value) >= 0 {
+	for i := range m.pairs {
+		if bytes.Compare(m.pairs[i].key, key) == 0 && len(m.pairs[i].value) >= len(value) && bytes.Compare(m.pairs[i].value[:len(value)], value) >= 0 {
+			m.current = i
 			_, retValue, err := m.goForward(key, dbValue)
 			return retValue, err
 		}
-		m.current++
 	}
+	m.current = len(m.pairs)
 	return dbValue, nil
 }
 
