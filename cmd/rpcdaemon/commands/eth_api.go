@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -101,13 +100,12 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader  services.BlockReader
-	_headerReader services.HeaderReader
-	_txnReader    services.TxnReader
-	TevmEnabled   bool // experiment
+	_blockReader interfaces.BlockReader
+	_txnReader   interfaces.TxnReader
+	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *rpcservices.Filters, stateCache kvcache.Cache, blockReader services.BlockTxnAndHeaderReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -216,14 +214,6 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 
 func (api *BaseAPI) pendingBlockHeader() *types.Header {
 	return api.filters.LastPendingBlockHeader()
-}
-
-func (api *BaseAPI) getHeaderByRPCNumber(ctx context.Context, tx kv.Tx, number rpc.BlockNumber) (*types.Header, error) {
-	blockNum, err := getBlockNumber(number, tx)
-	if err != nil {
-		return nil, err
-	}
-	return api._headerReader.HeaderByNumber(ctx, tx, blockNum)
 }
 
 func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {

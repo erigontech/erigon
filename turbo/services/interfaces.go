@@ -42,9 +42,9 @@ type HeaderAndCanonicalReader interface {
 	CanonicalReader
 }
 
-type BlockTxnAndHeaderReader interface {
+type BlockAndTxnReader interface {
 	BlockReader
-	HeaderReader
+	//HeaderReader
 	TxnReader
 }
 

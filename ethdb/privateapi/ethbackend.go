@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -49,7 +48,7 @@ type EthBackendServer struct {
 	eth         EthBackend
 	events      *Events
 	db          kv.RoDB
-	blockReader services.BlockTxnAndHeaderReader
+	blockReader interfaces.BlockAndTxnReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
 	payloadId       uint64
@@ -88,7 +87,7 @@ type pendingPayload struct {
 	built bool
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockTxnAndHeaderReader,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader interfaces.BlockAndTxnReader,
 	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
 	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
 ) *EthBackendServer {
