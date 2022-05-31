@@ -2,7 +2,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -54,22 +53,18 @@ type miningmutationcursor struct {
 
 func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	dbCurrK, dbCurrV, _ := m.cursor.Current()
-	fmt.Println()
 	lastK, lastV, err := m.cursor.Last()
 	if err != nil {
 		return false, err
 	}
 	if m.table == kv.HashedStorage && len(dbCurrK) == 72 {
-		dbCurrK = dbCurrK[:40]
 		dbCurrV = append(dbCurrK[40:], dbCurrV...)
-		fmt.Println("enddb")
-		fmt.Println(common.Bytes2Hex(dbCurrK))
-		fmt.Println(common.Bytes2Hex(dbCurrV))
+		dbCurrK = dbCurrK[:40]
 	}
 
 	if m.table == kv.HashedStorage && len(lastK) == 72 {
-		lastK = lastK[:40]
 		lastV = append(lastK[40:], lastV...)
+		lastK = lastK[:40]
 	}
 	currK, currV, _ := m.Current()
 	if m.dupCursor != nil {
@@ -159,9 +154,6 @@ func (m *miningmutationcursor) goNext(nextDup bool) ([]byte, []byte, error) {
 	}
 	var err error
 	if m.pairs.Len()-1 < m.current {
-		if m.table == kv.HashedStorage {
-			fmt.Println("almost dead 2")
-		}
 		var nextK, nextV []byte
 		if m.isPrevFromDb {
 			if nextDup {
