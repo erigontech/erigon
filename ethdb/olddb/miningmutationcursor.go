@@ -2,7 +2,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -54,23 +53,21 @@ type miningmutationcursor struct {
 
 func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	dbCurrK, dbCurrV, _ := m.cursor.Current()
-	if m.table == kv.HashedStorage {
-		fmt.Println(common.CopyBytes(dbCurrK))
-	}
-	dbCurrK, dbCurrV = m.convertToHashedStorageFormat(dbCurrK, dbCurrV)
-	if m.table == kv.HashedStorage {
-		fmt.Println(common.CopyBytes(dbCurrK))
-	}
-	lastK, lastV, err := m.cursor.Last()
-	lastK, lastV = m.convertToHashedStorageFormat(lastK, lastV)
 
+	lastK, lastV, err := m.cursor.Last()
 	if err != nil {
 		return false, err
 	}
+	if m.table == kv.HashedStorage && len(dbCurrK) == 72 {
+		dbCurrK = dbCurrK[:40]
+		dbCurrV = append(dbCurrK[40:], dbCurrV...)
+	}
 
+	if m.table == kv.HashedStorage && len(lastK) == 72 {
+		lastK = lastK[:40]
+		lastV = append(lastK[40:], lastV...)
+	}
 	currK, currV, _ := m.Current()
-	currK, currV = m.convertToHashedStorageFormat(currK, currV)
-
 	if m.dupCursor != nil {
 		_, err = m.dupCursor.SeekBothRange(dbCurrK, dbCurrV)
 	} else {
@@ -86,11 +83,11 @@ func (m *miningmutationcursor) endOfNextDb() (bool, error) {
 	return bytes.Compare(lastK, currK) <= 0, nil
 }
 
-func (m *miningmutationcursor) convertToHashedStorageFormat(k []byte, v []byte) ([]byte, []byte) {
+func (m *miningmutationcursor) convertToHashedStoraFormat(k []byte, v []byte) ([]byte, []byte, error) {
 	if len(k) == 72 && m.table == kv.HashedStorage {
-		return common.CopyBytes(k[:40]), append(k[40:], v...)
+		return k[:40], append(k[40:], v...), nil
 	}
-	return k, v
+	return k, v, nil
 }
 
 func (m miningmutationcursor) isDupsortedEnabled() bool {
@@ -140,7 +137,6 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 		if dbKey, dbValue, err = m.cursor.Next(); err != nil {
 			return nil, nil, err
 		}
-		dbKey, dbValue = m.convertToHashedStorageFormat(dbKey, dbValue)
 	}
 	if dbKey != nil && dbValue != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]) {
 		m.isPrevFromDb = true
@@ -153,15 +149,18 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 	return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 }
 
-// Next returns the next element of the mutation.
-func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
+func (m *miningmutationcursor) goNext(nextDup bool) ([]byte, []byte, error) {
 	if m.cursor == nil {
 		return m.goForward(nil, nil)
 	}
-
+	var err error
 	if m.pairs.Len()-1 < m.current {
-		nextK, nextV, err := m.cursor.Next()
-		nextK, nextV = m.convertToHashedStorageFormat(nextK, nextV)
+		var nextK, nextV []byte
+		if nextDup {
+			nextK, nextV, err = m.dupCursor.NextDup()
+		} else {
+			nextK, nextV, err = m.cursor.Next()
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -198,7 +197,6 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 		var dbKey, dbValue []byte
 		// we check current of memory against next in db
 		dbKey, dbValue, err = m.cursor.Next()
-		dbKey, dbValue = m.convertToHashedStorageFormat(dbKey, dbValue)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -214,19 +212,22 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 	return m.goForward(dbKey, dbValue)
 }
 
+// Next returns the next element of the mutation.
+func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
+	return m.goNext(false)
+}
+
 // NextDup returns the next dupsorted element of the mutation (We do not apply recovery when ending of nextDup)
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
-	currK, _ := m.convertToHashedStorageFormat(m.currentPair.key, m.currentPair.value)
-	nextK, nextV, err := m.Next()
+	currK := m.currentPair.key
+	nextK, nextV, err := m.goNext(true)
 	if err != nil {
 		return nil, nil, err
 	}
-	nextK, nextV = m.convertToHashedStorageFormat(nextK, nextV)
+
 	if bytes.Compare(currK, nextK) != 0 {
-		m.currentPair = cursorentry{}
 		return nil, nil, nil
 	}
-	m.currentPair = cursorentry{common.CopyBytes(nextK), common.CopyBytes(nextV)}
 	return nextK, nextV, nil
 }
 
