@@ -1,31 +1,15 @@
-package observer
+package node_utils
 
 import (
-	"crypto/ecdsa"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
-	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/cmd/observer/utils"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"net"
-	"net/url"
 )
 
-func nodeID(node *enode.Node) (database.NodeID, error) {
-	if node.Incomplete() {
-		return "", errors.New("nodeID not implemented for incomplete nodes")
-	}
-	nodeURL, err := url.Parse(node.URLv4())
-	if err != nil {
-		return "", fmt.Errorf("failed to parse node URL: %w", err)
-	}
-	id := nodeURL.User.Username()
-	return database.NodeID(id), nil
-}
-
-func makeNodeAddr(node *enode.Node) database.NodeAddr {
+func MakeNodeAddr(node *enode.Node) database.NodeAddr {
 	var addr database.NodeAddr
 
 	var ipEntry enr.IPv4
@@ -61,10 +45,10 @@ func makeNodeAddr(node *enode.Node) database.NodeAddr {
 	return addr
 }
 
-func makeNodeFromAddr(id database.NodeID, addr database.NodeAddr) (*enode.Node, error) {
+func MakeNodeFromAddr(id database.NodeID, addr database.NodeAddr) (*enode.Node, error) {
 	rec := new(enr.Record)
 
-	pubkey, err := parseHexPublicKey(string(id))
+	pubkey, err := utils.ParseHexPublicKey(string(id))
 	if err != nil {
 		return nil, err
 	}
@@ -103,43 +87,4 @@ type noSignatureIDScheme struct {
 
 func (noSignatureIDScheme) Verify(_ *enr.Record, _ []byte) error {
 	return nil
-}
-
-func parseHexPublicKey(keyStr string) (*ecdsa.PublicKey, error) {
-	nodeWithPubkey, err := enode.ParseV4("enode://" + keyStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode a public key: %w", err)
-	}
-	return nodeWithPubkey.Pubkey(), nil
-}
-
-func parseHexPublicKeys(hexKeys []string) ([]*ecdsa.PublicKey, error) {
-	if hexKeys == nil {
-		return nil, nil
-	}
-	keys := make([]*ecdsa.PublicKey, 0, len(hexKeys))
-	for _, keyStr := range hexKeys {
-		key, err := parseHexPublicKey(keyStr)
-		if err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	return keys, nil
-}
-
-func hexEncodePublicKey(key *ecdsa.PublicKey) string {
-	return hex.EncodeToString(crypto.MarshalPubkey(key))
-}
-
-func hexEncodePublicKeys(keys []*ecdsa.PublicKey) []string {
-	if keys == nil {
-		return nil
-	}
-	hexKeys := make([]string, 0, len(keys))
-	for _, key := range keys {
-		keyStr := hexEncodePublicKey(key)
-		hexKeys = append(hexKeys, keyStr)
-	}
-	return hexKeys
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
+	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"github.com/ledgerwatch/erigon/cmd/observer/utils"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -143,7 +144,7 @@ func (diplomacy *Diplomacy) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to get the node address: %w", err)
 		}
 
-		node, err := makeNodeFromAddr(id, *nodeAddr)
+		node, err := node_utils.MakeNodeFromAddr(id, *nodeAddr)
 		if err != nil {
 			return fmt.Errorf("failed to make node from node address: %w", err)
 		}

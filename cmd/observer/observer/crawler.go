@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"sync/atomic"
 	"time"
 
@@ -126,7 +127,7 @@ func (crawler *Crawler) startSelectCandidates(ctx context.Context) <-chan candid
 
 func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candidateNode) error {
 	for _, node := range crawler.config.Bootnodes {
-		id, err := nodeID(node)
+		id, err := node_utils.NodeID(node)
 		if err != nil {
 			return fmt.Errorf("failed to get a bootnode ID: %w", err)
 		}
@@ -225,7 +226,7 @@ func (crawler *Crawler) Run(ctx context.Context) error {
 				return fmt.Errorf("failed to get the node address: %w", err)
 			}
 
-			node, err = makeNodeFromAddr(id, *nodeAddr)
+			node, err = node_utils.MakeNodeFromAddr(id, *nodeAddr)
 			if err != nil {
 				return fmt.Errorf("failed to make node from node address: %w", err)
 			}
@@ -285,7 +286,7 @@ func (crawler *Crawler) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("failed to get neighbor bucket keys: %w", err)
 		}
-		keygenCachedKeys, err := parseHexPublicKeys(keygenCachedHexKeys)
+		keygenCachedKeys, err := utils.ParseHexPublicKeys(keygenCachedHexKeys)
 		if err != nil {
 			return fmt.Errorf("failed to parse cached neighbor bucket keys: %w", err)
 		}
@@ -392,19 +393,19 @@ func (crawler *Crawler) saveInterrogationResult(
 	}
 
 	for _, peer := range peers {
-		peerID, err := nodeID(peer)
+		peerID, err := node_utils.NodeID(peer)
 		if err != nil {
 			return fmt.Errorf("failed to get peer node ID: %w", err)
 		}
 
-		dbErr := crawler.db.UpsertNodeAddr(ctx, peerID, makeNodeAddr(peer))
+		dbErr := crawler.db.UpsertNodeAddr(ctx, peerID, node_utils.MakeNodeAddr(peer))
 		if dbErr != nil {
 			return dbErr
 		}
 	}
 
 	if (result != nil) && (len(result.KeygenKeys) >= 15) {
-		keygenHexKeys := hexEncodePublicKeys(result.KeygenKeys)
+		keygenHexKeys := utils.HexEncodePublicKeys(result.KeygenKeys)
 		dbErr := crawler.db.UpdateNeighborBucketKeys(ctx, id, keygenHexKeys)
 		if dbErr != nil {
 			return dbErr
