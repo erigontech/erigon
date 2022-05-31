@@ -2,6 +2,7 @@
 # For example: p2p sentry can work inside Erigon - or outside (even on another server), txpool also, JSON RPC also
 #
 # This file is just an example: how to run most of Erigon's services as separated processes.
+# By default: --datadir=/home/erigon/.local/share/erigon
 
 version: '2.2'
 
@@ -10,21 +11,43 @@ services:
   erigon:
     image: thorax/erigon:${TAG:-latest}
     build: .
-    command: erigon ${ERIGON_FLAGS-} --datadir=/home/erigon/.local/share/erigon --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
+    command: |
+      erigon ${ERIGON_FLAGS-} 
+      --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 
+      --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
     volumes:
       # This is "datadir". It's ok to mount sub-dirs of "datadir" to different drives
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
-    ports:
-      - "30303:30303/tcp"
-      - "30303:30303/udp"
+    ports: [ "30303:30303/tcp", "30303:30303/udp" ]
+    restart: unless-stopped
+
+  rpcdaemon: # Service to server JSON-RCP API
+    image: thorax/erigon:${TAG:-latest}
+    command: |
+      rpcdaemon ${RPCDAEMON_FLAGS-} 
+      --private.api.addr=erigon:9090 --txpool.api.addr=erigon:9090 
+      --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net --ws
+    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
+    volumes_from: [ erigon ]
+    ports: [ "8545:8545", "8551:8551" ]
+    restart: unless-stopped
+
+  downloader: # Service to download/seed historical data (need only if you use --syncmode=snap)
+    image: thorax/erigon:${TAG:-latest}
+    command: |
+      downloader ${DOWNLOADER_FLAGS-}
+      --downloader.api.addr=0.0.0.0:9093
+    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
+    #cpus: 0.2 # No real-time computation here, so - limit it hard
+    volumes_from: [ erigon ]
+    ports: [ "9093:9093", "42069:42069/tcp", "42069:42069/udp" ]
     restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.35.0
     user: 1000:1000 # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
-    ports:
-      - "9090:9090"
+    ports: [ "9090:9090" ]
     volumes:
       - ${ERIGON_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-prometheus:/prometheus
@@ -33,8 +56,7 @@ services:
   grafana:
     image: grafana/grafana:8.5.2
     user: 1000:1000 # Uses erigon user from Dockerfile
-    ports:
-      - "3000:3000"
+    ports: [ "3000:3000" ]
     volumes:
       - ${ERIGON_GRAFANA_CONFIG:-./cmd/prometheus/grafana.ini}:/etc/grafana/grafana.ini
       - ./cmd/prometheus/datasources:/etc/grafana/provisioning/datasources
@@ -42,26 +64,3 @@ services:
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
     restart: unless-stopped
 
-  rpcdaemon: # Service to server JSON-RCP API
-    image: thorax/erigon:${TAG:-latest}
-    command: rpcdaemon ${RPCDAEMON_FLAGS-} --datadir=/home/erigon/.local/share/erigon --private.api.addr=erigon:9090 --txpool.api.addr=erigon:9090 --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net --ws
-    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
-    volumes_from:
-      - erigon
-    ports:
-      - "8545:8545"
-      - "8551:8551"
-    restart: unless-stopped
-
-  downloader: # Service to download/seed historical data (need only if you use --syncmode=snap)
-    image: thorax/erigon:${TAG:-latest}
-    command: downloader ${DOWNLOADER_FLAGS-} --datadir=/home/erigon/.local/share/erigon --downloader.api.addr=0.0.0.0:9093
-    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
-    #cpus: 0.2 # No real-time computation here, so - limit it hard
-    volumes_from:
-      - erigon
-    ports:
-      - "9093:9093"
-      - "42069:42069/tcp"
-      - "42069:42069/udp"
-    restart: unless-stopped
