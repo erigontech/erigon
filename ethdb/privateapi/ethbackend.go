@@ -40,7 +40,9 @@ var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 1, Patch: 0}
 
 const MaxPendingPayloads = 128
 
-var UnknownPayload = rpc.CustomError{Code: -32001, Message: "Unknown payload"}
+var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
+var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
+var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -387,7 +389,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 
 	payload, ok := s.pendingPayloads[req.PayloadId]
 	if !ok {
-		return nil, &UnknownPayload
+		return nil, &UnknownPayloadErr
 	}
 
 	// getPayload should stop the build process
@@ -508,9 +510,10 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
 	}
 
-	if headHeader.Time > req.PayloadAttributes.Timestamp {
-		return nil, fmt.Errorf("timestamp is too low")
+	if headHeader.Time >= req.PayloadAttributes.Timestamp {
+		return nil, &InvalidPayloadAttributesErr
 	}
+
 	emptyHeader := core.MakeEmptyHeader(headHeader, s.config, req.PayloadAttributes.Timestamp, nil)
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
