@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -100,12 +101,12 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader interfaces.BlockReader
-	_txnReader   interfaces.TxnReader
+	_blockReader services.BlockReader
+	_txnReader   services.TxnReader
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *filters.Filters, stateCache kvcache.Cache, blockReader interfaces.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpcservices.Filters, stateCache kvcache.Cache, blockReader services.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512

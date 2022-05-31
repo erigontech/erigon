@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
@@ -27,10 +28,10 @@ type RemoteBackend struct {
 	log              log.Logger
 	version          gointerfaces.Version
 	db               kv.RoDB
-	blockReader      interfaces.BlockAndTxnReader
+	blockReader      services.BlockAndTxnReader
 }
 
-func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader interfaces.BlockAndTxnReader) *RemoteBackend {
+func NewRemoteBackend(client remote.ETHBACKENDClient, db kv.RoDB, blockReader services.BlockAndTxnReader) *RemoteBackend {
 	return &RemoteBackend{
 		remoteEthBackend: client,
 		version:          gointerfaces.VersionFromProto(privateapi.EthBackendAPIVersion),
