@@ -165,7 +165,7 @@ func (d *Domain) scanStateFiles(files []fs.DirEntry) {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 5 {
 			if len(subs) != 0 {
-				log.Warn("File ignored by doman scan, more than 4 submatches", "name", name, "submatches", len(subs))
+				log.Warn("File ignored by doman scan, more than 5 submatches", "name", name, "submatches", len(subs))
 			}
 			continue
 		}
@@ -256,10 +256,10 @@ func (d *Domain) SetTxNum(txNum uint64) {
 	d.txNum = txNum
 }
 
-func (d *Domain) get(key []byte) ([]byte, bool, error) {
+func (d *Domain) get(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	var invertedStep [8]byte
 	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
-	keyCursor, err := d.tx.CursorDupSort(d.keysTable)
+	keyCursor, err := roTx.CursorDupSort(d.keysTable)
 	if err != nil {
 		return nil, false, err
 	}
@@ -275,15 +275,15 @@ func (d *Domain) get(key []byte) ([]byte, bool, error) {
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	copy(keySuffix[len(key):], foundInvStep)
-	v, err := d.tx.GetOne(d.valsTable, keySuffix)
+	v, err := roTx.GetOne(d.valsTable, keySuffix)
 	if err != nil {
 		return nil, false, err
 	}
 	return v, true, nil
 }
 
-func (d *Domain) Get(key []byte) ([]byte, error) {
-	v, _, err := d.get(key)
+func (d *Domain) Get(key []byte, roTx kv.Tx) ([]byte, error) {
+	v, _, err := d.get(key, roTx)
 	return v, err
 }
 
@@ -325,7 +325,7 @@ func (d *Domain) update(key, original []byte) error {
 }
 
 func (d *Domain) Put(key, val []byte) error {
-	original, _, err := d.get(key)
+	original, _, err := d.get(key, d.tx)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func (d *Domain) Put(key, val []byte) error {
 }
 
 func (d *Domain) Delete(key []byte) error {
-	original, _, err := d.get(key)
+	original, _, err := d.get(key, d.tx)
 	if err != nil {
 		return err
 	}
@@ -410,6 +410,11 @@ func (ch *CursorHeap) Pop() interface{} {
 	return x
 }
 
+// IteratePrefix iterates over key-value pairs of the domain that start with given prefix
+// The length of the prefix has to match the `prefixLen` parameter used to create the domain
+// Such iteration is not intended to be used in public API, therefore it uses read-write transaction
+// inside the domain. Another version of this for public API use needs to be created, that uses
+// roTx instead and supports ending the iterations before it reaches the end.
 func (d *Domain) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 	if len(prefix) != d.prefixLen {
 		return fmt.Errorf("wrong prefix length, this %s domain supports prefixLen %d, given [%x]", d.filenameBase, d.prefixLen, prefix)
@@ -955,15 +960,18 @@ func (d *Domain) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
 
 // historyAfterTxNum searches history for a value of specified key after txNum
 // second return value is true if the value is found in the history (even if it is nil)
-func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, error) {
+func (d *Domain) historyAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	var search filesItem
+	search.startTxNum = txNum + 1
 	search.endTxNum = txNum + 1
 	var foundTxNum uint64
 	var foundEndTxNum uint64
 	var foundStartTxNum uint64
 	var found bool
+	var anyItem bool // Whether any filesItem has been looked at in the loop below
 	d.files[EfHistory].AscendGreaterOrEqual(&search, func(i btree.Item) bool {
 		item := i.(*filesItem)
+		anyItem = true
 		offset := item.indexReader.Lookup(key)
 		g := item.getter
 		g.Reset(offset)
@@ -981,8 +989,38 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, erro
 		return true
 	})
 	if !found {
+		if anyItem {
+			// If there were no changes but there were history files, the value can be obtained from value files
+			var topState *filesItem
+			d.files[Values].AscendGreaterOrEqual(&search, func(i btree.Item) bool {
+				topState = i.(*filesItem)
+				return false
+			})
+			var val []byte
+			d.files[Values].DescendLessOrEqual(topState, func(i btree.Item) bool {
+				item := i.(*filesItem)
+				if item.index.Empty() {
+					return true
+				}
+				offset := item.indexReader.Lookup(key)
+				g := item.getter
+				g.Reset(offset)
+				if g.HasNext() {
+					if keyMatch, _ := g.Match(key); keyMatch {
+						val, _ = g.Next(nil)
+						found = true
+						return false
+					}
+				}
+				return true
+			})
+			return val, found, nil
+		}
 		// Value not found in history files, look in the recent history
-		indexCursor, err := d.tx.CursorDupSort(d.indexTable)
+		if roTx == nil {
+			return nil, false, fmt.Errorf("roTx is nil")
+		}
+		indexCursor, err := roTx.CursorDupSort(d.indexTable)
 		if err != nil {
 			return nil, false, err
 		}
@@ -995,7 +1033,7 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, erro
 		}
 		if foundTxNumVal != nil {
 			var historyKeysCursor kv.CursorDupSort
-			if historyKeysCursor, err = d.tx.CursorDupSort(d.historyKeysTable); err != nil {
+			if historyKeysCursor, err = roTx.CursorDupSort(d.historyKeysTable); err != nil {
 				return nil, false, err
 			}
 			defer historyKeysCursor.Close()
@@ -1009,7 +1047,7 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, erro
 				return nil, true, nil
 			}
 			var v []byte
-			if v, err = d.tx.GetOne(d.historyValsTable, vn[len(vn)-8:]); err != nil {
+			if v, err = roTx.GetOne(d.historyValsTable, vn[len(vn)-8:]); err != nil {
 				return nil, false, err
 			}
 			return v, true, nil
@@ -1034,15 +1072,17 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64) ([]byte, bool, erro
 	return v, true, nil
 }
 
-func (d *Domain) getAfterTxNum(key []byte, txNum uint64) ([]byte, error) {
-	v, hOk, err := d.historyAfterTxNum(key, txNum)
+// GetAfterTxNum does not always require usage of roTx. If it is possible to determine
+// historical value based only on static files, roTx will not be used.
+func (d *Domain) GetAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	v, hOk, err := d.historyAfterTxNum(key, txNum, roTx)
 	if err != nil {
 		return nil, err
 	}
 	if hOk {
 		return v, nil
 	}
-	if v, _, err = d.get(key); err != nil {
+	if v, _, err = d.get(key, roTx); err != nil {
 		return nil, err
 	}
 	return v, nil
