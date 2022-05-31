@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 	"unsafe"
- 
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb"
