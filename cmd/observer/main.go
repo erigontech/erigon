@@ -49,6 +49,8 @@ func mainWithFlags(ctx context.Context, flags observer.CommandFlags) error {
 
 		KeygenTimeout:     flags.KeygenTimeout,
 		KeygenConcurrency: flags.KeygenConcurrency,
+
+		ErigonLogPath: flags.ErigonLogPath,
 	}
 
 	crawler, err := observer.NewCrawler(discV4, db, crawlerConfig, log.Root())

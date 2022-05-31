@@ -216,6 +216,25 @@ func (db DBRetrier) FindNeighborBucketKeys(ctx context.Context, id NodeID) ([]st
 	return result, err
 }
 
+func (db DBRetrier) UpdateSentryCandidatesLastEventTime(ctx context.Context, value time.Time) error {
+	_, err := db.retry(ctx, "UpdateSentryCandidatesLastEventTime", func(ctx context.Context) (interface{}, error) {
+		return nil, db.db.UpdateSentryCandidatesLastEventTime(ctx, value)
+	})
+	return err
+}
+
+func (db DBRetrier) FindSentryCandidatesLastEventTime(ctx context.Context) (*time.Time, error) {
+	resultAny, err := db.retry(ctx, "FindSentryCandidatesLastEventTime", func(ctx context.Context) (interface{}, error) {
+		return db.db.FindSentryCandidatesLastEventTime(ctx)
+	})
+
+	if resultAny == nil {
+		return nil, err
+	}
+	result := resultAny.(*time.Time)
+	return result, err
+}
+
 func (db DBRetrier) UpdateCrawlRetryTime(ctx context.Context, id NodeID, retryTime time.Time) error {
 	_, err := db.retry(ctx, "UpdateCrawlRetryTime", func(ctx context.Context) (interface{}, error) {
 		return nil, db.db.UpdateCrawlRetryTime(ctx, id, retryTime)

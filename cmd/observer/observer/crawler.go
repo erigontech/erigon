@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
+	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,8 @@ type Crawler struct {
 
 	diplomacy *Diplomacy
 
+	sentryCandidatesIntake *sentry_candidates.Intake
+
 	log log.Logger
 }
 
@@ -47,6 +50,8 @@ type CrawlerConfig struct {
 
 	KeygenTimeout     time.Duration
 	KeygenConcurrency uint
+
+	ErigonLogPath string
 }
 
 func NewCrawler(
@@ -83,6 +88,18 @@ func NewCrawler(
 		config.StatusLogPeriod,
 		logger)
 
+	var sentryCandidatesIntake *sentry_candidates.Intake
+	if config.ErigonLogPath != "" {
+		sentryCandidatesIntake = sentry_candidates.NewIntake(
+			config.ErigonLogPath,
+			database.NewDBRetrier(db, logger),
+			saveQueue,
+			chain,
+			config.HandshakeRefreshTimeout,
+			config.StatusLogPeriod,
+			logger)
+	}
+
 	instance := Crawler{
 		transport,
 		database.NewDBRetrier(db, logger),
@@ -90,6 +107,7 @@ func NewCrawler(
 		config,
 		forkFilter,
 		diplomacy,
+		sentryCandidatesIntake,
 		logger,
 	}
 	return &instance, nil
@@ -104,6 +122,15 @@ func (crawler *Crawler) startDiplomacy(ctx context.Context) {
 		err := crawler.diplomacy.Run(ctx)
 		if (err != nil) && !errors.Is(err, context.Canceled) {
 			crawler.log.Error("Diplomacy has failed", "err", err)
+		}
+	}()
+}
+
+func (crawler *Crawler) startSentryCandidatesIntake(ctx context.Context) {
+	go func() {
+		err := crawler.sentryCandidatesIntake.Run(ctx)
+		if (err != nil) && !errors.Is(err, context.Canceled) {
+			crawler.log.Error("Sentry candidates intake has failed", "err", err)
 		}
 	}()
 }
@@ -170,6 +197,9 @@ func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candi
 func (crawler *Crawler) Run(ctx context.Context) error {
 	crawler.startSaveQueue(ctx)
 	crawler.startDiplomacy(ctx)
+	if crawler.sentryCandidatesIntake != nil {
+		crawler.startSentryCandidatesIntake(ctx)
+	}
 
 	nodes := crawler.startSelectCandidates(ctx)
 	sem := semaphore.NewWeighted(int64(crawler.config.ConcurrencyLimit))

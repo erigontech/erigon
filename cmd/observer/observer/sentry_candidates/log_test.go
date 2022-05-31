@@ -1,6 +1,8 @@
 package sentry_candidates
 
 import (
+	"context"
+	"github.com/nxadm/tail"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"strings"
@@ -27,6 +29,27 @@ func TestLogRead(t *testing.T) {
 	assert.True(t, strings.HasPrefix(event.NodeURL, "enode:"))
 	assert.True(t, strings.HasPrefix(event.ClientID, "Nethermind"))
 	assert.Equal(t, 2, len(event.Capabilities))
+}
+
+func TestLogReadTailSkimFile(t *testing.T) {
+	t.Skip()
+
+	logFile, err := tail.TailFile(
+		"erigon.log",
+		tail.Config{Follow: false, MustExist: true})
+	require.Nil(t, err)
+	defer func() {
+		_ = logFile.Stop()
+	}()
+
+	eventLog := NewLog(NewTailLineReader(context.Background(), logFile))
+	for {
+		event, err := eventLog.Read()
+		require.Nil(t, err)
+		if event == nil {
+			break
+		}
+	}
 }
 
 func TestLogEventEthVersion(t *testing.T) {

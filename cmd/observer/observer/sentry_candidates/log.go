@@ -2,8 +2,10 @@ package sentry_candidates
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/nxadm/tail"
 	"io"
 	"strconv"
 	"strings"
@@ -76,5 +78,27 @@ func (reader *ScannerLineReader) ReadLine() (*string, error) {
 		return &line, nil
 	} else {
 		return nil, reader.scanner.Err()
+	}
+}
+
+type TailLineReader struct {
+	ctx  context.Context
+	tail *tail.Tail
+}
+
+func NewTailLineReader(ctx context.Context, tail *tail.Tail) *TailLineReader {
+	return &TailLineReader{ctx, tail}
+}
+
+func (reader *TailLineReader) ReadLine() (*string, error) {
+	select {
+	case line, ok := <-reader.tail.Lines:
+		if ok {
+			return &line.Text, nil
+		} else {
+			return nil, reader.tail.Err()
+		}
+	case <-reader.ctx.Done():
+		return nil, reader.ctx.Err()
 	}
 }

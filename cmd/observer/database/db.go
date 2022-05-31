@@ -56,6 +56,9 @@ type DB interface {
 	UpdateNeighborBucketKeys(ctx context.Context, id NodeID, keys []string) error
 	FindNeighborBucketKeys(ctx context.Context, id NodeID) ([]string, error)
 
+	UpdateSentryCandidatesLastEventTime(ctx context.Context, value time.Time) error
+	FindSentryCandidatesLastEventTime(ctx context.Context) (*time.Time, error)
+
 	UpdateCrawlRetryTime(ctx context.Context, id NodeID, retryTime time.Time) error
 	CountCandidates(ctx context.Context) (uint, error)
 	FindCandidates(ctx context.Context, limit uint) ([]NodeID, error)
