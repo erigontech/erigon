@@ -197,12 +197,6 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 	return ff.pendingBlock
 }
 
-func (ff *Filters) LastPendingBlockHeader() *types.Header {
-	ff.mu.RLock()
-	defer ff.mu.RUnlock()
-	return ff.pendingBlock.Header()
-}
-
 func (ff *Filters) subscribeToPendingTransactions(ctx context.Context, txPool txpool.TxpoolClient) error {
 	subscription, err := txPool.OnAdd(ctx, &txpool.OnAddRequest{}, grpc.WaitForReady(true))
 	if err != nil {
