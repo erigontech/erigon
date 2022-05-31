@@ -334,7 +334,7 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 	}
 	if parentTd != nil && parentTd.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[NewPayload] TTD not reached yet", "height", header.Number, "hash", common.Hash(blockHash))
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID}, nil
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: &types2.H256{}}, nil
 	}
 	tx.Rollback()
 
@@ -454,7 +454,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn("[ForkChoiceUpdated] TTD not reached yet", "forkChoice", forkChoice)
 		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID},
+			PayloadStatus: &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: &types2.H256{}},
 		}, nil
 	}
 
