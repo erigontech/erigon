@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/urfave/cli"
@@ -275,9 +276,9 @@ func Main(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Commit()
+	//defer tx.Commit()
 
-	reader, writer := MakePreState2(chainConfig.Rules(0), tx, prestate.Pre)
+	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true)
@@ -291,6 +292,14 @@ func Main(ctx *cli.Context) error {
 	}
 
 	body, _ := rlp.EncodeToBytes(txs)
+
+	var root common.Hash
+	root, err = trie.CalcRoot("", tx)
+	if err != nil {
+		return err
+	}
+	fmt.Print("dfasdg")
+	fmt.Printf("root for block %d=[%s]\n", block, root)
 
 	// Dump the excution result
 	collector := make(Alloc)

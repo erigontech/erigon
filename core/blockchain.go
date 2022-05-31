@@ -58,17 +58,24 @@ const (
 // always print out progress. This avoids the user wondering what's going on.
 const statsReportLimit = 8 * time.Second
 
+type RejectedTx struct {
+	Index int    `json:"index"    gencodec:"required"`
+	Err   string `json:"error"    gencodec:"required"`
+}
+
+type RejectedTxs []*RejectedTx
+
 type EphemeralExecResult struct {
-	StateRoot         common.Hash           `json:"stateRoot"`
-	TxRoot            common.Hash           `json:"txRoot"`
-	ReceiptRoot       common.Hash           `json:"receiptRoot"`
-	LogsHash          common.Hash           `json:"logsHash"`
-	Bloom             types.Bloom           `json:"logsBloom"        gencodec:"required"`
-	Receipts          types.Receipts        `json:"receipts"`
-	Rejected          []*rejectedTx         `json:"rejected,omitempty"`
-	Difficulty        *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
-	GasUsed           math.HexOrDecimal64   `json:"gasUsed"`
-	ReceiptForStorage *types.ReceiptForStorage
+	StateRoot         common.Hash              `json:"stateRoot"`
+	TxRoot            common.Hash              `json:"txRoot"`
+	ReceiptRoot       common.Hash              `json:"receiptRoot"`
+	LogsHash          common.Hash              `json:"logsHash"`
+	Bloom             types.Bloom              `json:"logsBloom"        gencodec:"required"`
+	Receipts          types.Receipts           `json:"receipts"`
+	Rejected          RejectedTxs              `json:"rejected"`
+	Difficulty        *math.HexOrDecimal256    `json:"currentDifficulty" gencodec:"required"`
+	GasUsed           math.HexOrDecimal64      `json:"gasUsed"`
+	ReceiptForStorage *types.ReceiptForStorage `json:"-"`
 }
 
 // report prints statistics if some number of blocks have been processed
@@ -234,11 +241,6 @@ func ExecuteBlockEphemerallyForBSC(
 	return receipts, nil
 }
 
-type rejectedTx struct {
-	Index int    `json:"index"`
-	Err   string `json:"error"`
-}
-
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerally(
@@ -265,7 +267,7 @@ func ExecuteBlockEphemerally(
 	gp.AddGas(block.GasLimit())
 
 	var (
-		rejectedTxs []*rejectedTx
+		rejectedTxs []*RejectedTx
 		includedTxs types.Transactions
 	)
 
@@ -305,7 +307,7 @@ func ExecuteBlockEphemerally(
 			vmConfig.Tracer = nil
 		}
 		if err != nil {
-			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
+			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
 		} else {
 			includedTxs = append(includedTxs, tx)
 			if !vmConfig.NoReceipts {
@@ -316,7 +318,6 @@ func ExecuteBlockEphemerally(
 
 	var bloom types.Bloom
 	var receiptSha common.Hash
-	var err error
 
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
 		receiptSha = types.DeriveSha(receipts)
@@ -370,12 +371,12 @@ func ExecuteBlockEphemerally(
 		Bloom:             bloom,
 		LogsHash:          rlpHash(blockLogs),
 		Receipts:          receipts,
+		Difficulty:        (*math.HexOrDecimal256)(block.Header().Difficulty),
 		GasUsed:           math.HexOrDecimal64(*usedGas),
 		Rejected:          rejectedTxs,
 		ReceiptForStorage: stateSyncReceipt,
 	}
 
-	// return receipts, stateSyncReceipt, execRs, nil
 	return execRs, nil
 }
 
