@@ -38,7 +38,6 @@ func (cur cursorentries) Swap(i, j int) {
 type miningmutationcursor struct {
 	// sorted slice of the entries in the bucket we iterate on.
 	pairs cursorentries
-
 	// we can keep one cursor type if we store 2 of each kind.
 	cursor    kv.Cursor
 	dupCursor kv.CursorDupSort
@@ -88,30 +87,13 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 	if m.cursor == nil {
 		return m.goForward(nil, nil)
 	}
-	if m.pairs.Len() == 0 {
-		m.current = 0
-		return m.cursor.First()
-	}
 
 	dbKey, dbValue, err := m.cursor.First()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// is this db less than memory?
-	if (compareEntries(cursorentry{dbKey, dbValue}, m.pairs[0])) {
-		m.currentPair = cursorentry{dbKey, dbValue}
-		return dbKey, dbValue, nil
-	}
-
-	if !m.isDupsortedEnabled() && bytes.Compare(dbKey, m.pairs[0].key) == 0 {
-		if _, _, err := m.cursor.Next(); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	m.currentPair = cursorentry{common.CopyBytes(m.pairs[0].key), common.CopyBytes(m.pairs[0].value)}
-	return common.CopyBytes(m.pairs[0].key), common.CopyBytes(m.pairs[0].value), nil
+	return m.goForward(dbKey, dbValue)
 }
 
 // Current return the current key and values the cursor is on.

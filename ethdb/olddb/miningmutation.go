@@ -13,10 +13,14 @@ import (
 )
 
 type miningmutation struct {
-	puts          map[string]map[string][]byte
-	dupsortPuts   map[string]map[string][][]byte
+	// Bucket => Key => Value
+	puts        map[string]map[string][]byte
+	dupsortPuts map[string]map[string][][]byte
+
 	dupsortTables map[string]struct{}
 	clearedTables map[string]struct{}
+
+	ignoreDbEntries map[string]map[string]struct{}
 
 	db kv.Tx
 	mu sync.RWMutex
@@ -40,7 +44,8 @@ func NewMiningBatch(tx kv.Tx) *miningmutation {
 			kv.StorageChangeSet: {},
 			kv.HashedStorage:    {},
 		},
-		clearedTables: make(map[string]struct{}),
+		clearedTables:   make(map[string]struct{}),
+		ignoreDbEntries: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -53,6 +58,11 @@ func (m *miningmutation) RwKV() kv.RwDB {
 
 func (m *miningmutation) isDupsortedTable(table string) bool {
 	_, ok := m.dupsortTables[table]
+	return ok
+}
+
+func (m *miningmutation) ignoreDb(table string, key []byte) bool {
+	_, ok := m.ignoreDbEntries[table][string(key)]
 	return ok
 }
 
@@ -117,7 +127,7 @@ func (m *miningmutation) GetOne(table string, key []byte) ([]byte, error) {
 		}
 		return value, nil
 	}
-	if m.db != nil && !m.isBucketCleared(table) {
+	if m.db != nil && !m.isBucketCleared(table) && !m.ignoreDb(table, key) {
 		// TODO: simplify when tx can no longer be parent of mutation
 		value, err := m.db.GetOne(table, key)
 		if err != nil {
@@ -161,6 +171,12 @@ func (m *miningmutation) Has(table string, key []byte) (bool, error) {
 func (m *miningmutation) Put(table string, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if value == nil {
+		if _, ok := m.ignoreDbEntries[table][string(key)]; !ok {
+			m.ignoreDbEntries[table] = make(map[string]struct{})
+		}
+		m.ignoreDbEntries[table][string(key)] = struct{}{}
+	}
 	dupsort := m.isDupsortedTable(table)
 	if _, ok := m.puts[table]; !ok && !dupsort {
 		m.puts[table] = make(map[string][]byte)
