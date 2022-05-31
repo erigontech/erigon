@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -57,14 +58,16 @@ const (
 // always print out progress. This avoids the user wondering what's going on.
 const statsReportLimit = 8 * time.Second
 
-type ExecutionResultNew struct {
-	// StateRoot   common.Hash    `json:"stateRoot"` I think we don't need this
-	TxRoot            common.Hash    `json:"txRoot"`
-	ReceiptRoot       common.Hash    `json:"receiptRoot"`
-	LogsHash          common.Hash    `json:"logsHash"`
-	Bloom             types.Bloom    `json:"logsBloom"        gencodec:"required"`
-	Receipts          types.Receipts `json:"receipts"`
-	Rejected          []*rejectedTx  `json:"rejected,omitempty"`
+type EphemeralExecResult struct {
+	StateRoot         common.Hash           `json:"stateRoot"`
+	TxRoot            common.Hash           `json:"txRoot"`
+	ReceiptRoot       common.Hash           `json:"receiptRoot"`
+	LogsHash          common.Hash           `json:"logsHash"`
+	Bloom             types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Receipts          types.Receipts        `json:"receipts"`
+	Rejected          []*rejectedTx         `json:"rejected,omitempty"`
+	Difficulty        *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	GasUsed           math.HexOrDecimal64   `json:"gasUsed"`
 	ReceiptForStorage *types.ReceiptForStorage
 }
 
@@ -249,7 +252,8 @@ func ExecuteBlockEphemerally(
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
-) (*ExecutionResultNew, error) {
+	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
+) (*EphemeralExecResult, error) {
 
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
@@ -304,25 +308,29 @@ func ExecuteBlockEphemerally(
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 		} else {
 			includedTxs = append(includedTxs, tx)
-		}
-		if !vmConfig.NoReceipts {
-			receipts = append(receipts, receipt)
+			if !vmConfig.NoReceipts {
+				receipts = append(receipts, receipt)
+			}
 		}
 	}
 
+	var bloom types.Bloom
+	var receiptSha common.Hash
+	var err error
+
 	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		receiptSha := types.DeriveSha(receipts)
-		if receiptSha != block.ReceiptHash() {
+		receiptSha = types.DeriveSha(receipts)
+		if !statelessExec && receiptSha != block.ReceiptHash() {
 			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 		}
 	}
 
-	if *usedGas != header.GasUsed {
+	if !statelessExec && *usedGas != header.GasUsed {
 		return nil, fmt.Errorf("gas used by execution: %d, in header: %d", *usedGas, header.GasUsed)
 	}
 	if !vmConfig.NoReceipts {
-		bloom := types.CreateBloom(receipts)
-		if bloom != header.Bloom {
+		bloom = types.CreateBloom(receipts)
+		if !statelessExec && bloom != header.Bloom {
 			return nil, fmt.Errorf("bloom computed by execution: %x, in header: %x", bloom, header.Bloom)
 		}
 	}
@@ -356,13 +364,13 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	execRs := &ExecutionResultNew{
-		// StateRoot:   root,
+	execRs := &EphemeralExecResult{
 		TxRoot:            types.DeriveSha(includedTxs),
-		ReceiptRoot:       types.DeriveSha(receipts),
-		Bloom:             types.CreateBloom(receipts),
-		LogsHash:          rlpHash(ibs.Logs()),
+		ReceiptRoot:       receiptSha,
+		Bloom:             bloom,
+		LogsHash:          rlpHash(blockLogs),
 		Receipts:          receipts,
+		GasUsed:           math.HexOrDecimal64(*usedGas),
 		Rejected:          rejectedTxs,
 		ReceiptForStorage: stateSyncReceipt,
 	}
@@ -474,7 +482,7 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 		_, _, err = engine.Finalize(cc, header, ibs, txs, uncles, receipts, e, headerReader, syscall)
 	}
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	var originalSystemAcc *accounts.Account

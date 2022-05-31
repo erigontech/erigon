@@ -280,14 +280,14 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState2(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
-	_, _, err = core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true)
 
 	if hashError != nil {
-		return hashError
+		return fmt.Errorf("hash error on EBE: %w", err)
 	}
 
 	if err != nil {
-		return err
+		return fmt.Errorf("error on EBE: %w", err)
 	}
 
 	body, _ := rlp.EncodeToBytes(txs)
@@ -297,7 +297,7 @@ func Main(ctx *cli.Context) error {
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
 	//return dispatchOutput(ctx, baseDir, result, collector, body)
-	return dispatchOutput(ctx, baseDir, nil, collector, body)
+	return dispatchOutput(ctx, baseDir, result, collector, body)
 
 	// // earlier logic
 
@@ -445,7 +445,7 @@ func saveFile(baseDir, filename string, data interface{}) error {
 
 // dispatchOutput writes the output data to either stderr or stdout, or to the specified
 // files
-func dispatchOutput(ctx *cli.Context, baseDir string, result *ExecutionResult, alloc Alloc, body hexutil.Bytes) error {
+func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExecResult, alloc Alloc, body hexutil.Bytes) error {
 	stdOutObject := make(map[string]interface{})
 	stdErrObject := make(map[string]interface{})
 	dispatch := func(baseDir, fName, name string, obj interface{}) error {
