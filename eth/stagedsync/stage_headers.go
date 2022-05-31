@@ -737,6 +737,7 @@ Loop:
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
+				reqCount++
 			}
 		}
 		if len(penalties) > 0 {
