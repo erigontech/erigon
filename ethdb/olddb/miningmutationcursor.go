@@ -43,7 +43,8 @@ type miningmutationcursor struct {
 	cursor    kv.Cursor
 	dupCursor kv.CursorDupSort
 	// we keep the index in the slice of pairs we are at.
-	current int
+	current      int
+	isPrevFromDb bool
 	// current cursor entry
 	currentPair cursorentry
 	// we keep the mining mutation so that we can insert new elements in db
@@ -131,6 +132,7 @@ func (m *miningmutationcursor) isPointingOnDb() (bool, error) {
 func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte, error) {
 	// is this db less than memory?
 	if m.current > m.pairs.Len()-1 {
+		m.isPrevFromDb = true
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
@@ -141,10 +143,11 @@ func (m *miningmutationcursor) goForward(dbKey, dbValue []byte) ([]byte, []byte,
 		}
 	}
 	if dbKey != nil && dbValue != nil && compareEntries(cursorentry{dbKey, dbValue}, m.pairs[m.current]) {
+		m.isPrevFromDb = true
 		m.currentPair = cursorentry{dbKey, dbValue}
 		return dbKey, dbValue, nil
 	}
-
+	m.isPrevFromDb = false
 	m.currentPair = cursorentry{common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value)}
 	// return current
 	return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
@@ -165,6 +168,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 		if nextK != nil {
 			m.currentPair = cursorentry{nextK, nextV}
 		}
+		m.isPrevFromDb = true
 		return nextK, nextV, nil
 	}
 
@@ -172,12 +176,15 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
 	if isEndDb {
-		if m.current+1 > m.pairs.Len()-1 {
+		if !m.isPrevFromDb {
+			m.current++
+		}
+		m.isPrevFromDb = false
+
+		if m.current > m.pairs.Len()-1 {
 			return nil, nil, nil
 		}
-		m.current++
 		m.currentPair = cursorentry{common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value)}
 		return common.CopyBytes(m.pairs[m.current].key), common.CopyBytes(m.pairs[m.current].value), nil
 	}
@@ -238,6 +245,7 @@ func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 		}
 	}
 	m.current = len(m.pairs)
+	m.isPrevFromDb = true
 	return dbKey, dbValue, nil
 }
 
@@ -268,6 +276,7 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 		m.currentPair = cursorentry{dbKey, dbValue}
 		m.current = len(m.pairs)
 	}
+	m.isPrevFromDb = true
 	return dbKey, dbValue, err
 }
 
