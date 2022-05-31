@@ -212,7 +212,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-func (api *BaseAPI) pendingBlockHeader() *types.Header {
+func (api *BaseAPI) pendingBlockHeeader() *types.Header {
 	return api.filters.LastPendingBlockHeader()
 }
 
