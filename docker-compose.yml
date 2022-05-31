@@ -37,8 +37,7 @@ services:
     command: |
       downloader ${DOWNLOADER_FLAGS-}
       --downloader.api.addr=0.0.0.0:9093
-    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
-    #cpus: 0.2 # No real-time computation here, so - limit it hard
+    pid: service:erigon
     volumes_from: [ erigon ]
     ports: [ "9093:9093", "42069:42069/tcp", "42069:42069/udp" ]
     restart: unless-stopped
