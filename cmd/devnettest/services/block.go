@@ -115,6 +115,25 @@ func SearchBlockForTx(txnHash common.Hash) (uint64, error) {
 		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
 	}
 
+	// var count int
+
+// ForLoop:
+// 	for {
+// 		select {
+// 		case v := <-ch:
+// 			count++
+// 			_map := v.(map[string]interface{})
+// 			for k, val := range _map {
+// 				fmt.Printf("%s: %+v, ", k, val)
+// 			}
+// 			fmt.Println()
+// 			fmt.Println()
+// 			if count == numberOfIterations {
+// 				break ForLoop
+// 			}
+// 		}
+// 	}
+
 	return blockN, nil
 }
 
@@ -170,8 +189,6 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 		return fmt.Errorf("failed to get logs: %v", err)
 	}
 
-	//keepReads()
-
 	return nil
 }
 
@@ -193,26 +210,5 @@ func ClearDevDB() {
 	if err != nil {
 		fmt.Println("Error occurred clearing Dev DB")
 		panic("could not clear dev DB")
-	}
-}
-
-func keepReads() {
-	var count int
-
-ForLoop:
-	for {
-		select {
-		case v := <-ch:
-			count++
-			_map := v.(map[string]interface{})
-			for k, val := range _map {
-				fmt.Printf("%s: %+v, ", k, val)
-			}
-			fmt.Println()
-			fmt.Println()
-			if count == numberOfIterations {
-				break ForLoop
-			}
-		}
 	}
 }
