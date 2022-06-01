@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -28,7 +30,8 @@ type miningmutation struct {
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMiningBatch(tx kv.Tx) *miningmutation {
-	memTx, err := memdb.New().BeginRw(context.Background())
+	tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
+	memTx, err := tmpDB.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -274,7 +277,7 @@ func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 		return nil, err
 	}
 	c.cursor = c.dupCursor
-	// Initialize memory cursors 
+	// Initialize memory cursors
 	c.memDupCursor, err = m.memTx.RwCursorDupSort(bucket)
 	if err != nil {
 		return nil, err

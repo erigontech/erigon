@@ -2,7 +2,6 @@ package olddb
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -180,7 +179,6 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 // NextDup returns the next element of the mutation.
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 	if m.isPrevFromDb {
-		fmt.Println("err is here?1")
 		k, v, err := m.dupCursor.NextDup()
 
 		if err != nil {
@@ -188,8 +186,6 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 		}
 		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v)
 	}
-	fmt.Println("err is here?1")
-	defer fmt.Println("finished")
 	memK, memV, err := m.memDupCursor.NextDup()
 	if err != nil {
 		return nil, nil, err
@@ -245,18 +241,15 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
-	fmt.Println("Put " + m.table)
 	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 }
 
 func (m *miningmutationcursor) Append(k []byte, v []byte) error {
-	fmt.Println("Append " + m.table)
 	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 
 }
 
 func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
-	fmt.Println("AppendDup " + m.table)
 	return m.memDupCursor.AppendDup(common.CopyBytes(k), common.CopyBytes(v))
 }
 
