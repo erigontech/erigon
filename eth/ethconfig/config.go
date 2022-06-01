@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -61,7 +62,11 @@ var LightClientGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode: FullSync,
+	Sync: Sync{
+		Mode:                       FullSync,
+		BlockDownloaderWindow:      32768,
+		BodyDownloadTimeoutSeconds: 30,
+	},
 	Ethash: ethash.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
@@ -76,14 +81,17 @@ var Defaults = Config{
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
-	TxPool:      core.DefaultTxPoolConfig,
-	RPCGasCap:   50000000,
-	GPO:         FullNodeGPO,
-	RPCTxFeeCap: 1, // 1 ether
-
-	BodyDownloadTimeoutSeconds: 30,
+	DeprecatedTxPool: core.DeprecatedDefaultTxPoolConfig,
+	RPCGasCap:        50000000,
+	GPO:              FullNodeGPO,
+	RPCTxFeeCap:      1, // 1 ether
 
 	ImportMode: false,
+	Snapshot: Snapshot{
+		Enabled:    false,
+		KeepBlocks: false,
+		Produce:    true,
+	},
 }
 
 func init() {
@@ -110,11 +118,12 @@ func init() {
 	}
 }
 
-//go:generate gencodec -type Config -formats toml -out gen_config.go
+//go:generate gencodec -dir . -type Config -formats toml -out gen_config.go
 
 type Snapshot struct {
 	Enabled    bool
 	KeepBlocks bool
+	Produce    bool // produce new snapshots
 }
 
 func (s Snapshot) String() string {
@@ -123,24 +132,26 @@ func (s Snapshot) String() string {
 		out = append(out, "--syncmode=snap")
 	}
 	if s.KeepBlocks {
-		out = append(out, "--"+FlagSnapshotKeepBlocks+"=true")
+		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
+	}
+	if !s.Produce {
+		out = append(out, "--"+FlagSnapStop+"=true")
 	}
 	return strings.Join(out, " ")
 }
 
 var (
-	FlagSnapshot           = "snapshot"
-	FlagSnapshotKeepBlocks = "snap.keepblocks"
+	FlagSnapKeepBlocks = "snap.keepblocks"
+	FlagSnapStop       = "snap.stop"
 )
 
-func NewSnapshotCfg(enabled, keepBlocks bool) Snapshot {
-	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks}
+func NewSnapCfg(enabled, keepBlocks, produce bool) Snapshot {
+	return Snapshot{Enabled: enabled, KeepBlocks: keepBlocks, Produce: produce}
 }
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	SyncModeCli string
-	SyncMode    SyncMode
+	Sync Sync
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -167,8 +178,6 @@ type Config struct {
 
 	SnapDir string
 
-	BlockDownloaderWindow int
-
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader
 	ExternalSnapshotDownloaderAddr string
@@ -188,7 +197,8 @@ type Config struct {
 	Bor    params.BorConfig
 
 	// Transaction pool options
-	TxPool core.TxPoolConfig
+	DeprecatedTxPool core.TxPoolConfig
+	TxPool           txpool2.Config
 
 	// Gas Price Oracle options
 	GPO gasprice.Config
@@ -200,11 +210,7 @@ type Config struct {
 	// send-transction variants. The unit is ether.
 	RPCTxFeeCap float64 `toml:",omitempty"`
 
-	StateStream                bool
-	BodyDownloadTimeoutSeconds int // TODO change to duration
-
-	// SyncLoopThrottle sets a minimum time between staged loop iterations
-	SyncLoopThrottle time.Duration
+	StateStream bool
 
 	// Enable WatchTheBurn stage
 	EnabledIssuance bool
@@ -216,6 +222,21 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
+
+	// FORK_NEXT_VALUE (see EIP-3675) block override
+	OverrideMergeForkBlock *big.Int `toml:",omitempty"`
+
+	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
+}
+
+type Sync struct {
+	ModeCli string
+	Mode    SyncMode
+	// LoopThrottle sets a minimum time between staged loop iterations
+	LoopThrottle time.Duration
+
+	BlockDownloaderWindow      int
+	BodyDownloadTimeoutSeconds int // TODO: change to duration
 }
 
 type SyncMode string

@@ -60,11 +60,9 @@ var (
 
 // TxPoolConfig are the configuration parameters of the transaction pool.
 type TxPoolConfig struct {
-	Disable   bool
-	Locals    []common.Address // Addresses that should be treated by default as local
-	NoLocals  bool             // Whether local transaction handling should be disabled
-	Journal   string           // Journal of local transactions to survive node restarts
-	Rejournal time.Duration    // Time interval to regenerate the local transaction journal
+	Disable  bool
+	Locals   []common.Address // Addresses that should be treated by default as local
+	NoLocals bool             // Whether local transaction handling should be disabled
 
 	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
 	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
@@ -81,12 +79,9 @@ type TxPoolConfig struct {
 	TracedSenders []string // List of senders for which tx pool should print out debugging info
 }
 
-// DefaultTxPoolConfig contains the default configurations for the transaction
+// DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
 // pool.
-var DefaultTxPoolConfig = TxPoolConfig{
-	Journal:   "transactions.rlp",
-	Rejournal: time.Hour,
-
+var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
 	PriceLimit: 1,
 	PriceBump:  10,
 

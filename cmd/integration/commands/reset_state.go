@@ -274,7 +274,20 @@ func printStages(db kv.Tx) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "first header in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
+		if firstNonGenesis != nil {
+			fmt.Fprintf(w, "first header in db: %d\n", binary.BigEndian.Uint64(firstNonGenesis))
+		} else {
+			fmt.Fprintf(w, "no headers in db\n")
+		}
+		firstNonGenesis, err = rawdb.SecondKey(db, kv.BlockBody)
+		if err != nil {
+			return err
+		}
+		if firstNonGenesis != nil {
+			fmt.Fprintf(w, "first body in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
+		} else {
+			fmt.Fprintf(w, "no bodies in db\n\n")
+		}
 	}
 
 	return nil

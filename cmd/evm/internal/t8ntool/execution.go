@@ -118,7 +118,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	defer tx.Rollback()
 
 	var (
-		ibs         = MakePreState(chainConfig.Rules(0), tx, pre.Pre)
+		rules0      = chainConfig.Rules(0)
+		rules1      = chainConfig.Rules(1)
+		rules       = chainConfig.Rules(pre.Env.Number)
+		ibs         = MakePreState(rules0, tx, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -167,7 +170,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	systemcontracts.UpgradeBuildInSystemContract(chainConfig, new(big.Int).SetUint64(pre.Env.Number), ibs)
 
 	for i, txn := range txs {
-		msg, err := txn.AsMessage(*signer, pre.Env.BaseFee)
+		msg, err := txn.AsMessage(*signer, pre.Env.BaseFee, rules)
 		if err != nil {
 			log.Warn("rejected txn", "index", i, "hash", txn.Hash(), "err", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
@@ -255,7 +258,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 	// Commit block
 	var root common.Hash
-	if err = ibs.FinalizeTx(chainConfig.Rules(1), state.NewPlainStateWriter(tx, tx, 1)); err != nil {
+	if err = ibs.FinalizeTx(rules1, state.NewPlainStateWriter(tx, tx, 1)); err != nil {
 		return nil, nil, err
 	}
 	root, err = trie.CalcRoot("", tx)
@@ -278,7 +281,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db, execRs, nil
 }
 
-func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
+func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
 	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(r)

@@ -230,10 +230,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
-	cfg.BodyDownloadTimeoutSeconds = 10
-	cfg.TxPool.Disable = !withTxPool
-	cfg.TxPool.Journal = ""
-	cfg.TxPool.StartOnInit = true
+	cfg.Sync.BodyDownloadTimeoutSeconds = 10
+	cfg.DeprecatedTxPool.Disable = !withTxPool
+	cfg.DeprecatedTxPool.StartOnInit = true
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
@@ -241,7 +240,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
 	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
 
-	if !cfg.TxPool.Disable {
+	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpool.DefaultConfig
 		newTxs := make(chan types2.Hashes, 1024)
 		if t != nil {
@@ -282,9 +281,8 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 	blockReader := snapshotsync.NewBlockReader()
 
-	blockDownloaderWindow := 65536
 	networkID := uint64(1)
-	mock.sentriesClient, err = sentry.NewMultiClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, blockDownloaderWindow, blockReader)
+	mock.sentriesClient, err = sentry.NewMultiClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, cfg.Sync, blockReader)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)
@@ -309,7 +307,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				sendBodyRequest,
 				penalize,
 				blockPropagator,
-				cfg.BodyDownloadTimeoutSeconds,
+				cfg.Sync.BodyDownloadTimeoutSeconds,
 				*mock.ChainConfig,
 				cfg.BatchSize,
 				allSnapshots,

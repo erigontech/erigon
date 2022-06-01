@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/utils"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +17,6 @@ import (
 )
 
 func post(client *http.Client, url, request string, response interface{}) error {
-	fmt.Printf("Request: %+v\n", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
@@ -37,21 +38,26 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	return nil
 }
 
-func GetBalance(reqId int, address common.Address, blockNum string) error {
+func GetBalance(reqId int, address common.Address, blockNum string) (uint64, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 
 	if res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(address, blockNum), &b); res.Err != nil {
-		return fmt.Errorf("failed to get balance: %v", res.Err)
+		return 0, fmt.Errorf("failed to get balance: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	bal, err := json.Marshal(b.Balance)
 	if err != nil {
-		return fmt.Errorf("error parsing resonse: %v", err)
+		fmt.Println(err)
 	}
 
-	fmt.Printf("Balance retrieved: %v\n", s)
-	return nil
+	balStr := string(bal)[3 : len(bal)-1]
+	balance, err := strconv.ParseInt(balStr, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cannot convert balance to decimal: %v", err)
+	}
+
+	return uint64(balance), nil
 }
 
 func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
@@ -67,12 +73,6 @@ func SendTx(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
 		return nil, fmt.Errorf("could not make request to eth_sendRawTransaction: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing resonse: %v", err)
-	}
-
-	fmt.Printf("Submitted transaction successfully: %v\n", s)
 	return &b.TxnHash, nil
 }
 
@@ -84,7 +84,10 @@ func TxpoolContent(reqId int) error {
 		return fmt.Errorf("failed to fetch txpool content: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	//fmt.Printf("Pending: %+v\n", b.Result.(map[string]interface{})["pending"].(map[string]interface{})["hash"])
+	//fmt.Printf("Type: %T\n", b.Result.(map[string]interface{})["pending"])
+
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -101,7 +104,7 @@ func ParityList(reqId int, account common.Address, quantity int, offset []byte, 
 		return fmt.Errorf("failed to fetch storage keys: %v", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
@@ -110,7 +113,7 @@ func ParityList(reqId int, account common.Address, quantity int, offset []byte, 
 	return nil
 }
 
-func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error {
+func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address, show bool) error {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetLogs
 
@@ -118,34 +121,43 @@ func GetLogs(reqId int, fromBlock, toBlock uint64, address common.Address) error
 		return fmt.Errorf("error fetching logs: %v\n", res.Err)
 	}
 
-	s, err := parseResponse(b)
+	s, err := utils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing resonse: %v", err)
 	}
 
-	fmt.Printf("Logs: %v\n", s)
+	if show {
+		fmt.Printf("Logs: %v\n", s)
+	}
+
 	return nil
 }
 
-func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) error {
+func GetTransactionCountCmd(reqId int, address common.Address, blockNum string) (uint64, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
 	if res := reqGen.Erigon("eth_getTransactionCount", reqGen.getTransactionCount(address, blockNum), &b); res.Err != nil {
-		return fmt.Errorf("error getting transaction count: %v\n", res.Err)
+		return 0, fmt.Errorf("error getting transaction count: %v\n", res.Err)
 	}
 
 	if b.Error != nil {
-		return fmt.Errorf("error populating response object: %v", b.Error)
+		return 0, fmt.Errorf("error populating response object: %v", b.Error)
 	}
 
-	s, err := parseResponse(b)
+	n, err := json.Marshal(b.Result)
 	if err != nil {
-		return fmt.Errorf("error parsing resonse: %v", err)
+		fmt.Println(err)
 	}
 
-	fmt.Printf("Nonce: %v\n", s)
-	return nil
+	nonceStr := string(n)[3 : len(n)-1]
+
+	nonce, err := strconv.ParseInt(nonceStr, 16, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cannot convert nonce to decimal: %v", err)
+	}
+
+	return uint64(nonce), nil
 }
 
 func GetTransactionCount(reqId int, address common.Address, blockNum string) (rpctest.EthGetTransactionCount, error) {

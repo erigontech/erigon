@@ -16,11 +16,11 @@ var (
 )
 
 func init() {
-	listStorageKeysCmd.Flags().StringVar(&accountAddr, "addr", "", "String address to list keys")
-	listStorageKeysCmd.MarkFlagRequired("addr")
-	listStorageKeysCmd.Flags().StringVar(&offsetAddr, "offset", "", "Offset storage key from which the batch should start")
-	listStorageKeysCmd.Flags().IntVar(&quantity, "quantity", 10, "Integer number of addresses to display in a batch")
-	listStorageKeysCmd.Flags().StringVar(&blockNum, "block", "latest", "Integer block number, or the string 'latest', 'earliest' or 'pending'; now only 'latest' is available")
+	//listStorageKeysCmd.Flags().StringVar(&services.DevAddress, "addr", "", "String address to list keys")
+	//listStorageKeysCmd.MarkFlagRequired("addr")
+	//listStorageKeysCmd.Flags().StringVar(&offsetAddr, "offset", "", "Offset storage key from which the batch should start")
+	//listStorageKeysCmd.Flags().IntVar(&quantity, "quantity", 10, "Integer number of addresses to display in a batch")
+	//listStorageKeysCmd.Flags().StringVar(&blockNum, "block", "latest", "Integer block number, or the string 'latest', 'earliest' or 'pending'; now only 'latest' is available")
 
 	rootCmd.AddCommand(listStorageKeysCmd)
 }
@@ -32,10 +32,10 @@ var listStorageKeysCmd = &cobra.Command{
 		if clearDev {
 			defer services.ClearDevDB()
 		}
-		if !common.IsHexAddress(accountAddr) {
-			return fmt.Errorf("address: %v, is not a valid hex address\n", accountAddr)
+		if !common.IsHexAddress(services.DevAddress) {
+			return fmt.Errorf("address: %v, is not a valid hex address\n", services.DevAddress)
 		}
-		toAddress := common.HexToAddress(accountAddr)
+		toAddress := common.HexToAddress(services.DevAddress)
 		offset := common.Hex2Bytes(strings.TrimSuffix(offsetAddr, "0x"))
 		if err := requests.ParityList(reqId, toAddress, quantity, offset, blockNum); err != nil {
 			fmt.Printf("error getting parity list: %v\n", err)

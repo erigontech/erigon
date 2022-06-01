@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package node
+package nodecfg
 
 import (
 	"fmt"
@@ -27,12 +27,11 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -106,7 +105,7 @@ type Config struct {
 
 	// HTTPTimeouts allows for customization of the timeout values used by the HTTP RPC
 	// interface.
-	HTTPTimeouts rpc.HTTPTimeouts
+	HTTPTimeouts rpccfg.HTTPTimeouts
 
 	// HTTPPathPrefix specifies a path prefix on which http-rpc is to be served.
 	HTTPPathPrefix string `toml:",omitempty"`

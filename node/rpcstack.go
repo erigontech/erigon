@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/rs/cors"
 )
@@ -56,7 +57,7 @@ type rpcHandler struct {
 
 type httpServer struct {
 	log      log.Logger
-	timeouts rpc.HTTPTimeouts
+	timeouts rpccfg.HTTPTimeouts
 	mux      http.ServeMux // registered handlers go here
 
 	mu       sync.Mutex
@@ -80,7 +81,7 @@ type httpServer struct {
 	handlerNames map[string]string
 }
 
-func newHTTPServer(logger log.Logger, timeouts rpc.HTTPTimeouts) *httpServer {
+func newHTTPServer(logger log.Logger, timeouts rpccfg.HTTPTimeouts) *httpServer {
 	h := &httpServer{log: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
 
 	h.httpHandler.Store((*rpcHandler)(nil))
@@ -125,7 +126,7 @@ func (h *httpServer) start() error {
 
 	// Initialize the server.
 	h.server = &http.Server{Handler: h}
-	if h.timeouts != (rpc.HTTPTimeouts{}) {
+	if h.timeouts != (rpccfg.HTTPTimeouts{}) {
 		CheckTimeouts(&h.timeouts)
 		h.server.ReadTimeout = h.timeouts.ReadTimeout
 		h.server.WriteTimeout = h.timeouts.WriteTimeout

@@ -29,7 +29,9 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -43,7 +45,7 @@ import (
 
 // Node is a container on which services can be registered.
 type Node struct {
-	config        *Config
+	config        *nodecfg.Config
 	log           log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
@@ -70,7 +72,7 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(conf *Config) (*Node, error) {
+func New(conf *nodecfg.Config) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
@@ -123,7 +125,7 @@ func New(conf *Config) (*Node, error) {
 
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
-	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
+	node.ws = newHTTPServer(node.log, rpccfg.DefaultHTTPTimeouts)
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
 	//debug.CheckForCrashes(conf.DataDir)
@@ -457,7 +459,7 @@ func (n *Node) RPCHandler() (*rpc.Server, error) {
 }
 
 // Config returns the configuration of node.
-func (n *Node) Config() *Config {
+func (n *Node) Config() *nodecfg.Config {
 	return n.config
 }
 
@@ -490,7 +492,7 @@ func (n *Node) WSEndpoint() string {
 	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
 }
 
-func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
+func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
 	case kv.ChainDB:

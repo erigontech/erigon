@@ -26,6 +26,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -886,7 +887,7 @@ func ReadReceipts(db kv.Tx, block *types.Block, senders []common.Address) types.
 	}
 	block.SendersToTxs(senders)
 	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
-		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err)
+		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())
 		return nil
 	}
 	return receipts
@@ -1087,22 +1088,22 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
-func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
-	c, err := db.Cursor(kv.Headers)
+func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
 
 	// find first non-genesis block
-	k, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
+	firstK, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
 	if err != nil {
 		return err
 	}
-	if k == nil { //nothing to delete
+	if firstK == nil { //nothing to delete
 		return nil
 	}
-	blockFrom := binary.BigEndian.Uint64(k)
+	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := libcommon.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
@@ -1115,18 +1116,18 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			break
 		}
 
-		canonicalHash, err := ReadCanonicalHash(db, n)
+		canonicalHash, err := ReadCanonicalHash(tx, n)
 		if err != nil {
 			return err
 		}
 		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
 
-		b, err := ReadBodyForStorageByKey(db, k)
+		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
 			return err
 		}
 		if b == nil {
-			log.Warn("DeleteAncientBlocks: block body not found", "height", n)
+			log.Debug("DeleteAncientBlocks: block body not found", "height", n)
 		} else {
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxId; txID < b.BaseTxId+uint64(b.TxAmount); txID++ {
@@ -1135,15 +1136,15 @@ func DeleteAncientBlocks(db kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 				if !isCanonical {
 					bucket = kv.NonCanonicalTxs
 				}
-				if err := db.Delete(bucket, txIDBytes, nil); err != nil {
+				if err := tx.Delete(bucket, txIDBytes, nil); err != nil {
 					return err
 				}
 			}
 		}
-		if err := db.Delete(kv.Headers, k, nil); err != nil {
+		if err := tx.Delete(kv.Headers, k, nil); err != nil {
 			return err
 		}
-		if err := db.Delete(kv.BlockBody, k, nil); err != nil {
+		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
 			return err
 		}
 	}
@@ -1261,13 +1262,6 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			log.Info("TruncateBlocks", "block", n)
 		default:
 		}
-	}
-
-	// ensure no grabage records left (it may happen if db is inconsistent)
-	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
-		return tx.Delete(kv.BlockBody, k, nil)
-	}); err != nil {
-		return err
 	}
 
 	return nil

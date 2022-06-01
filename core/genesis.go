@@ -173,12 +173,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+	return CommitGenesisBlockWithOverride(db, genesis, nil, nil)
+}
+
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty)
 	if err != nil {
 		return c, b, err
 	}
@@ -197,21 +201,27 @@ func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, 
 	return c, b
 }
 
-func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeForkBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, nil, ErrGenesisNoConfig
 	}
 	// Just commit the new block if there is no stored genesis block.
-	stored, storedErr := rawdb.ReadCanonicalHash(db, 0)
+	storedHash, storedErr := rawdb.ReadCanonicalHash(db, 0)
 	if storedErr != nil {
 		return nil, nil, storedErr
 	}
-	if (stored == common.Hash{}) {
+	if (storedHash == common.Hash{}) {
 		custom := true
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
 			genesis = DefaultGenesisBlock()
 			custom = false
+		}
+		if overrideMergeForkBlock != nil {
+			genesis.Config.MergeForkBlock = overrideMergeForkBlock
+		}
+		if overrideTerminalTotalDifficulty != nil {
+			genesis.Config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
 		}
 		block, _, err1 := genesis.Write(db)
 		if err1 != nil {
@@ -230,52 +240,56 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis) (*params.ChainConfig, *type
 			return genesis.Config, nil, err1
 		}
 		hash := block.Hash()
-		if hash != stored {
-			return genesis.Config, block, &GenesisMismatchError{stored, hash}
+		if hash != storedHash {
+			return genesis.Config, block, &GenesisMismatchError{storedHash, hash}
 		}
 	}
-	storedBlock, err := rawdb.ReadBlockByHash(db, stored)
+	storedBlock, err := rawdb.ReadBlockByHash(db, storedHash)
 	if err != nil {
 		return genesis.Config, nil, err
 	}
 	// Get the existing chain configuration.
-	newcfg := genesis.configOrDefault(stored)
-	if err := newcfg.CheckConfigForkOrder(); err != nil {
-		return newcfg, nil, err
+	newCfg := genesis.configOrDefault(storedHash)
+	if overrideMergeForkBlock != nil {
+		newCfg.MergeForkBlock = overrideMergeForkBlock
 	}
-	storedcfg, storedErr := rawdb.ReadChainConfig(db, stored)
+	if overrideTerminalTotalDifficulty != nil {
+		newCfg.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+	}
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return newCfg, nil, err
+	}
+	storedCfg, storedErr := rawdb.ReadChainConfig(db, storedHash)
 	if storedErr != nil {
-		return newcfg, nil, storedErr
+		return newCfg, nil, storedErr
 	}
-	if storedcfg == nil {
+	if storedCfg == nil {
 		log.Warn("Found genesis block without chain config")
-		err1 := rawdb.WriteChainConfig(db, stored, newcfg)
+		err1 := rawdb.WriteChainConfig(db, storedHash, newCfg)
 		if err1 != nil {
-			return newcfg, nil, err1
+			return newCfg, nil, err1
 		}
-		return newcfg, storedBlock, nil
+		return newCfg, storedBlock, nil
 	}
 	// Special case: don't change the existing config of a non-mainnet chain if no new
-	// config is supplied. These chains would get AllProtocolChanges (and a compat error)
+	// config is supplied. These chains would get AllProtocolChanges (and a compatibility error)
 	// if we just continued here.
-	if genesis == nil && stored != params.MainnetGenesisHash {
-		return storedcfg, storedBlock, nil
+	if genesis == nil && storedHash != params.MainnetGenesisHash && overrideMergeForkBlock == nil && overrideTerminalTotalDifficulty == nil {
+		return storedCfg, storedBlock, nil
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	height := rawdb.ReadHeaderNumber(db, rawdb.ReadHeadHeaderHash(db))
-	if height == nil {
-		//return newcfg, storedBlock, fmt.Errorf("missing block number for head header hash")
-	} else {
-		compatErr := storedcfg.CheckCompatible(newcfg, *height)
-		if compatErr != nil && *height != 0 && compatErr.RewindTo != 0 {
-			return newcfg, storedBlock, compatErr
+	if height != nil {
+		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
+		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
+			return newCfg, storedBlock, compatibilityErr
 		}
 	}
-	if err := rawdb.WriteChainConfig(db, stored, newcfg); err != nil {
-		return newcfg, nil, err
+	if err := rawdb.WriteChainConfig(db, storedHash, newCfg); err != nil {
+		return newCfg, nil, err
 	}
-	return newcfg, storedBlock, nil
+	return newCfg, storedBlock, nil
 }
 
 func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
@@ -327,7 +341,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				statedb.SetIncarnation(addr, 1)
 			}
 		}
-		if err := statedb.FinalizeTx(params.Rules{}, w); err != nil {
+		if err := statedb.FinalizeTx(&params.Rules{}, w); err != nil {
 			panic(err)
 		}
 		root, err = trie.CalcRoot("genesis", tx)
@@ -403,7 +417,7 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 
 	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
-	if err := statedb.CommitBlock(params.Rules{}, blockWriter); err != nil {
+	if err := statedb.CommitBlock(&params.Rules{}, blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 	if err := blockWriter.WriteChangeSets(); err != nil {

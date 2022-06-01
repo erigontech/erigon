@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package node
+package nodecfg
 
 import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 const (
@@ -39,7 +39,7 @@ var DefaultConfig = Config{
 	HTTPPort:         DefaultHTTPPort,
 	HTTPModules:      []string{"net", "web3"},
 	HTTPVirtualHosts: []string{"localhost"},
-	HTTPTimeouts:     rpc.DefaultHTTPTimeouts,
+	HTTPTimeouts:     rpccfg.DefaultHTTPTimeouts,
 	WSPort:           DefaultWSPort,
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{

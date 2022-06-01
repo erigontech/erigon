@@ -721,7 +721,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	// header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number.Uint64()))
+	// header.Root = state.IntermediateRoot(chain.Config().IsSpuriousDragon(header.Number.Uint64()))
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Set state sync data to blockchain
@@ -791,7 +791,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 	}
 
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
-	// header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
+	// header.Root = state.IntermediateRoot(chain.Config().IsSpuriousDragon(header.Number))
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble block

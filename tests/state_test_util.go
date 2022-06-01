@@ -64,9 +64,10 @@ type stJSON struct {
 }
 
 type stPostState struct {
-	Root common.Hash   `json:"hash"`
-	Logs common.Hash   `json:"logs"`
-	Tx   hexutil.Bytes `json:"txbytes"`
+	Root            common.Hash   `json:"hash"`
+	Logs            common.Hash   `json:"logs"`
+	Tx              hexutil.Bytes `json:"txbytes"`
+	ExpectException string        `json:"expectException"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
@@ -127,7 +128,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
+func (t *StateTest) Run(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
 	state, root, err := t.RunNoVerify(rules, tx, subtest, vmconfig)
 	if err != nil {
 		return state, err
@@ -145,7 +146,7 @@ func (t *StateTest) Run(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vm
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(rules *params.Rules, tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -159,7 +160,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(params.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&params.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -180,7 +181,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
-	msg, err := txn.AsMessage(*types.MakeSigner(config, 0), baseFee)
+	msg, err := txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0))
 	if err != nil {
 		return nil, common.Hash{}, err
 	}
@@ -258,7 +259,7 @@ func (t *StateTest) RunNoVerify(rules params.Rules, tx kv.RwTx, subtest StateSub
 	return statedb, root, nil
 }
 
-func MakePreState(rules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {

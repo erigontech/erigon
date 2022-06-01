@@ -110,7 +110,7 @@ lintci:
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.2
 
 clean:
 	go clean -cache
@@ -129,6 +129,7 @@ devtools:
 	PATH=$(GOBIN):$(PATH) go generate ./common
 	PATH=$(GOBIN):$(PATH) go generate ./core/types
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
+	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'

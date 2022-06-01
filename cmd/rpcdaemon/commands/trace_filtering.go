@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -70,7 +71,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	hash := block.Hash()
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), txIndex, types.MakeSigner(chainConfig, blockNumber), chainConfig.Rules(blockNumber))
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +153,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	if err != nil {
 		return nil, err
 	}
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNum), chainConfig.Rules(blockNum))
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
 		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b))
+		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
 		if tErr != nil {
 			stream.WriteNil()
 			return tErr
@@ -470,7 +471,7 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, traceTypes []string, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, traceTypes []string, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer, rules *params.Rules) ([]*TraceCallResult, error) {
 	callParams := make([]TraceCallParam, 0, len(txs))
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {
@@ -480,7 +481,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, t
 			traceTypes: traceTypes,
 		})
 		var err error
-		if msgs[i], err = tx.AsMessage(*signer, header.BaseFee); err != nil {
+		if msgs[i], err = tx.AsMessage(*signer, header.BaseFee, rules); err != nil {
 			return nil, fmt.Errorf("convert tx into msg: %w", err)
 		}
 	}

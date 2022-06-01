@@ -293,10 +293,12 @@ func (hd *HeaderDownload) logAnchorState() {
 		}
 		sb.WriteString(fmt.Sprintf("-%d links=%d (%s)}", end, len(bs), sbb.String()))
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
+		sb.WriteString(fmt.Sprintf(", anchorQueue.idx=%d", anchor.idx))
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
 	for _, s := range ss {
+		log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 		log.Info(s)
 	}
 }
@@ -374,8 +376,8 @@ func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
 	log.Debug("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
 	hd.removeAnchor(anchor)
 	for child := anchor.fLink; child != nil; child, child.next = child.next, nil {
+		hd.removeUpwards(child)
 	}
-	hd.removeUpwards(anchor.fLink)
 }
 
 func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest, []PenaltyItem) {

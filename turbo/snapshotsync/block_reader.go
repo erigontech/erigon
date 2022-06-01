@@ -116,6 +116,34 @@ type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
 
+func (back *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	block, _, err := back.BlockWithSenders(ctx, tx, canonicalHash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	return block.Header(), nil
+}
+
+func (back *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+	blockNum := rawdb.ReadHeaderNumber(tx, hash)
+	if blockNum == nil {
+		return nil, nil
+	}
+	block, _, err := back.BlockWithSenders(ctx, tx, hash, *blockNum)
+	if err != nil {
+		return nil, err
+	}
+	return block.Header(), nil
+}
+
+func (back *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
+	return rawdb.ReadCanonicalHash(tx, blockHeight)
+}
+
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
 }

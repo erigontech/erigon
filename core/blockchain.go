@@ -357,7 +357,13 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		author = &state.SystemAddress
 	}
 	blockContext := NewEVMBlockContext(header, nil, engine, author, nil)
-	evm := vm.NewEVM(blockContext, NewEVMTxContext(msg), ibs, &chainConfig, vmConfig)
+	var txContext vm.TxContext
+	if isBor {
+		txContext = vm.TxContext{}
+	} else {
+		txContext = NewEVMTxContext(msg)
+	}
+	evm := vm.NewEVM(blockContext, txContext, ibs, &chainConfig, vmConfig)
 	if isBor {
 		ret, _, err := evm.Call(
 			vm.AccountRef(msg.From()),

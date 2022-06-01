@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -1343,25 +1344,27 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	defer d.Close()
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions.String())),
-		BaseDataID: firstTxID,
+		KeyCount:    d.Count(),
+		Enums:       true,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      tmpDir,
+		IndexFile:   filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions.String())),
+		BaseDataID:  firstTxID,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	})
 	if err != nil {
 		return err
 	}
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions2Block.String())),
-		BaseDataID: firstBlockNum,
+		KeyCount:    d.Count(),
+		Enums:       false,
+		BucketSize:  2000,
+		LeafSize:    8,
+		TmpDir:      tmpDir,
+		IndexFile:   filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Transactions2Block.String())),
+		BaseDataID:  firstBlockNum,
+		EtlBufLimit: etl.BufferOptimalSize / 2,
 	})
 	if err != nil {
 		return err
@@ -1417,7 +1420,7 @@ RETRY:
 				binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
 			} else {
 				if _, err := parseCtx.ParseTransaction(word[1+20:], 0, &slot, nil, true /* hasEnvelope */, nil); err != nil {
-					return err
+					return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
 				}
 			}
 

@@ -32,8 +32,8 @@ func TestCheckCompatible(t *testing.T) {
 		{stored: AllEthashProtocolChanges, new: AllEthashProtocolChanges, head: 0, wantErr: nil},
 		{stored: AllEthashProtocolChanges, new: AllEthashProtocolChanges, head: 100, wantErr: nil},
 		{
-			stored:  &ChainConfig{EIP150Block: big.NewInt(10)},
-			new:     &ChainConfig{EIP150Block: big.NewInt(20)},
+			stored:  &ChainConfig{TangerineWhistleBlock: big.NewInt(10)},
+			new:     &ChainConfig{TangerineWhistleBlock: big.NewInt(20)},
 			head:    9,
 			wantErr: nil,
 		},
@@ -60,11 +60,11 @@ func TestCheckCompatible(t *testing.T) {
 			},
 		},
 		{
-			stored: &ChainConfig{HomesteadBlock: big.NewInt(30), EIP150Block: big.NewInt(10)},
-			new:    &ChainConfig{HomesteadBlock: big.NewInt(25), EIP150Block: big.NewInt(20)},
+			stored: &ChainConfig{HomesteadBlock: big.NewInt(30), TangerineWhistleBlock: big.NewInt(10)},
+			new:    &ChainConfig{HomesteadBlock: big.NewInt(25), TangerineWhistleBlock: big.NewInt(20)},
 			head:   25,
 			wantErr: &ConfigCompatError{
-				What:         "EIP150 fork block",
+				What:         "Tangerine Whistle fork block",
 				StoredConfig: big.NewInt(10),
 				NewConfig:    big.NewInt(20),
 				RewindTo:     9,

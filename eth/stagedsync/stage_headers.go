@@ -202,32 +202,36 @@ func safeAndFinalizedBlocksAreCanonical(
 	cfg HeadersCfg,
 	sendErrResponse bool,
 ) (bool, error) {
-	safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
-	if err != nil {
-		return false, err
-	}
-	if (!safeIsCanonical && forkChoice.SafeBlockHash != common.Hash{}) {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("safe block is not an ancestor of head block"),
-			}
+	if forkChoice.SafeBlockHash != (common.Hash{}) {
+		safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
+		if err != nil {
+			return false, err
 		}
-		return false, nil
+		if !safeIsCanonical {
+			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+			if sendErrResponse {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}
+			}
+			return false, nil
+		}
 	}
 
-	finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
-	if err != nil {
-		return false, err
-	}
-	if (!finalizedIsCanonical && forkChoice.FinalizedBlockHash != common.Hash{}) {
-		log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
-		if sendErrResponse {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				CriticalError: errors.New("finalized block is not an ancestor of head block"),
-			}
+	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+		finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
+		if err != nil {
+			return false, err
 		}
-		return false, nil
+		if !finalizedIsCanonical {
+			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
+			if sendErrResponse {
+				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}
+			}
+			return false, nil
+		}
 	}
 
 	return true, nil
@@ -733,6 +737,7 @@ Loop:
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
+				reqCount++
 			}
 		}
 		if len(penalties) > 0 {
@@ -1145,7 +1150,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
 			workers := cmp.InRange(1, 2, runtime.GOMAXPROCS(-1)-1)
 			if err := snapshotsync.BuildIndices(ctx, cfg.snapshots, *chainID, cfg.tmpdir, cfg.snapshots.IndicesMax(), workers, log.LvlInfo); err != nil {
-				return err
+				return fmt.Errorf("BuildIndices: %w", err)
 			}
 		}
 
@@ -1161,6 +1166,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
+		h2n := etl.NewCollector("[Snapshots]", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		defer h2n.Close()
+
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db
 		td := big.NewInt(0)
@@ -1173,7 +1181,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 				return err
 			}
-			if err := rawdb.WriteHeaderNumber(tx, blockHash, blockNum); err != nil {
+			if err := h2n.Collect(blockHash[:], dbutils.EncodeBlockNumber(blockNum)); err != nil {
 				return err
 			}
 			select {
@@ -1187,7 +1195,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}); err != nil {
 			return err
 		}
-
+		if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
+			return err
+		}
 		// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 		ok, err := cfg.snapshots.ViewTxs(cfg.snapshots.BlocksAvailable(), func(sn *snapshotsync.TxnSegment) error {
 			lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())

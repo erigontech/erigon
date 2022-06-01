@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/urfave/cli"
@@ -42,8 +43,8 @@ func MigrateFlags(action func(ctx *cli.Context) error) func(*cli.Context) error 
 	}
 }
 
-func NewNodeConfig(ctx *cli.Context) *node.Config {
-	nodeConfig := node.DefaultConfig
+func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
+	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
 		nodeConfig.Version = params.VersionWithCommit(commit, "")
@@ -62,7 +63,7 @@ func MakeConfigNodeDefault(ctx *cli.Context) *node.Node {
 	return makeConfigNode(NewNodeConfig(ctx))
 }
 
-func makeConfigNode(config *node.Config) *node.Node {
+func makeConfigNode(config *nodecfg.Config) *node.Node {
 	stack, err := node.New(config)
 	if err != nil {
 		utils.Fatalf("Failed to create Erigon node: %v", err)

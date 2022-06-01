@@ -14,6 +14,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
-	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/log/v3"
@@ -52,7 +52,7 @@ Examples:
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
-		cfg := &node.DefaultConfig
+		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
@@ -184,7 +184,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 
 	stateStages.DisableStages(stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 
-	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir, getBlockReader(chainConfig))
+	execCfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, changeSetHook, chainConfig, engine, vmConfig, nil, false, tmpDir, getBlockReader(chainConfig, db))
 
 	execUntilFunc := func(execToBlock uint64) func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
 		return func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
@@ -429,7 +429,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	}
 	_ = sync.SetCurrentStage(stages.IntermediateHashes)
 	u = &stagedsync.UnwindState{ID: stages.IntermediateHashes, UnwindPoint: to}
-	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader(chainConfig)), ctx); err != nil {
+	if err = stagedsync.UnwindIntermediateHashesStage(u, stage(sync, tx, nil, stages.IntermediateHashes), tx, stagedsync.StageTrieCfg(db, true, true, tmpdir, getBlockReader(chainConfig, db)), ctx); err != nil {
 		return err
 	}
 	must(tx.Commit())
@@ -494,7 +494,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpdir, getBlockReader(chainConfig))
+	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil, false, tmpdir, getBlockReader(chainConfig, db))
 
 	// set block limit of execute stage
 	sync.MockExecFunc(stages.Execution, func(firstCycle bool, badBlockUnwind bool, stageState *stagedsync.StageState, unwinder stagedsync.Unwinder, tx kv.RwTx) error {
