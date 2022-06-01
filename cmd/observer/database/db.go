@@ -36,6 +36,7 @@ type DB interface {
 	CountPingErrors(ctx context.Context, id NodeID) (*uint, error)
 
 	UpdateClientID(ctx context.Context, id NodeID, clientID string) error
+	FindClientID(ctx context.Context, id NodeID) (*string, error)
 	UpdateNetworkID(ctx context.Context, id NodeID, networkID uint) error
 	UpdateEthVersion(ctx context.Context, id NodeID, ethVersion uint) error
 	UpdateHandshakeTransientError(ctx context.Context, id NodeID, hasTransientErr bool) error
@@ -54,6 +55,9 @@ type DB interface {
 
 	UpdateNeighborBucketKeys(ctx context.Context, id NodeID, keys []string) error
 	FindNeighborBucketKeys(ctx context.Context, id NodeID) ([]string, error)
+
+	UpdateSentryCandidatesLastEventTime(ctx context.Context, value time.Time) error
+	FindSentryCandidatesLastEventTime(ctx context.Context) (*time.Time, error)
 
 	UpdateCrawlRetryTime(ctx context.Context, id NodeID, retryTime time.Time) error
 	CountCandidates(ctx context.Context) (uint, error)

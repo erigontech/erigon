@@ -49,6 +49,8 @@ func mainWithFlags(ctx context.Context, flags observer.CommandFlags) error {
 
 		KeygenTimeout:     flags.KeygenTimeout,
 		KeygenConcurrency: flags.KeygenConcurrency,
+
+		ErigonLogPath: flags.ErigonLogPath,
 	}
 
 	crawler, err := observer.NewCrawler(discV4, db, crawlerConfig, log.Root())
@@ -70,6 +72,15 @@ func reportWithFlags(ctx context.Context, flags reports.CommandFlags) error {
 
 	if flags.Estimate {
 		report, err := reports.CreateClientsEstimateReport(ctx, db, flags.ClientsLimit, flags.MaxPingTries, networkID)
+		if err != nil {
+			return err
+		}
+		fmt.Println(report)
+		return nil
+	}
+
+	if flags.SentryCandidates {
+		report, err := reports.CreateSentryCandidatesReport(ctx, db, flags.ErigonLogPath)
 		if err != nil {
 			return err
 		}

@@ -152,6 +152,8 @@ type Config struct {
 	staticNodesWarning  bool
 	trustedNodesWarning bool
 
+	SentryLogPeerInfo bool
+
 	TLSConnection bool
 	TLSCertFile   string
 	// AllowUnprotectedTxs allows non EIP-155 protected transactions to be send over RPC.

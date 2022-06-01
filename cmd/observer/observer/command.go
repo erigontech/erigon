@@ -35,6 +35,8 @@ type CommandFlags struct {
 	HandshakeRefreshTimeout time.Duration
 	HandshakeRetryDelay     time.Duration
 	HandshakeMaxTries       uint
+
+	ErigonLogPath string
 }
 
 type Command struct {
@@ -77,6 +79,8 @@ func NewCommand() *Command {
 	instance.withHandshakeRefreshTimeout()
 	instance.withHandshakeRetryDelay()
 	instance.withHandshakeMaxTries()
+
+	instance.withErigonLogPath()
 
 	return &instance
 }
@@ -201,6 +205,14 @@ func (command *Command) withHandshakeMaxTries() {
 		Value: 3,
 	}
 	command.command.Flags().UintVar(&command.flags.HandshakeMaxTries, flag.Name, flag.Value, flag.Usage)
+}
+
+func (command *Command) withErigonLogPath() {
+	flag := cli.StringFlag{
+		Name:  "erigon-log",
+		Usage: "Erigon log file path. Enables sentry candidates intake.",
+	}
+	command.command.Flags().StringVar(&command.flags.ErigonLogPath, flag.Name, flag.Value, flag.Usage)
 }
 
 func (command *Command) ExecuteContext(ctx context.Context, runFunc func(ctx context.Context, flags CommandFlags) error) error {

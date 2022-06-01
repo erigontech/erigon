@@ -88,6 +88,18 @@ func (db DBRetrier) UpdateClientID(ctx context.Context, id NodeID, clientID stri
 	return err
 }
 
+func (db DBRetrier) FindClientID(ctx context.Context, id NodeID) (*string, error) {
+	resultAny, err := db.retry(ctx, "FindClientID", func(ctx context.Context) (interface{}, error) {
+		return db.db.FindClientID(ctx, id)
+	})
+
+	if resultAny == nil {
+		return nil, err
+	}
+	result := resultAny.(*string)
+	return result, err
+}
+
 func (db DBRetrier) UpdateNetworkID(ctx context.Context, id NodeID, networkID uint) error {
 	_, err := db.retry(ctx, "UpdateNetworkID", func(ctx context.Context) (interface{}, error) {
 		return nil, db.db.UpdateNetworkID(ctx, id, networkID)
@@ -201,6 +213,25 @@ func (db DBRetrier) FindNeighborBucketKeys(ctx context.Context, id NodeID) ([]st
 		return nil, err
 	}
 	result := resultAny.([]string)
+	return result, err
+}
+
+func (db DBRetrier) UpdateSentryCandidatesLastEventTime(ctx context.Context, value time.Time) error {
+	_, err := db.retry(ctx, "UpdateSentryCandidatesLastEventTime", func(ctx context.Context) (interface{}, error) {
+		return nil, db.db.UpdateSentryCandidatesLastEventTime(ctx, value)
+	})
+	return err
+}
+
+func (db DBRetrier) FindSentryCandidatesLastEventTime(ctx context.Context) (*time.Time, error) {
+	resultAny, err := db.retry(ctx, "FindSentryCandidatesLastEventTime", func(ctx context.Context) (interface{}, error) {
+		return db.db.FindSentryCandidatesLastEventTime(ctx)
+	})
+
+	if resultAny == nil {
+		return nil, err
+	}
+	result := resultAny.(*time.Time)
 	return result, err
 }
 

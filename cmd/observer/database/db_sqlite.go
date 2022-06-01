@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS handshake_errors (
     updated INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS sentry_candidates_intake (
+    id INTEGER PRIMARY KEY,
+    last_event_time INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nodes_crawl_retry_time ON nodes (crawl_retry_time);
 CREATE INDEX IF NOT EXISTS idx_nodes_ip ON nodes (ip);
 CREATE INDEX IF NOT EXISTS idx_nodes_ip_v6 ON nodes (ip_v6);
@@ -114,6 +119,10 @@ UPDATE nodes SET
 	client_id = ?, 
 	handshake_updated = ?
 WHERE id = ?
+`
+
+	sqlFindClientID = `
+SELECT client_id FROM nodes WHERE id = ?
 `
 
 	sqlUpdateNetworkID = `
@@ -192,6 +201,19 @@ UPDATE nodes SET neighbor_keys = ? WHERE id = ?
 
 	sqlFindNeighborBucketKeys = `
 SELECT neighbor_keys FROM nodes WHERE id = ?
+`
+
+	sqlUpdateSentryCandidatesLastEventTime = `
+INSERT INTO sentry_candidates_intake(
+	id,
+	last_event_time
+) VALUES (0, ?)
+ON CONFLICT(id) DO UPDATE SET
+	last_event_time = excluded.last_event_time
+`
+
+	sqlFindSentryCandidatesLastEventTime = `
+SELECT last_event_time FROM sentry_candidates_intake WHERE id = 0
 `
 
 	sqlUpdateCrawlRetryTime = `
@@ -428,6 +450,22 @@ func (db *DBSQLite) UpdateClientID(ctx context.Context, id NodeID, clientID stri
 		return fmt.Errorf("UpdateClientID failed to update a node: %w", err)
 	}
 	return nil
+}
+
+func (db *DBSQLite) FindClientID(ctx context.Context, id NodeID) (*string, error) {
+	row := db.db.QueryRowContext(ctx, sqlFindClientID, id)
+	var clientID sql.NullString
+	err := row.Scan(&clientID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("FindClientID failed: %w", err)
+	}
+	if clientID.Valid {
+		return &clientID.String, nil
+	}
+	return nil, nil
 }
 
 func (db *DBSQLite) UpdateNetworkID(ctx context.Context, id NodeID, networkID uint) error {
@@ -670,6 +708,29 @@ func (db *DBSQLite) FindNeighborBucketKeys(ctx context.Context, id NodeID) ([]st
 		return nil, nil
 	}
 	return strings.Split(keysStr.String, ","), nil
+}
+
+func (db *DBSQLite) UpdateSentryCandidatesLastEventTime(ctx context.Context, value time.Time) error {
+	_, err := db.db.ExecContext(ctx, sqlUpdateSentryCandidatesLastEventTime, value.Unix())
+	if err != nil {
+		return fmt.Errorf("UpdateSentryCandidatesLastEventTime failed: %w", err)
+	}
+	return nil
+}
+
+func (db *DBSQLite) FindSentryCandidatesLastEventTime(ctx context.Context) (*time.Time, error) {
+	row := db.db.QueryRowContext(ctx, sqlFindSentryCandidatesLastEventTime)
+
+	var timestamp sql.NullInt64
+	if err := row.Scan(&timestamp); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("FindSentryCandidatesLastEventTime failed: %w", err)
+	}
+
+	value := time.Unix(timestamp.Int64, 0)
+	return &value, nil
 }
 
 func (db *DBSQLite) UpdateCrawlRetryTime(ctx context.Context, id NodeID, retryTime time.Time) error {
