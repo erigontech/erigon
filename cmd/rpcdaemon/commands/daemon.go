@@ -15,7 +15,7 @@ import (
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, borDb kv.RoDB, eth rpcinterfaces.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet starknet.CAIROVMClient, filters *rpcservices.Filters, stateCache kvcache.Cache,
-	blockReader services.BlockAndTxnReader, cfg httpcfg.HttpCfg) (list []rpc.API) {
+	blockReader services.FullBlockReader, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
 	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
 	if cfg.TevmEnabled {

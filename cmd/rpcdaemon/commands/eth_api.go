@@ -101,12 +101,12 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_blockReader services.BlockReader
+	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
 	TevmEnabled  bool // experiment
 }
 
-func NewBaseApi(f *rpcservices.Filters, stateCache kvcache.Cache, blockReader services.BlockAndTxnReader, singleNodeMode bool) *BaseAPI {
+func NewBaseApi(f *rpcservices.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
