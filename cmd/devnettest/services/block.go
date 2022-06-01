@@ -115,6 +115,25 @@ func SearchBlockForTx(txnHash common.Hash) (uint64, error) {
 		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
 	}
 
+	// var count int
+
+	// ForLoop:
+	// 	for {
+	// 		select {
+	// 		case v := <-ch:
+	// 			count++
+	// 			_map := v.(map[string]interface{})
+	// 			for k, val := range _map {
+	// 				fmt.Printf("%s: %+v, ", k, val)
+	// 			}
+	// 			fmt.Println()
+	// 			fmt.Println()
+	// 			if count == numberOfIterations {
+	// 				break ForLoop
+	// 			}
+	// 		}
+	// 	}
+
 	return blockN, nil
 }
 
@@ -160,6 +179,7 @@ func EmitEventAndGetLogs(reqId int, subContract *contracts.Subscription, opts *b
 	}
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
+	// TODO: Mining does not happen because node is stuck in StageSync
 	blockN, err := SearchBlockForTx(*hash)
 	if err != nil {
 		return fmt.Errorf("error searching block for tx: %v", err)
@@ -183,7 +203,7 @@ func ApplyTransaction(ctx context.Context, tx types.Transaction) error {
 
 // ClearDevDB cleans up the dev folder used for the operations
 func ClearDevDB() {
-	fmt.Printf("Clearing ./dev\n")
+	fmt.Printf("\nDeleting ./dev folder\n")
 
 	cmd := exec.Command("rm", "-rf", "./dev")
 	err := cmd.Run()
@@ -191,4 +211,6 @@ func ClearDevDB() {
 		fmt.Println("Error occurred clearing Dev DB")
 		panic("could not clear dev DB")
 	}
+
+	fmt.Printf("SUCCESS => Deleted ./dev\n")
 }

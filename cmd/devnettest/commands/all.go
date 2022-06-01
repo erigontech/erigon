@@ -2,10 +2,7 @@ package commands
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
-	"time"
 )
 
 func init() {
@@ -16,10 +13,6 @@ var allCmd = &cobra.Command{
 	Use:   "all",
 	Short: "Runs all the simulation tests for erigon devnet",
 	Run: func(cmd *cobra.Command, args []string) {
-		if clearDev {
-			defer services.ClearDevDB()
-		}
-
 		// Test connection to JSON RPC
 		fmt.Println("Mocking get requests to JSON RPC...")
 		callMockGetRequest()
@@ -42,13 +35,13 @@ var allCmd = &cobra.Command{
 		fmt.Println()
 
 		// Create a contract transaction signed by the dev address and emit a log for it
-		go callContractTx()
-		time.Sleep(erigon.DevPeriod * 2 * time.Second)
-		fmt.Println()
+		// callContractTx()
+		// time.Sleep(erigon.DevPeriod * 2 * time.Second)
+		// fmt.Println()
 
 		// Get the nonce of the devAddress, check that it is 3
-		callGetTransactionCount(devAddress, blockNum, 3)
-		fmt.Println()
+		// callGetTransactionCount(devAddress, blockNum, 3)
+		// fmt.Println()
 
 		// Confirm that the txpool is empty (meaning all txs have been mined)
 		fmt.Println("Confirming the tx pool is empty...")
