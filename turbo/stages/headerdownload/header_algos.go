@@ -296,9 +296,9 @@ func (hd *HeaderDownload) logAnchorState() {
 		sb.WriteString(fmt.Sprintf(", anchorQueue.idx=%d", anchor.idx))
 		ss = append(ss, sb.String())
 	}
+	log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 	sort.Strings(ss)
 	for _, s := range ss {
-		log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 		log.Info(s)
 	}
 }
