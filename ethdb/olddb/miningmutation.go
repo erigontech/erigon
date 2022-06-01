@@ -1,30 +1,24 @@
 package olddb
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"sort"
-	"sync"
-	"unsafe"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 type miningmutation struct {
 	// Bucket => Key => Value
-	puts        map[string]map[string][]byte
-	dupsortPuts map[string]map[string][][]byte
-
-	dupsortTables map[string]struct{}
-	clearedTables map[string]struct{}
-
-	ignoreDbEntries map[string]map[string]struct{}
-
-	db kv.Tx
-	mu sync.RWMutex
+	memTx          kv.RwTx
+	memDb          kv.RwDB
+	deletedEntries map[string]map[string]struct{}
+	clearedTables  map[string]struct{}
+	dupsortTables  map[string]struct{}
+	db             kv.Tx
 }
 
 // NewBatch - starts in-mem batch
@@ -36,16 +30,22 @@ type miningmutation struct {
 // ... some calculations on `batch`
 // batch.Commit()
 func NewMiningBatch(tx kv.Tx) *miningmutation {
+	tmpDB := mdbx.NewMDBX(log.New()).InMem().MustOpen()
+	memTx, err := tmpDB.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
 	return &miningmutation{
-		db:          tx,
-		puts:        make(map[string]map[string][]byte),
-		dupsortPuts: make(map[string]map[string][][]byte),
+		db:             tx,
+		memDb:          tmpDB,
+		memTx:          memTx,
+		deletedEntries: make(map[string]map[string]struct{}),
+		clearedTables:  make(map[string]struct{}),
 		dupsortTables: map[string]struct{}{
 			kv.AccountChangeSet: {},
 			kv.StorageChangeSet: {},
+			kv.HashedStorage:    {},
 		},
-		clearedTables:   make(map[string]struct{}),
-		ignoreDbEntries: make(map[string]map[string]struct{}),
 	}
 }
 
@@ -56,28 +56,27 @@ func (m *miningmutation) RwKV() kv.RwDB {
 	return nil
 }
 
-func (m *miningmutation) isDupsortedTable(table string) bool {
-	_, ok := m.dupsortTables[table]
+func (m *miningmutation) isTableCleared(table string) bool {
+	_, ok := m.clearedTables[table]
 	return ok
 }
 
-func (m *miningmutation) ignoreDb(table string, key []byte) bool {
-	_, ok := m.ignoreDbEntries[table][string(key)]
+func (m *miningmutation) isEntryDeleted(table string, key []byte) bool {
+	_, ok := m.deletedEntries[table]
+	if !ok {
+		return ok
+	}
+	_, ok = m.deletedEntries[table][string(key)]
 	return ok
 }
 
 // getMem Retrieve database entry from memory (hashed storage will be left out for now because it is the only non auto-DupSorted table)
 func (m *miningmutation) getMem(table string, key []byte) ([]byte, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if _, ok := m.puts[table]; !ok {
-		return nil, false
+	val, err := m.memTx.GetOne(table, key)
+	if err != nil {
+		panic(err)
 	}
-	if value, ok := m.puts[table][*(*string)(unsafe.Pointer(&key))]; ok {
-		return value, ok
-	}
-
-	return nil, false
+	return val, val != nil
 }
 
 func (m *miningmutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
@@ -127,7 +126,7 @@ func (m *miningmutation) GetOne(table string, key []byte) ([]byte, error) {
 		}
 		return value, nil
 	}
-	if m.db != nil && !m.isBucketCleared(table) && !m.ignoreDb(table, key) {
+	if m.db != nil && !m.isTableCleared(table) && !m.isEntryDeleted(table, key) {
 		// TODO: simplify when tx can no longer be parent of mutation
 		value, err := m.db.GetOne(table, key)
 		if err != nil {
@@ -169,34 +168,7 @@ func (m *miningmutation) Has(table string, key []byte) (bool, error) {
 
 // Put insert a new entry in the database, if it is hashed storage it will add it to a slice instead of a map.
 func (m *miningmutation) Put(table string, key []byte, value []byte) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if value == nil {
-		if _, ok := m.ignoreDbEntries[table][string(key)]; !ok {
-			m.ignoreDbEntries[table] = make(map[string]struct{})
-		}
-		m.ignoreDbEntries[table][string(key)] = struct{}{}
-	}
-	dupsort := m.isDupsortedTable(table)
-	if _, ok := m.puts[table]; !ok && !dupsort {
-		m.puts[table] = make(map[string][]byte)
-	}
-
-	cValue := common.CopyBytes(value)
-	stringKey := string(key)
-
-	if dupsort {
-		if _, ok := m.dupsortPuts[table]; !ok {
-			m.dupsortPuts[table] = make(map[string][][]byte)
-		}
-		if _, ok := m.dupsortPuts[table][stringKey]; !ok {
-			m.dupsortPuts[table][stringKey] = [][]byte{}
-		}
-		m.dupsortPuts[table][stringKey] = append(m.dupsortPuts[table][stringKey], cValue)
-		return nil
-	}
-	m.puts[table][stringKey] = cValue
-	return nil
+	return m.memTx.Put(table, key, value)
 }
 
 func (m *miningmutation) Append(table string, key []byte, value []byte) error {
@@ -208,8 +180,6 @@ func (m *miningmutation) AppendDup(table string, key []byte, value []byte) error
 }
 
 func (m *miningmutation) BatchSize() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	return 0
 }
 
@@ -229,7 +199,11 @@ func (m *miningmutation) ForAmount(bucket string, prefix []byte, amount uint32, 
 }
 
 func (m *miningmutation) Delete(table string, k, v []byte) error {
-	return m.Put(table, k, nil)
+	if _, ok := m.deletedEntries[table]; !ok {
+		m.deletedEntries[table] = make(map[string]struct{})
+	}
+	m.deletedEntries[table][string(k)] = struct{}{}
+	return m.memTx.Delete(table, k, v)
 }
 
 func (m *miningmutation) Commit() error {
@@ -237,9 +211,9 @@ func (m *miningmutation) Commit() error {
 }
 
 func (m *miningmutation) Rollback() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.puts = map[string]map[string][]byte{}
+	m.memTx.Rollback()
+	m.memDb.Close()
+	return
 }
 
 func (m *miningmutation) Close() {
@@ -261,7 +235,7 @@ func (m *miningmutation) SetRwKV(kv kv.RwDB) {
 }
 
 func (m *miningmutation) BucketSize(bucket string) (uint64, error) {
-	panic("Not implemented")
+	return 0, nil
 }
 
 func (m *miningmutation) DropBucket(bucket string) error {
@@ -278,9 +252,7 @@ func (m *miningmutation) ListBuckets() ([]string, error) {
 
 func (m *miningmutation) ClearBucket(bucket string) error {
 	m.clearedTables[bucket] = struct{}{}
-	m.puts[bucket] = make(map[string][]byte)
-	m.dupsortPuts[bucket] = make(map[string][][]byte)
-	return nil
+	return m.memTx.ClearBucket(bucket)
 }
 
 func (m *miningmutation) isBucketCleared(bucket string) bool {
@@ -299,48 +271,23 @@ func (m *miningmutation) CreateBucket(bucket string) error {
 func (m *miningmutation) makeCursor(bucket string) (kv.RwCursorDupSort, error) {
 	c := &miningmutationcursor{}
 	// We can filter duplicates in dup sorted table
-	filterMap := make(map[string]struct{})
 	c.table = bucket
+
 	var err error
-	if bucket == kv.HashedStorage {
-		for key, value := range m.puts[bucket] {
-			byteKey := []byte(key)
-			c.pairs = append(c.pairs, cursorentry{byteKey[:40], append(byteKey[40:], value...)})
-		}
-		c.dupCursor, err = m.db.CursorDupSort(bucket)
-		c.cursor = c.dupCursor
-	} else if !m.isDupsortedTable(bucket) {
-		for key, value := range m.puts[bucket] {
-			c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
-		}
-		if !m.isBucketCleared(bucket) {
-			c.cursor, err = m.db.Cursor(bucket)
-		}
-	} else {
-		if !m.isBucketCleared(bucket) {
-			c.dupCursor, err = m.db.CursorDupSort(bucket)
-			c.cursor = c.dupCursor
-		}
-		for key, values := range m.dupsortPuts[bucket] {
-			for _, value := range values {
-				var dbValue []byte
-				if !m.isBucketCleared(bucket) {
-					dbValue, err = c.dupCursor.SeekBothRange([]byte(key), value)
-					if err != nil {
-						return nil, err
-					}
-				}
-				if _, ok := filterMap[string(append([]byte(key), value...))]; bytes.Compare(dbValue, value) != 0 && !ok {
-					c.pairs = append(c.pairs, cursorentry{[]byte(key), value})
-				}
-				filterMap[string(append([]byte(key), value...))] = struct{}{}
-			}
-		}
-	}
+	// Initialize db cursors
+	c.dupCursor, err = m.db.CursorDupSort(bucket)
 	if err != nil {
 		return nil, err
 	}
-	sort.Sort(c.pairs)
+	c.cursor = c.dupCursor
+	// Initialize memory cursors
+	c.memDupCursor, err = m.memTx.RwCursorDupSort(bucket)
+	if err != nil {
+		return nil, err
+	}
+	_, isDupsort := m.dupsortTables[bucket]
+	c.isDupsort = isDupsort
+	c.memCursor = c.memDupCursor
 	c.mutation = m
 	return c, err
 }
