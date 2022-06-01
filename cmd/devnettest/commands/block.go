@@ -24,10 +24,6 @@ var sendTxCmd = &cobra.Command{
 	Use:   "send-tx",
 	Short: "Sends a transaction",
 	Run: func(cmd *cobra.Command, args []string) {
-		if clearDev {
-			defer services.ClearDevDB()
-		}
-
 		callSendRegularTxAndSearchBlock(sendValue, recvAddr, devAddress, true)
 	},
 }

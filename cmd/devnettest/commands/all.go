@@ -2,7 +2,6 @@ package commands
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/spf13/cobra"
 )
 
@@ -14,10 +13,6 @@ var allCmd = &cobra.Command{
 	Use:   "all",
 	Short: "Runs all the simulation tests for erigon devnet",
 	Run: func(cmd *cobra.Command, args []string) {
-		if clearDev {
-			defer services.ClearDevDB()
-		}
-
 		// Test connection to JSON RPC
 		fmt.Println("Mocking get requests to JSON RPC...")
 		callMockGetRequest()

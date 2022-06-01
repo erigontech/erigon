@@ -2,8 +2,8 @@ package commands
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/devnettest/requests"
-	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/spf13/cobra"
 )
@@ -22,9 +22,6 @@ var getBalanceCmd = &cobra.Command{
 	Use:   "get-balance",
 	Short: fmt.Sprintf("Checks balance for the address: %q", devAddress),
 	Run: func(cmd *cobra.Command, args []string) {
-		if clearDev {
-			defer services.ClearDevDB()
-		}
 		callGetBalance(devAddress, blockNum, 0)
 	},
 }
@@ -33,9 +30,6 @@ var getTransactionCountCmd = &cobra.Command{
 	Use:   "get-transaction-count",
 	Short: fmt.Sprintf("Gets nonce for the address: %q", devAddress),
 	Run: func(cmd *cobra.Command, args []string) {
-		if clearDev {
-			defer services.ClearDevDB()
-		}
 		callGetTransactionCount(devAddress, blockNum, 0)
 	},
 }
