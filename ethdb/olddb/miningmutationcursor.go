@@ -34,13 +34,6 @@ type miningmutationcursor struct {
 	table    string
 }
 
-func (m *miningmutationcursor) convertToHashedStoraFormat(k []byte, v []byte) ([]byte, []byte, error) {
-	if len(k) == 72 && m.table == kv.HashedStorage {
-		return k[:40], append(k[40:], v...), nil
-	}
-	return k, v, nil
-}
-
 // First move cursor to first position and return key and value accordingly.
 func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 	memKey, memValue, err := m.memCursor.First()
@@ -63,6 +56,9 @@ func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
 
 func (m *miningmutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte) ([]byte, []byte, error) {
 	var err error
+	if memValue == nil && dbValue == nil {
+		return nil, nil, nil
+	}
 	// Check for duplicates
 	if bytes.Compare(memKey, dbKey) == 0 {
 		if !m.isDupsort {
@@ -130,6 +126,7 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 		}
 		return m.goForward(m.currentMemEntry.key, m.currentMemEntry.value, k, v)
 	}
+
 	memK, memV, err := m.memDupCursor.NextDup()
 	if err != nil {
 		return nil, nil, err
