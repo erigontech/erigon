@@ -151,6 +151,7 @@ func TestSuggestPrice(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+	defer tx.Rollback()
 	got, err := oracle.SuggestTipCap(context.Background(), tx)
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
