@@ -237,14 +237,12 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 }
 
 func (m *miningmutationcursor) Put(k, v []byte) error {
-	return m.memCursor.Put(common.CopyBytes(k), common.CopyBytes(v))
+	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 }
 
 func (m *miningmutationcursor) Append(k []byte, v []byte) error {
-	if m.table == kv.HashedStorage && len(k) == 72 {
-		return m.memDupCursor.AppendDup(common.CopyBytes(k[:40]), append(k[40:], v...))
-	}
-	return m.memCursor.Append(common.CopyBytes(k), common.CopyBytes(v))
+	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
+
 }
 
 func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
