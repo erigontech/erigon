@@ -5,6 +5,8 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
+	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +30,8 @@ type Crawler struct {
 
 	diplomacy *Diplomacy
 
+	sentryCandidatesIntake *sentry_candidates.Intake
+
 	log log.Logger
 }
 
@@ -46,6 +50,8 @@ type CrawlerConfig struct {
 
 	KeygenTimeout     time.Duration
 	KeygenConcurrency uint
+
+	ErigonLogPath string
 }
 
 func NewCrawler(
@@ -82,6 +88,18 @@ func NewCrawler(
 		config.StatusLogPeriod,
 		logger)
 
+	var sentryCandidatesIntake *sentry_candidates.Intake
+	if config.ErigonLogPath != "" {
+		sentryCandidatesIntake = sentry_candidates.NewIntake(
+			config.ErigonLogPath,
+			database.NewDBRetrier(db, logger),
+			saveQueue,
+			chain,
+			config.HandshakeRefreshTimeout,
+			config.StatusLogPeriod,
+			logger)
+	}
+
 	instance := Crawler{
 		transport,
 		database.NewDBRetrier(db, logger),
@@ -89,6 +107,7 @@ func NewCrawler(
 		config,
 		forkFilter,
 		diplomacy,
+		sentryCandidatesIntake,
 		logger,
 	}
 	return &instance, nil
@@ -103,6 +122,15 @@ func (crawler *Crawler) startDiplomacy(ctx context.Context) {
 		err := crawler.diplomacy.Run(ctx)
 		if (err != nil) && !errors.Is(err, context.Canceled) {
 			crawler.log.Error("Diplomacy has failed", "err", err)
+		}
+	}()
+}
+
+func (crawler *Crawler) startSentryCandidatesIntake(ctx context.Context) {
+	go func() {
+		err := crawler.sentryCandidatesIntake.Run(ctx)
+		if (err != nil) && !errors.Is(err, context.Canceled) {
+			crawler.log.Error("Sentry candidates intake has failed", "err", err)
 		}
 	}()
 }
@@ -126,7 +154,7 @@ func (crawler *Crawler) startSelectCandidates(ctx context.Context) <-chan candid
 
 func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candidateNode) error {
 	for _, node := range crawler.config.Bootnodes {
-		id, err := nodeID(node)
+		id, err := node_utils.NodeID(node)
 		if err != nil {
 			return fmt.Errorf("failed to get a bootnode ID: %w", err)
 		}
@@ -169,6 +197,9 @@ func (crawler *Crawler) selectCandidates(ctx context.Context, nodes chan<- candi
 func (crawler *Crawler) Run(ctx context.Context) error {
 	crawler.startSaveQueue(ctx)
 	crawler.startDiplomacy(ctx)
+	if crawler.sentryCandidatesIntake != nil {
+		crawler.startSentryCandidatesIntake(ctx)
+	}
 
 	nodes := crawler.startSelectCandidates(ctx)
 	sem := semaphore.NewWeighted(int64(crawler.config.ConcurrencyLimit))
@@ -225,7 +256,7 @@ func (crawler *Crawler) Run(ctx context.Context) error {
 				return fmt.Errorf("failed to get the node address: %w", err)
 			}
 
-			node, err = makeNodeFromAddr(id, *nodeAddr)
+			node, err = node_utils.MakeNodeFromAddr(id, *nodeAddr)
 			if err != nil {
 				return fmt.Errorf("failed to make node from node address: %w", err)
 			}
@@ -285,7 +316,7 @@ func (crawler *Crawler) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("failed to get neighbor bucket keys: %w", err)
 		}
-		keygenCachedKeys, err := parseHexPublicKeys(keygenCachedHexKeys)
+		keygenCachedKeys, err := utils.ParseHexPublicKeys(keygenCachedHexKeys)
 		if err != nil {
 			return fmt.Errorf("failed to parse cached neighbor bucket keys: %w", err)
 		}
@@ -392,19 +423,19 @@ func (crawler *Crawler) saveInterrogationResult(
 	}
 
 	for _, peer := range peers {
-		peerID, err := nodeID(peer)
+		peerID, err := node_utils.NodeID(peer)
 		if err != nil {
 			return fmt.Errorf("failed to get peer node ID: %w", err)
 		}
 
-		dbErr := crawler.db.UpsertNodeAddr(ctx, peerID, makeNodeAddr(peer))
+		dbErr := crawler.db.UpsertNodeAddr(ctx, peerID, node_utils.MakeNodeAddr(peer))
 		if dbErr != nil {
 			return dbErr
 		}
 	}
 
 	if (result != nil) && (len(result.KeygenKeys) >= 15) {
-		keygenHexKeys := hexEncodePublicKeys(result.KeygenKeys)
+		keygenHexKeys := utils.HexEncodePublicKeys(result.KeygenKeys)
 		dbErr := crawler.db.UpdateNeighborBucketKeys(ctx, id, keygenHexKeys)
 		if dbErr != nil {
 			return dbErr

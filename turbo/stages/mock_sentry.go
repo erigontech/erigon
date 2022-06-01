@@ -282,7 +282,18 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockReader := snapshotsync.NewBlockReader()
 
 	networkID := uint64(1)
-	mock.sentriesClient, err = sentry.NewMultiClient(mock.DB, "mock", mock.ChainConfig, mock.Genesis.Hash(), mock.Engine, networkID, sentries, cfg.Sync, blockReader)
+	mock.sentriesClient, err = sentry.NewMultiClient(
+		mock.DB,
+		"mock",
+		mock.ChainConfig,
+		mock.Genesis.Hash(),
+		mock.Engine,
+		networkID,
+		sentries,
+		cfg.Sync,
+		blockReader,
+		false,
+	)
 	if err != nil {
 		if t != nil {
 			t.Fatal(err)

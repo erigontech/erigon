@@ -13,6 +13,9 @@ type CommandFlags struct {
 	ClientsLimit uint
 	MaxPingTries uint
 	Estimate     bool
+
+	SentryCandidates bool
+	ErigonLogPath    string
 }
 
 type Command struct {
@@ -34,6 +37,8 @@ func NewCommand() *Command {
 	instance.withClientsLimit()
 	instance.withMaxPingTries()
 	instance.withEstimate()
+	instance.withSentryCandidates()
+	instance.withErigonLogPath()
 
 	return &instance
 }
@@ -73,6 +78,22 @@ func (command *Command) withEstimate() {
 		Usage: "Estimate totals including nodes that replied with 'too many peers'",
 	}
 	command.command.Flags().BoolVar(&command.flags.Estimate, flag.Name, false, flag.Usage)
+}
+
+func (command *Command) withSentryCandidates() {
+	flag := cli.BoolFlag{
+		Name:  "sentry-candidates",
+		Usage: "Count unseen peers. Requires 'erigon-log'.",
+	}
+	command.command.Flags().BoolVar(&command.flags.SentryCandidates, flag.Name, false, flag.Usage)
+}
+
+func (command *Command) withErigonLogPath() {
+	flag := cli.StringFlag{
+		Name:  "erigon-log",
+		Usage: "Erigon log file path",
+	}
+	command.command.Flags().StringVar(&command.flags.ErigonLogPath, flag.Name, flag.Value, flag.Usage)
 }
 
 func (command *Command) RawCommand() *cobra.Command {

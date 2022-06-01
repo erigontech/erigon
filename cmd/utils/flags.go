@@ -496,6 +496,10 @@ var (
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
+	SentryLogPeerInfoFlag = cli.BoolFlag{
+		Name:  "sentry.log-peer-info",
+		Usage: "Log detailed peer info when a peer connects or disconnects. Enable to integrate with observer.",
+	}
 	DownloaderAddrFlag = cli.StringFlag{
 		Name:  "downloader.api.addr",
 		Usage: "downloader address '<host>:<port>'",
@@ -1017,6 +1021,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	SetP2PConfig(ctx, &cfg.P2P, cfg.NodeName(), cfg.DataDir)
 
 	cfg.DownloaderAddr = strings.TrimSpace(ctx.GlobalString(DownloaderAddrFlag.Name))
+	cfg.SentryLogPeerInfo = ctx.GlobalIsSet(SentryLogPeerInfoFlag.Name)
 }
 
 func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {

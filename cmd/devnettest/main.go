@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/devnettest/commands"
 	"github.com/ledgerwatch/erigon/cmd/devnettest/erigon"
+	"github.com/ledgerwatch/erigon/cmd/devnettest/services"
 )
 
 func main() {
@@ -18,4 +19,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	defer services.ClearDevDB()
 }
