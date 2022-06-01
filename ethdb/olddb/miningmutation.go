@@ -13,8 +13,8 @@ import (
 
 type miningmutation struct {
 	// Bucket => Key => Value
-	memTx kv.RwTx
-
+	memTx          kv.RwTx
+	memDb          kv.RwDB
 	deletedEntries map[string]map[string]struct{}
 	clearedTables  map[string]struct{}
 	dupsortTables  map[string]struct{}
@@ -37,6 +37,7 @@ func NewMiningBatch(tx kv.Tx) *miningmutation {
 	}
 	return &miningmutation{
 		db:             tx,
+		memDb:          tmpDB,
 		memTx:          memTx,
 		deletedEntries: make(map[string]map[string]struct{}),
 		clearedTables:  make(map[string]struct{}),
@@ -210,6 +211,8 @@ func (m *miningmutation) Commit() error {
 }
 
 func (m *miningmutation) Rollback() {
+	m.memTx.Rollback()
+	m.memDb.Close()
 	return
 }
 

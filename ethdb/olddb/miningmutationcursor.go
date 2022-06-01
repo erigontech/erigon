@@ -13,27 +13,6 @@ type cursorentry struct {
 	value []byte
 }
 
-func compareEntries(a, b cursorentry) bool {
-	if bytes.Compare(a.key, b.key) == 0 {
-		return bytes.Compare(a.value, b.value) < 0
-	}
-	return bytes.Compare(a.key, b.key) < 0
-}
-
-type cursorentries []cursorentry
-
-func (cur cursorentries) Less(i, j int) bool {
-	return compareEntries(cur[i], cur[j])
-}
-
-func (cur cursorentries) Len() int {
-	return len(cur)
-}
-
-func (cur cursorentries) Swap(i, j int) {
-	cur[j], cur[i] = cur[i], cur[j]
-}
-
 // cursor
 type miningmutationcursor struct {
 	// we can keep one cursor type if we store 2 of each kind.
@@ -55,46 +34,11 @@ type miningmutationcursor struct {
 	table    string
 }
 
-func (m *miningmutationcursor) endOfNextDb() (bool, error) {
-	dbCurrK, dbCurrV, _ := m.cursor.Current()
-	lastK, lastV, err := m.cursor.Last()
-	if err != nil {
-		return false, err
-	}
-	if m.table == kv.HashedStorage && len(dbCurrK) == 72 {
-		dbCurrV = append(dbCurrK[40:], dbCurrV...)
-		dbCurrK = dbCurrK[:40]
-	}
-
-	if m.table == kv.HashedStorage && len(lastK) == 72 {
-		lastV = append(lastK[40:], lastV...)
-		lastK = lastK[:40]
-	}
-	currK, currV, _ := m.Current()
-	if m.dupCursor != nil {
-		_, err = m.dupCursor.SeekBothRange(dbCurrK, dbCurrV)
-	} else {
-		_, _, err = m.cursor.Seek(dbCurrK)
-	}
-	if err != nil {
-		return false, err
-	}
-
-	if bytes.Compare(lastK, currK) == 0 {
-		return bytes.Compare(lastV, currV) <= 0, nil
-	}
-	return bytes.Compare(lastK, currK) <= 0, nil
-}
-
 func (m *miningmutationcursor) convertToHashedStoraFormat(k []byte, v []byte) ([]byte, []byte, error) {
 	if len(k) == 72 && m.table == kv.HashedStorage {
 		return k[:40], append(k[40:], v...), nil
 	}
 	return k, v, nil
-}
-
-func (m miningmutationcursor) isDupsortedEnabled() bool {
-	return m.dupCursor != nil
 }
 
 // First move cursor to first position and return key and value accordingly.
