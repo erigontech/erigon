@@ -69,7 +69,9 @@ func NewInvertedIndex(
 	}
 	ii.files = btree.New(32)
 	ii.scanStateFiles(files)
-	ii.openFiles()
+	if err = ii.openFiles(); err != nil {
+		return nil, err
+	}
 	return ii, nil
 }
 

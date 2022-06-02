@@ -328,6 +328,38 @@ const (
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
+
+	// Domains and Inverted Indices
+	AccountKeys        = "AccountKeys"
+	AccountVals        = "AccountVals"
+	AccountHistoryKeys = "AccountHistoryKeys"
+	AccountHistoryVals = "AccountHistoryVals"
+	AccountSettings    = "AccountSettings"
+	AccountIdx         = "AccountIdx"
+
+	StorageKeys        = "StorageKeys"
+	StorageVals        = "StorageVals"
+	StorageHistoryKeys = "StorageHistoryKeys"
+	StorageHistoryVals = "StorageHistoryVals"
+	StorageSettings    = "StorageSettings"
+	StorageIdx         = "StorageIdx"
+
+	CodeKeys        = "CodeKeys"
+	CodeVals        = "CodeVals"
+	CodeHistoryKeys = "CodeHistoryKeys"
+	CodeHistoryVals = "CodeHistoryVals"
+	CodeSettings    = "CodeSettings"
+	CodeIdx         = "CodeIdx"
+
+	LogAddressKeys = "LogAddressKeys"
+	LogAddressIdx  = "LogAddressIdx"
+	LogTopicsKeys  = "LogTopicsKeys"
+	LogTopicsIdx   = "LogTopicsIdx"
+
+	TracesFromKeys = "TracesFromKeys"
+	TracesFromIdx  = "TracesFromIdx"
+	TracesToKeys   = "TracesToKeys"
+	TracesToIdx    = "TracesToIdx"
 )
 
 // Keys
@@ -415,6 +447,36 @@ var ChaindataTables = []string{
 	BorReceipts,
 	BorTxLookup,
 	BorSeparate,
+	AccountKeys,
+	AccountVals,
+	AccountHistoryKeys,
+	AccountHistoryVals,
+	AccountSettings,
+	AccountIdx,
+
+	StorageKeys,
+	StorageVals,
+	StorageHistoryKeys,
+	StorageHistoryVals,
+	StorageSettings,
+	StorageIdx,
+
+	CodeKeys,
+	CodeVals,
+	CodeHistoryKeys,
+	CodeHistoryVals,
+	CodeSettings,
+	CodeIdx,
+
+	LogAddressKeys,
+	LogAddressIdx,
+	LogTopicsKeys,
+	LogTopicsIdx,
+
+	TracesFromKeys,
+	TracesFromIdx,
+	TracesToKeys,
+	TracesToIdx,
 }
 
 const (
@@ -481,21 +543,29 @@ var ChaindataTablesCfg = TableCfg{
 		DupFromLen:                72,
 		DupToLen:                  40,
 	},
-	AccountChangeSet: {
-		Flags: DupSort,
-	},
-	StorageChangeSet: {
-		Flags: DupSort,
-	},
+	AccountChangeSet: {Flags: DupSort},
+	StorageChangeSet: {Flags: DupSort},
 	PlainState: {
 		Flags:                     DupSort,
 		AutoDupSortKeysConversion: true,
 		DupFromLen:                60,
 		DupToLen:                  28,
 	},
-	CallTraceSet: {
-		Flags: DupSort,
-	},
+	CallTraceSet: {Flags: DupSort},
+
+	AccountKeys:        {Flags: DupSort},
+	AccountHistoryKeys: {Flags: DupSort},
+	AccountIdx:         {Flags: DupSort},
+	StorageKeys:        {Flags: DupSort},
+	StorageHistoryKeys: {Flags: DupSort},
+	StorageIdx:         {Flags: DupSort},
+	CodeKeys:           {Flags: DupSort},
+	CodeHistoryKeys:    {Flags: DupSort},
+	CodeIdx:            {Flags: DupSort},
+	LogAddressIdx:      {Flags: DupSort},
+	LogTopicsIdx:       {Flags: DupSort},
+	TracesFromIdx:      {Flags: DupSort},
+	TracesToIdx:        {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

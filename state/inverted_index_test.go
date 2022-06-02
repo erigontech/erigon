@@ -30,7 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testDbAndInvertedIndex(t *testing.T) (kv.RwDB, *InvertedIndex) {
+func testDbAndInvertedIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex) {
 	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
@@ -44,11 +44,11 @@ func testDbAndInvertedIndex(t *testing.T) (kv.RwDB, *InvertedIndex) {
 	}).MustOpen()
 	ii, err := NewInvertedIndex(path, 16 /* aggregationStep */, "inv" /* filenameBase */, keysTable, indexTable)
 	require.NoError(t, err)
-	return db, ii
+	return path, db, ii
 }
 
 func TestInvIndexCollationBuild(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t)
+	_, db, ii := testDbAndInvertedIndex(t)
 	defer db.Close()
 	defer ii.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -115,7 +115,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 }
 
 func TestInvIndexAfterPrune(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t)
+	_, db, ii := testDbAndInvertedIndex(t)
 	defer db.Close()
 	defer ii.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -181,10 +181,9 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}
 }
 
-func TestInvIndexRanges(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t)
-	defer db.Close()
-	defer ii.Close()
+func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
+	t.Helper()
+	path, db, ii := testDbAndInvertedIndex(t)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -216,27 +215,11 @@ func TestInvIndexRanges(t *testing.T) {
 	}
 	err = tx.Commit()
 	require.NoError(t, err)
+	return path, db, ii, txs
+}
 
-	// Leave the last 2 aggregation steps un-collated
-	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
-		func() {
-			require.NoError(t, err)
-			roTx, err := db.BeginRo(context.Background())
-			require.NoError(t, err)
-			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
-			roTx.Rollback()
-			require.NoError(t, err)
-			sf, err := ii.buildFiles(step, bs)
-			require.NoError(t, err)
-			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
-			ii.SetTx(tx)
-			ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep)
-			err = tx.Commit()
-			require.NoError(t, err)
-		}()
-	}
+func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
+	t.Helper()
 	// Check the iterator ranges first without roTx
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 		var k [8]byte
@@ -270,58 +253,32 @@ func TestInvIndexRanges(t *testing.T) {
 	}
 }
 
-func TestInvIndexMerge(t *testing.T) {
-	db, ii := testDbAndInvertedIndex(t)
-	defer db.Close()
-	defer ii.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+func mergeInverted(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
+	t.Helper()
+	// Leave the last 2 aggregation steps un-collated
+	var tx kv.RwTx
 	defer func() {
 		if tx != nil {
 			tx.Rollback()
 		}
 	}()
-	ii.SetTx(tx)
-	txs := uint64(1000)
-	// keys are encodings of numbers 1..31
-	// each key changes value on every txNum which is multiple of the key
-	for txNum := uint64(1); txNum <= txs; txNum++ {
-		ii.SetTxNum(txNum)
-		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-			if txNum%keyNum == 0 {
-				var k [8]byte
-				binary.BigEndian.PutUint64(k[:], keyNum)
-				err = ii.Add(k[:])
-				require.NoError(t, err)
-			}
-		}
-		if txNum%10 == 0 {
-			err = tx.Commit()
-			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
-			ii.SetTx(tx)
-		}
-	}
-	err = tx.Commit()
-	require.NoError(t, err)
-
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			require.NoError(t, err)
 			roTx, err := db.BeginRo(context.Background())
 			require.NoError(t, err)
+			defer roTx.Rollback()
 			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
-			roTx.Rollback()
 			require.NoError(t, err)
+			roTx.Rollback()
 			sf, err := ii.buildFiles(step, bs)
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			ii.SetTx(tx)
-			ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx = nil
@@ -334,38 +291,68 @@ func TestInvIndexMerge(t *testing.T) {
 				in, err := ii.mergeFiles(outs, startTxNum, endTxNum, maxSpan)
 				require.NoError(t, err)
 				ii.integrateMergedFiles(outs, in)
+				err = ii.deleteFiles(outs)
+				require.NoError(t, err)
 			}
 		}()
 	}
-	// Check the iterator ranges first without roTx
-	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-		var k [8]byte
-		binary.BigEndian.PutUint64(k[:], keyNum)
-		it := ii.IterateRange(k[:], 0, 976, nil)
-		defer it.Close()
-		for i := keyNum; i < 976; i += keyNum {
-			label := fmt.Sprintf("keyNum=%d, txNum=%d", keyNum, i)
-			require.True(t, it.HasNext(), label)
-			n := it.Next()
-			require.Equal(t, i, n, label)
+}
+
+func TestInvIndexRanges(t *testing.T) {
+	_, db, ii, txs := filledInvIndex(t)
+	defer db.Close()
+	defer ii.Close()
+	var tx kv.RwTx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
 		}
-		require.False(t, it.HasNext())
+	}()
+
+	// Leave the last 2 aggregation steps un-collated
+	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
+		func() {
+			roTx, err := db.BeginRo(context.Background())
+			require.NoError(t, err)
+			bs, err := ii.collate(step*ii.aggregationStep, (step+1)*ii.aggregationStep, roTx)
+			roTx.Rollback()
+			require.NoError(t, err)
+			sf, err := ii.buildFiles(step, bs)
+			require.NoError(t, err)
+			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			tx, err = db.BeginRw(context.Background())
+			require.NoError(t, err)
+			ii.SetTx(tx)
+			err = ii.prune(step*ii.aggregationStep, (step+1)*ii.aggregationStep)
+			require.NoError(t, err)
+			err = tx.Commit()
+			require.NoError(t, err)
+		}()
 	}
-	// Now check ranges that require access to DB
-	roTx, err := db.BeginRo(context.Background())
+	checkRanges(t, db, ii, txs)
+}
+
+func TestInvIndexMerge(t *testing.T) {
+	_, db, ii, txs := filledInvIndex(t)
+	defer db.Close()
+	defer ii.Close()
+
+	mergeInverted(t, db, ii, txs)
+	checkRanges(t, db, ii, txs)
+}
+
+func TestInvIndexScanFiles(t *testing.T) {
+	path, db, ii, txs := filledInvIndex(t)
+	defer db.Close()
+	defer func() {
+		ii.Close()
+	}()
+	ii.Close()
+	// Recreate InvertedIndex to scan the files
+	var err error
+	ii, err = NewInvertedIndex(path, ii.aggregationStep, ii.filenameBase, ii.keysTable, ii.indexTable)
 	require.NoError(t, err)
-	defer roTx.Rollback()
-	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-		var k [8]byte
-		binary.BigEndian.PutUint64(k[:], keyNum)
-		it := ii.IterateRange(k[:], 400, 1000, roTx)
-		defer it.Close()
-		for i := keyNum * ((400 + keyNum - 1) / keyNum); i < txs; i += keyNum {
-			label := fmt.Sprintf("keyNum=%d, txNum=%d", keyNum, i)
-			require.True(t, it.HasNext(), label)
-			n := it.Next()
-			require.Equal(t, i, n, label)
-		}
-		require.False(t, it.HasNext())
-	}
+
+	mergeInverted(t, db, ii, txs)
+	checkRanges(t, db, ii, txs)
 }

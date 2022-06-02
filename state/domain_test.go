@@ -31,7 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testDbAndDomain(t *testing.T, prefixLen int) (kv.RwDB, *Domain) {
+func testDbAndDomain(t *testing.T, prefixLen int) (string, kv.RwDB, *Domain) {
 	t.Helper()
 	path := t.TempDir()
 	logger := log.New()
@@ -53,11 +53,11 @@ func testDbAndDomain(t *testing.T, prefixLen int) (kv.RwDB, *Domain) {
 	}).MustOpen()
 	d, err := NewDomain(path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, prefixLen)
 	require.NoError(t, err)
-	return db, d
+	return path, db, d
 }
 
 func TestCollationBuild(t *testing.T) {
-	db, d := testDbAndDomain(t, 0 /* prefixLen */)
+	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
 	defer db.Close()
 	defer d.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -160,7 +160,7 @@ func TestCollationBuild(t *testing.T) {
 }
 
 func TestIterationBasic(t *testing.T) {
-	db, d := testDbAndDomain(t, 5 /* prefixLen */)
+	_, db, d := testDbAndDomain(t, 5 /* prefixLen */)
 	defer db.Close()
 	defer d.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -195,7 +195,7 @@ func TestIterationBasic(t *testing.T) {
 }
 
 func TestAfterPrune(t *testing.T) {
-	db, d := testDbAndDomain(t, 0 /* prefixLen */)
+	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
 	defer db.Close()
 	defer d.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -273,10 +273,9 @@ func TestAfterPrune(t *testing.T) {
 	require.Equal(t, []byte("value2.1"), v)
 }
 
-func TestHistory(t *testing.T) {
-	db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
+func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
+	t.Helper()
+	path, db, d := testDbAndDomain(t, 0 /* prefixLen */)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer func() {
@@ -311,28 +310,13 @@ func TestHistory(t *testing.T) {
 	}
 	err = tx.Commit()
 	require.NoError(t, err)
+	tx = nil
+	return path, db, d, txs
+}
 
-	// Leave the last 2 aggregation steps un-collated
-	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
-		func() {
-			require.NoError(t, err)
-			roTx, err := db.BeginRo(context.Background())
-			require.NoError(t, err)
-			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
-			roTx.Rollback()
-			require.NoError(t, err)
-			sf, err := d.buildFiles(step, c)
-			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
-			d.SetTx(tx)
-			d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			err = tx.Commit()
-			require.NoError(t, err)
-			tx = nil
-		}()
-	}
+func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+	t.Helper()
+	var err error
 	// Check the history
 	var roTx kv.Tx
 	for txNum := uint64(0); txNum <= txs; txNum++ {
@@ -361,8 +345,43 @@ func TestHistory(t *testing.T) {
 	}
 }
 
+func TestHistory(t *testing.T) {
+	_, db, d, txs := filledDomain(t)
+	defer db.Close()
+	defer d.Close()
+	var tx kv.RwTx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Leave the last 2 aggregation steps un-collated
+	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
+		func() {
+			roTx, err := db.BeginRo(context.Background())
+			require.NoError(t, err)
+			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
+			roTx.Rollback()
+			require.NoError(t, err)
+			sf, err := d.buildFiles(step, c)
+			require.NoError(t, err)
+			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			tx, err = db.BeginRw(context.Background())
+			require.NoError(t, err)
+			d.SetTx(tx)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			require.NoError(t, err)
+			err = tx.Commit()
+			require.NoError(t, err)
+			tx = nil
+		}()
+	}
+	checkHistory(t, db, d, txs)
+}
+
 func TestIterationMultistep(t *testing.T) {
-	db, d := testDbAndDomain(t, 5 /* prefixLen */)
+	_, db, d := testDbAndDomain(t, 5 /* prefixLen */)
 	defer db.Close()
 	defer d.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -406,10 +425,10 @@ func TestIterationMultistep(t *testing.T) {
 
 	err = tx.Commit()
 	require.NoError(t, err)
+	tx = nil
 
 	for step := uint64(0); step <= 2; step++ {
 		func() {
-			require.NoError(t, err)
 			roTx, err := db.BeginRo(context.Background())
 			require.NoError(t, err)
 			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
@@ -421,7 +440,8 @@ func TestIterationMultistep(t *testing.T) {
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			d.SetTx(tx)
-			d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx = nil
@@ -443,62 +463,31 @@ func TestIterationMultistep(t *testing.T) {
 	require.Equal(t, []string{"value1", "value1", "value1"}, vals)
 }
 
-func TestMergeFiles(t *testing.T) {
-	db, d := testDbAndDomain(t, 0 /* prefixLen */)
-	defer db.Close()
-	defer d.Close()
-	tx, err := db.BeginRw(context.Background())
-	require.NoError(t, err)
+func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
+	t.Helper()
+	var tx kv.RwTx
 	defer func() {
 		if tx != nil {
 			tx.Rollback()
 		}
 	}()
-	d.SetTx(tx)
-	txs := uint64(1000)
-	// keys are encodings of numbers 1..31
-	// each key changes value on every txNum which is multiple of the key
-	for txNum := uint64(1); txNum <= txs; txNum++ {
-		d.SetTxNum(txNum)
-		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-			if txNum%keyNum == 0 {
-				valNum := txNum / keyNum
-				var k [8]byte
-				var v [8]byte
-				binary.BigEndian.PutUint64(k[:], keyNum)
-				binary.BigEndian.PutUint64(v[:], valNum)
-				err = d.Put(k[:], v[:])
-				require.NoError(t, err)
-			}
-		}
-		if txNum%10 == 0 {
-			err = tx.Commit()
-			require.NoError(t, err)
-			tx, err = db.BeginRw(context.Background())
-			require.NoError(t, err)
-			d.SetTx(tx)
-		}
-	}
-	err = tx.Commit()
-	require.NoError(t, err)
-	tx = nil
-
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
 		func() {
-			require.NoError(t, err)
 			roTx, err := db.BeginRo(context.Background())
 			require.NoError(t, err)
+			defer roTx.Rollback()
 			c, err := d.collate(step, step*d.aggregationStep, (step+1)*d.aggregationStep, roTx)
-			roTx.Rollback()
 			require.NoError(t, err)
+			roTx.Rollback()
 			sf, err := d.buildFiles(step, c)
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 			tx, err = db.BeginRw(context.Background())
 			require.NoError(t, err)
 			d.SetTx(tx)
-			d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			err = d.prune(step, step*d.aggregationStep, (step+1)*d.aggregationStep)
+			require.NoError(t, err)
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx = nil
@@ -511,33 +500,89 @@ func TestMergeFiles(t *testing.T) {
 				in, err := d.mergeFiles(outs, startTxNum, endTxNum, maxSpan)
 				require.NoError(t, err)
 				d.integrateMergedFiles(outs, in)
+				err = d.deleteFiles(outs)
+				require.NoError(t, err)
 			}
 		}()
 	}
+}
+
+func TestMergeFiles(t *testing.T) {
+	_, db, d, txs := filledDomain(t)
+	defer db.Close()
+	defer d.Close()
+
+	collateAndMerge(t, db, d, txs)
+	checkHistory(t, db, d, txs)
+}
+
+func TestScanFiles(t *testing.T) {
+	path, db, d, txs := filledDomain(t)
+	defer db.Close()
+	defer func() {
+		d.Close()
+	}()
+	var err error
+	var tx kv.RwTx
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	collateAndMerge(t, db, d, txs)
+	// Recreate domain and re-scan the files
+	txNum := d.txNum
+	d.Close()
+	d, err = NewDomain(path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.historyKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen)
+	require.NoError(t, err)
+	d.SetTxNum(txNum)
 	// Check the history
-	var roTx kv.Tx
-	for txNum := uint64(1); txNum <= txs; txNum++ {
-		if txNum == 976 {
-			// Create roTx obnly for the last several txNum, because all history before that
-			// we should be able to read without any DB access
-			roTx, err = db.BeginRo(context.Background())
-			require.NoError(t, err)
-			defer roTx.Rollback()
+	checkHistory(t, db, d, txs)
+}
+
+func TestDelete(t *testing.T) {
+	_, db, d := testDbAndDomain(t, 0 /* prefixLen */)
+	defer db.Close()
+	defer d.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
 		}
-		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
-			valNum := txNum / keyNum
-			var k [8]byte
-			var v [8]byte
-			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
-			binary.BigEndian.PutUint64(k[:], keyNum)
-			binary.BigEndian.PutUint64(v[:], valNum)
-			val, err := d.GetAfterTxNum(k[:], txNum, roTx)
-			require.NoError(t, err, label)
-			if txNum >= keyNum {
-				require.Equal(t, v[:], val, label)
-			} else {
-				require.Nil(t, val, label)
-			}
+	}()
+	d.SetTx(tx)
+
+	// Put on even txNum, delete on odd txNum
+	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
+		d.SetTxNum(txNum)
+		if txNum%2 == 0 {
+			err = d.Put([]byte("key1"), []byte("value1"))
+		} else {
+			err = d.Delete([]byte("key1"))
 		}
+		require.NoError(t, err)
+	}
+	err = tx.Commit()
+	require.NoError(t, err)
+	tx = nil
+	collateAndMerge(t, db, d, 1000)
+	// Check the history
+	roTx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for txNum := uint64(0); txNum < 1000; txNum++ {
+		val, err := d.GetAfterTxNum([]byte("key1"), txNum, roTx)
+		require.NoError(t, err)
+		label := fmt.Sprintf("txNum=%d", txNum)
+		if txNum%2 == 0 {
+			require.Equal(t, []byte("value1"), val, label)
+		} else {
+			require.Nil(t, val, label)
+		}
+		val, err = d.GetAfterTxNum([]byte("key2"), txNum, roTx)
+		require.NoError(t, err)
+		require.Nil(t, val, label)
 	}
 }

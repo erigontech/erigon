@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/google/btree"
@@ -533,4 +534,34 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 		out.decompressor.Close()
 		out.index.Close()
 	}
+}
+
+func (d *Domain) deleteFiles(outs [][NumberOfTypes]*filesItem) error {
+	for fType := FileType(0); fType < NumberOfTypes; fType++ {
+		for _, out := range outs {
+			datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), out[fType].startTxNum, out[fType].endTxNum))
+			if err := os.Remove(datPath); err != nil {
+				return err
+			}
+			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.idx", d.filenameBase, fType.String(), out[fType].startTxNum, out[fType].endTxNum))
+			if err := os.Remove(idxPath); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (ii *InvertedIndex) deleteFiles(outs []*filesItem) error {
+	for _, out := range outs {
+		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, out.startTxNum, out.endTxNum))
+		if err := os.Remove(datPath); err != nil {
+			return err
+		}
+		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, out.startTxNum, out.endTxNum))
+		if err := os.Remove(idxPath); err != nil {
+			return err
+		}
+	}
+	return nil
 }
