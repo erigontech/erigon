@@ -296,9 +296,9 @@ func (hd *HeaderDownload) logAnchorState() {
 		sb.WriteString(fmt.Sprintf(", anchorQueue.idx=%d", anchor.idx))
 		ss = append(ss, sb.String())
 	}
-	log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 	sort.Strings(ss)
 	for _, s := range ss {
+		log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 		log.Info(s)
 	}
 }
@@ -524,6 +524,9 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 				return true, true, nil
 			}
 		}
+		if link.blockHeight == hd.latestMinedBlockNumber {
+			return false, true, nil
+		}
 
 		if link.blockHeight > hd.highestInDb {
 			if hd.trace {
@@ -555,12 +558,12 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
 	var more bool = true
 	var err error
-	var isPos bool
+	var force bool
 	for more {
-		if more, isPos, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+		if more, force, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
 		}
-		if isPos {
+		if force {
 			return true, nil
 		}
 	}
@@ -1129,6 +1132,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 	peerID := [64]byte{'m', 'i', 'n', 'e', 'r'} // "miner"
 
 	_ = hd.ProcessHeaders(segments, false /* newBlock */, peerID)
+	hd.latestMinedBlockNumber = header.Number.Uint64()
 	return nil
 }
 
