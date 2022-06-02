@@ -273,33 +273,10 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	if config.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
-		if err = allSnapshots.Reopen(); err != nil {
-			return nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-
-		if len(stack.Config().DownloaderAddr) > 0 {
-			// connect to external Downloader
-			backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			backend.downloader, err = downloader.New(config.Torrent)
-			if err != nil {
-				return nil, err
-			}
-			go downloader.MainLoop(ctx, backend.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloader)
-			if err != nil {
-				return nil, fmt.Errorf("new server: %w", err)
-			}
-
-			backend.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
-		if err != nil {
-			return nil, err
-		}
+	err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, allSnapshots, stack, &blockReader)
+	if err != nil {
+		return nil, err
+	}
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
@@ -741,6 +718,44 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	}
 
 	return sentryPc, nil
+}
+
+// sets up blockReader and client downloader
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, config *ethconfig.Config, allSnapshots *snapshotsync.RoSnapshots, stack *node.Node, blockReader *services.FullBlockReader) error {
+	var err error
+
+	if isSnapshotEnabled {
+		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
+		if err = allSnapshots.Reopen(); err != nil {
+			return fmt.Errorf("[Snapshots] Reopen: %w", err)
+		}
+		*blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+		if len(stack.Config().DownloaderAddr) > 0 {
+			// connect to external Downloader
+			s.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
+		} else {
+			// start embedded Downloader
+			s.downloader, err = downloader.New(config.Torrent)
+			if err != nil {
+				return err
+			}
+			go downloader.MainLoop(ctx, s.downloader, true)
+			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+			if err != nil {
+				return fmt.Errorf("new server: %w", err)
+			}
+
+			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		*blockReader = snapshotsync.NewBlockReader()
+	}
+
+	return nil
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
