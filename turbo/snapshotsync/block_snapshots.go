@@ -387,6 +387,8 @@ func (s *RoSnapshots) Reopen() error {
 	if err != nil {
 		return err
 	}
+	var segmentsMax uint64
+	var segmentsMaxSet bool
 	for _, f := range files {
 		{
 			seg := &BodySegment{From: f.From, To: f.To}
@@ -426,10 +428,14 @@ func (s *RoSnapshots) Reopen() error {
 		}
 
 		if f.To > 0 {
-			s.segmentsMax.Store(f.To - 1)
+			segmentsMax = f.To - 1
 		} else {
-			s.segmentsMax.Store(0)
+			segmentsMax = 0
 		}
+		segmentsMaxSet = true
+	}
+	if segmentsMaxSet {
+		s.segmentsMax.Store(segmentsMax)
 	}
 	s.segmentsReady.Store(true)
 
@@ -473,6 +479,8 @@ func (s *RoSnapshots) ReopenSegments() error {
 	if err != nil {
 		return err
 	}
+	var segmentsMax uint64
+	var segmentsMaxSet bool
 	for _, f := range files {
 		{
 			seg := &BodySegment{From: f.From, To: f.To}
@@ -512,10 +520,14 @@ func (s *RoSnapshots) ReopenSegments() error {
 		}
 
 		if f.To > 0 {
-			s.segmentsMax.Store(f.To - 1)
+			segmentsMax = f.To - 1
 		} else {
-			s.segmentsMax.Store(0)
+			segmentsMax = 0
 		}
+		segmentsMaxSet = true
+	}
+	if segmentsMaxSet {
+		s.segmentsMax.Store(segmentsMax)
 	}
 	s.segmentsReady.Store(true)
 	return nil
