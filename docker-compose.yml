@@ -11,10 +11,8 @@ services:
   erigon:
     image: thorax/erigon:${TAG:-latest}
     build: .
-    command: |
-      erigon ${ERIGON_FLAGS-} 
-      --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 
-      --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061
+    command: erigon ${ERIGON_FLAGS-} --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061 |
+      --private.api.addr=0.0.0.0:9090 --downloader.api.addr=downloader:9093 --sentry.api.addr=sentry:9091
     volumes:
       # This is "datadir". It's ok to mount sub-dirs of "datadir" to different drives
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
@@ -23,10 +21,9 @@ services:
 
   rpcdaemon: # Service to server JSON-RCP API
     image: thorax/erigon:${TAG:-latest}
-    command: |
-      rpcdaemon ${RPCDAEMON_FLAGS-} 
-      --private.api.addr=erigon:9090 --txpool.api.addr=erigon:9090 
-      --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.api=eth,debug,net --ws
+    command: rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* |
+      --http.api=eth,debug,net --ws
+      --private.api.addr=erigon:9090 --txpool.api.addr=erigon:9090
     pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
     volumes_from: [ erigon ]
     ports: [ "8545:8545", "8551:8551" ]
@@ -39,11 +36,23 @@ services:
       --downloader.api.addr=0.0.0.0:9093
     pid: service:erigon
     volumes_from: [ erigon ]
-    ports: [ "9093:9093", "42069:42069/tcp", "42069:42069/udp" ]
+    ports: [ "42069:42069/tcp", "42069:42069/udp" ] # "9093:9093"
+    restart: unless-stopped
+    mem_swappiness: 0
+    mem_limit: 1gb
+    mem
+
+  sentry: # To handle p2p connections
+    image: thorax/erigon:${TAG:-latest}
+    command: sentry ${SENTRY_FLAGS-} |
+      --sentry.api.addr=0.0.0.0:9093
+    pid: service:erigon
+    volumes_from: [ erigon ]
+    ports: [ ] # "9091:9091"
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.35.0
+    image: prom/prometheus:v2.36.0
     user: 1000:1000 # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports: [ "9090:9090" ]
@@ -53,7 +62,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:8.5.2
+    image: grafana/grafana:8.5.4
     user: 1000:1000 # Uses erigon user from Dockerfile
     ports: [ "3000:3000" ]
     volumes:
