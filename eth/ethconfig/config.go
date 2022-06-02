@@ -253,7 +253,6 @@ func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
 		return SnapSync
 	} else if syncCliFlag != "" {
 		log.Warn("Unexpected Syncmode", "got", syncCliFlag, "option_1", FullSync, "option_2 ", SnapSync)
-		return FullSync
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
