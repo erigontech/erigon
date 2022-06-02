@@ -31,27 +31,27 @@ services:
     restart: unless-stopped
     mem_swappiness: 0
 
-  rpcdaemon: # Service to server JSON-RCP API
-    <<: *default-erigon-servie
-    command: |
-      rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
-      --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9093
-    ports: [ "8545:8545", "8551:8551" ]
-
-  downloader: # download/seed historical data
-    <<: *default-erigon-servie
-    command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093
-    ports: [ "42069:42069/tcp", "42069:42069/udp" ]
-
-  sentry: # handle p2p connections
+  sentry:
     <<: *default-erigon-servie
     command: sentry ${SENTRY_FLAGS-} --sentry.api.addr=0.0.0.0:9091
     ports: [ "30303:30303/tcp", "30303:30303/udp" ]
 
-  txpool: # storing pending transactions
+  downloader:
     <<: *default-erigon-servie
-    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9093
-    ports: [ ]
+    command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093
+    ports: [ "42069:42069/tcp", "42069:42069/udp" ]
+
+  txpool:
+    <<: *default-erigon-servie
+    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9094
+
+  rpcdaemon:
+    <<: *default-erigon-servie
+    command: |
+      rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
+      --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094
+    ports: [ "8545:8545", "8551:8551" ]
+
 
 
 
