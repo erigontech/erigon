@@ -320,7 +320,7 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		txs = seg.To - 1
 		break
 	}
-	fmt.Printf("idxAvailability headers=%d (out of %d), bodies=%d (out of %d), txs=%d (out od %d\n", headers, len(s.Headers.segments), bodies, len(s.Bodies.segments), txs, len(s.Txs.segments))
+	fmt.Printf("idxAvailability headers=%d (out of %d), bodies=%d (out of %d), txs=%d (out of %d)\n", headers, len(s.Headers.segments), bodies, len(s.Bodies.segments), txs, len(s.Txs.segments))
 	return cmp.Min(headers, cmp.Min(bodies, txs))
 }
 
@@ -956,7 +956,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
-	if err := snapshots.ReopenSegments(); err != nil {
+	if err := snapshots.Reopen(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 	idxWorkers := workers
