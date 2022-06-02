@@ -897,7 +897,7 @@ func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, chainID uint256.Int, lvl log.Lvl) {
 	if br.working.Load() {
 		// go-routine is still working
 		return
@@ -906,13 +906,17 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, 
 		// Prevent invocation for the same range twice, result needs to be cleared in the Result() function
 		return
 	}
-	br.result = nil
 
 	br.wg.Add(1)
 	go func() {
 		br.working.Store(true)
 		defer br.working.Store(false)
 		defer br.wg.Done()
+
+		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.Snapshots())
+		if !ok {
+			return
+		}
 
 		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 		br.result = &BlockRetireResult{
