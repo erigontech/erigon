@@ -277,9 +277,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if err != nil {
 		return nil, err
 	}
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
-	}
 
 	var consensusConfig interface{}
 
@@ -309,8 +306,19 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return err
 		}
-		if err := snap.EnsureNotChanged(tx, config.Snapshot); err != nil {
+		isCorrectSync, syncMode, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
 			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the correct one
+		if !isCorrectSync {
+			log.Warn("Incorrect syncmode", "got", config.Sync.Mode, "change_to", syncMode)
+			config.Sync.Mode = syncMode
+			config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
+			err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, allSnapshots, stack, &blockReader)
+			if err != nil {
+				return err
+			}
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
@@ -779,29 +787,6 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 	}
 
 	return nil
-}
-
-func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
-	if limit == 0 || limit > len(s.sentriesClient.Sentries()) {
-		limit = len(s.sentriesClient.Sentries())
-	}
-
-	nodes := make([]*prototypes.NodeInfoReply, 0, limit)
-	for i := 0; i < limit; i++ {
-		sc := s.sentriesClient.Sentries()[i]
-
-		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
-		if err != nil {
-			log.Error("sentry nodeInfo", "err", err)
-		}
-
-		nodes = append(nodes, nodeInfo)
-	}
-
-	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
-	sort.Sort(nodesInfo)
-
-	return nodesInfo, nil
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
