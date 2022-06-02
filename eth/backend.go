@@ -720,6 +720,29 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	return sentryPc, nil
 }
 
+func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
+	if limit == 0 || limit > len(s.sentriesClient.Sentries()) {
+		limit = len(s.sentriesClient.Sentries())
+	}
+
+	nodes := make([]*prototypes.NodeInfoReply, 0, limit)
+	for i := 0; i < limit; i++ {
+		sc := s.sentriesClient.Sentries()[i]
+
+		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
+		if err != nil {
+			log.Error("sentry nodeInfo", "err", err)
+		}
+
+		nodes = append(nodes, nodeInfo)
+	}
+
+	nodesInfo := &remote.NodesInfoReply{NodesInfo: nodes}
+	sort.Sort(nodesInfo)
+
+	return nodesInfo, nil
+}
+
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, config *ethconfig.Config, allSnapshots *snapshotsync.RoSnapshots, stack *node.Node, blockReader *services.FullBlockReader) error {
 	var err error
