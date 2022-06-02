@@ -320,7 +320,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 		txs = seg.To - 1
 		break
 	}
-	fmt.Printf("idxAvailability headers=%d (out of %d), bodies=%d (out of %d), txs=%d (out of %d)\n", headers, len(s.Headers.segments), bodies, len(s.Bodies.segments), txs, len(s.Txs.segments))
 	return cmp.Min(headers, cmp.Min(bodies, txs))
 }
 
@@ -935,7 +934,6 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		if !ok {
 			return
 		}
-		fmt.Printf("segmax=%d, indmax=%d\n", br.snapshots.SegmentsMax(), br.snapshots.IndicesMax())
 
 		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 		br.result = &BlockRetireResult{
