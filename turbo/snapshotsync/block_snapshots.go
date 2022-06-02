@@ -389,6 +389,9 @@ func (s *RoSnapshots) Reopen() error {
 	}
 	var segmentsMax uint64
 	var segmentsMaxSet bool
+	s.Bodies.segments = s.Bodies.segments[:0]
+	s.Headers.segments = s.Headers.segments[:0]
+	s.Txs.segments = s.Txs.segments[:0]
 	for _, f := range files {
 		{
 			seg := &BodySegment{From: f.From, To: f.To}
@@ -479,6 +482,9 @@ func (s *RoSnapshots) ReopenSegments() error {
 	if err != nil {
 		return err
 	}
+	s.Bodies.segments = s.Bodies.segments[:0]
+	s.Headers.segments = s.Headers.segments[:0]
+	s.Txs.segments = s.Txs.segments[:0]
 	var segmentsMax uint64
 	var segmentsMaxSet bool
 	for _, f := range files {
