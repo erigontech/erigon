@@ -3,8 +3,9 @@
 #
 # This file is just an example: how to run most of Erigon's services as separated processes.
 
-# By default: --datadir=/home/erigon/.local/share/erigon
-# Ports agreement: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+# Default: --datadir=/home/erigon/.local/share/erigon
+# Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+# Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
 
 # Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon,
 
@@ -50,7 +51,7 @@ services:
     command: |
       rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
       --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9094
-    ports: [ "8545:8545", "8551:8551" ]
+    ports: [ "8545:8545" ] # "8551:8551"
 
 
 
