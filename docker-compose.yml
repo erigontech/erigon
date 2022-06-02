@@ -38,17 +38,17 @@ services:
   downloader: # download/seed historical data
     <<: *default-erigon-servie
     command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093
-    ports: [ "42069:42069/tcp", "42069:42069/udp" ] # "9093:9093"
+    ports: [ "42069:42069/tcp", "42069:42069/udp" ]
 
   sentry: # handle p2p connections
     <<: *default-erigon-servie
     command: sentry ${SENTRY_FLAGS-} --sentry.api.addr=0.0.0.0:9091
-    ports: [ "30303:30303/tcp", "30303:30303/udp" ] # "9091:9091"
+    ports: [ "30303:30303/tcp", "30303:30303/udp" ]
 
   txpool: # storing pending transactions
     <<: *default-erigon-servie
-    command: txpool ${TXPOOL_FLAGS-} --txpool.api.addr=0.0.0.0:9093
-    ports: [ ] # "9093:9093"
+    command: txpool ${TXPOOL_FLAGS-} --private.api.addr=erigon:9090 --txpool.api.addr=0.0.0.0:9093
+    ports: [ ]
 
 
 
