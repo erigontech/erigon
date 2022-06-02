@@ -898,10 +898,15 @@ func CanDeleteTo(curBlockNum uint64, snapshots *RoSnapshots) (blockTo uint64) {
 	return cmp.Min(hardLimit, snapshots.BlocksAvailable()+1)
 }
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, blockFrom, blockTo uint64, chainID uint256.Int, lvl log.Lvl) {
-	br.result = nil
 	if br.working.Load() {
+		// go-routine is still working
 		return
 	}
+	if br.result != nil {
+		// Prevent invocation for the same range twice, result needs to be cleared in the Result() function
+		return
+	}
+	br.result = nil
 
 	br.wg.Add(1)
 	go func() {
@@ -928,7 +933,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	if err := DumpBlocks(ctx, blockFrom, blockTo, snap.DEFAULT_SEGMENT_SIZE, tmpDir, snapshots.Dir(), db, workers, lvl); err != nil {
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
-	if err := snapshots.Reopen(); err != nil {
+	if err := snapshots.ReopenSegments(); err != nil {
 		return fmt.Errorf("ReopenSegments: %w", err)
 	}
 	idxWorkers := workers
@@ -946,6 +951,9 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	err := merger.Merge(ctx, snapshots, ranges, snapshots.Dir(), true)
 	if err != nil {
 		return err
+	}
+	if err := snapshots.Reopen(); err != nil {
+		return fmt.Errorf("Reopen: %w", err)
 	}
 	// start seed large .seg of large size
 	req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(snap.AllSnapshotTypes))}
