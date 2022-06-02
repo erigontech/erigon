@@ -487,7 +487,6 @@ func (s *RoSnapshots) ReopenSegments() error {
 			s.Bodies.segments = append(s.Bodies.segments, seg)
 		}
 		{
-			fmt.Printf("reopen segment: %d-%d\n", f.From, f.To)
 			seg := &HeaderSegment{From: f.From, To: f.To}
 			fileName := snap.SegmentFileName(f.From, f.To, snap.Headers)
 			seg.seg, err = compress.NewDecompressor(path.Join(s.dir, fileName))
