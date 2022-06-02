@@ -957,7 +957,7 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 		return fmt.Errorf("DumpBlocks: %w", err)
 	}
 	if err := snapshots.Reopen(); err != nil {
-		return fmt.Errorf("ReopenSegments: %w", err)
+		return fmt.Errorf("Reopen: %w", err)
 	}
 	idxWorkers := workers
 	if idxWorkers > 4 {
@@ -965,6 +965,9 @@ func retireBlocks(ctx context.Context, blockFrom, blockTo uint64, chainID uint25
 	}
 	if err := BuildIndices(ctx, snapshots, chainID, tmpDir, snapshots.IndicesMax(), idxWorkers, log.LvlInfo); err != nil {
 		return err
+	}
+	if err := snapshots.Reopen(); err != nil {
+		return fmt.Errorf("Reopen: %w", err)
 	}
 	merger := NewMerger(tmpDir, workers, lvl, chainID, notifier)
 	ranges := merger.FindMergeRanges(snapshots)
