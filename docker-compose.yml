@@ -8,10 +8,10 @@
 # Basic erigon's service
 x-erigon-service: &default-erigon-servie
   image: thorax/erigon:${TAG:-latest}
-  restart: unless-stopped
-  mem_swappiness: 0
   pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
   volumes_from: [ erigon ]
+  restart: unless-stopped
+  mem_swappiness: 0
 
 services:
 
