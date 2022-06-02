@@ -928,6 +928,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 		if !ok {
 			return
 		}
+		fmt.Printf("segmax=%d, indmax=%d\n", br.snapshots.SegmentsMax(), br.snapshots.IndicesMax())
 
 		err := retireBlocks(ctx, blockFrom, blockTo, chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 		br.result = &BlockRetireResult{
