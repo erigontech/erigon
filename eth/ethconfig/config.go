@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -249,10 +248,8 @@ const (
 
 func SyncModeByChainName(chain, syncCliFlag string) (SyncMode, error) {
 	if syncCliFlag == "full" {
-		log.Info("Syncmode", "type", FullSync)
 		return FullSync, nil
 	} else if syncCliFlag == "snap" {
-		log.Info("Syncmode", "type", SnapSync)
 		return SnapSync, nil
 	} else if syncCliFlag != "" {
 		return FullSync, fmt.Errorf("unexpected syncmode: %s, only next options are valid: %s, %s", syncCliFlag, FullSync, SnapSync)
@@ -260,10 +257,8 @@ func SyncModeByChainName(chain, syncCliFlag string) (SyncMode, error) {
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
 		networkname.RopstenChainName:
-		log.Info("Syncmode", "type", SnapSync)
 		return SnapSync, nil
 	default:
-		log.Info("Syncmode", "type", FullSync)
 		return FullSync, nil
 	}
 }

@@ -184,6 +184,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Syncmode", "type", config.Sync.Mode)
 	config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
