@@ -1,12 +1,16 @@
-# syntax=docker/dockerfile:1
+# syntax = docker/dockerfile:1.2
 FROM docker.io/library/golang:1.18-alpine3.15 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
+RUN mkdir -p /app/build/bin
 WORKDIR /app
 ADD . .
 
-RUN make erigon rpcdaemon integration sentry txpool downloader hack observer db-tools
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make  db-tools erigon rpcdaemon integration sentry txpool downloader hack observer
 
 FROM docker.io/library/alpine:3.15
 
