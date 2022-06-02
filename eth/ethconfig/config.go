@@ -18,7 +18,6 @@
 package ethconfig
 
 import (
-	"fmt"
 	"math/big"
 	"os"
 	"os/user"
@@ -37,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -246,19 +246,20 @@ const (
 	SnapSync SyncMode = "snap"
 )
 
-func SyncModeByChainName(chain, syncCliFlag string) (SyncMode, error) {
+func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
 	if syncCliFlag == "full" {
-		return FullSync, nil
+		return FullSync
 	} else if syncCliFlag == "snap" {
-		return SnapSync, nil
+		return SnapSync
 	} else if syncCliFlag != "" {
-		return FullSync, fmt.Errorf("unexpected syncmode: %s, only next options are valid: %s, %s", syncCliFlag, FullSync, SnapSync)
+		log.Warn("Unexpected Syncmode", "got", syncCliFlag, "option_1", FullSync, "option_2 ", SnapSync)
+		return FullSync
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
 		networkname.RopstenChainName:
-		return SnapSync, nil
+		return SnapSync
 	default:
-		return FullSync, nil
+		return FullSync
 	}
 }

@@ -1104,10 +1104,7 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
 func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
-		syncmode, err := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
-		if err != nil {
-			panic(err)
-		}
+		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		snapCfg := ethconfig.NewSnapCfg(syncmode == ethconfig.SnapSync, true, true)
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error { return snap.EnsureNotChanged(tx, snapCfg) }); err != nil {
 			panic(err)

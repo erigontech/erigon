@@ -180,10 +180,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 
-	config.Sync.Mode, err = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.Sync.ModeCli)
-	if err != nil {
-		return nil, err
-	}
+	config.Sync.Mode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.Sync.ModeCli)
 	log.Info("Syncmode", "type", config.Sync.Mode)
 	config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
 
