@@ -5,57 +5,52 @@
 # By default: --datadir=/home/erigon/.local/share/erigon
 # Ports agreement: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
 
+# Basic erigon's service
+x-erigon-service: &default-erigon-servie
+  image: thorax/erigon:${TAG:-latest}
+  restart: unless-stopped
+  mem_swappiness: 0
+  pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
+  volumes_from: [ erigon ]
+
 services:
 
   erigon:
     image: thorax/erigon:${TAG:-latest}
     build: .
-    command: erigon ${ERIGON_FLAGS-} --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061 |
+    command: |
+      erigon ${ERIGON_FLAGS-} 
+      --metrics --metrics.addr=0.0.0.0 --metrics.port=6060 --pprof --pprof.addr=0.0.0.0 --pprof.port=6061 
       --private.api.addr=0.0.0.0:9090 --sentry.api.addr=sentry:9091 --downloader.api.addr=downloader:9093 --txpool.disable
     volumes:
       # This is "datadir". It's ok to mount sub-dirs of "datadir" to different drives
       - ${XDG_DATA_HOME:-~/.local/share}/erigon:/home/erigon/.local/share/erigon
-    ports: [ "30303:30303/tcp", "30303:30303/udp" ]
     restart: unless-stopped
     mem_swappiness: 0
 
   rpcdaemon: # Service to server JSON-RCP API
-    image: thorax/erigon:${TAG:-latest}
-    command: rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* |
-      --http.api=eth,debug,net --ws
+    <<: *default-erigon-servie
+    command: |
+      rpcdaemon ${RPCDAEMON_FLAGS-} --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --ws
       --private.api.addr=erigon:9090 --txpool.api.addr=txpool:9093
-    pid: service:erigon # Use erigon's PID namespace. It's required to open Erigon's DB from another process (RPCDaemon local-mode)
-    volumes_from: [ erigon ]
     ports: [ "8545:8545", "8551:8551" ]
-    restart: unless-stopped
-    mem_swappiness: 0
 
-  downloader: # Service to download/seed historical data (need only if you use --syncmode=snap)
-    image: thorax/erigon:${TAG:-latest}
+  downloader: # download/seed historical data
+    <<: *default-erigon-servie
     command: downloader ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093
-    pid: service:erigon
-    volumes_from: [ erigon ]
     ports: [ "42069:42069/tcp", "42069:42069/udp" ] # "9093:9093"
-    restart: unless-stopped
-    mem_swappiness: 0
 
-  sentry: # To handle p2p connections
-    image: thorax/erigon:${TAG:-latest}
+  sentry: # handle p2p connections
+    <<: *default-erigon-servie
     command: sentry ${SENTRY_FLAGS-} --sentry.api.addr=0.0.0.0:9091
-    pid: service:erigon
-    volumes_from: [ erigon ]
-    ports: [ ] # "9091:9091"
-    restart: unless-stopped
-    mem_swappiness: 0
+    ports: [ "30303:30303/tcp", "30303:30303/udp" ] # "9091:9091"
 
-  txpool: # To handle p2p connections
-    image: thorax/erigon:${TAG:-latest}
+  txpool: # storing pending transactions
+    <<: *default-erigon-servie
     command: txpool ${TXPOOL_FLAGS-} --txpool.api.addr=0.0.0.0:9093
-    pid: service:erigon
-    volumes_from: [ erigon ]
     ports: [ ] # "9093:9093"
-    restart: unless-stopped
-    mem_swappiness: 0
+
+
 
   prometheus:
     image: prom/prometheus:v2.36.0
@@ -77,4 +72,3 @@ services:
       - ./cmd/prometheus/dashboards:/etc/grafana/provisioning/dashboards
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-grafana:/var/lib/grafana
     restart: unless-stopped
-
