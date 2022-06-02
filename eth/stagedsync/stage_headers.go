@@ -1140,7 +1140,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	// Create .idx files
-	if cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
+	if cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
 		if !cfg.snapshots.SegmentsReady() {
 			return fmt.Errorf("not all snapshot segments are available")
 		}
