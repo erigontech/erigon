@@ -15,6 +15,7 @@ func Enabled(tx kv.Getter) (bool, error) {
 	return kv.GetBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey)
 }
 
+// makes sure that erigon is on the same syncmode used previously
 func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
 	ok, v, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey, cfg.Enabled)
 	if err != nil {
