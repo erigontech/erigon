@@ -63,7 +63,6 @@ erigon: go-version erigon.cmd
 COMMANDS += cons
 COMMANDS += devnettest
 COMMANDS += downloader
-COMMANDS += evm
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
