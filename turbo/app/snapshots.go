@@ -260,7 +260,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, chainDB, nil, nil)
 
 	for i := from; i < to; i += every {
-		br.RetireBlocksInBackground(ctx, i, i+every, *chainID, log.LvlInfo)
+		br.RetireBlocksInBackground(ctx, i, *chainID, log.LvlInfo)
 		br.Wait()
 		res := br.Result()
 		if res.Err != nil {

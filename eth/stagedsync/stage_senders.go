@@ -416,13 +416,8 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, cfg SendersCfg, ctx con
 		}
 	}
 
-	blockFrom, blockTo, ok := snapshotsync.CanRetire(s.ForwardProgress, cfg.blockRetire.Snapshots())
-	if !ok {
-		return nil
-	}
-
 	chainID, _ := uint256.FromBig(cfg.chainConfig.ChainID)
-	cfg.blockRetire.RetireBlocksInBackground(ctx, blockFrom, blockTo, *chainID, log.LvlInfo)
+	cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, *chainID, log.LvlInfo)
 
 	return nil
 }
