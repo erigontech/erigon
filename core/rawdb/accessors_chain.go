@@ -1106,10 +1106,10 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := libcommon.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
-	cur, _, _ := c.Current()
-	deletedFrom = binary.BigEndian.Uint64(cur)
+	k, _, _ := c.Current()
+	deletedFrom = binary.BigEndian.Uint64(k)
 
-	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
+	for k, _, err = c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return
 		}
@@ -1139,21 +1139,21 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 				if !isCanonical {
 					bucket = kv.NonCanonicalTxs
 				}
-				if err := tx.Delete(bucket, txIDBytes, nil); err != nil {
+				if err = tx.Delete(bucket, txIDBytes, nil); err != nil {
 					return
 				}
 			}
 		}
-		if err := tx.Delete(kv.Headers, k, nil); err != nil {
+		if err = tx.Delete(kv.Headers, k, nil); err != nil {
 			return
 		}
-		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
+		if err = tx.Delete(kv.BlockBody, k, nil); err != nil {
 			return
 		}
 	}
 
-	cur, _, _ = c.Current()
-	deletedTo = binary.BigEndian.Uint64(cur)
+	k, _, _ = c.Current()
+	deletedTo = binary.BigEndian.Uint64(k)
 
 	return
 }
