@@ -77,6 +77,14 @@ Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
 
+### Modularity
+
+Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
+Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
+Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by
+your own implementation, security.
+How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
+
 ### Optional stages
 
 There is an optional stage that can be enabled through flags:
