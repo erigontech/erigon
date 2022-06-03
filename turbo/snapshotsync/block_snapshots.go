@@ -1364,7 +1364,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 			return err
 		}
 		expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
-		fmt.Printf("from-to: %d-%d, alex first: %d, %s, %d, last: %d\n", blockFrom, blockTo, bodiesSegment.Size(), bodiesSegment.FilePath(), idx.BaseDataID(), blockTo-blockFrom-1)
+
 		idx.Close()
 	}
 
@@ -1468,7 +1468,7 @@ RETRY:
 		}
 
 		if i != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, i))
+			panic(fmt.Errorf("expect: %d, got %d, d.cnt: %d\n", expectedCount, i, d.Count()))
 		}
 
 		if err := txnHashIdx.Build(); err != nil {
