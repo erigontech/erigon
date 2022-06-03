@@ -61,9 +61,7 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
 	// and App only work with <datadir>/snapshot s folder
 	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
-		if err := os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")); err != nil {
-			return nil, err
-		}
+		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
 	}
 	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) {
 		cfg.DataDir = filepath.Join(cfg.DataDir, "tmp")
