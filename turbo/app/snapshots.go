@@ -267,9 +267,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := chainDB.Update(ctx, func(tx kv.RwTx) error {
 			progress, _ := stages.GetStageProgress(tx, stages.Headers)
 			canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
-			if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
+			deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
+			if err != nil {
 				return nil
 			}
+			log.Info("Deleted blocks", "from", deletedFrom, "to", deletedTo)
 			return nil
 		}); err != nil {
 			return err
