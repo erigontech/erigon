@@ -65,6 +65,10 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	}
 	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) {
 		cfg.DataDir = filepath.Join(cfg.DataDir, "tmp")
+	} else {
+		if err := copyFromTmp(cfg.DataDir); err != nil {
+			return nil, err
+		}
 	}
 	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
@@ -151,6 +155,34 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
+func copyFromTmp(snapDir string) error {
+	tmpDir := filepath.Join(snapDir, "tmp")
+	if !common.FileExist(tmpDir) {
+		return nil
+	}
+
+	snFs := os.DirFS(tmpDir)
+	paths, err := fs.ReadDir(snFs, ".")
+	if err != nil {
+		return err
+	}
+	for _, p := range paths {
+		if p.Name() == "." || p.Name() == ".." || p.Name() == "tmp" {
+			continue
+		}
+		src := filepath.Join(tmpDir, p.Name())
+		if err := os.Rename(src, filepath.Join(snapDir, p.Name())); err != nil {
+			if os.IsExist(err) {
+				_ = os.Remove(src)
+				return nil
+			}
+			return err
+		}
+	}
+	_ = os.Remove(tmpDir)
+	return nil
+}
+
 // onComplete - only once - after download of all files fully done:
 // - closing torrent client, closing downloader db
 // - removing _tmp suffix from snapDir
@@ -169,22 +201,11 @@ func (d *Downloader) onComplete() {
 	d.pieceCompletionDB.Close()
 	d.db.Close()
 
-	// rename _tmp folder
-	if err := os.Rename(d.cfg.DataDir, snapDir); err != nil {
+	if err := copyFromTmp(snapDir); err != nil {
 		panic(err)
 	}
 	d.cfg.DataDir = snapDir
-
-	snFs := os.DirFS(d.cfg.DataDir)
-
-	if err := fs.WalkDir(snFs, ".", func(path string, d fs.DirEntry, err error) error {
-		if err := os.Rename(path, filepath.Join(snapDir, d.Name())); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		panic(err)
-	}
+	fmt.Printf("alex1: %s\n", d.cfg.DataDir)
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {
