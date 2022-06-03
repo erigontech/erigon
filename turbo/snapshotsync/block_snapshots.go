@@ -1334,7 +1334,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}
-	if err := rlp.DecodeBytes(buf, firstBody); err != nil {
+	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
 		return
 	}
 	firstTxID = firstBody.BaseTxId
@@ -1351,7 +1351,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 
 	buf, _ = gg.Next(buf[:0])
 	lastBody := new(types.BodyForStorage)
-	if err := rlp.DecodeBytes(buf, lastBody); err != nil {
+	if err = rlp.DecodeBytes(buf, lastBody); err != nil {
 		return
 	}
 	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
