@@ -1166,7 +1166,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
-		h2n := etl.NewCollector("[Snapshots]", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		h2n := etl.NewCollector("Snapshots", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer h2n.Close()
 
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
