@@ -1107,6 +1107,7 @@ func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots 
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		snapCfg := ethconfig.NewSnapCfg(syncmode == ethconfig.SnapSync, true, true)
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			// if we dont have the correct syncmode here return an error
 			changed, snapSync, err := snap.EnsureNotChanged(tx, snapCfg)
 			if err != nil {
 				return err

@@ -306,7 +306,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return err
 		}
-		// if we are in the incorrect syncmode then we change it to the correct one
+		// if we are in the incorrect syncmode then we change it to the appropriate one
 		if !isCorrectSync {
 			log.Warn("Incorrect Syncmode", "got", config.Sync.Mode, "change_to", syncMode)
 			config.Sync.Mode = syncMode
