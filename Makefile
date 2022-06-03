@@ -1,9 +1,15 @@
 GO = go
 GOBIN = $(CURDIR)/build/bin
 
+ifndef VCS_REF
 VCS_REF ?= $(shell git rev-list -1 HEAD)
-GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+endif
+ifndef VCS_BRANCH
+VCS_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+endif
+ifndef VERSION
 VERSION ?= $(shell git describe --tags '--match=v*' --dirty)
+endif
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
@@ -15,7 +21,7 @@ BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${VCS_REF} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${VERSION}"
+GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${VCS_REF} -X ${PACKAGE}/params.GitBranch=${VCS_BRANCH} -X ${PACKAGE}/params.GitTag=${VERSION}"
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
@@ -30,10 +36,11 @@ go-version:
 	fi
 
 docker: git-submodules
+	@# add --progress=plain for debug
 	DOCKER_BUILDKIT=1 docker build \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=$(shell git rev-list -1 HEAD) \
-		--build-arg GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD) \
+		--build-arg VCS_BRANCH=$(shell git rev-parse --abbrev-ref HEAD) \
 		--build-arg VERSION=$(shell git describe --tags '--match=v*' --dirty) \
 		${DOCKER_FLAGS} \
 		.
@@ -81,10 +88,6 @@ all: erigon $(COMMANDS)
 
 db-tools: git-submodules
 	@echo "Building db-tools"
-
-	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
-	rm -rf libmdbx
-	git submodule update --init --recursive --force libmdbx
 
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
@@ -150,5 +153,5 @@ git-submodules:
 	@if [ -d ".git" ];then \
 		echo "Updating git submodules"; \
 		git submodule sync --quiet --recursive; \
-		git submodule update --quiet --init --recursive --force || true; \
+        git submodule update --quiet --init --recursive --force || true; \
 	fi

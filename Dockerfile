@@ -6,6 +6,11 @@ RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc
 WORKDIR /app
 ADD . .
 
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VCS_BRANCH
+ARG VERSION
+
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
@@ -28,6 +33,7 @@ EXPOSE 8545 8551 8546 30303 30303/udp 42069 42069/udp 8080 9090 6060
 # https://github.com/opencontainers/image-spec/blob/main/annotations.md
 ARG BUILD_DATE
 ARG VCS_REF
+ARG VCS_BRANCH
 ARG VERSION
 LABEL org.label-schema.build-date=$BUILD_DATE \
       org.label-schema.name="Erigon" \
