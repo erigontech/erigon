@@ -1046,7 +1046,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	}
 	defer f.Close()
 
-	var count, prevTxID uint64
+	var prevTxID uint64
 	numBuf := make([]byte, binary.MaxVarintLen64)
 	parseCtx := types2.NewTxParseContext(*chainID)
 	parseCtx.WithSender(false)
@@ -1135,7 +1135,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 		if err := addSystemTx(tx, body.BaseTxId); err != nil {
 			return false, err
 		}
-		count++
 		if prevTxID > 0 {
 			prevTxID++
 		} else {
@@ -1156,7 +1155,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			if err := f.AddWord(valueBuf); err != nil {
 				return err
 			}
-			count++
 			j++
 
 			return nil
@@ -1168,7 +1166,6 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 			return false, err
 		}
 		prevTxID++
-		count++
 
 		select {
 		case <-ctx.Done():
@@ -1187,8 +1184,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
-	if lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID != count {
-		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", count, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstTxID)
+	expectedCount := lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstTxID
+	if expectedCount != uint64(f.Count()) {
+		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", f.Count(), expectedCount)
 	}
 	if err := f.Compress(); err != nil {
 		return 0, fmt.Errorf("compress: %w", err)
