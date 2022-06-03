@@ -1364,7 +1364,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 			return err
 		}
 		expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
-		fmt.Printf("first: %d, %s, %d, last: %d\n", bodiesSegment.Size(), bodiesSegment.FilePath(), idx.BaseDataID(), blockTo-blockFrom-1)
+		fmt.Printf("alex first: %d, %s, %d, last: %d\n", bodiesSegment.Size(), bodiesSegment.FilePath(), idx.BaseDataID(), blockTo-blockFrom-1)
 		idx.Close()
 	}
 
