@@ -1352,7 +1352,6 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	if err = rlp.DecodeBytes(buf, lastBody); err != nil {
 		return
 	}
-	fmt.Printf("a: %d, %d, %d\n", lastBody.BaseTxId+uint64(lastBody.TxAmount), firstBody.BaseTxId, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstBody.BaseTxId)
 	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 	return
 }
@@ -1364,7 +1363,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		}
 	}()
 	firstBlockNum := blockFrom
-	expectedCount, firstTxID, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
+	firstTxID, expectedCount, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
 	if err != nil {
 		return err
 	}
