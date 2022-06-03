@@ -174,7 +174,7 @@ func copyFromTmp(snapDir string) error {
 		if err := os.Rename(src, filepath.Join(snapDir, p.Name())); err != nil {
 			if os.IsExist(err) {
 				_ = os.Remove(src)
-				return nil
+				continue
 			}
 			return err
 		}
