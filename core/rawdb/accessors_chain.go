@@ -1105,6 +1105,8 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := libcommon.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
+	cur, _, _ := c.Current()
+	delFrom := binary.BigEndian.Uint64(cur)
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
@@ -1148,6 +1150,9 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 			return err
 		}
 	}
+	cur, _, _ = c.Current()
+	delTo := binary.BigEndian.Uint64(cur)
+	fmt.Printf("alex2: deleteting: %d-%d\n", delFrom, delTo)
 
 	return nil
 }
