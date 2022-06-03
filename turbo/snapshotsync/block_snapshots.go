@@ -1836,7 +1836,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 	}
 	defer f.Close()
 	var word = make([]byte, 0, 4096)
-	var cnt, total int
+	var expectedTotal int
 	cList := make([]*compress.Decompressor, len(toMerge))
 	for i, cFile := range toMerge {
 		d, err := compress.NewDecompressor(cFile)
@@ -1845,14 +1845,13 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		}
 		defer d.Close()
 		cList[i] = d
-		total += d.Count()
+		expectedTotal += d.Count()
 	}
 
 	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {
 			g := d.MakeGetter()
 			for g.HasNext() {
-				cnt++
 				word, _ = g.Next(word[:0])
 				if err := f.AddWord(word); err != nil {
 					return err
@@ -1862,7 +1861,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 					return ctx.Err()
 				case <-logEvery.C:
 					_, fName := filepath.Split(targetFile)
-					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(cnt)/float64(total)), "to", fName)
+					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(f.Count())/float64(expectedTotal)), "to", fName)
 				default:
 				}
 			}
@@ -1871,6 +1870,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 			return err
 		}
 		d.Close()
+	}
+	if f.Count() != expectedTotal {
+		return fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d\n", f.Count(), expectedTotal)
 	}
 	if err = f.Compress(); err != nil {
 		return err
