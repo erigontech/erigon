@@ -285,7 +285,7 @@ var cmdSetPrune = &cobra.Command{
 
 var cmdSetSnapshto = &cobra.Command{
 	Use:   "force_set_snapshot",
-	Short: "Override existing --syncmode flag value (if you know what you are doing)",
+	Short: "Override existing --snapshots flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
@@ -1104,7 +1104,7 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
 func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
-		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
+		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, snapshotsBool)
 		snapCfg := ethconfig.NewSnapCfg(syncmode == ethconfig.SnapSync, true, true)
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			// if we dont have the correct syncmode here return an error
@@ -1114,7 +1114,7 @@ func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots 
 			}
 
 			if !changed {
-				return fmt.Errorf("syncmode has changed. Run erigon again with %v", snapSync)
+				return fmt.Errorf("syncmode has changed. Run erigon again with --snapshots=%v", snapSync == ethconfig.SnapSync)
 			}
 
 			return nil

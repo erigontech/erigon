@@ -129,7 +129,7 @@ type Snapshot struct {
 func (s Snapshot) String() string {
 	var out []string
 	if s.Enabled {
-		out = append(out, "--syncmode=snap")
+		out = append(out, "--snapshots=true")
 	}
 	if s.KeepBlocks {
 		out = append(out, "--"+FlagSnapKeepBlocks+"=true")
@@ -246,13 +246,13 @@ const (
 	SnapSync SyncMode = "snap"
 )
 
-func SyncModeByChainName(chain, syncCliFlag string) SyncMode {
-	if syncCliFlag == "full" {
+func SyncModeByChainName(chain string, useSnapshots string) SyncMode {
+	if useSnapshots == "false" {
 		return FullSync
-	} else if syncCliFlag == "snap" {
+	} else if useSnapshots == "true" {
 		return SnapSync
-	} else if syncCliFlag != "" {
-		log.Warn("Unexpected Syncmode", "got", syncCliFlag, "option_1", FullSync, "option_2 ", SnapSync)
+	} else {
+		log.Warn("Unexpected Syncmode", "got", useSnapshots, "turn_off_snapshots_using", false)
 	}
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,

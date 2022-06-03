@@ -10,7 +10,7 @@ import (
 var DefaultFlags = []cli.Flag{
 	utils.DataDirFlag,
 	utils.EthashDatasetDirFlag,
-	utils.SyncModeFlag,
+	utils.SnapshotFlag,
 	utils.TxPoolDisableFlag,
 	utils.TxPoolLocalsFlag,
 	utils.TxPoolNoLocalsFlag,
