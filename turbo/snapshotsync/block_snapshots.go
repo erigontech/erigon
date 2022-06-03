@@ -1352,7 +1352,7 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	if err = rlp.DecodeBytes(buf, lastBody); err != nil {
 		return
 	}
-	fmt.Println("a: %d, %d, %d\n", lastBody.BaseTxId+uint64(lastBody.TxAmount), firstBody.BaseTxId, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstBody.BaseTxId)
+	fmt.Printf("a: %d, %d, %d\n", lastBody.BaseTxId+uint64(lastBody.TxAmount), firstBody.BaseTxId, lastBody.BaseTxId+uint64(lastBody.TxAmount)-firstBody.BaseTxId)
 	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 	return
 }
