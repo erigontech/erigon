@@ -147,8 +147,8 @@ escape:
 
 git-submodules:
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@echo "Updating git submodules"
 	@if [ -d ".git" ];then \
+		echo "Updating git submodules"; \
 		git submodule sync --quiet --recursive; \
 		git submodule update --quiet --init --recursive --force || true; \
 	fi
