@@ -1,8 +1,6 @@
 package snap
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
@@ -15,20 +13,19 @@ func Enabled(tx kv.Getter) (bool, error) {
 	return kv.GetBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey)
 }
 
-// makes sure that erigon is on the same syncmode used previously
-func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) error {
+func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) (bool, ethconfig.SyncMode, error) {
 	ok, v, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey, cfg.Enabled)
 	if err != nil {
-		return err
+		return false, "", err
 	}
 	if !ok {
 		if v {
-			return fmt.Errorf("we recently changed default of --syncmode flag, or you forgot to set --syncmode flag, please add flag --syncmode=snap")
+			return false, ethconfig.SnapSync, nil
 		} else {
-			return fmt.Errorf("we recently changed default of --syncmode flag, or you forgot to set --syncmode flag, please add flag --syncmode=full")
+			return false, ethconfig.FullSync, nil
 		}
 	}
-	return nil
+	return true, "", nil
 }
 
 // ForceSetFlags - if you know what you are doing
