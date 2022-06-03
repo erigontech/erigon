@@ -36,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -230,7 +229,7 @@ type Config struct {
 }
 
 type Sync struct {
-	ModeCli string
+	ModeCli bool
 	Mode    SyncMode
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle time.Duration
@@ -246,18 +245,15 @@ const (
 	SnapSync SyncMode = "snap"
 )
 
-func SyncModeByChainName(chain string, useSnapshots string) SyncMode {
-	if useSnapshots == "false" {
-		return FullSync
-	} else if useSnapshots == "true" {
-		return SnapSync
-	} else {
-		log.Warn("Unexpected Syncmode", "got", useSnapshots, "turn_off_snapshots_using", false)
-	}
+func SyncModeByChainName(chain string, useSnapshots bool) SyncMode {
 	switch chain {
 	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
 		networkname.RopstenChainName:
-		return SnapSync
+		if useSnapshots {
+			return SnapSync
+		} else {
+			return FullSync
+		}
 	default:
 		return FullSync
 	}
