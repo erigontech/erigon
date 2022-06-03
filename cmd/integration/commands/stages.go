@@ -1106,7 +1106,18 @@ func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots 
 	openSnapshotOnce.Do(func() {
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		snapCfg := ethconfig.NewSnapCfg(syncmode == ethconfig.SnapSync, true, true)
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error { return snap.EnsureNotChanged(tx, snapCfg) }); err != nil {
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			changed, snapSync, err := snap.EnsureNotChanged(tx, snapCfg)
+			if err != nil {
+				return err
+			}
+
+			if !changed {
+				return fmt.Errorf("syncmode has changed. Run erigon again with %v", snapSync)
+			}
+
+			return nil
+		}); err != nil {
 			panic(err)
 		}
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadir, "snapshots"))
