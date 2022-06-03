@@ -1109,6 +1109,9 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 	k, _, _ := c.Current()
 	deletedFrom = binary.BigEndian.Uint64(k)
 
+	var canonicalHash common.Hash
+	var b *types.BodyForStorage
+
 	for k, _, err = c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
 			return
@@ -1119,13 +1122,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 			break
 		}
 
-		canonicalHash, err := ReadCanonicalHash(tx, n)
+		canonicalHash, err = ReadCanonicalHash(tx, n)
 		if err != nil {
 			return
 		}
 		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
 
-		b, err := ReadBodyForStorageByKey(tx, k)
+		b, err = ReadBodyForStorageByKey(tx, k)
 		if err != nil {
 			return
 		}
