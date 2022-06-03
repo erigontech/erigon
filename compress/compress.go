@@ -128,6 +128,8 @@ func (c *Compressor) SetTrace(trace bool) {
 	c.trace = trace
 }
 
+func (c *Compressor) Count() int { return int(c.wordsCount) }
+
 func (c *Compressor) AddWord(word []byte) error {
 	c.wordsCount++
 
