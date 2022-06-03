@@ -1143,7 +1143,7 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.FullBlockReader) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-
+	var lastNum uint64
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
 		header, err := r.HeaderByNumber(context.Background(), tx, i)
 		if err != nil {
@@ -1164,6 +1164,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.
 		}
 		link := hd.addHeaderAsLink(h, true /* persisted */)
 		link.verified = true
+		lastNum = h.Number
 	}
 	if hd.highestInDb < n {
 		hd.highestInDb = n
@@ -1171,6 +1172,7 @@ func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.
 	if hd.preverifiedHeight < n {
 		hd.preverifiedHeight = n
 	}
+	fmt.Printf("alex2, AddHeadersFromSnapshot: %d-%d\n", lastNum, hd.highestInDb)
 
 	return nil
 }
