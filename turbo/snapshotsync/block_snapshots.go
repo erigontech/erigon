@@ -1830,11 +1830,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 }
 
 func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
-	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*compress.Decompressor, len(toMerge))
@@ -1847,6 +1842,12 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		cList[i] = d
 		expectedTotal += d.Count()
 	}
+
+	f, err := compress.NewCompressor(ctx, "merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 
 	for _, d := range cList {
 		if err := d.WithReadAhead(func() error {
