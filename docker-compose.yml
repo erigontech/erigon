@@ -1,7 +1,7 @@
-# Erigon's parts - can run inside and outside of Erigon (as separated processes).
-# For example: p2p sentry can work inside Erigon - or outside (even on another server), txpool also, JSON RPC also
-#
-# This file is an example: how to start all Erigon's services as separated processes.
+# Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
+# Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
+# Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by your own implementation, security.
+# This file is an example: how to start Erigon's services as separated processes.
 
 # Default: --datadir=/home/erigon/.local/share/erigon
 # Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
