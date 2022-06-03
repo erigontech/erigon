@@ -461,7 +461,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		if unwind > progress {
 			unwindTo = 1 // keep genesis
 		} else {
-			unwindTo = cmp.Max(1, progress-unwind)
+			unwindTo = uint64(cmp.Max(1, int(progress)-int(unwind)))
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
