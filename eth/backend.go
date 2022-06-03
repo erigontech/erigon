@@ -621,31 +621,41 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		log.Error("Cannot start mining without etherbase", "err", err)
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
-	var cli *clique.Clique
+
+	var clq *clique.Clique
 	if c, ok := s.engine.(*clique.Clique); ok {
-		cli = c
+		clq = c
 	} else if cl, ok := s.engine.(*serenity.Serenity); ok {
 		if c, ok := cl.InnerEngine().(*clique.Clique); ok {
-			cli = c
+			clq = c
 		}
 	}
-	if cli != nil {
+	if clq != nil {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		cli.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+		clq.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
 	}
+
+	var prl *parlia.Parlia
 	if p, ok := s.engine.(*parlia.Parlia); ok {
+		prl = p
+	} else if cl, ok := s.engine.(*serenity.Serenity); ok {
+		if p, ok := cl.InnerEngine().(*parlia.Parlia); ok {
+			prl = p
+		}
+	}
+	if prl != nil {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		p.Authorize(eb, func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error) {
+		prl.Authorize(eb, func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error) {
 			return crypto.Sign(payload, cfg.SigKey)
 		})
 	}

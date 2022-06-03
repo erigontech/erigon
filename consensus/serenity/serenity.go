@@ -59,7 +59,7 @@ func (s *Serenity) InnerEngine() consensus.Engine {
 	return s.eth1Engine
 }
 
-// Type returns underlying consensus engine
+// Type returns the type of the underlying consensus engine.
 func (s *Serenity) Type() params.ConsensusType {
 	return s.eth1Engine.Type()
 }
