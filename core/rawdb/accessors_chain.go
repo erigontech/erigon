@@ -1088,29 +1088,30 @@ func WriteBlock(db kv.RwTx, block *types.Block) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequnces of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Reciepts, Senders, Canonical markers, TotalDifficulty
-func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+// returns [deletedFrom, deletedTo)
+func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deletedFrom, deletedTo uint64, err error) {
 	c, err := tx.Cursor(kv.Headers)
 	if err != nil {
-		return err
+		return
 	}
 	defer c.Close()
 
 	// find first non-genesis block
 	firstK, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
 	if err != nil {
-		return err
+		return
 	}
 	if firstK == nil { //nothing to delete
-		return nil
+		return
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := libcommon.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 	cur, _, _ := c.Current()
-	delFrom := binary.BigEndian.Uint64(cur)
+	deletedFrom = binary.BigEndian.Uint64(cur)
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
-			return err
+			return
 		}
 
 		n := binary.BigEndian.Uint64(k)
@@ -1120,13 +1121,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 
 		canonicalHash, err := ReadCanonicalHash(tx, n)
 		if err != nil {
-			return err
+			return
 		}
 		isCanonical := bytes.Equal(k[8:], canonicalHash[:])
 
 		b, err := ReadBodyForStorageByKey(tx, k)
 		if err != nil {
-			return err
+			return
 		}
 		if b == nil {
 			log.Debug("DeleteAncientBlocks: block body not found", "height", n)
@@ -1139,22 +1140,22 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) erro
 					bucket = kv.NonCanonicalTxs
 				}
 				if err := tx.Delete(bucket, txIDBytes, nil); err != nil {
-					return err
+					return
 				}
 			}
 		}
 		if err := tx.Delete(kv.Headers, k, nil); err != nil {
-			return err
+			return
 		}
 		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
-			return err
+			return
 		}
 	}
-	cur, _, _ = c.Current()
-	delTo := binary.BigEndian.Uint64(cur)
-	fmt.Printf("alex2: deleteting: %d-%d\n", delFrom, delTo)
 
-	return nil
+	cur, _, _ = c.Current()
+	deletedTo = binary.BigEndian.Uint64(cur)
+
+	return
 }
 
 // LastKey - candidate on move to kv.Tx interface
