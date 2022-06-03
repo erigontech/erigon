@@ -1184,10 +1184,20 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	}); err != nil {
 		return 0, fmt.Errorf("BigChunks: %w", err)
 	}
+
 	expectedCount := lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstTxID
 	if expectedCount != uint64(f.Count()) {
-		return 0, fmt.Errorf("incorrect tx count: %d, expected: %d", f.Count(), expectedCount)
+		return 0, fmt.Errorf("incorrect tx count: %d, expected from db: %d", f.Count(), expectedCount)
 	}
+	snapDir, _ := filepath.Split(segmentFile)
+	_, expectedCount, err = expectedTxsAmount(snapDir, blockFrom, blockTo)
+	if err != nil {
+		return 0, err
+	}
+	if expectedCount != uint64(f.Count()) {
+		return 0, fmt.Errorf("incorrect tx count: %d, expected from snapshots: %d", f.Count(), expectedCount)
+	}
+
 	if err := f.Compress(); err != nil {
 		return 0, fmt.Errorf("compress: %w", err)
 	}
@@ -1337,21 +1347,23 @@ func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, ex
 	}
 	firstTxID = firstBody.BaseTxId
 
-	bodyIdxPath := filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Bodies.String()))
-	idx, err := recsplit.OpenIndex(bodyIdxPath)
-	if err != nil {
-		return
-	}
-	defer idx.Close()
-
-	off := idx.Lookup2(blockTo - blockFrom - 1)
-	gg.Reset(off)
-
-	buf, _ = gg.Next(buf[:0])
 	lastBody := new(types.BodyForStorage)
-	if err = rlp.DecodeBytes(buf, lastBody); err != nil {
-		return
+	i := uint64(0)
+	for gg.HasNext() {
+		i++
+		if i == blockTo-blockFrom-1 {
+			buf, _ = gg.Next(buf[:0])
+			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
+				return
+			}
+			if gg.HasNext() {
+				panic(1)
+			}
+		} else {
+			gg.Skip()
+		}
 	}
+
 	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
 	return
 }
