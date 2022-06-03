@@ -1382,6 +1382,9 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 		return err
 	}
 	defer d.Close()
+	if uint64(d.Count()) != expectedCount {
+		panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, d.Count()))
+	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:    d.Count(),
@@ -1476,7 +1479,7 @@ RETRY:
 		}
 
 		if i != expectedCount {
-			panic(fmt.Errorf("expect: %d, got %d, d.cnt: %d\n", expectedCount, i, d.Count()))
+			panic(fmt.Errorf("expect: %d, got %d\n", expectedCount, i))
 		}
 
 		if err := txnHashIdx.Build(); err != nil {
