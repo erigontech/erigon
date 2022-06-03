@@ -1011,9 +1011,9 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, t
 	return nil
 }
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl) error {
-	segmentFile := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Transactions))
-	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return fmt.Errorf("DumpTxs: %w", err)
+	segmentFile := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
+	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
+		return fmt.Errorf("DumpHeaders: %w", err)
 	}
 
 	segmentFile = filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
@@ -1021,9 +1021,9 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		return fmt.Errorf("DumpBodies: %w", err)
 	}
 
-	segmentFile = filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Headers))
-	if err := DumpHeaders(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
-		return fmt.Errorf("DumpHeaders: %w", err)
+	segmentFile = filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Transactions))
+	if _, err := DumpTxs(ctx, chainDB, segmentFile, tmpDir, blockFrom, blockTo, workers, lvl); err != nil {
+		return fmt.Errorf("DumpTxs: %w", err)
 	}
 
 	return nil
@@ -1323,50 +1323,58 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 
 var EmptyTxHash = common.Hash{}
 
+func expectedTxsAmount(snapDir string, blockFrom, blockTo uint64) (firstTxID, expectedCount uint64, err error) {
+	bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+	if err != nil {
+		return
+	}
+	defer bodiesSegment.Close()
+
+	gg := bodiesSegment.MakeGetter()
+	buf, _ := gg.Next(nil)
+	firstBody := &types.BodyForStorage{}
+	if err := rlp.DecodeBytes(buf, firstBody); err != nil {
+		return
+	}
+	firstTxID = firstBody.BaseTxId
+
+	bodyIdxPath := filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Bodies.String()))
+	idx, err := recsplit.OpenIndex(bodyIdxPath)
+	if err != nil {
+		return
+	}
+	defer idx.Close()
+
+	off := idx.Lookup2(blockTo - blockFrom - 1)
+	gg.Reset(off)
+
+	buf, _ = gg.Next(buf[:0])
+	lastBody := new(types.BodyForStorage)
+	if err := rlp.DecodeBytes(buf, lastBody); err != nil {
+		return
+	}
+	expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
+	return
+}
+
 func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockTo uint64, snapDir string, tmpDir string, lvl log.Lvl) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
 		}
 	}()
-	var expectedCount, firstTxID uint64
 	firstBlockNum := blockFrom
-
-	bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
-	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+	expectedCount, firstTxID, err := expectedTxsAmount(snapDir, blockFrom, blockTo)
 	if err != nil {
 		return err
 	}
-	defer bodiesSegment.Close()
-
-	{
-		gg := bodiesSegment.MakeGetter()
-		buf, _ := gg.Next(nil)
-		firstBody := &types.BodyForStorage{}
-		if err := rlp.DecodeBytes(buf, firstBody); err != nil {
-			return err
-		}
-		firstTxID = firstBody.BaseTxId
-
-		bodyIdxPath := filepath.Join(snapDir, snap.IdxFileName(blockFrom, blockTo, snap.Bodies.String()))
-		idx, err := recsplit.OpenIndex(bodyIdxPath)
-		if err != nil {
-			return err
-		}
-		defer idx.Close()
-
-		off := idx.Lookup2(blockTo - blockFrom - 1)
-		gg.Reset(off)
-
-		buf, _ = gg.Next(buf[:0])
-		lastBody := new(types.BodyForStorage)
-		if err := rlp.DecodeBytes(buf, lastBody); err != nil {
-			return err
-		}
-		expectedCount = lastBody.BaseTxId + uint64(lastBody.TxAmount) - firstBody.BaseTxId
-
-		idx.Close()
+	bodySegmentPath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Bodies))
+	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+	if err != nil {
+		return
 	}
+	defer bodiesSegment.Close()
 
 	segmentFilePath := filepath.Join(snapDir, snap.SegmentFileName(blockFrom, blockTo, snap.Transactions))
 	d, err := compress.NewDecompressor(segmentFilePath)
