@@ -261,11 +261,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
-		blockFrom, blockTo, ok := snapshotsync.CanRetire(i, br.Snapshots())
-		if !ok {
-			break
-		}
-		if err := br.RetireBlocks(ctx, blockFrom, blockTo, *chainID, log.LvlInfo); err != nil {
+		if err := br.RetireBlocks(ctx, i, i+every, *chainID, log.LvlInfo); err != nil {
 			panic(err)
 		}
 	}
