@@ -7,4 +7,4 @@
 build
 tests
 cmd/prometheus
-
+.git

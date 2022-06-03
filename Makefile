@@ -1,9 +1,9 @@
 GO = go
 GOBIN = $(CURDIR)/build/bin
 
-GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
-GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
+VCS_REF ?= $(shell git rev-list -1 HEAD)
+#GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
+VERSION ?= $(shell git describe --tags '--match=v*' --dirty)
 
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
@@ -15,7 +15,7 @@ BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${VCS_REF} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${VERSION}"
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
 GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
@@ -32,8 +32,8 @@ go-version:
 docker: git-submodules
 	DOCKER_BUILDKIT=1 docker build \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
-		--build-arg VCS_REF=${GIT_COMMIT} \
-		--build-arg VERSION=${GIT_TAG} \
+		--build-arg VCS_REF=$(shell git rev-list -1 HEAD) \
+		--build-arg VERSION=$(shell git describe --tags '--match=v*' --dirty) \
 		${DOCKER_FLAGS} \
 		.
 
@@ -145,8 +145,6 @@ escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 git-submodules:
-	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
 	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
-	@git submodule sync --quiet --recursive
-	@git submodule update --quiet --init --recursive --force || true
+	@[ -d ".git" ] && git submodule sync --quiet --recursive && (git submodule update --quiet --init --recursive --force || true) || true
