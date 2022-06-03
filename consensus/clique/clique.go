@@ -421,7 +421,6 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return err
 	}
 	if _, authorized := snap.Signers[signer]; !authorized {
-		 log.Warn("ErrUnauthorizedSigner","signer", signer, "snap.Signers", snap.Signers )
 		return ErrUnauthorizedSigner
 	}
 	// If we're amongst the recent signers, wait for the next block
