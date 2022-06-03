@@ -326,6 +326,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("alex, recoverFromDB: %d\n", hd.highestInDb)
 		// Take hd.persistedLinkLimit headers (with the highest heights) as links
 		for k, v, err := c.Last(); k != nil && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; k, v, err = c.Prev() {
 			if err != nil {
@@ -351,6 +352,8 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			default:
 			}
 		}
+		fmt.Printf("alex2, recoverFromDB: %d\n", hd.highestInDb)
+
 		return nil
 	})
 	if err != nil {
