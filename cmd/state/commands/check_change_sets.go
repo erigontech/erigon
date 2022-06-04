@@ -152,7 +152,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		}
 
 		reader := state.NewPlainState(historyTx, blockNum)
-		reader.SetTrace(blockNum == uint64(block))
+		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
 		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)
 		var blockWriter state.StateWriter
@@ -193,6 +193,9 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
+					return nil
+				}
+				if len(v) == 0 {
 					return nil
 				}
 
