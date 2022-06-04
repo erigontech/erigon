@@ -14,6 +14,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -21,7 +22,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -242,7 +245,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 
-	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(path.Join(datadir, "chaindata")).Readonly().MustOpen()
+	chainDB := mdbx.NewMDBX(log.New()).Label(kv.ChainDB).Path(path.Join(datadir, "chaindata")).MustOpen()
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
@@ -253,20 +256,28 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	workers := runtime.GOMAXPROCS(-1) - 1
-	if workers < 1 {
-		workers = 1
-	}
+	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1)
 	br := snapshotsync.NewBlockRetire(workers, tmpDir, snapshots, chainDB, nil, nil)
 
+	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
-		br.RetireBlocksInBackground(ctx, i, *chainID, log.LvlInfo)
-		br.Wait()
-		res := br.Result()
-		if res.Err != nil {
-			panic(res.Err)
+		if err := br.RetireBlocks(ctx, i, i+every, *chainID, log.LvlInfo); err != nil {
+			panic(err)
+		}
+		if err := chainDB.Update(ctx, func(tx kv.RwTx) error {
+			progress, _ := stages.GetStageProgress(tx, stages.Headers)
+			canDeleteTo := snapshotsync.CanDeleteTo(progress, br.Snapshots())
+			deletedFrom, deletedTo, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100)
+			if err != nil {
+				return nil
+			}
+			log.Info("Deleted blocks", "from", deletedFrom, "to", deletedTo)
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
+
 	return nil
 }
 

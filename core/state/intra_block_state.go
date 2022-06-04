@@ -550,7 +550,7 @@ func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObj
 func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObject {
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject = sdb.createObject(addr, nil /* previous */)
+		stateObject = sdb.createObject(addr, stateObject /* previous */)
 	}
 	return stateObject
 }
@@ -559,10 +559,6 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 // the given address, it is overwritten.
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj *stateObject) {
 	account := new(accounts.Account)
-	if previous != nil {
-		account.Balance.Set(&previous.data.Balance)
-		account.Initialised = true
-	}
 	var original *accounts.Account
 	if previous == nil {
 		original = &accounts.Account{}
@@ -571,9 +567,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	}
 	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
-	if previous != nil && previous.suicided {
-		newobj.suicided = true
-	}
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
@@ -624,6 +617,10 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 	}
 
 	newObj := sdb.createObject(addr, previous)
+	if previous != nil {
+		newObj.data.Balance.Set(&previous.data.Balance)
+		newObj.data.Initialised = true
+	}
 
 	if contractCreation {
 		newObj.created = true

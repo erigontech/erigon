@@ -62,7 +62,6 @@ right_*.txt
 root_*.txt
 
 __pycache__
-docker-compose.dev.yml
 /build
 *.tmp
 
@@ -74,3 +73,5 @@ tests/testdata/*
 go.work
 
 /goerli
+
+docker-compose.*.yml
