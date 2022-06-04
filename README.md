@@ -36,6 +36,7 @@ NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 **Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
 
+<code>🔬 Alpha/Beta versions difference: [here](https://erigon.substack.com/p/erigon-2-three-upgrades?s=r)</code>
 
 System Requirements
 ===================
@@ -45,7 +46,7 @@ folder `<datadir>/etl-tmp` to another disk).
 
 RAM: 16GB, 64-bit architecture, [Golang version >= 1.16](https://golang.org/doc/install)
 
-<code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space)) </code>
+<code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r) and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
 
 Usage
 =====
