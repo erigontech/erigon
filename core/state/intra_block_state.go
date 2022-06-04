@@ -560,7 +560,7 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj *stateObject) {
 	account := new(accounts.Account)
 	var original *accounts.Account
-	if previous == nil || previous.deleted {
+	if previous == nil {
 		original = &accounts.Account{}
 	} else {
 		original = &previous.original

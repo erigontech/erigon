@@ -667,7 +667,6 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		vmConfig.Tracer = nil
 		vmConfig.Debug = true
 	}
-	vmConfig.TraceJumpDest = true
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
