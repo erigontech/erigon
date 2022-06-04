@@ -885,7 +885,9 @@ func ReadReceipts(db kv.Tx, block *types.Block, senders []common.Address) types.
 	if receipts == nil {
 		return nil
 	}
-	block.SendersToTxs(senders)
+	if len(senders) > 0 {
+		block.SendersToTxs(senders)
+	}
 	if err := receipts.DeriveFields(block.Hash(), block.NumberU64(), block.Transactions(), senders); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", block.Hash(), "number", block.NumberU64(), "err", err, "stack", dbg.Stack())
 		return nil
