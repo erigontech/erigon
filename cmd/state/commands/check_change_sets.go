@@ -31,9 +31,8 @@ import (
 )
 
 var (
-	historyfile   string
-	nocheck       bool
-	writeReceipts bool
+	historyfile string
+	nocheck     bool
 )
 
 func init() {
@@ -42,7 +41,6 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
-	checkChangeSetsCmd.Flags().BoolVar(&writeReceipts, "writeReceipts", false, "set to turn on writing receipts as the execution ongoing")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -51,13 +49,13 @@ var checkChangeSetsCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, writeReceipts)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, writeReceipts bool) error {
+func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -114,17 +112,12 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
-	if syncMode == ethconfig.SnapSync {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.Reopen(); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
+	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true /* enabled */, true /* keepBlocks */, false /* produce */), path.Join(datadir, "snapshots"))
+	defer allSnapshots.Close()
+	if err := allSnapshots.Reopen(); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
+	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 
 	for !interrupt {
@@ -168,16 +161,10 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if err1 != nil {
 			return err1
 		}
-		if writeReceipts {
-			if chainConfig.IsByzantium(blockNum) {
-				receiptSha := types.DeriveSha(receipts)
-				if receiptSha != b.ReceiptHash() {
-					return fmt.Errorf("mismatched receipt headers for block %d", blockNum)
-				}
-			}
-
-			if err := rawdb.AppendReceipts(rwtx, blockNum, receipts); err != nil {
-				return err
+		if chainConfig.IsByzantium(blockNum) {
+			receiptSha := types.DeriveSha(receipts)
+			if receiptSha != b.ReceiptHash() {
+				return fmt.Errorf("mismatched receipt headers for block %d", blockNum)
 			}
 		}
 
@@ -274,30 +261,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		select {
 		case interrupt = <-interruptCh:
 			fmt.Println("interrupted, please wait for cleanup...")
-		case <-commitEvery.C:
-			if writeReceipts {
-				log.Info("Committing receipts", "up to block", b.NumberU64())
-				if err = rwtx.Commit(); err != nil {
-					return err
-				}
-				rwtx, err = chainDb.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-				defer rwtx.Rollback()
-				historyTx.Rollback()
-				historyTx, err = historyDb.BeginRo(context.Background())
-				if err != nil {
-					return err
-				}
-			}
 		default:
-		}
-	}
-	if writeReceipts {
-		log.Info("Committing final receipts", "batch size")
-		if err = rwtx.Commit(); err != nil {
-			return err
 		}
 	}
 	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
