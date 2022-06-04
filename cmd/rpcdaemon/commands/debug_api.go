@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned per call
@@ -74,7 +75,11 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return StorageRangeResult{}, nil
 	}
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(tx, hash, number)
+		h, e := api._blockReader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h
 	}
 
 	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }

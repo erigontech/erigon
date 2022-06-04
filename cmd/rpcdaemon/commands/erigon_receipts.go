@@ -28,7 +28,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	if block == nil {
 		return nil, nil
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon/common"
@@ -29,13 +30,17 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
 	}
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(tx, hash, number)
+		h, e := api._blockReader.Header(ctx, tx, hash, number)
+		if e != nil {
+			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
+		}
+		return h
 	}
 	contractHasTEVM := ethdb.GetHasTEVM(tx)
 	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, contractHasTEVM, ethash.NewFaker(), tx, block.Hash(), 0)
@@ -310,7 +315,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, hash common.Hash)
 		return nil, nil
 	}
 
-	receipts, err := getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, cc, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -344,7 +349,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
-	receipts, err := getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
