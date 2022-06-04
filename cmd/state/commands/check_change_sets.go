@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -155,7 +154,13 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			blockWriter = csw
 		}
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(rwtx, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header {
+			h, e := blockReader.Header(ctx, rwtx, hash, number)
+			if e != nil {
+				panic(e)
+			}
+			return h
+		}
 		contractHasTEVM := ethdb.GetHasTEVM(rwtx)
 		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig)
 		if err1 != nil {
