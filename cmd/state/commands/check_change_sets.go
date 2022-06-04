@@ -143,7 +143,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if b == nil {
 			break
 		}
-
+		fmt.Printf("blockNum = %d, txNum = %d\n", blockNum, len(b.Transactions()))
 		reader := state.NewPlainState(historyTx, blockNum)
 		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
