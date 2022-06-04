@@ -111,12 +111,17 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true /* enabled */, true /* keepBlocks */, false /* produce */), path.Join(datadir, "snapshots"))
-	defer allSnapshots.Close()
-	if err := allSnapshots.Reopen(); err != nil {
-		return fmt.Errorf("reopen snapshot segments: %w", err)
+	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, syncmodeCli)
+	if syncMode == ethconfig.SnapSync {
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
+		defer allSnapshots.Close()
+		if err := allSnapshots.Reopen(); err != nil {
+			return fmt.Errorf("reopen snapshot segments: %w", err)
+		}
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
 	}
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
 
 	for !interrupt {
@@ -142,7 +147,6 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if b == nil {
 			break
 		}
-		fmt.Printf("blockNum = %d, txNum = %d\n", blockNum, len(b.Transactions()))
 		reader := state.NewPlainState(historyTx, blockNum)
 		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
