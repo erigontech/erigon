@@ -61,6 +61,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/parlia"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -181,7 +182,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	config.Sync.Mode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.Sync.ModeCli)
-	log.Info("Syncmode", "type", config.Sync.Mode)
 	config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
@@ -269,37 +269,9 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	if config.Snapshot.Enabled {
-		allSnapshots = snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
-		if err = allSnapshots.Reopen(); err != nil {
-			return nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-
-		if len(stack.Config().DownloaderAddr) > 0 {
-			// connect to external Downloader
-			backend.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
-		} else {
-			// start embedded Downloader
-			backend.downloader, err = downloader.New(config.Torrent)
-			if err != nil {
-				return nil, err
-			}
-			go downloader.MainLoop(ctx, backend.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(backend.downloader)
-			if err != nil {
-				return nil, fmt.Errorf("new server: %w", err)
-			}
-
-			backend.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
-		}
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
+	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
+	if err != nil {
+		return nil, err
 	}
 
 	var consensusConfig interface{}
@@ -320,6 +292,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
+	log.Info("Syncmode", "type", config.Sync.Mode)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
@@ -330,8 +303,19 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return err
 		}
-		if err := snap.EnsureNotChanged(tx, config.Snapshot); err != nil {
+		isCorrectSync, syncMode, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
 			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the appropriate one
+		if !isCorrectSync {
+			log.Warn("Incorrect Syncmode", "got", config.Sync.Mode, "change_to", syncMode)
+			config.Sync.Mode = syncMode
+			config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
+			blockReader, allSnapshots, err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
+			if err != nil {
+				return err
+			}
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
@@ -637,23 +621,41 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		log.Error("Cannot start mining without etherbase", "err", err)
 		return fmt.Errorf("etherbase missing: %w", err)
 	}
+
+	var clq *clique.Clique
 	if c, ok := s.engine.(*clique.Clique); ok {
+		clq = c
+	} else if cl, ok := s.engine.(*serenity.Serenity); ok {
+		if c, ok := cl.InnerEngine().(*clique.Clique); ok {
+			clq = c
+		}
+	}
+	if clq != nil {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		c.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+		clq.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
 			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 		})
 	}
+
+	var prl *parlia.Parlia
 	if p, ok := s.engine.(*parlia.Parlia); ok {
+		prl = p
+	} else if cl, ok := s.engine.(*serenity.Serenity); ok {
+		if p, ok := cl.InnerEngine().(*parlia.Parlia); ok {
+			prl = p
+		}
+	}
+	if prl != nil {
 		if cfg.SigKey == nil {
 			log.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
-		p.Authorize(eb, func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error) {
+		prl.Authorize(eb, func(validator common.Address, payload []byte, chainId *big.Int) ([]byte, error) {
 			return crypto.Sign(payload, cfg.SigKey)
 		})
 	}
@@ -762,6 +764,45 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 	sort.Sort(nodesInfo)
 
 	return nodesInfo, nil
+}
+
+// sets up blockReader and client downloader
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, config *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
+	var err error
+
+	if isSnapshotEnabled {
+		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
+		if err = allSnapshots.Reopen(); err != nil {
+			return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
+		}
+		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+		if len(stack.Config().DownloaderAddr) > 0 {
+			// connect to external Downloader
+			s.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
+		} else {
+			// start embedded Downloader
+			s.downloader, err = downloader.New(config.Torrent)
+			if err != nil {
+				return nil, nil, err
+			}
+			go downloader.MainLoop(ctx, s.downloader, true)
+			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+			if err != nil {
+				return nil, nil, fmt.Errorf("new server: %w", err)
+			}
+
+			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		return blockReader, allSnapshots, nil
+	} else {
+		blockReader := snapshotsync.NewBlockReader()
+		return blockReader, nil, nil
+	}
+
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {

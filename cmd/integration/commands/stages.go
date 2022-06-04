@@ -461,7 +461,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		if unwind > progress {
 			unwindTo = 1 // keep genesis
 		} else {
-			unwindTo = cmp.Max(1, progress-unwind)
+			unwindTo = uint64(cmp.Max(1, int(progress)-int(unwind)))
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
@@ -1106,7 +1106,19 @@ func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots 
 	openSnapshotOnce.Do(func() {
 		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
 		snapCfg := ethconfig.NewSnapCfg(syncmode == ethconfig.SnapSync, true, true)
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error { return snap.EnsureNotChanged(tx, snapCfg) }); err != nil {
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			// if we dont have the correct syncmode here return an error
+			changed, snapSync, err := snap.EnsureNotChanged(tx, snapCfg)
+			if err != nil {
+				return err
+			}
+
+			if !changed {
+				return fmt.Errorf("syncmode has changed. Run erigon again with %v", snapSync)
+			}
+
+			return nil
+		}); err != nil {
 			panic(err)
 		}
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadir, "snapshots"))

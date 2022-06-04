@@ -550,7 +550,7 @@ func (sdb *IntraBlockState) setStateObject(addr common.Address, object *stateObj
 func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObject {
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject = sdb.createObject(addr, nil /* previous */)
+		stateObject = sdb.createObject(addr, stateObject /* previous */)
 	}
 	return stateObject
 }

@@ -351,6 +351,7 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			default:
 			}
 		}
+
 		return nil
 	})
 	if err != nil {
@@ -1139,7 +1140,6 @@ func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
 func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.FullBlockReader) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-
 	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
 		header, err := r.HeaderByNumber(context.Background(), tx, i)
 		if err != nil {
