@@ -98,7 +98,7 @@ func (w *ChangeSetWriter) UpdateAccountCode(address common.Address, incarnation 
 
 func (w *ChangeSetWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	fmt.Printf("delete,%x\n", address)
-	if original == nil {
+	if original == nil || !original.Initialised {
 		return nil
 	}
 	w.accountChanges[address] = originalAccountData(original, false)
