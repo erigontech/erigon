@@ -13,19 +13,15 @@ func Enabled(tx kv.Getter) (bool, error) {
 	return kv.GetBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey)
 }
 
-func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) (bool, ethconfig.SyncMode, error) {
+func EnsureNotChanged(tx kv.GetPut, cfg ethconfig.Snapshot) (bool, bool, error) {
 	ok, v, err := kv.EnsureNotChangedBool(tx, kv.DatabaseInfo, blockSnapshotEnabledKey, cfg.Enabled)
 	if err != nil {
-		return false, "", err
+		return false, false, err
 	}
 	if !ok {
-		if v {
-			return false, ethconfig.SnapSync, nil
-		} else {
-			return false, ethconfig.FullSync, nil
-		}
+		return false, v, nil
 	}
-	return true, "", nil
+	return true, false, nil
 }
 
 // ForceSetFlags - if you know what you are doing

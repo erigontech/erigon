@@ -114,8 +114,8 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 
 	var blockReader services.FullBlockReader
 	var allSnapshots *snapshotsync.RoSnapshots
-	syncMode := ethconfig.SyncModeByChainName(chainConfig.ChainName, snapshotsCli)
-	if syncMode == ethconfig.SnapSync {
+	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
+	if useSnapshots {
 		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		if err := allSnapshots.Reopen(); err != nil {

@@ -62,7 +62,7 @@ var LightClientGPO = gasprice.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	Sync: Sync{
-		Mode:                       FullSync,
+		UseSnapshots:               false,
 		BlockDownloaderWindow:      32768,
 		BodyDownloadTimeoutSeconds: 30,
 	},
@@ -229,8 +229,7 @@ type Config struct {
 }
 
 type Sync struct {
-	ModeCli bool
-	Mode    SyncMode
+	UseSnapshots bool
 	// LoopThrottle sets a minimum time between staged loop iterations
 	LoopThrottle time.Duration
 
@@ -238,23 +237,15 @@ type Sync struct {
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
 }
 
-type SyncMode string
+// Chains where snapshots are enabled by default
+var ChainsWithSnapshots map[string]struct{} = map[string]struct{}{
+	networkname.MainnetChainName: {},
+	networkname.BSCChainName:     {},
+	networkname.GoerliChainName:  {},
+	networkname.RopstenChainName: {},
+}
 
-const (
-	FullSync SyncMode = "full"
-	SnapSync SyncMode = "snap"
-)
-
-func SyncModeByChainName(chain string, useSnapshots bool) SyncMode {
-	switch chain {
-	case networkname.MainnetChainName, networkname.BSCChainName, networkname.GoerliChainName,
-		networkname.RopstenChainName:
-		if useSnapshots {
-			return SnapSync
-		} else {
-			return FullSync
-		}
-	default:
-		return FullSync
-	}
+func UseSnapshotsByChainName(chain string) bool {
+	_, ok := ChainsWithSnapshots[chain]
+	return ok
 }
