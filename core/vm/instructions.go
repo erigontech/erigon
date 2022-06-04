@@ -557,11 +557,18 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 func opJump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	pos := scope.Stack.Pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
-		if usedBitmap && interpreter.cfg.TraceJumpDest {
-			log.Warn("Code Bitmap used for detecting invalid jump",
-				"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
-				"block_num", interpreter.evm.Context().BlockNumber,
-			)
+		if usedBitmap {
+			if interpreter.cfg.TraceJumpDest {
+				log.Warn("Code Bitmap used for detecting invalid jump",
+					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
+					"block_num", interpreter.evm.Context().BlockNumber,
+				)
+			} else {
+				// This is "cheaper" version because it does not require calculation of txHash for each transaction
+				log.Warn("Code Bitmap used for detecting invalid jump",
+					"block_num", interpreter.evm.Context().BlockNumber,
+				)
+			}
 		}
 		return nil, ErrInvalidJump
 	}
@@ -573,11 +580,18 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	pos, cond := scope.Stack.Pop(), scope.Stack.Pop()
 	if !cond.IsZero() {
 		if valid, usedBitmap := scope.Contract.validJumpdest(&pos); !valid {
-			if usedBitmap && interpreter.cfg.TraceJumpDest {
-				log.Warn("Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
-					"block_num", interpreter.evm.Context().BlockNumber,
-				)
+			if usedBitmap {
+				if interpreter.cfg.TraceJumpDest {
+					log.Warn("Code Bitmap used for detecting invalid jump",
+						"tx", fmt.Sprintf("0x%x", interpreter.evm.TxContext().TxHash),
+						"block_num", interpreter.evm.Context().BlockNumber,
+					)
+				} else {
+					// This is "cheaper" version because it does not require calculation of txHash for each transaction
+					log.Warn("Code Bitmap used for detecting invalid jump",
+						"block_num", interpreter.evm.Context().BlockNumber,
+					)
+				}
 			}
 			return nil, ErrInvalidJump
 		}

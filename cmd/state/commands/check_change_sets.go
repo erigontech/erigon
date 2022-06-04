@@ -152,7 +152,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		}
 
 		reader := state.NewPlainState(historyTx, blockNum)
-		reader.SetTrace(blockNum == uint64(block))
+		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
 		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)
 		var blockWriter state.StateWriter
@@ -190,9 +190,22 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			i := 0
 			match := true
 			err = changeset.ForPrefix(historyTx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+				if i >= len(accountChanges.Changes) {
+					if len(v) != 0 {
+						fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+						fmt.Printf("In the database: ======================\n")
+						fmt.Printf("%d: 0x%x: %x\n", i, k, v)
+						match = false
+					}
+					i++
+					return nil
+				}
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
+					return nil
+				}
+				if len(v) == 0 {
 					return nil
 				}
 
@@ -202,6 +215,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 				fmt.Printf("%d: 0x%x: %x\n", i, k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("%d: 0x%x %x\n", i, c.Key, c.Value)
+				i++
 				return nil
 			})
 			if err != nil {
@@ -221,21 +235,33 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 				expectedStorageChanges = changeset.NewChangeSet()
 			}
 			sort.Sort(expectedStorageChanges)
+			match = true
 			err = changeset.ForPrefix(historyTx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+				if i >= len(expectedStorageChanges.Changes) {
+					fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
+					fmt.Printf("0x%x: %x\n", k, v)
+					match = false
+					i++
+					return nil
+				}
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					return nil
 				}
-
+				match = false
 				fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 				fmt.Printf("0x%x: %x\n", k, v)
 				fmt.Printf("Expected: ==========================\n")
 				fmt.Printf("0x%x %x\n", c.Key, c.Value)
-				return fmt.Errorf("check change set failed")
+				i++
+				return nil
 			})
 			if err != nil {
 				return err
+			}
+			if !match {
+				return fmt.Errorf("check change set failed")
 			}
 		}
 
