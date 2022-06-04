@@ -190,6 +190,13 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			i := 0
 			match := true
 			err = changeset.ForPrefix(historyTx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+				if i >= len(accountChanges.Changes) {
+					fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+					fmt.Printf("In the database: ======================\n")
+					fmt.Printf("%d: 0x%x: %x\n", i, k, v)
+					i++
+					return nil
+				}
 				c := accountChanges.Changes[i]
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
 					i++
@@ -227,6 +234,12 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			sort.Sort(expectedStorageChanges)
 			match = true
 			err = changeset.ForPrefix(historyTx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+				if i >= len(expectedStorageChanges.Changes) {
+					fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
+					fmt.Printf("0x%x: %x\n", k, v)
+					i++
+					return nil
+				}
 				c := expectedStorageChanges.Changes[i]
 				i++
 				if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
