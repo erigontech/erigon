@@ -24,11 +24,11 @@ import (
 const MainnetNotCheckedFrom uint64 = 14_909_200
 
 // MainnetNotCheckedFrom is the first block number not yet checked for invalid jumps
-const BSCNotCheckedFrom uint64 = 16_903_214
+const BSCNotCheckedFrom uint64 = 17_048_970
 
-const BorMainnetNotCheckedFrom uint64 = 8_914_624
+const BorMainnetNotCheckedFrom uint64 = 14_232_422
 
-const RopstenNotCheckedFrom uint64 = 7_213_871
+const RopstenNotCheckedFrom uint64 = 12_331_664
 
 // SkipAnalysis function tells us whether we can skip performing jumpdest analysis
 // for the historical blocks (on mainnet now but perhaps on the testsnets
@@ -59,7 +59,9 @@ func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
 		if blockNumber >= RopstenNotCheckedFrom {
 			return false
 		}
-		if blockNumber == 2534105 || blockNumber == 2534116 || blockNumber == 3028887 || blockNumber == 3028940 || blockNumber == 3028956 || blockNumber == 3450102 || blockNumber == 5294626 || blockNumber == 5752787 {
+		if blockNumber == 2534105 || blockNumber == 2534116 || blockNumber == 3028887 || blockNumber == 3028940 || blockNumber == 3028956 ||
+			blockNumber == 3450102 || blockNumber == 5294626 || blockNumber == 5752787 || blockNumber == 10801303 || blockNumber == 10925062 ||
+			blockNumber == 11440683 || blockNumber == 11897655 || blockNumber == 11898288 || blockNumber == 12291199 {
 			return false
 		}
 		return true
