@@ -632,3 +632,11 @@ func (a *Aggregator) WriteAccountStorage(addr, loc []byte, value []byte) error {
 	copy(dbkey[len(addr):], loc)
 	return a.storage.Put(dbkey, value)
 }
+
+type FilesStats struct {
+}
+
+func (a *Aggregator) Stats() FilesStats {
+	var fs FilesStats
+	return fs
+}
