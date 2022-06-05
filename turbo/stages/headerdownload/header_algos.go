@@ -297,7 +297,7 @@ func (hd *HeaderDownload) logAnchorState() {
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
-	log.Info("anchorQueue", "len", hd.anchorQueue.Len())
+	log.Info("Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
 	for _, s := range ss {
 		log.Info(s)
 	}
@@ -442,6 +442,32 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime uint64) (timeout 
 		Reverse: true,
 	}
 	return
+}
+
+func (hd *HeaderDownload) UpdateStats(req *HeaderRequest, skeleton bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if skeleton {
+		hd.stats.SkeletonRequests++
+		if hd.stats.SkeletonReqMinBlock == 0 || req.Number < hd.stats.SkeletonReqMinBlock {
+			hd.stats.SkeletonReqMinBlock = req.Number
+		}
+		if req.Number+req.Length*req.Skip > hd.stats.SkeletonReqMaxBlock {
+			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*req.Skip
+		}
+	} else {
+		hd.stats.Requests++
+		// We know that req is reverse request, with Skip == 0, therefore comparing Number with reqMax
+		if req.Number > hd.stats.ReqMaxBlock {
+			hd.stats.ReqMaxBlock = req.Number
+		}
+		if hd.stats.ReqMinBlock == 0 || req.Number < hd.stats.ReqMinBlock+req.Length {
+			if req.Number >= req.Length {
+				hd.stats.ReqMinBlock = req.Number - req.Length
+			}
+		}
+	}
+
 }
 
 func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
@@ -888,13 +914,14 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 	if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
 		hd.topSeenHeightPoW = sh.Number
 	}
-	if sh.Number > hd.respMax {
-		hd.respMax = sh.Number
+	if sh.Number > hd.stats.RespMaxBlock {
+		hd.stats.RespMaxBlock = sh.Number
 	}
-	if hd.respMin == 0 || sh.Number < hd.respMin {
-		hd.respMin = sh.Number
+	if hd.stats.RespMinBlock == 0 || sh.Number < hd.stats.RespMinBlock {
+		hd.stats.RespMinBlock = sh.Number
 	}
 	if _, ok := hd.links[sh.Hash]; ok {
+		hd.stats.Duplicates++
 		// Duplicate
 		return false
 	}
@@ -952,7 +979,6 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 }
 
 func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
-	hd.respCount++
 	requestMore := false
 	for _, sh := range csHeaders {
 		// Lock is acquired for every invocation of ProcessHeader
@@ -962,6 +988,7 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 	}
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	hd.stats.Responses++
 	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
 		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(csHeaders), "limit", hd.linkLimit)
@@ -976,14 +1003,10 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 	return hd.requestChaining && requestMore
 }
 
-func (hd *HeaderDownload) ExtractRespStats() (respCount int, respMin uint64, respMax uint64) {
-	respCount = hd.respCount
-	respMin = hd.respMin
-	respMax = hd.respMax
-	hd.respCount = 0
-	hd.respMin = 0
-	hd.respMax = 0
-	return
+func (hd *HeaderDownload) ExtractStats() Stats {
+	s := hd.stats
+	hd.stats = Stats{}
+	return s
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
