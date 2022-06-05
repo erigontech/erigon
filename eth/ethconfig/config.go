@@ -239,11 +239,12 @@ type Sync struct {
 
 // Chains where snapshots are enabled by default
 var ChainsWithSnapshots map[string]struct{} = map[string]struct{}{
-	networkname.MainnetChainName: {},
-	networkname.BSCChainName:     {},
-	networkname.GoerliChainName:  {},
-	networkname.RopstenChainName: {},
-	networkname.MumbaiChainName:  {},
+	networkname.MainnetChainName:    {},
+	networkname.BSCChainName:        {},
+	networkname.GoerliChainName:     {},
+	networkname.RopstenChainName:    {},
+	networkname.MumbaiChainName:     {},
+	networkname.BorMainnetChainName: {},
 }
 
 func UseSnapshotsByChainName(chain string) bool {
