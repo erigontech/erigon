@@ -17,6 +17,8 @@
 package state
 
 import (
+	"fmt"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -174,7 +176,7 @@ func (a *Aggregator) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (AggC
 	if ac.storage, err = a.storage.collate(step, txFrom, txTo, roTx); err != nil {
 		return AggCollation{}, err
 	}
-	if ac.storage, err = a.storage.collate(step, txFrom, txTo, roTx); err != nil {
+	if ac.code, err = a.code.collate(step, txFrom, txTo, roTx); err != nil {
 		return AggCollation{}, err
 	}
 	if ac.logAddrs, err = a.logAddrs.collate(txFrom, txTo, roTx); err != nil {
@@ -341,6 +343,7 @@ func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
 	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = a.code.findMergeRange(maxEndTxNum, maxSpan)
+	fmt.Printf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r)
 	return r
 }
 
@@ -574,7 +577,7 @@ func (a *Aggregator) FinishTx() error {
 		return err
 	}
 	maxEndTxNum := a.endTxNumMinimax()
-	maxSpan := uint64(16 * 16)
+	maxSpan := uint64(32) * a.aggregationStep
 	for r := a.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = a.findMergeRange(maxEndTxNum, maxSpan) {
 		outs := a.staticFilesInRange(r)
 		defer func() {

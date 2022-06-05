@@ -668,12 +668,24 @@ type StaticFiles struct {
 }
 
 func (sf StaticFiles) Close() {
-	sf.valuesDecomp.Close()
-	sf.valuesIdx.Close()
-	sf.historyDecomp.Close()
-	sf.historyIdx.Close()
-	sf.efHistoryDecomp.Close()
-	sf.efHistoryIdx.Close()
+	if sf.valuesDecomp != nil {
+		sf.valuesDecomp.Close()
+	}
+	if sf.valuesIdx != nil {
+		sf.valuesIdx.Close()
+	}
+	if sf.historyDecomp != nil {
+		sf.historyDecomp.Close()
+	}
+	if sf.historyIdx != nil {
+		sf.historyIdx.Close()
+	}
+	if sf.efHistoryDecomp != nil {
+		sf.efHistoryDecomp.Close()
+	}
+	if sf.efHistoryIdx != nil {
+		sf.efHistoryIdx.Close()
+	}
 }
 
 // buildFiles performs potentially resource intensive operations of creating
