@@ -215,6 +215,7 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		}
 
 		txNum++ // Pre-block transaction
+		agg.SetTxNum(txNum)
 
 		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, block, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
@@ -227,6 +228,7 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		}
 
 		txNum++ // Post-block transaction
+		agg.SetTxNum(txNum)
 
 		// Check for interrupts
 		select {
@@ -322,7 +324,6 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		ww.w.SetTxNum(txNum)
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
@@ -335,6 +336,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			fmt.Printf("FinishTx called for %d [%x]\n", txNum, tx.Hash())
 		}
 		txNum++
+		ww.w.SetTxNum(txNum)
 	}
 
 	ibs := state.New(rw)
