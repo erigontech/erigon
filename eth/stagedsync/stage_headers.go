@@ -820,10 +820,6 @@ Loop:
 			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress)
 			stats := cfg.hd.ExtractStats()
-			log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
-				"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-				"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
-			cfg.hd.LogAnchorState()
 			if prevProgress == progress {
 				noProgressCounter++
 				if noProgressCounter >= 5 {
