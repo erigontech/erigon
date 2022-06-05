@@ -256,6 +256,19 @@ const ( // SyncStatus values
 	Synced // if we found a canonical hash during backward sync, in this case our sync process is done
 )
 
+type Stats struct {
+	Requests            int
+	SkeletonRequests    int
+	Responses           int
+	Duplicates          int
+	ReqMinBlock         uint64
+	ReqMaxBlock         uint64
+	SkeletonReqMinBlock uint64
+	SkeletonReqMaxBlock uint64
+	RespMinBlock        uint64
+	RespMaxBlock        uint64
+}
+
 type HeaderDownload struct {
 	badHeaders             map[common.Hash]struct{}
 	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
@@ -279,9 +292,7 @@ type HeaderDownload struct {
 	topSeenHeightPoW       uint64
 	latestMinedBlockNumber uint64
 	trace                  bool
-	respCount              int
-	respMin                uint64
-	respMax                uint64
+	stats                  Stats
 
 	consensusHeaderReader consensus.ChainHeaderReader
 	headerReader          services.HeaderReader

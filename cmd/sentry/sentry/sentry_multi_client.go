@@ -421,6 +421,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 					cs.Hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 					log.Trace("Sent request", "height", req.Number)
+					cs.Hd.UpdateStats(req, false /* skeleton */)
 				}
 			}
 			if len(penalties) > 0 {
