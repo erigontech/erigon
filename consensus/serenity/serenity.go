@@ -54,7 +54,12 @@ func New(eth1Engine consensus.Engine) *Serenity {
 	return &Serenity{eth1Engine: eth1Engine}
 }
 
-// Type returns underlying consensus engine
+// InnerEngine returns the embedded eth1 consensus engine.
+func (s *Serenity) InnerEngine() consensus.Engine {
+	return s.eth1Engine
+}
+
+// Type returns the type of the underlying consensus engine.
 func (s *Serenity) Type() params.ConsensusType {
 	return s.eth1Engine.Type()
 }

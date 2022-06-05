@@ -710,8 +710,6 @@ func HeadersPOW(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
-	var skeletonReqCount, reqCount int                        // How many requests have been issued in the last logging interval
-	var skeletonReqMin, skeletonReqMax, reqMin, reqMax uint64 // min and max block height for skeleton and non-skeleton requests
 	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
@@ -737,7 +735,6 @@ Loop:
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
-				reqCount++
 			}
 		}
 		if len(penalties) > 0 {
@@ -752,16 +749,8 @@ Loop:
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
 					cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
-					reqCount++
-					// We know that req is reverse request, with Skip == 0, therefore comparing Number with reqMax
-					if req.Number > reqMax {
-						reqMax = req.Number
-					}
-					if reqMin == 0 || req.Number < reqMin+req.Length {
-						if req.Number >= req.Length {
-							reqMin = req.Number - req.Length
-						}
-					}
+					cfg.hd.UpdateStats(req, false /* skeleton */)
+
 				}
 			}
 			if len(penalties) > 0 {
@@ -777,13 +766,7 @@ Loop:
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					log.Trace("Sent skeleton request", "height", req.Number)
-					skeletonReqCount++
-					if skeletonReqMin == 0 || req.Number < skeletonReqMin {
-						skeletonReqMin = req.Number
-					}
-					if req.Number+req.Length*req.Skip > skeletonReqMax {
-						skeletonReqMax = req.Number + req.Length*req.Skip
-					}
+					cfg.hd.UpdateStats(req, true /* skeleton */)
 					lastSkeletonTime = time.Now()
 				}
 			}
@@ -820,25 +803,21 @@ Loop:
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress)
+			stats := cfg.hd.ExtractStats()
 			if prevProgress == progress {
 				noProgressCounter++
-				respCount, respMin, respMax := cfg.hd.ExtractRespStats()
-				log.Info("Req/resp stats", "req", reqCount, "reqMin", reqMin, "reqMax", reqMax,
-					"skel", skeletonReqCount, "skelMin", skeletonReqMin, "skelMax", skeletonReqMax,
-					"resp", respCount, "respMin", respMin, "respMax", respMax)
-				cfg.hd.LogAnchorState()
-				if noProgressCounter >= 5 && wasProgress {
-					log.Warn("Looks like chain is not progressing, moving to the next stage")
-					break Loop
+				if noProgressCounter >= 5 {
+					log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
+						"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
+						"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+					cfg.hd.LogAnchorState()
+					if wasProgress {
+						log.Warn("Looks like chain is not progressing, moving to the next stage")
+						break Loop
+					}
 				}
 			}
 			prevProgress = progress
-			reqCount = 0
-			reqMin = 0
-			reqMax = 0
-			skeletonReqCount = 0
-			skeletonReqMin = 0
-			skeletonReqMax = 0
 		case <-timer.C:
 			log.Trace("RequestQueueTime (header) ticked")
 		case <-cfg.hd.DeliveryNotify:
@@ -1137,7 +1116,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	var m runtime.MemStats
 	libcommon.ReadMemStats(&m)
-	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+	log.Info("[Snapshots] Stat", "blocks", cfg.snapshots.BlocksAvailable(), "segments", cfg.snapshots.SegmentsMax(), "indices", cfg.snapshots.IndicesMax(), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 
 	// Create .idx files
 	if cfg.snapshots.Cfg().Produce && cfg.snapshots.IndicesMax() < cfg.snapshots.SegmentsMax() {
@@ -1166,8 +1145,9 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		logEvery := time.NewTicker(logInterval)
 		defer logEvery.Stop()
 
-		h2n := etl.NewCollector("[Snapshots]", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+		h2n := etl.NewCollector("Snapshots", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 		defer h2n.Close()
+		h2n.LogLvl(log.LvlDebug)
 
 		// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 		// for now easier just store them in db

@@ -3,9 +3,9 @@ package downloader
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -58,10 +58,17 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 
 	// Application must never see partially-downloaded files
 	// To provide such consistent view - downloader does:
-	// add suffix _tmp to <datadir>/snapshots - then method .onComplete will remove this suffix
-	// and App only work with <datadir>/snapshots folder
+	// add <datadir>/snapshots/tmp - then method .onComplete will remove this suffix
+	// and App only work with <datadir>/snapshot s folder
+	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
+		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
+	}
 	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) {
-		cfg.DataDir += "_tmp"
+		cfg.DataDir = filepath.Join(cfg.DataDir, "tmp")
+	} else {
+		if err := copyFromTmp(cfg.DataDir); err != nil {
+			return nil, err
+		}
 	}
 	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
@@ -148,12 +155,41 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
+func copyFromTmp(snapDir string) error {
+	tmpDir := filepath.Join(snapDir, "tmp")
+	if !common.FileExist(tmpDir) {
+		return nil
+	}
+
+	snFs := os.DirFS(tmpDir)
+	paths, err := fs.ReadDir(snFs, ".")
+	if err != nil {
+		return err
+	}
+	for _, p := range paths {
+		if p.Name() == "." || p.Name() == ".." || p.Name() == "tmp" {
+			continue
+		}
+		src := filepath.Join(tmpDir, p.Name())
+		if err := os.Rename(src, filepath.Join(snapDir, p.Name())); err != nil {
+			if os.IsExist(err) {
+				_ = os.Remove(src)
+				continue
+			}
+			return err
+		}
+	}
+	_ = os.Remove(tmpDir)
+	return nil
+}
+
 // onComplete - only once - after download of all files fully done:
 // - closing torrent client, closing downloader db
 // - removing _tmp suffix from snapDir
 // - open new torrentClient and db
 func (d *Downloader) onComplete() {
-	if !strings.HasSuffix(d.cfg.DataDir, "_tmp") {
+	snapDir, lastPart := filepath.Split(d.cfg.DataDir)
+	if lastPart != "tmp" {
 		return
 	}
 
@@ -165,12 +201,11 @@ func (d *Downloader) onComplete() {
 	d.pieceCompletionDB.Close()
 	d.db.Close()
 
-	// rename _tmp folder
-	snapDir := strings.TrimSuffix(d.cfg.DataDir, "_tmp")
-	if err := os.Rename(d.cfg.DataDir, snapDir); err != nil {
+	if err := copyFromTmp(snapDir); err != nil {
 		panic(err)
 	}
 	d.cfg.DataDir = snapDir
+	fmt.Printf("alex1: %s\n", d.cfg.DataDir)
 
 	db, c, m, torrentClient, err := openClient(d.cfg.ClientConfig)
 	if err != nil {

@@ -46,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -2589,6 +2590,57 @@ func chainConfig(name string) error {
 	return nil
 }
 
+func keybytesToHex(str []byte) []byte {
+	l := len(str)*2 + 1
+	var nibbles = make([]byte, l)
+	for i, b := range str {
+		nibbles[i*2] = b / 16
+		nibbles[i*2+1] = b % 16
+	}
+	nibbles[l-1] = 16
+	return nibbles
+}
+
+func findPrefix(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+
+	c, err := tx.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	var k []byte
+	var e error
+	prefix := common.FromHex("0x0901050b0c03")
+	count := 0
+	for k, _, e = c.First(); k != nil && e == nil; k, _, e = c.Next() {
+		if len(k) != 20 {
+			continue
+		}
+		hash := crypto.Keccak256(k)
+		nibbles := keybytesToHex(hash)
+		if bytes.HasPrefix(nibbles, prefix) {
+			fmt.Printf("addr = [%x], hash = [%x]\n", k, hash)
+			break
+		}
+		count++
+		if count%1_000_000 == 0 {
+			fmt.Printf("Searched %d records\n", count)
+		}
+	}
+	if e != nil {
+		return e
+	}
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -2768,6 +2820,8 @@ func main() {
 		err = histStat1(*chaindata)
 	case "chainConfig":
 		err = chainConfig(*name)
+	case "findPrefix":
+		err = findPrefix(*chaindata)
 	}
 
 	if err != nil {

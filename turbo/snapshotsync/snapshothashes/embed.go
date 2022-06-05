@@ -31,6 +31,10 @@ var Ropsten = fromToml(ropsten)
 var mumbai []byte
 var Mumbai = fromToml(mumbai)
 
+//go:embed erigon-snapshots/bor-mainnet.toml
+var borMainnet []byte
+var BorMainnet = fromToml(borMainnet)
+
 type PreverifiedItem struct {
 	Name string
 	Hash string
@@ -55,11 +59,12 @@ func doSort(in preverified) Preverified {
 }
 
 var (
-	MainnetChainSnapshotConfig = newConfig(Mainnet)
-	GoerliChainSnapshotConfig  = newConfig(Goerli)
-	BscChainSnapshotConfig     = newConfig(Bsc)
-	RopstenChainSnapshotConfig = newConfig(Ropsten)
-	MumbaiChainSnapshotConfig  = newConfig(Mumbai)
+	MainnetChainSnapshotConfig    = newConfig(Mainnet)
+	GoerliChainSnapshotConfig     = newConfig(Goerli)
+	BscChainSnapshotConfig        = newConfig(Bsc)
+	RopstenChainSnapshotConfig    = newConfig(Ropsten)
+	MumbaiChainSnapshotConfig     = newConfig(Mumbai)
+	BorMainnetChainSnapshotConfig = newConfig(BorMainnet)
 )
 
 func newConfig(preverified Preverified) *Config {
@@ -101,19 +106,18 @@ type Config struct {
 	Preverified  Preverified
 }
 
+var KnownConfigs map[string]*Config = map[string]*Config{
+	networkname.MainnetChainName:    MainnetChainSnapshotConfig,
+	networkname.GoerliChainName:     GoerliChainSnapshotConfig,
+	networkname.BSCChainName:        BscChainSnapshotConfig,
+	networkname.RopstenChainName:    RopstenChainSnapshotConfig,
+	networkname.MumbaiChainName:     MumbaiChainSnapshotConfig,
+	networkname.BorMainnetChainName: BorMainnetChainSnapshotConfig,
+}
+
 func KnownConfig(networkName string) *Config {
-	switch networkName {
-	case networkname.MainnetChainName:
-		return MainnetChainSnapshotConfig
-	case networkname.GoerliChainName:
-		return GoerliChainSnapshotConfig
-	case networkname.BSCChainName:
-		return BscChainSnapshotConfig
-	case networkname.RopstenChainName:
-		return RopstenChainSnapshotConfig
-	case networkname.MumbaiChainName:
-		return MumbaiChainSnapshotConfig
-	default:
-		return newConfig(Preverified{})
+	if c, ok := KnownConfigs[networkName]; ok {
+		return c
 	}
+	return newConfig(Preverified{})
 }

@@ -285,7 +285,7 @@ var cmdSetPrune = &cobra.Command{
 
 var cmdSetSnapshto = &cobra.Command{
 	Use:   "force_set_snapshot",
-	Short: "Override existing --syncmode flag value (if you know what you are doing)",
+	Short: "Override existing --snapshots flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
@@ -461,7 +461,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		if unwind > progress {
 			unwindTo = 1 // keep genesis
 		} else {
-			unwindTo = cmp.Max(1, progress-unwind)
+			unwindTo = uint64(cmp.Max(1, int(progress)-int(unwind)))
 		}
 
 		if err = stages.SaveStageProgress(tx, stages.Headers, unwindTo); err != nil {
@@ -667,7 +667,6 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		vmConfig.Tracer = nil
 		vmConfig.Debug = true
 	}
-	vmConfig.TraceJumpDest = true
 
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
@@ -1104,13 +1103,25 @@ var _allSnapshotsSingleton *snapshotsync.RoSnapshots
 
 func allSnapshots(cc *params.ChainConfig, db kv.RwDB) *snapshotsync.RoSnapshots {
 	openSnapshotOnce.Do(func() {
-		syncmode := ethconfig.SyncModeByChainName(cc.ChainName, syncmodeStr)
-		snapCfg := ethconfig.NewSnapCfg(syncmode == ethconfig.SnapSync, true, true)
-		if err := db.Update(context.Background(), func(tx kv.RwTx) error { return snap.EnsureNotChanged(tx, snapCfg) }); err != nil {
+		useSnapshots := ethconfig.UseSnapshotsByChainName(cc.ChainName)
+		snapCfg := ethconfig.NewSnapCfg(useSnapshots && snapshotsBool, true, true)
+		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
+			// if we dont have the correct syncmode here return an error
+			changed, snapSync, err := snap.EnsureNotChanged(tx, snapCfg)
+			if err != nil {
+				return err
+			}
+
+			if !changed {
+				return fmt.Errorf("syncmode has changed. Run erigon again with --snapshots=%v", snapSync)
+			}
+
+			return nil
+		}); err != nil {
 			panic(err)
 		}
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, filepath.Join(datadir, "snapshots"))
-		if syncmode == ethconfig.SnapSync {
+		if useSnapshots {
 			if err := _allSnapshotsSingleton.Reopen(); err != nil {
 				panic(err)
 			}

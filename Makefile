@@ -30,7 +30,7 @@ go-version:
 	fi
 
 docker: git-submodules
-	DOCKER_BUILDKIT=1 docker build \
+	DOCKER_BUILDKIT=1 docker build -t thorax/erigon:latest \
 		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
 		--build-arg VCS_REF=${GIT_COMMIT} \
 		--build-arg VERSION=${GIT_TAG} \

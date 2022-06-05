@@ -38,6 +38,7 @@ NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
 **Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
 changes but we don't guarantee anything. Things can and will break.**
 
+<code>🔬 Alpha/Beta versions difference: [here](https://erigon.substack.com/p/erigon-2-three-upgrades?s=r)</code>
 
 System Requirements
 ===================
@@ -56,7 +57,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture, [Golang version >= 1.18](https://golang.org/doc/install), GCC 10+
 
-<code>🔬 more info on disk storage is [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
+<code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r) and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
 
 Usage
 =====
@@ -75,6 +76,14 @@ Default `--syncmode=snap` for `mainnet`, `goerli`, `bsc`. Other networks now hav
 Use `--datadir` to choose where to store data.
 
 Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
+
+### Modularity
+
+Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
+Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
+Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by
+your own implementation, security.
+How to start Erigon's services as separated processes, see in [docker-compose.yml](./docker-compose.yml).
 
 ### Optional stages
 
