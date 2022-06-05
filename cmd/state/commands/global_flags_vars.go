@@ -14,7 +14,7 @@ var (
 	block           uint64
 	changeSetBucket string
 	indexBucket     string
-	syncmodeCli     string
+	snapshotsCli    bool
 	chain           string
 )
 
@@ -50,7 +50,7 @@ func withIndexBucket(cmd *cobra.Command) {
 }
 
 func withSnapshotBlocks(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&syncmodeCli, "syncmode", "", utils.SyncModeFlag.Usage)
+	cmd.Flags().BoolVar(&snapshotsCli, "snapshots", true, utils.SnapshotFlag.Usage)
 }
 
 func withChain(cmd *cobra.Command) {

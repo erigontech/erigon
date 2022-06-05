@@ -181,8 +181,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, genesisErr
 	}
 
-	config.Sync.Mode = ethconfig.SyncModeByChainName(chainConfig.ChainName, config.Sync.ModeCli)
-	config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
+	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
 
 	types.SetHeaderSealFlag(chainConfig.IsHeaderWithSeal())
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
@@ -292,7 +291,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
-	log.Info("Syncmode", "type", config.Sync.Mode)
+	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
 
 	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
 		if err = stagedsync.UpdateMetrics(tx); err != nil {
@@ -303,15 +302,15 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return err
 		}
-		isCorrectSync, syncMode, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
 		if err != nil {
 			return err
 		}
 		// if we are in the incorrect syncmode then we change it to the appropriate one
 		if !isCorrectSync {
-			log.Warn("Incorrect Syncmode", "got", config.Sync.Mode, "change_to", syncMode)
-			config.Sync.Mode = syncMode
-			config.Snapshot.Enabled = config.Sync.Mode == ethconfig.SnapSync
+			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
+			config.Sync.UseSnapshots = useSnapshots
+			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
 			blockReader, allSnapshots, err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
 			if err != nil {
 				return err
