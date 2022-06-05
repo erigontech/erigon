@@ -819,16 +819,22 @@ Loop:
 		case <-logEvery.C:
 			progress := cfg.hd.Progress()
 			logProgressHeaders(logPrefix, prevProgress, progress)
+			stats := cfg.hd.ExtractStats()
+			log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
+				"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
+				"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+			cfg.hd.LogAnchorState()
 			if prevProgress == progress {
 				noProgressCounter++
-				stats := cfg.hd.ExtractStats()
-				log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
-					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
-				cfg.hd.LogAnchorState()
-				if noProgressCounter >= 5 && wasProgress {
-					log.Warn("Looks like chain is not progressing, moving to the next stage")
-					break Loop
+				if noProgressCounter >= 5 {
+					log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
+						"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
+						"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+					cfg.hd.LogAnchorState()
+					if wasProgress {
+						log.Warn("Looks like chain is not progressing, moving to the next stage")
+						break Loop
+					}
 				}
 			}
 			prevProgress = progress
