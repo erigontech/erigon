@@ -418,22 +418,6 @@ func handleNewPayload(
 		return err
 	}
 
-	isCanonicalHeader, err := rawdb.IsCanonicalHash(tx, headerHash)
-	if err != nil {
-		return err
-	}
-
-	// If we already processed this block as canonical we return VALID and skip it.
-	if isCanonicalHeader {
-		if requestStatus == engineapi.New {
-			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
-			}
-		}
-		return nil
-	}
-
 	if existingCanonicalHash != (common.Hash{}) && headerHash == existingCanonicalHash {
 		log.Info(fmt.Sprintf("[%s] New payload: previously received valid header", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
