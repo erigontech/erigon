@@ -296,7 +296,7 @@ Next command starts: Erigon on port 30303, rpcdaemon on port 8545, prometheus on
 ```sh
 make docker-compose
 # or
-XDG_DATA_HOME=/preferred/data/folder make docker-compose
+XDG_DATA_HOME=/preferred/data/folder DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 make docker-compose
 ```
 
 Makefile creates the initial directories for erigon, prometheus and grafana. The PID namespace is shared between erigon
