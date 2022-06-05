@@ -220,6 +220,7 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, block, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
+		agg.SetTxNum(txNum)
 		if err := agg.FinishTx(); err != nil {
 			return fmt.Errorf("failed to finish tx: %w", err)
 		}
@@ -316,6 +317,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
+	ww.w.SetTxNum(txNum)
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
