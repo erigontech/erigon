@@ -297,8 +297,8 @@ func (hd *HeaderDownload) logAnchorState() {
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
+	log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 	for _, s := range ss {
-		log.Info("anchorQueue", "len", hd.anchorQueue.Len())
 		log.Info(s)
 	}
 }
