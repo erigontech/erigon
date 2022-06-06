@@ -925,9 +925,16 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 		// Duplicate
 		return false
 	}
+	if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
+		// Alternative branch connected to an existing anchor
+		// Adding link as another child to the anchor and quit (not to overwrite the anchor)
+		link := hd.addHeaderAsLink(sh, false /* persisted */)
+		link.next = parentAnchor.fLink
+		parentAnchor.fLink = link
+		return false
+	}
 	parent, foundParent := hd.links[sh.Header.ParentHash]
 	anchor, foundAnchor := hd.anchors[sh.Hash]
-	//fmt.Printf("sh = %d %x, foundParent=%t, foundAnchor=%t\n", sh.Number, sh.Hash, foundParent, foundAnchor)
 	if !foundParent && !foundAnchor {
 		if sh.Number < hd.highestInDb {
 			log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
@@ -940,16 +947,12 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 	}
 	link := hd.addHeaderAsLink(sh, false /* persisted */)
 	if foundAnchor {
+		// The new link is what anchor was pointing to, so the link takes over the child links of the anchor and the anchor is removed
 		link.fChild = anchor.fLink
 		hd.removeAnchor(anchor)
-		//fmt.Printf("removed anchor %d %x\n", anchor.blockHeight, anchor.parentHash)
-	}
-	if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
-		link.next = parentAnchor.fLink
-		parentAnchor.fLink = link
 	}
 	if foundParent {
-		//fmt.Printf("sh = %d %x, found parent\n", sh.Number, sh.Hash)
+		// Add this link as another child to the parent that is found
 		link.next = parent.fChild
 		parent.fChild = link
 		if parent.persisted {
@@ -957,13 +960,12 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 			hd.moveLinkToQueue(link, InsertQueueID)
 		}
 	} else {
+		// The link has not known parent, therefore it becomes an anchor, unless it is too far in the past
 		if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
 			log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
 			hd.removeUpwards(link)
 			return false
 		}
-		//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
-		// See if it links existing anchor
 		anchor = &Anchor{
 			parentHash:    sh.Header.ParentHash,
 			nextRetryTime: 0, // Will ensure this anchor will be top priority
