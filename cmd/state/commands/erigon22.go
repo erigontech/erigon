@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -185,21 +184,18 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 			return err
 		}
 
-		if blockNum <= block {
-			_, _, txAmount := rawdb.ReadBody(historyTx, blockHash, blockNum)
-
-			// Skip that block, but increase txNum
-			txNum += uint64(txAmount) + 2 // Pre and Post block transaction
-			continue
-		}
-
-		block, _, err := blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)
+		b, _, err := blockReader.BlockWithSenders(ctx, historyTx, blockHash, blockNum)
 		if err != nil {
 			return err
 		}
-		if block == nil {
+		if b == nil {
 			log.Info("history: block is nil", "block", blockNum)
 			break
+		}
+		if blockNum <= block {
+			// Skip that block, but increase txNum
+			txNum += uint64(len(b.Transactions())) + 2 // Pre and Post block transaction
+			continue
 		}
 		agg.SetTx(rwTx)
 		agg.SetTxNum(txNum)
@@ -217,7 +213,7 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		txNum++ // Pre-block transaction
 		agg.SetTxNum(txNum)
 
-		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, block, vmConfig); err != nil {
+		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
 		agg.SetTxNum(txNum)
