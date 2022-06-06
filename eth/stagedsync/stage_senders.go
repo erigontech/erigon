@@ -256,13 +256,11 @@ Loop:
 		}
 	}
 	if minBlockErr != nil {
-		fmt.Printf("alex99\n")
 		log.Error(fmt.Sprintf("[%s] Error recovering senders for block %d %x): %v", logPrefix, minBlockNum, minBlockHash, minBlockErr))
 		if to > s.BlockNumber {
 			u.UnwindTo(minBlockNum-1, minBlockHash)
 		}
 	} else {
-		fmt.Printf("alex98\n")
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{
 			Quit: quitCh,
 			LogDetailsLoad: func(k, v []byte) (additionalLogArguments []interface{}) {
