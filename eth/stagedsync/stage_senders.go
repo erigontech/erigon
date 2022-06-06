@@ -225,12 +225,6 @@ Loop:
 		}
 
 		if canonical[blockNumber-s.BlockNumber-1] != blockHash {
-			fmt.Printf("non-can: %d, %d, %x, %x, %x\n", blockNumber, blockNumber-s.BlockNumber-1, canonical[blockNumber-s.BlockNumber-1], blockHash, canonical[blockNumber-s.BlockNumber-1+1])
-			tx.ForAmount(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockNumber-2), 4, func(k, v []byte) error {
-				fmt.Printf("in db: %x, %x, \n", k, v)
-				return nil
-			})
-			//panic(1)
 			// non-canonical case
 			continue
 		}
@@ -277,10 +271,6 @@ Loop:
 		}); err != nil {
 			return err
 		}
-		c, _ := tx.Cursor(kv.Senders)
-		cnt, _ := c.Count()
-		fmt.Printf("cojnt: %d\n", cnt)
-
 		if err = s.Update(tx, to); err != nil {
 			return err
 		}
