@@ -585,9 +585,6 @@ func (s *EthBackendServer) StartProposer() {
 				log.Trace("[Proposer] Wait finished")
 			}
 
-			// Tell the stage headers to leave space for the write transaction for mining stages
-			s.requestList.Interrupt(engineapi.Yield)
-
 			param := core.BlockProposerParametersPOS{
 				ParentHash:            blockToBuild.ParentHash(),
 				Timestamp:             blockToBuild.Header().Time,
