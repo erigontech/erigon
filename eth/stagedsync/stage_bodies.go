@@ -58,6 +58,9 @@ func BodiesForward(
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	firstCycle bool,
 ) error {
+	if cfg.snapshots != nil && s.BlockNumber < cfg.snapshots.BlocksAvailable() {
+		s.BlockNumber = cfg.snapshots.BlocksAvailable()
+	}
 
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
@@ -71,14 +74,6 @@ func BodiesForward(
 	}
 	timeout := cfg.timeout
 
-	if cfg.snapshots != nil {
-		if s.BlockNumber < cfg.snapshots.BlocksAvailable() {
-			if err := s.Update(tx, cfg.snapshots.BlocksAvailable()); err != nil {
-				return err
-			}
-			s.BlockNumber = cfg.snapshots.BlocksAvailable()
-		}
-	}
 	// This will update bd.maxProgress
 	if _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
