@@ -174,8 +174,7 @@ func (hd *HeaderDownload) removeUpwards(link *Link) {
 func (hd *HeaderDownload) MarkAllVerified() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	for hd.insertQueue.Len() > 0 {
-		link := hd.insertQueue[0]
+	for _, link := range hd.insertQueue {
 		if !link.verified {
 			link.linked = true
 			link.verified = true
