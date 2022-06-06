@@ -190,7 +190,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				if err := snap.store(c.db); err != nil {
 					return nil, err
 				}
-				log.Info("Stored checkpoint snapshot to disk", "number", number, "hash", hash)
+				log.Info("[Clique] Stored checkpoint snapshot to disk", "number", number, "hash", hash)
 				break
 			}
 		}

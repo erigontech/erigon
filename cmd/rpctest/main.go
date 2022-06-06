@@ -22,6 +22,7 @@ func main() {
 		erigonURL   string
 		blockFrom   uint64
 		blockTo     uint64
+		latest      bool
 		recordFile  string
 		errorFile   string
 	)
@@ -34,6 +35,9 @@ func main() {
 	withBlockNum := func(cmd *cobra.Command) {
 		cmd.Flags().Uint64Var(&blockFrom, "blockFrom", 2000000, "Block number to start test generation from")
 		cmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
+	}
+	withLatest := func(cmd *cobra.Command) {
+		cmd.Flags().BoolVar(&latest, "latest", false, "Exec on latest ")
 	}
 	withNeedCompare := func(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&needCompare, "needCompare", false, "need compare with geth")
@@ -49,6 +53,16 @@ func main() {
 			opts[i](cmd)
 		}
 	}
+
+	var benchEthCallCmd = &cobra.Command{
+		Use:   "benchEthCall",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchEthCall(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+		},
+	}
+	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
 	var bench1Cmd = &cobra.Command{
 		Use:   "bench1",
@@ -138,6 +152,16 @@ func main() {
 	}
 	with(bench9Cmd, withErigonUrl, withGethUrl, withNeedCompare)
 
+	var benchTraceBlockByHashCmd = &cobra.Command{
+		Use:   "benchTraceBlockByHash",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			rpctest.BenchTraceBlockByHash(erigonURL, gethURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+		},
+	}
+	with(benchTraceBlockByHashCmd, withGethUrl, withErigonUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var benchTraceTransactionCmd = &cobra.Command{
 		Use:   "benchTraceTransaction",
 		Short: "",
@@ -222,8 +246,8 @@ func main() {
 		Use:   "replay",
 		Short: "",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			rpctest.Replay(erigonURL, recordFile)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rpctest.Replay(erigonURL, recordFile)
 		},
 	}
 	with(replayCmd, withErigonUrl, withRecord)
@@ -250,6 +274,7 @@ func main() {
 	rootCmd.Flags().Uint64Var(&blockTo, "blockTo", 2101000, "Block number to end test generation at")
 
 	rootCmd.AddCommand(
+		benchEthCallCmd,
 		bench1Cmd,
 		bench2Cmd,
 		bench3Cmd,

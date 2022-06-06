@@ -51,12 +51,12 @@ type Interpreter interface {
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
 }
 
-// callCtx contains the things that are per-call, such as stack and memory,
+// ScopeContext contains the things that are per-call, such as stack and memory,
 // but not transients like pc and gas
-type callCtx struct {
-	memory   *Memory
-	stack    *stack.Stack
-	contract *Contract
+type ScopeContext struct {
+	Memory   *Memory
+	Stack    *stack.Stack
+	Contract *Contract
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -69,10 +69,15 @@ type keccakState interface {
 
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
+	*VM
+	jt *JumpTable // EVM instruction table
+}
+
+//structcheck doesn't see embedding
+//nolint:structcheck
+type VM struct {
 	evm *EVM
 	cfg Config
-
-	jt *JumpTable // EVM instruction table
 
 	hasher    keccakState // Keccak256 hasher instance shared across opcodes
 	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
@@ -85,21 +90,21 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
-	case evm.ChainRules.IsLondon:
+	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
-	case evm.ChainRules.IsBerlin:
+	case evm.ChainRules().IsBerlin:
 		jt = &berlinInstructionSet
-	case evm.ChainRules.IsIstanbul:
+	case evm.ChainRules().IsIstanbul:
 		jt = &istanbulInstructionSet
-	case evm.ChainRules.IsConstantinople:
+	case evm.ChainRules().IsConstantinople:
 		jt = &constantinopleInstructionSet
-	case evm.ChainRules.IsByzantium:
+	case evm.ChainRules().IsByzantium:
 		jt = &byzantiumInstructionSet
-	case evm.ChainRules.IsEIP158:
+	case evm.ChainRules().IsSpuriousDragon:
 		jt = &spuriousDragonInstructionSet
-	case evm.ChainRules.IsEIP150:
+	case evm.ChainRules().IsTangerineWhistle:
 		jt = &tangerineWhistleInstructionSet
-	case evm.ChainRules.IsHomestead:
+	case evm.ChainRules().IsHomestead:
 		jt = &homesteadInstructionSet
 	default:
 		jt = &frontierInstructionSet
@@ -109,15 +114,55 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 			if err := EnableEIP(eip, jt); err != nil {
 				// Disable it, so caller can check if it's activated or not
 				cfg.ExtraEips = append(cfg.ExtraEips[:i], cfg.ExtraEips[i+1:]...)
-				log.Error("EIP activation failed", "eip", eip, "error", err)
+				log.Error("EIP activation failed", "eip", eip, "err", err)
 			}
 		}
 	}
 
 	return &EVMInterpreter{
-		evm: evm,
-		cfg: cfg,
-		jt:  jt,
+		VM: &VM{
+			evm: evm,
+			cfg: cfg,
+		},
+		jt: jt,
+	}
+}
+
+func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
+	var jt *JumpTable
+	switch {
+	case vm.evm.ChainRules().IsLondon:
+		jt = &londonInstructionSet
+	case vm.evm.ChainRules().IsBerlin:
+		jt = &berlinInstructionSet
+	case vm.evm.ChainRules().IsIstanbul:
+		jt = &istanbulInstructionSet
+	case vm.evm.ChainRules().IsConstantinople:
+		jt = &constantinopleInstructionSet
+	case vm.evm.ChainRules().IsByzantium:
+		jt = &byzantiumInstructionSet
+	case vm.evm.ChainRules().IsSpuriousDragon:
+		jt = &spuriousDragonInstructionSet
+	case vm.evm.ChainRules().IsTangerineWhistle:
+		jt = &tangerineWhistleInstructionSet
+	case vm.evm.ChainRules().IsHomestead:
+		jt = &homesteadInstructionSet
+	default:
+		jt = &frontierInstructionSet
+	}
+	if len(vm.cfg.ExtraEips) > 0 {
+		for i, eip := range vm.cfg.ExtraEips {
+			if err := EnableEIP(eip, jt); err != nil {
+				// Disable it, so caller can check if it's activated or not
+				vm.cfg.ExtraEips = append(vm.cfg.ExtraEips[:i], vm.cfg.ExtraEips[i+1:]...)
+				log.Error("EIP activation failed", "eip", eip, "err", err)
+			}
+		}
+	}
+
+	return &EVMInterpreter{
+		VM: vm,
+		jt: jt,
 	}
 }
 
@@ -134,10 +179,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
-	if readOnly && !in.readOnly {
-		in.readOnly = true
-		defer func() { in.readOnly = false }()
-	}
+	callback := in.setReadonly(readOnly)
+	defer func() {
+		callback()
+	}()
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -152,10 +197,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		op          OpCode        // current opcode
 		mem         = NewMemory() // bound memory
 		locStack    = stack.New()
-		callContext = &callCtx{
-			memory:   mem,
-			stack:    locStack,
-			contract: contract,
+		callContext = &ScopeContext{
+			Memory:   mem,
+			Stack:    locStack,
+			Contract: contract,
 		}
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
@@ -180,9 +225,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
+					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 				} else {
-					_ = in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, mem, locStack, contract, in.evm.depth, err)
+					in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, callContext, in.evm.depth, err)
 				}
 			}
 		}()
@@ -217,13 +262,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
 		// If the operation is valid, enforce and write restrictions
-		if in.readOnly && in.evm.ChainRules.IsByzantium {
+		if in.readOnly && in.evm.ChainRules().IsByzantium {
 			// If the interpreter is operating in readonly mode, make sure no
 			// state-modifying operation is performed. The 3rd stack item
 			// for a call operation is the value. Transferring value from one
 			// account to the others means the state is modified and should also
 			// return with an error.
-			if operation.writes || (op == CALL && locStack.Back(2).Sign() != 0) {
+			if operation.writes || (op == CALL && !locStack.Back(2).IsZero()) {
 				return nil, ErrWriteProtection
 			}
 		}
@@ -265,7 +310,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, mem, locStack, in.returnData, contract, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
 
@@ -274,7 +319,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
 		if operation.returns {
-			in.returnData = common.CopyBytes(res)
+			in.returnData = res
 		}
 
 		switch {
@@ -289,4 +334,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 	}
 	return nil, nil
+}
+
+func (vm *VM) setReadonly(outerReadonly bool) func() {
+	if outerReadonly && !vm.readOnly {
+		vm.readOnly = true
+		return func() {
+			vm.readOnly = false
+		}
+	}
+	return func() {}
+}
+
+func (vm *VM) getReadonly() bool {
+	return vm.readOnly
 }

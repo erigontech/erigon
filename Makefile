@@ -1,25 +1,41 @@
+GO = go
 GOBIN = $(CURDIR)/build/bin
-GOTEST = GODEBUG=cgocheck=0 go test ./... -p 2
 
 GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
 GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags)
-GOBUILD = env GO111MODULE=on go build -trimpath -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}"
-GO_DBG_BUILD = go build -trimpath -tags=debug -ldflags "-X github.com/ledgerwatch/erigon/params.GitCommit=${GIT_COMMIT} -X github.com/ledgerwatch/erigon/params.GitBranch=${GIT_BRANCH} -X github.com/ledgerwatch/erigon/params.GitTag=${GIT_TAG}" -gcflags=all="-N -l"  # see delve docs
+GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
 
-GO_MAJOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f1)
-GO_MINOR_VERSION = $(shell go version | cut -c 14- | cut -d' ' -f1 | cut -d'.' -f2)
+CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS) # don't loose default
+CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=1 # Enable MDBX's asserts by default in 'devel' branch and disable in 'stable'
+CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
+DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-all: erigon hack rpctest state pics rpcdaemon integration db-tools sentry
+GO_MINOR_VERSION = $(shell $(GO) version | cut -c 16-17)
+BUILD_TAGS = nosqlite,noboltdb
+PACKAGE = github.com/ledgerwatch/erigon
+
+GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
+GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
+
+GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
+GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GOTEST = GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+
+default: all
 
 go-version:
-	@if [ $(GO_MINOR_VERSION) -lt 16 ]; then \
-		echo "minimum required Golang version is 1.16"; \
+	@if [ $(GO_MINOR_VERSION) -lt 18 ]; then \
+		echo "minimum required Golang version is 1.18"; \
 		exit 1 ;\
 	fi
 
-docker:
-	DOCKER_BUILDKIT=1 docker build -t erigon:latest --build-arg git_commit='${GIT_COMMIT}' --build-arg git_branch='${GIT_BRANCH}' --build-arg git_tag='${GIT_TAG}' .
+docker: git-submodules
+	DOCKER_BUILDKIT=1 docker build -t thorax/erigon:latest \
+		--build-arg "BUILD_DATE=$(shell date -Iseconds)" \
+		--build-arg VCS_REF=${GIT_COMMIT} \
+		--build-arg VERSION=${GIT_TAG} \
+		${DOCKER_FLAGS} \
+		.
 
 xdg_data_home :=  ~/.local/share
 ifdef XDG_DATA_HOME
@@ -33,80 +49,42 @@ docker-compose:
 dbg:
 	$(GO_DBG_BUILD) -o $(GOBIN)/ ./cmd/...
 
+%.cmd: git-submodules
+	@# Note: $* is replaced by the command name
+	@echo "Building $*"
+	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
+	@echo "Run \"$(GOBIN)/$*\" to launch $*."
+
 geth: erigon
 
-erigon: go-version
-	@echo "Building Erigon"
-	rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
-	$(GOBUILD) -o $(GOBIN)/erigon ./cmd/erigon
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/erigon\" to launch Erigon."
+erigon: go-version erigon.cmd
+	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
-hack:
-	$(GOBUILD) -o $(GOBIN)/hack ./cmd/hack
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/hack\" to launch hack."
+COMMANDS += cons
+COMMANDS += devnettest
+COMMANDS += downloader
+COMMANDS += hack
+COMMANDS += integration
+COMMANDS += observer
+COMMANDS += pics
+COMMANDS += rpcdaemon
+COMMANDS += rpctest
+COMMANDS += sentry
+COMMANDS += state
+COMMANDS += txpool
 
-rpctest:
-	$(GOBUILD) -o $(GOBIN)/rpctest ./cmd/rpctest
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
+# build each command using %.cmd rule
+$(COMMANDS): %: %.cmd
 
-state:
-	$(GOBUILD) -o $(GOBIN)/state ./cmd/state
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/state\" to launch state."
+all: erigon $(COMMANDS)
 
-
-pics:
-	$(GOBUILD) -o $(GOBIN)/pics ./cmd/pics
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/pics\" to launch pics."
-
-rpcdaemon:
-	$(GOBUILD) -o $(GOBIN)/rpcdaemon ./cmd/rpcdaemon
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
-
-integration:
-	$(GOBUILD) -o $(GOBIN)/integration ./cmd/integration
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/integration\" to launch integration tests."
-
-sentry:
-	$(GOBUILD) -o $(GOBIN)/sentry ./cmd/sentry
-	rm -f $(GOBIN)/headers # Remove old binary to prevent confusion where users still use it because of the scripts
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/sentry\" to run sentry"
-
-cons:
-	$(GOBUILD) -o $(GOBIN)/cons ./cmd/cons
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/cons\" to run consensus engine PoC."
-
-evm:
-	$(GOBUILD) -o $(GOBIN)/evm ./cmd/evm
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/evm\" to run EVM"
-
-seeder:
-	$(GOBUILD) -o $(GOBIN)/seeder ./cmd/snapshots/seeder
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/seeder\" to seed snapshots."
-
-sndownloader:
-	$(GOBUILD) -o $(GOBIN)/sndownloader ./cmd/snapshots/downloader
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/sndownloader\" to seed snapshots."
-
-tracker:
-	$(GOBUILD) -o $(GOBIN)/tracker ./cmd/snapshots/tracker
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/tracker\" to run snapshots tracker."
-
-db-tools: libmdbx
+db-tools: git-submodules
 	@echo "Building db-tools"
-	git submodule update --init --recursive
+
+	# hub.docker.com setup incorrect gitpath for git modules. Just remove it and re-init submodule.
+	rm -rf libmdbx
+	git submodule update --init --recursive --force libmdbx
+
 	cd libmdbx && MDBX_BUILD_TIMESTAMP=unknown make tools
 	cp libmdbx/mdbx_chk $(GOBIN)
 	cp libmdbx/mdbx_copy $(GOBIN)
@@ -117,7 +95,10 @@ db-tools: libmdbx
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 test:
-	$(GOTEST) --timeout 30m
+	$(GOTEST) --timeout 30s
+
+test-integration:
+	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
@@ -128,10 +109,10 @@ lintci:
 
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.41.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.46.2
 
 clean:
-	env GO111MODULE=on go clean -cache
+	go clean -cache
 	rm -fr build/*
 	cd libmdbx/ && make clean
 
@@ -140,7 +121,6 @@ clean:
 
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
-	$(GOBUILD) -o $(GOBIN)/stringer golang.org/x/tools/cmd/stringer
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
 	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
@@ -148,6 +128,7 @@ devtools:
 	PATH=$(GOBIN):$(PATH) go generate ./common
 	PATH=$(GOBIN):$(PATH) go generate ./core/types
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
+	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'
 	@type "solc" 2> /dev/null || echo 'Please install solc'
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
@@ -162,3 +143,10 @@ prometheus:
 
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
+
+git-submodules:
+	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
+	@echo "Updating git submodules"
+	@# Dockerhub using ./hooks/post-checkout to set submodules, so this line will fail on Dockerhub
+	@git submodule sync --quiet --recursive
+	@git submodule update --quiet --init --recursive --force || true

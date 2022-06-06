@@ -3,38 +3,93 @@ package privateapi
 import (
 	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type RpcEventType uint64
 
-type HeaderSubscription func(*types.Header) error
+type NewSnapshotSubscription func() error
+type HeaderSubscription func(headerRLP []byte) error
 type PendingLogsSubscription func(types.Logs) error
 type PendingBlockSubscription func(*types.Block) error
 type PendingTxsSubscription func([]types.Transaction) error
+type LogsSubscription func([]*remote.SubscribeLogsReply) error
 
 // Events manages event subscriptions and dissimination. Thread-safe
 type Events struct {
-	headerSubscriptions       map[int]HeaderSubscription
+	id                        int
+	headerSubscriptions       map[int]chan [][]byte
+	newSnapshotSubscription   map[int]chan struct{}
 	pendingLogsSubscriptions  map[int]PendingLogsSubscription
 	pendingBlockSubscriptions map[int]PendingBlockSubscription
 	pendingTxsSubscriptions   map[int]PendingTxsSubscription
+	logsSubscriptions         map[int]chan []*remote.SubscribeLogsReply
+	hasLogSubscriptions       bool
 	lock                      sync.RWMutex
+	onNewSnapshotsHappened    bool
 }
 
 func NewEvents() *Events {
 	return &Events{
-		headerSubscriptions:       map[int]HeaderSubscription{},
+		headerSubscriptions:       map[int]chan [][]byte{},
 		pendingLogsSubscriptions:  map[int]PendingLogsSubscription{},
 		pendingBlockSubscriptions: map[int]PendingBlockSubscription{},
 		pendingTxsSubscriptions:   map[int]PendingTxsSubscription{},
+		logsSubscriptions:         map[int]chan []*remote.SubscribeLogsReply{},
+		newSnapshotSubscription:   map[int]chan struct{}{},
 	}
 }
 
-func (e *Events) AddHeaderSubscription(s HeaderSubscription) {
+func (e *Events) AddHeaderSubscription() (chan [][]byte, func()) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	e.headerSubscriptions[len(e.headerSubscriptions)] = s
+	ch := make(chan [][]byte, 8)
+	e.id++
+	id := e.id
+	e.headerSubscriptions[id] = ch
+	return ch, func() {
+		delete(e.headerSubscriptions, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddNewSnapshotSubscription() (chan struct{}, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan struct{}, 8)
+	e.id++
+	id := e.id
+	e.newSnapshotSubscription[id] = ch
+	return ch, func() {
+		delete(e.newSnapshotSubscription, id)
+		close(ch)
+	}
+}
+
+func (e *Events) AddLogsSubscription() (chan []*remote.SubscribeLogsReply, func()) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	ch := make(chan []*remote.SubscribeLogsReply, 8)
+	e.id++
+	id := e.id
+	e.logsSubscriptions[id] = ch
+	return ch, func() {
+		delete(e.logsSubscriptions, id)
+		close(ch)
+	}
+}
+
+func (e *Events) EmptyLogSubsctiption(empty bool) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.hasLogSubscriptions = !empty
+}
+
+func (e *Events) HasLogSubsriptions() bool {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	return e.hasLogSubscriptions
 }
 
 func (e *Events) AddPendingLogsSubscription(s PendingLogsSubscription) {
@@ -49,12 +104,45 @@ func (e *Events) AddPendingBlockSubscription(s PendingBlockSubscription) {
 	e.pendingBlockSubscriptions[len(e.pendingBlockSubscriptions)] = s
 }
 
-func (e *Events) OnNewHeader(newHeader *types.Header) {
+func (e *Events) OnNewSnapshotHappened() bool {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	return e.onNewSnapshotsHappened
+}
+
+func (e *Events) OnNewSnapshot() {
 	e.lock.Lock()
 	defer e.lock.Unlock()
-	for i, sub := range e.headerSubscriptions {
-		if err := sub(newHeader); err != nil {
-			delete(e.headerSubscriptions, i)
+	e.onNewSnapshotsHappened = true
+	for _, ch := range e.newSnapshotSubscription {
+		select {
+		case ch <- struct{}{}:
+		default: //if channel is full (slow consumer), drop old messages
+			for i := 0; i < cap(ch)/2; i++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+			ch <- struct{}{}
+		}
+	}
+}
+
+func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.headerSubscriptions {
+		select {
+		case ch <- newHeadersRlp:
+		default: //if channel is full (slow consumer), drop old messages
+			for i := 0; i < cap(ch)/2; i++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+			ch <- newHeadersRlp
 		}
 	}
 }
@@ -65,6 +153,24 @@ func (e *Events) OnNewPendingLogs(logs types.Logs) {
 	for i, sub := range e.pendingLogsSubscriptions {
 		if err := sub(logs); err != nil {
 			delete(e.pendingLogsSubscriptions, i)
+		}
+	}
+}
+
+func (e *Events) OnLogs(logs []*remote.SubscribeLogsReply) {
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	for _, ch := range e.logsSubscriptions {
+		select {
+		case ch <- logs:
+		default: //if channel is full (slow consumer), drop old messages
+			for i := 0; i < cap(ch)/2; i++ {
+				select {
+				case <-ch:
+				default:
+				}
+			}
+			ch <- logs
 		}
 	}
 }

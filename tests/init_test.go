@@ -14,45 +14,44 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+
 package tests
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/params"
+	"golang.org/x/exp/slices"
 )
 
 var (
 	baseDir            = filepath.Join(".", "testdata")
 	blockTestDir       = filepath.Join(baseDir, "BlockchainTests")
 	stateTestDir       = filepath.Join(baseDir, "GeneralStateTests")
-	legacyStateTestDir = filepath.Join(baseDir, "LegacyTests", "Constantinople", "GeneralStateTests")
-	vmTestDir          = filepath.Join(baseDir, "LegacyTests", "Constantinople", "VMTests")
 	transactionTestDir = filepath.Join(baseDir, "TransactionTests")
 	rlpTestDir         = filepath.Join(baseDir, "RLPTests")
-	difficultyTestDir  = filepath.Join(baseDir, "BasicTests")
+	difficultyTestDir  = filepath.Join(baseDir, "DifficultyTests")
 )
 
 func readJSON(reader io.Reader, value interface{}) error {
-	data, err := ioutil.ReadAll(reader)
+	data, err := io.ReadAll(reader)
 	if err != nil {
-		return fmt.Errorf("error reading JSON file: %v", err)
+		return fmt.Errorf("error reading JSON file: %w", err)
 	}
 	if err = json.Unmarshal(data, &value); err != nil {
 		if syntaxerr, ok := err.(*json.SyntaxError); ok {
 			line := findLine(data, syntaxerr.Offset)
-			return fmt.Errorf("JSON syntax error at line %v: %v", line, err)
+			return fmt.Errorf("JSON syntax error at line %v: %w", line, err)
 		}
 		return err
 	}
@@ -269,7 +268,7 @@ func sortedMapKeys(m reflect.Value) []string {
 	for i, k := range m.MapKeys() {
 		keys[i] = k.String()
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 

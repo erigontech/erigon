@@ -5,12 +5,13 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -18,18 +19,20 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 	if len(k) != 40 {
 		return nil
 	}
-	return next(k, common.CopyBytes(k[8:]), common.CopyBytes(k[:8]))
+	return next(k, libcommon.Copy(k[8:]), libcommon.Copy(k[:8]))
 }
 
 type BlockHashesCfg struct {
 	db     kv.RwDB
 	tmpDir string
+	cc     *params.ChainConfig
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *params.ChainConfig) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:     db,
 		tmpDir: tmpDir,
+		cc:     cc,
 	}
 }
 
@@ -47,14 +50,13 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
-	headHash := rawdb.ReadHeaderByNumber(tx, headNumber).Hash()
 	if s.BlockNumber == headNumber {
 		return nil
 	}
 
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
-	endKey := dbutils.HeaderKey(headNumber, headHash) // Make sure we stop at head
+	endKey := dbutils.HeaderKey(headNumber+1, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
 	//todo do we need non canonical headers ?
 	logPrefix := s.LogPrefix()
@@ -96,7 +98,7 @@ func UnwindBlockHashStage(u *UnwindState, tx kv.RwTx, cfg BlockHashesCfg, ctx co
 	}
 
 	if err = u.Done(tx); err != nil {
-		return fmt.Errorf(" reset: %v", err)
+		return fmt.Errorf(" reset: %w", err)
 	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {

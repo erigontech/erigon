@@ -27,7 +27,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/bitutil"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -102,11 +101,12 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 
 	// Set metrics.
 	msg.meterSize = size
-	if metrics.Enabled && msg.meterCap.Name != "" { // don't meter non-subprotocol messages
-		m := fmt.Sprintf("%s/%s/%d/%#02x", egressMeterName, msg.meterCap.Name, msg.meterCap.Version, msg.meterCode)
-		metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
-		metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
-	}
+	// TODO: use 	"github.com/VictoriaMetrics/metrics"
+	//if metrics.Enabled && msg.meterCap.Name != "" { // don't meter non-subprotocol messages
+	//	m := fmt.Sprintf("%s/%s/%d/%#02x", egressMeterName, msg.meterCap.Name, msg.meterCap.Version, msg.meterCode)
+	//	metrics.GetOrRegisterMeter(m, nil).Mark(int64(msg.meterSize))
+	//	metrics.GetOrRegisterMeter(m+"/packets", nil).Mark(1)
+	//}
 	return nil
 }
 
@@ -150,7 +150,7 @@ func (t *rlpxTransport) doProtoHandshake(our *protoHandshake) (their *protoHands
 		return nil, err
 	}
 	if err := <-werr; err != nil {
-		return nil, fmt.Errorf("write error: %v", err)
+		return nil, fmt.Errorf("write error: %w", err)
 	}
 	// If the protocol version supports Snappy encoding, upgrade immediately
 	t.conn.SetSnappy(their.Version >= snappyProtocolVersion)
@@ -184,7 +184,7 @@ func readProtocolHandshake(rw MsgReader) (*protoHandshake, error) {
 	if err := msg.Decode(&hs); err != nil {
 		return nil, err
 	}
-	if len(hs.ID) != 64 || !bitutil.TestBytes(hs.ID) {
+	if len(hs.Pubkey) != 64 || !bitutil.TestBytes(hs.Pubkey) {
 		return nil, DiscInvalidIdentity
 	}
 	return &hs, nil

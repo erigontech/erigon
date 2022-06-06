@@ -42,6 +42,7 @@ func (w *PlainStateWriter) SetAccumulator(accumulator *shards.Accumulator) *Plai
 }
 
 func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	//fmt.Printf("balance,%x,%d\n", address, &account.Balance)
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountData(address, original, account); err != nil {
 			return err
@@ -50,12 +51,13 @@ func (w *PlainStateWriter) UpdateAccountData(address common.Address, original, a
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	if w.accumulator != nil {
-		w.accumulator.ChangeAccount(address, value)
+		w.accumulator.ChangeAccount(address, account.Incarnation, value)
 	}
 	return w.db.Put(kv.PlainState, address[:], value)
 }
 
 func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	//fmt.Printf("code,%x,%x\n", address, code)
 	if w.csw != nil {
 		if err := w.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 			return err
@@ -71,6 +73,7 @@ func (w *PlainStateWriter) UpdateAccountCode(address common.Address, incarnation
 }
 
 func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+	//fmt.Printf("delete,%x\n", address)
 	if w.csw != nil {
 		if err := w.csw.DeleteAccount(address, original); err != nil {
 			return err
@@ -93,6 +96,7 @@ func (w *PlainStateWriter) DeleteAccount(address common.Address, original *accou
 }
 
 func (w *PlainStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	//fmt.Printf("storage,%x,%x,%x\n", address, *key, value.Bytes())
 	if w.csw != nil {
 		if err := w.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 			return err

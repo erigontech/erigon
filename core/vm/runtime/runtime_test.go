@@ -115,7 +115,7 @@ func TestCall(t *testing.T) {
 		byte(vm.RETURN),
 	})
 
-	ret, _, err := Call(address, nil, &Config{State: state})
+	ret, _, err := Call(address, nil, &Config{State: state, kv: tx})
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -161,7 +161,7 @@ func BenchmarkCall(b *testing.B) {
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	_, tx := memdb.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 0))
+		statedb  = state.New(state.NewPlainState(tx, 1))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -177,15 +177,14 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 		Coinbase:    common.Address{},
 		BlockNumber: new(big.Int).SetUint64(1),
 		ChainConfig: &params.ChainConfig{
-			ChainID:             big.NewInt(1),
-			HomesteadBlock:      new(big.Int),
-			ByzantiumBlock:      new(big.Int),
-			ConstantinopleBlock: new(big.Int),
-			DAOForkBlock:        new(big.Int),
-			DAOForkSupport:      false,
-			EIP150Block:         new(big.Int),
-			EIP155Block:         new(big.Int),
-			EIP158Block:         new(big.Int),
+			ChainID:               big.NewInt(1),
+			HomesteadBlock:        new(big.Int),
+			ByzantiumBlock:        new(big.Int),
+			ConstantinopleBlock:   new(big.Int),
+			DAOForkBlock:          new(big.Int),
+			DAOForkSupport:        false,
+			TangerineWhistleBlock: new(big.Int),
+			SpuriousDragonBlock:   new(big.Int),
 		},
 		EVMConfig: vm.Config{},
 	}
@@ -310,7 +309,7 @@ func TestBlockhash(t *testing.T) {
 	zero := new(big.Int).SetBytes(ret[0:32])
 	first := new(big.Int).SetBytes(ret[32:64])
 	last := new(big.Int).SetBytes(ret[64:96])
-	if zero.BitLen() != 0 {
+	if zero.Sign() != 0 {
 		t.Fatalf("expected zeroes, got %x", ret[0:32])
 	}
 	if first.Uint64() != 999 {
@@ -330,7 +329,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.
 	cfg := new(Config)
 	setDefaults(cfg)
 	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 0))
+	cfg.State = state.New(state.NewPlainState(tx, 1))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

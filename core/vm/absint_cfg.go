@@ -5,11 +5,12 @@ import (
 	"compress/zlib"
 	"encoding/json"
 	"fmt"
-	"github.com/holiman/uint256"
-	"io/ioutil"
+	"io"
 	"log"
 	"strconv"
 	"strings"
+
+	"github.com/holiman/uint256"
 )
 
 ////////////////////////
@@ -349,7 +350,7 @@ func DecompressProof(in []byte) []byte {
 		log.Fatal("cannot read")
 	}
 
-	res, err := ioutil.ReadAll(breader)
+	res, err := io.ReadAll(breader)
 	if err != nil {
 		log.Fatal("cannot read")
 	}

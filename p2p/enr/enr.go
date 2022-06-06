@@ -131,7 +131,7 @@ func (r *Record) Load(e Entry) error {
 func (r *Record) Set(e Entry) {
 	blob, err := rlp.EncodeToBytes(e)
 	if err != nil {
-		panic(fmt.Errorf("enr: can't encode %s: %v", e.ENRKey(), err))
+		panic(fmt.Errorf("enr: can't encode %s: %w", e.ENRKey(), err))
 	}
 	r.invalidate()
 

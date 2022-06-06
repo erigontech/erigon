@@ -7,30 +7,33 @@ linters:
     - gofmt
     - deadcode
     - errcheck
-    - gosimple
+#    - gosimple # 1.18
     - govet
     - ineffassign
-    - staticcheck
-    - structcheck
-    - unused
+#    - staticcheck # 1.18
+#    - structcheck # 1.18
+#    - unused # 1.18
     - varcheck
-    - gocritic
+#    - gocritic
+#    - bodyclose # 1.18
+#    - gosec
 #    - forcetypeassert
 
 linters-settings:
   gocritic:
     # Which checks should be enabled; can't be combined with 'disabled-checks';
     # See https://go-critic.github.io/overview#checks-overview
-    # To check which checks are enabled run `GL_DEBUG=gocritic golangci-lint run`
+    # To check which checks are enabled run `GL_DEBUG=gocritic ./build/bin/golangci-lint run`
     # By default list of stable checks is used.
     enabled-checks:
       - ruleguard
       - truncateCmp
-    #      - defaultCaseOrder
+      # - defaultCaseOrder
 
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
+      - appendAssign
       #      - hugeParam
       - rangeValCopy
       - exitAfterDefer
@@ -42,17 +45,22 @@ linters-settings:
       - captLocal
       - commentFormatting
       - ifElseChain
-      - appendAssign
+      - importShadow
+      - paramTypeCombine
+      - builtinShadow
+      - typeUnparen
 
     # Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
     # Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
     enabled-tags:
       - performance
+      - diagnostic
+      - opinionated
     disabled-tags:
       - experimental
-    ruleguard:
-      rules: "rules.go"
     settings:
+      ruleguard:
+        rules: "rules.go"
       hugeParam:
         # size in bytes that makes the warning trigger (default 80)
         sizeThreshold: 1000
@@ -92,13 +100,29 @@ issues:
         - staticcheck
       text: "SA(1019|1029|5011)"
     # Exclude some linters from running on tests files.
-    - path: _test\.go
+    - path: test\.go
+      linters:
+        - gosec
+        - unused
+        - deadcode
+        - gocritic
+    - path: hack\.go
+      linters:
+        - gosec
+        - unused
+        - deadcode
+        - gocritic
+    - path: cmd/devp2p
       linters:
         - gosec
         - unused
         - deadcode
         - gocritic
     - path: metrics/sample\.go
+      linters:
+        - gosec
+        - gocritic
+    - path: p2p/simulations
       linters:
         - gosec
         - gocritic

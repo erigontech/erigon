@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
 	"errors"
@@ -57,8 +58,8 @@ func (c *testTransport) doEncHandshake(prv *ecdsa.PrivateKey) (*ecdsa.PublicKey,
 }
 
 func (c *testTransport) doProtoHandshake(our *protoHandshake) (*protoHandshake, error) {
-	pubkey := crypto.FromECDSAPub(c.rpub)[1:]
-	return &protoHandshake{ID: pubkey, Name: "test"}, nil
+	pubkey := crypto.MarshalPubkey(c.rpub)
+	return &protoHandshake{Pubkey: pubkey, Name: "test"}, nil
 }
 
 func (c *testTransport) close(err error) {
@@ -68,12 +69,13 @@ func (c *testTransport) close(err error) {
 
 func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *Server {
 	config := Config{
-		Name:        "test",
-		MaxPeers:    10,
-		ListenAddr:  "127.0.0.1:0",
-		NoDiscovery: true,
-		PrivateKey:  newkey(),
-		Logger:      testlog.Logger(t, log.LvlTrace),
+		Name:            "test",
+		MaxPeers:        10,
+		MaxPendingPeers: 10,
+		ListenAddr:      "127.0.0.1:0",
+		NoDiscovery:     true,
+		PrivateKey:      newkey(),
+		Log:             testlog.Logger(t, log.LvlError),
 	}
 	server := &Server{
 		Config:      config,
@@ -82,10 +84,14 @@ func startTestServer(t *testing.T, remoteKey *ecdsa.PublicKey, pf func(*Peer)) *
 			return newTestTransport(remoteKey, fd, dialDest)
 		},
 	}
-	if err := server.Start(); err != nil {
+	if err := server.TestStart(); err != nil {
 		t.Fatalf("Could not start server: %v", err)
 	}
 	return server
+}
+
+func (srv *Server) TestStart() error {
+	return srv.Start(context.Background())
 }
 
 func TestServerListen(t *testing.T) {
@@ -206,24 +212,26 @@ func TestServerDial(t *testing.T) {
 // This test checks that RemovePeer disconnects the peer if it is connected.
 func TestServerRemovePeerDisconnect(t *testing.T) {
 	srv1 := &Server{Config: Config{
-		PrivateKey:  newkey(),
-		MaxPeers:    1,
-		NoDiscovery: true,
-		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "1"),
+		PrivateKey:      newkey(),
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		Log:             testlog.Logger(t, log.LvlTrace).New("server", "1"),
 	}}
 	srv2 := &Server{Config: Config{
-		PrivateKey:  newkey(),
-		MaxPeers:    1,
-		NoDiscovery: true,
-		NoDial:      true,
-		ListenAddr:  "127.0.0.1:0",
-		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "2"),
+		PrivateKey:      newkey(),
+		MaxPeers:        1,
+		MaxPendingPeers: 1,
+		NoDiscovery:     true,
+		NoDial:          true,
+		ListenAddr:      "127.0.0.1:0",
+		Log:             testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
-	if err := srv1.Start(); err != nil {
+	if err := srv1.TestStart(); err != nil {
 		t.Fatal("cant start srv1")
 	}
 	defer srv1.Stop()
-	if err := srv2.Start(); err != nil {
+	if err := srv2.TestStart(); err != nil {
 		t.Fatal("cant start srv2")
 	}
 	defer srv2.Stop()
@@ -244,15 +252,16 @@ func TestServerAtCap(t *testing.T) {
 	trustedID := enode.PubkeyToIDV4(&trustedNode.PublicKey)
 	srv := &Server{
 		Config: Config{
-			PrivateKey:   newkey(),
-			MaxPeers:     10,
-			NoDial:       true,
-			NoDiscovery:  true,
-			TrustedNodes: []*enode.Node{newNode(trustedID, "")},
-			Logger:       testlog.Logger(t, log.LvlTrace),
+			PrivateKey:      newkey(),
+			MaxPeers:        10,
+			MaxPendingPeers: 10,
+			NoDial:          true,
+			NoDiscovery:     true,
+			TrustedNodes:    []*enode.Node{newNode(trustedID, "")},
+			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatalf("could not start: %v", err)
 	}
 	defer srv.Stop()
@@ -265,22 +274,30 @@ func TestServerAtCap(t *testing.T) {
 	}
 
 	// Inject a few connections to fill up the peer set.
-	for i := 0; i < 10; i++ {
+	for i := 0; i < srv.Config.MaxPeers; i++ {
 		c := newconn(randomID())
 		if err := srv.checkpoint(c, srv.checkpointAddPeer); err != nil {
 			t.Fatalf("could not add conn %d: %v", i, err)
 		}
 	}
+
 	// Try inserting a non-trusted connection.
 	anotherID := randomID()
 	c := newconn(anotherID)
-	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
 		t.Error("wrong error for insert:", err)
 	}
+
 	// Try inserting a trusted connection.
 	c = newconn(trustedID)
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
-		t.Error("unexpected error for trusted conn @posthandshake:", err)
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != nil {
+		t.Error("unexpected error for trusted conn:", err)
 	}
 	if !c.is(trustedConn) {
 		t.Error("Server did not set trusted flag")
@@ -289,7 +306,10 @@ func TestServerAtCap(t *testing.T) {
 	// Remove from trusted set and try again
 	srv.RemoveTrustedPeer(newNode(trustedID, ""))
 	c = newconn(trustedID)
-	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -297,7 +317,10 @@ func TestServerAtCap(t *testing.T) {
 	srv.AddTrustedPeer(newNode(anotherID, ""))
 	c = newconn(anotherID)
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
-		t.Error("unexpected error for trusted conn @posthandshake:", err)
+		t.Error("unexpected error @ checkpointPostHandshake:", err)
+	}
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != nil {
+		t.Error("unexpected error for trusted conn:", err)
 	}
 	if !c.is(trustedConn) {
 		t.Error("Server did not set trusted flag")
@@ -312,24 +335,24 @@ func TestServerPeerLimits(t *testing.T) {
 	var tp = &setupTransport{
 		pubkey: &clientkey.PublicKey,
 		phs: protoHandshake{
-			ID: crypto.FromECDSAPub(&clientkey.PublicKey)[1:],
-			// Force "DiscUselessPeer" due to unmatching caps
-			// Caps: []Cap{discard.cap()},
+			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),
+			Caps:   []Cap{discard.cap()},
 		},
 	}
 
 	srv := &Server{
 		Config: Config{
-			PrivateKey:  srvkey,
-			MaxPeers:    0,
-			NoDial:      true,
-			NoDiscovery: true,
-			Protocols:   []Protocol{discard},
-			Logger:      testlog.Logger(t, log.LvlTrace),
+			PrivateKey:      srvkey,
+			MaxPeers:        0,
+			MaxPendingPeers: 50,
+			NoDial:          true,
+			NoDiscovery:     true,
+			Protocols:       []Protocol{discard},
+			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return tp },
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatalf("couldn't start server: %v", err)
 	}
 	defer srv.Stop()
@@ -338,35 +361,31 @@ func TestServerPeerLimits(t *testing.T) {
 	flags := dynDialedConn
 	dialDest := clientnode
 	conn, _ := net.Pipe()
-	srv.SetupConn(conn, flags, dialDest)
-	if tp.closeErr != DiscTooManyPeers {
-		t.Errorf("unexpected close error: %q", tp.closeErr)
+	err := srv.SetupConn(conn, flags, dialDest)
+	_ = conn.Close()
+	if !errors.Is(err, DiscTooManyPeers) {
+		t.Fatalf("expected DiscTooManyPeers, but got error: %q", err)
 	}
-	conn.Close()
 
 	srv.AddTrustedPeer(clientnode)
 
 	// Check that server allows a trusted peer despite being full.
 	conn, _ = net.Pipe()
-	srv.SetupConn(conn, flags, dialDest)
-	if tp.closeErr == DiscTooManyPeers {
-		t.Errorf("failed to bypass MaxPeers with trusted node: %q", tp.closeErr)
+	err = srv.SetupConn(conn, flags, dialDest)
+	_ = conn.Close()
+	if err != nil {
+		t.Fatalf("failed to bypass MaxPeers with trusted node: %q", err)
 	}
-
-	if tp.closeErr != DiscUselessPeer {
-		t.Errorf("unexpected close error: %q", tp.closeErr)
-	}
-	conn.Close()
 
 	srv.RemoveTrustedPeer(clientnode)
 
 	// Check that server is full again.
 	conn, _ = net.Pipe()
-	srv.SetupConn(conn, flags, dialDest)
-	if tp.closeErr != DiscTooManyPeers {
-		t.Errorf("unexpected close error: %q", tp.closeErr)
+	err = srv.SetupConn(conn, flags, dialDest)
+	_ = conn.Close()
+	if !errors.Is(err, DiscTooManyPeers) {
+		t.Fatalf("expected DiscTooManyPeers, but got error: %q", err)
 	}
-	conn.Close()
 }
 
 func TestServerSetupConn(t *testing.T) {
@@ -397,7 +416,7 @@ func TestServerSetupConn(t *testing.T) {
 			wantCloseErr: errors.New("read error"),
 		},
 		{
-			tt:           &setupTransport{pubkey: clientpub, phs: protoHandshake{ID: randomID().Bytes()}},
+			tt:           &setupTransport{pubkey: clientpub, phs: protoHandshake{Pubkey: randomID().Bytes()}},
 			dialDest:     enode.NewV4(clientpub, nil, 0, 0),
 			flags:        dynDialedConn,
 			wantCalls:    "doEncHandshake,doProtoHandshake,close,",
@@ -411,13 +430,13 @@ func TestServerSetupConn(t *testing.T) {
 			wantCloseErr: errors.New("foo"),
 		},
 		{
-			tt:           &setupTransport{pubkey: srvpub, phs: protoHandshake{ID: crypto.FromECDSAPub(srvpub)[1:]}},
+			tt:           &setupTransport{pubkey: srvpub, phs: protoHandshake{Pubkey: crypto.MarshalPubkey(srvpub)}},
 			flags:        inboundConn,
-			wantCalls:    "doEncHandshake,close,",
+			wantCalls:    "doEncHandshake,doProtoHandshake,close,",
 			wantCloseErr: DiscSelf,
 		},
 		{
-			tt:           &setupTransport{pubkey: clientpub, phs: protoHandshake{ID: crypto.FromECDSAPub(clientpub)[1:]}},
+			tt:           &setupTransport{pubkey: clientpub, phs: protoHandshake{Pubkey: crypto.MarshalPubkey(clientpub)}},
 			flags:        inboundConn,
 			wantCalls:    "doEncHandshake,doProtoHandshake,close,",
 			wantCloseErr: DiscUselessPeer,
@@ -427,20 +446,21 @@ func TestServerSetupConn(t *testing.T) {
 	for i, test := range tests {
 		t.Run(test.wantCalls, func(t *testing.T) {
 			cfg := Config{
-				PrivateKey:  srvkey,
-				MaxPeers:    10,
-				NoDial:      true,
-				NoDiscovery: true,
-				Protocols:   []Protocol{discard},
-				Logger:      testlog.Logger(t, log.LvlTrace),
+				PrivateKey:      srvkey,
+				MaxPeers:        10,
+				MaxPendingPeers: 10,
+				NoDial:          true,
+				NoDiscovery:     true,
+				Protocols:       []Protocol{discard},
+				Log:             testlog.Logger(t, log.LvlTrace),
 			}
 			srv := &Server{
 				Config:       cfg,
 				newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport { return test.tt }, //nolint:scopelint
-				log:          cfg.Logger,
+				log:          cfg.Log,
 			}
 			if !test.dontstart {
-				if err := srv.Start(); err != nil {
+				if err := srv.TestStart(); err != nil {
 					t.Fatalf("couldn't start server: %v", err)
 				}
 				defer srv.Stop()
@@ -479,6 +499,7 @@ func (c *setupTransport) doProtoHandshake(our *protoHandshake) (*protoHandshake,
 	}
 	return &c.phs, nil
 }
+
 func (c *setupTransport) close(err error) {
 	c.calls += "close,"
 	c.closeErr = err
@@ -486,10 +507,11 @@ func (c *setupTransport) close(err error) {
 
 // setupConn shouldn't write to/read from the connection.
 func (c *setupTransport) WriteMsg(Msg) error {
-	panic("WriteMsg called on setupTransport")
+	return errors.New("WriteMsg called on setupTransport")
 }
+
 func (c *setupTransport) ReadMsg() (Msg, error) {
-	panic("ReadMsg called on setupTransport")
+	return Msg{}, errors.New("ReadMsg called on setupTransport")
 }
 
 func newkey() *ecdsa.PrivateKey {
@@ -513,13 +535,14 @@ func TestServerInboundThrottle(t *testing.T) {
 	newTransportCalled := make(chan struct{})
 	srv := &Server{
 		Config: Config{
-			PrivateKey:  newkey(),
-			ListenAddr:  "127.0.0.1:0",
-			MaxPeers:    10,
-			NoDial:      true,
-			NoDiscovery: true,
-			Protocols:   []Protocol{discard},
-			Logger:      testlog.Logger(t, log.LvlTrace),
+			PrivateKey:      newkey(),
+			ListenAddr:      "127.0.0.1:0",
+			MaxPeers:        10,
+			MaxPendingPeers: 10,
+			NoDial:          true,
+			NoDiscovery:     true,
+			Protocols:       []Protocol{discard},
+			Log:             testlog.Logger(t, log.LvlTrace),
 		},
 		newTransport: func(fd net.Conn, dialDest *ecdsa.PublicKey) transport {
 			newTransportCalled <- struct{}{}
@@ -530,7 +553,7 @@ func TestServerInboundThrottle(t *testing.T) {
 			return listenFakeAddr(network, laddr, fakeAddr)
 		},
 	}
-	if err := srv.Start(); err != nil {
+	if err := srv.TestStart(); err != nil {
 		t.Fatal("can't start: ", err)
 	}
 	defer srv.Stop()

@@ -38,8 +38,6 @@ var (
 	receiptStatusSuccessfulRLP = []byte{0x01}
 )
 
-var errEmptyTypedReceipt = errors.New("empty typed receipt bytes")
-
 const (
 	// ReceiptStatusFailed is the status code of a transaction if execution failed.
 	ReceiptStatusFailed = uint64(0)
@@ -244,7 +242,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read TxType: %w", err)
 		}
 		if len(b) != 1 {
-			return fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes: %w", len(b), errEmptyTypedReceipt)
+			return fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
 		}
 		r.Type = b[0]
 		switch r.Type {
@@ -297,6 +295,39 @@ func (r *Receipt) Size() common.StorageSize {
 		size += common.StorageSize(len(log.Topics)*common.HashLength + len(log.Data))
 	}
 	return size
+}
+
+// Copy creates a deep copy of the Receipt.
+func (r *Receipt) Copy() *Receipt {
+	postState := make([]byte, len(r.PostState))
+	copy(postState, r.PostState)
+
+	bloom := BytesToBloom(r.Bloom.Bytes())
+
+	logs := make(Logs, 0, len(r.Logs))
+	for _, log := range r.Logs {
+		logs = append(logs, log.Copy())
+	}
+
+	txHash := common.BytesToHash(r.TxHash.Bytes())
+	contractAddress := common.BytesToAddress(r.ContractAddress.Bytes())
+	blockHash := common.BytesToHash(r.BlockHash.Bytes())
+	blockNumber := big.NewInt(0).Set(r.BlockNumber)
+
+	return &Receipt{
+		Type:              r.Type,
+		PostState:         postState,
+		Status:            r.Status,
+		CumulativeGasUsed: r.CumulativeGasUsed,
+		Bloom:             bloom,
+		Logs:              logs,
+		TxHash:            txHash,
+		ContractAddress:   contractAddress,
+		GasUsed:           r.GasUsed,
+		BlockHash:         blockHash,
+		BlockNumber:       blockNumber,
+		TransactionIndex:  r.TransactionIndex,
+	}
 }
 
 type ReceiptsForStorage []*ReceiptForStorage
@@ -434,10 +465,10 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 func (r Receipts) DeriveFields(hash common.Hash, number uint64, txs Transactions, senders []common.Address) error {
 	logIndex := uint(0) // logIdx is unique within the block and starts from 0
 	if len(txs) != len(r) {
-		return errors.New("transaction and receipt count mismatch")
+		return fmt.Errorf("transaction and receipt count mismatch, tx count = %d, receipts count = %d", len(txs), len(r))
 	}
 	if len(senders) != len(txs) {
-		return errors.New("transaction and senders count mismatch")
+		return fmt.Errorf("transaction and senders count mismatch, tx count = %d, senders count = %d", len(txs), len(senders))
 	}
 	for i := 0; i < len(r); i++ {
 		// The transaction type and hash can be retrieved from the transaction itself

@@ -2,6 +2,7 @@
 - [Getting Started](#getting-started)
     * [Running locally](#running-locally)
     * [Running remotely](#running-remotely)
+    * [Healthcheck](#healthcheck)
     * [Testing](#testing)
 - [FAQ](#faq)
     * [Relations between prune options and rpc methods](#relations-between-prune-options-and-rpc-method)
@@ -12,7 +13,7 @@
     * [Trace transactions progress](#trace-transactions-progress)
     * [Clients getting timeout, but server load is low](#clients-getting-timeout--but-server-load-is-low)
     * [Server load too high](#server-load-too-high)
-    * [Batch requests](#batch-requests)
+    * [Faster Batch requests](#faster-batch-requests)
 - [For Developers](#for-developers)
     * [Code generation](#code-generation)
 
@@ -41,7 +42,7 @@ it's much faster than TCP access. Provide both `--datadir` and `--private.api.ad
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=localhost:9090
 make rpcdaemon
-./build/bin/rpcdaemon --datadir=<your_data_dir> --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --datadir=<your_data_dir> --txpool.api.addr=localhost:9090 --private.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 Note that we've also specified which RPC namespaces to enable in the above command by `--http.api` flag.
@@ -54,13 +55,56 @@ To start the daemon remotely - just don't set `--datadir` flag:
 make erigon
 ./build/bin/erigon --datadir=<your_data_dir> --private.api.addr=0.0.0.0:9090
 make rpcdaemon
-./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool,shh
+./build/bin/rpcdaemon --private.api.addr=<erigon_ip>:9090 --txpool.api.addr=localhost:9090 --http.api=eth,erigon,web3,net,debug,trace,txpool
 ```
 
 The daemon should respond with something like:
 
 ```[bash]
 INFO [date-time] HTTP endpoint opened url=localhost:8545...
+```
+
+When RPC daemon runs remotely, by default it maintains a state cache, which is updated every time when Erigon imports a
+new block. When state cache is reasonably warm, it allows such remote RPC daemon to execute queries related to `latest`
+block (i.e. to current state) with comparable performance to a local RPC daemon
+(around 2x slower vs 10x slower without state cache). Since there can be multiple such RPC daemons per one Erigon node,
+it may scale well for some workloads that are heavy on the current state queries.
+
+### Healthcheck
+
+Running the daemon also opens an endpoint `/health` that provides a basic health check.
+
+If the health check is successful it returns 200 OK.
+
+If the health check fails it returns 500 Internal Server Error.
+
+Configuration of the health check is sent as POST body of the method.
+
+```
+{
+   "min_peer_count": <minimal number of the node peers>,
+   "known_block": <number_of_block_that_node_should_know>
+}
+```
+
+Not adding a check disables that.
+
+**`min_peer_count`** -- checks for mimimum of healthy node peers. Requires
+`net` namespace to be listed in `http.api`.
+
+**`known_block`** -- sets up the block that node has to know about. Requires
+`eth` namespace to be listed in `http.api`.
+
+Example request
+```http POST http://localhost:8545/health --raw '{"min_peer_count": 3, "known_block": "0x1F"}'```
+Example response
+
+```
+{
+    "check_block": "HEALTHY",
+    "healthcheck_query": "HEALTHY",
+    "min_peer_count": "HEALTHY"
+}
 ```
 
 ### Testing
@@ -95,10 +139,10 @@ to test the RPC.
 Next options available (by `--prune` flag):
 
 ```
-* h - prune history (ChangeSets, HistoryIndices - used to access historical state)
+* h - prune history (ChangeSets, HistoryIndices - used to access historical state, like eth_getStorageAt, eth_getBalanceAt, debug_traceTransaction, trace_block, trace_transaction, etc.)
 * r - prune receipts (Receipts, Logs, LogTopicIndex, LogAddressIndex - used by eth_getLogs and similar RPC methods)
 * t - prune tx lookup (used to get transaction by hash)
-* c - prune call traces (used by trace_* methods)
+* c - prune call traces (used by trace_filter method)
 ```
 
 By default data pruned after 90K blocks, can change it by flags like `--prune.history.after=100_000`
@@ -107,6 +151,8 @@ Some methods, if not found historical data in DB, can fallback to old blocks re-
 
 ### RPC Implementation Status
 
+Label "remote" means: `--private.api.addr` flag is required.
+
 The following table shows the current implementation status of Erigon's RPC daemon.
 
 | Command                                    | Avail   | Notes                                      |
@@ -114,15 +160,17 @@ The following table shows the current implementation status of Erigon's RPC daem
 | web3_clientVersion                         | Yes     |                                            |
 | web3_sha3                                  | Yes     |                                            |
 |                                            |         |                                            |
-| net_listening                              | HC      | (remote only hard coded returns true)      |
+| net_listening                              | HC      | (`remote` hard coded returns true)         |
 | net_peerCount                              | Limited | internal sentries only                     |
-| net_version                                | Yes     | remote only                                |
+| net_version                                | Yes     | `remote`.                                  |
 |                                            |         |                                            |
 | eth_blockNumber                            | Yes     |                                            |
-| eth_chainID                                | Yes     |                                            |
+| eth_chainID/eth_chainId                    | Yes     |                                            |
 | eth_protocolVersion                        | Yes     |                                            |
 | eth_syncing                                | Yes     |                                            |
 | eth_gasPrice                               | Yes     |                                            |
+| eth_maxPriorityFeePerGas                   | Yes     |                                            |
+| eth_feeHistory                             | Yes     |                                            |
 |                                            |         |                                            |
 | eth_getBlockByHash                         | Yes     |                                            |
 | eth_getBlockByNumber                       | Yes     |                                            |
@@ -149,6 +197,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getStorageAt                           | Yes     |                                            |
 | eth_call                                   | Yes     |                                            |
 | eth_callBundle                             | Yes     |                                            |
+| eth_createAccessList                       | Yes     |
 |                                            |         |                                            |
 | eth_newFilter                              | -       | not yet implemented                        |
 | eth_newBlockFilter                         | -       | not yet implemented                        |
@@ -158,7 +207,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_getLogs                                | Yes     |                                            |
 |                                            |         |                                            |
 | eth_accounts                               | No      | deprecated                                 |
-| eth_sendRawTransaction                     | Yes     | remote only                                |
+| eth_sendRawTransaction                     | Yes     | `remote`.                                  |
 | eth_sendTransaction                        | -       | not yet implemented                        |
 | eth_sign                                   | No      | deprecated                                 |
 | eth_signTransaction                        | -       | not yet implemented                        |
@@ -174,14 +223,21 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_submitWork                             | Yes     |                                            |
 |                                            |         |                                            |
 | eth_subscribe                              | Limited | Websock Only - newHeads,                   |
-|                                            |         | newPendingTransaction                      |
+|                                            |         | newPendingTransactions                     |
 | eth_unsubscribe                            | Yes     | Websock Only                               |
+|                                            |         |                                            |
+| engine_newPayloadV1                        | Yes     |                                            |
+| engine_forkchoiceUpdatedV1                 | Yes     |                                            |
+| engine_getPayloadV1                        | Yes     |                                            |
+| engine_exchangeTransitionConfigurationV1   | Yes     |                                            |
 |                                            |         |                                            |
 | debug_accountRange                         | Yes     | Private Erigon debug module                |
 | debug_accountAt                            | Yes     | Private Erigon debug module                |
 | debug_getModifiedAccountsByNumber          | Yes     |                                            |
 | debug_getModifiedAccountsByHash            | Yes     |                                            |
 | debug_storageRangeAt                       | Yes     |                                            |
+| debug_traceBlockByHash                     | Yes     | Streaming (can handle huge results)        |
+| debug_traceBlockByNumber                   | Yes     | Streaming (can handle huge results)        |
 | debug_traceTransaction                     | Yes     | Streaming (can handle huge results)        |
 | debug_traceCall                            | Yes     | Streaming (can handle huge results)        |
 |                                            |         |                                            |
@@ -195,7 +251,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 | trace_get                                  | Yes     |                                            |
 | trace_transaction                          | Yes     |                                            |
 |                                            |         |                                            |
-| txpool_content                             | Yes     | remote only                                |
+| txpool_content                             | Yes     | `remote`                                   |
+| txpool_status                              | Yes     | `remote`                                   |
 |                                            |         |                                            |
 | eth_getCompilers                           | No      | deprecated                                 |
 | eth_compileLLL                             | No      | deprecated                                 |
@@ -207,22 +264,23 @@ The following table shows the current implementation status of Erigon's RPC daem
 | db_putHex                                  | No      | deprecated                                 |
 | db_getHex                                  | No      | deprecated                                 |
 |                                            |         |                                            |
-| shh_post                                   | No      | deprecated                                 |
-| shh_version                                | No      | deprecated                                 |
-| shh_newIdentity                            | No      | deprecated                                 |
-| shh_hasIdentity                            | No      | deprecated                                 |
-| shh_newGroup                               | No      | deprecated                                 |
-| shh_addToGroup                             | No      | deprecated                                 |
-| shh_newFilter                              | No      | deprecated                                 |
-| shh_uninstallFilter                        | No      | deprecated                                 |
-| shh_getFilterChanges                       | No      | deprecated                                 |
-| shh_getMessages                            | No      | deprecated                                 |
-|                                            |         |                                            |
 | erigon_getHeaderByHash                     | Yes     | Erigon only                                |
 | erigon_getHeaderByNumber                   | Yes     | Erigon only                                |
 | erigon_getLogsByHash                       | Yes     | Erigon only                                |
 | erigon_forks                               | Yes     | Erigon only                                |
 | erigon_issuance                            | Yes     | Erigon only                                |
+| erigon_GetBlockByTimestamp                 | Yes     | Erigon only                                |
+|                                            |         |                                            |
+| starknet_call                              | Yes     | Starknet only                              |
+|                                            |         |                                            |
+| bor_getSnapshot                            | Yes     | Bor only                                   |
+| bor_getAuthor                              | Yes     | Bor only                                   |
+| bor_getSnapshotAtHash                      | Yes     | Bor only                                   |
+| bor_getSigners                             | Yes     | Bor only                                   |
+| bor_getSignersAtHash                       | Yes     | Bor only                                   |
+| bor_getCurrentProposer                     | Yes     | Bor only                                   |
+| bor_getCurrentValidators                   | Yes     | Bor only                                   |
+| bor_getRootHash                            | Yes     | Bor only                                   |
 
 This table is constantly updated. Please visit again.
 
@@ -349,15 +407,9 @@ Then update your `app.json` for ethstats-client like that:
       "RPC_PORT": "8545",
       "LISTENING_PORT": "30303",
       "INSTANCE_NAME": "Erigon node",
-      "CONTACT_DETAILS": <your
-      twitter
-      handle>,
+      "CONTACT_DETAILS": <your twitter handle>,
       "WS_SERVER": "wss://ethstats.net/api",
-      "WS_SECRET": <put
-      your
-      secret
-      key
-      there>,
+      "WS_SECRET": <put your secret key here>,
       "VERBOSITY": 2
     }
   }
@@ -414,12 +466,12 @@ Reduce `--private.api.ratelimit`
 
 ### Read DB directly without Json-RPC/Graphql
 
-[./docs/programmers_guide/db_faq.md](./docs/programmers_guide/db_faq.md)
+[./../../docs/programmers_guide/db_faq.md](./../../docs/programmers_guide/db_faq.md)
 
-### Batch requests
+### Faster Batch requests
 
 Currently batch requests are spawn multiple goroutines and process all sub-requests in parallel. To limit impact of 1
-huge batch to other users - added flag `--rpc.batch.concurrency` (default: 50). Increase it to process large batches
+huge batch to other users - added flag `--rpc.batch.concurrency` (default: 2). Increase it to process large batches
 faster.
 
 Known Issue: if at least 1 request is "stremable" (has parameter of type *jsoniter.Stream) - then whole batch will

@@ -46,13 +46,19 @@ func CheckEnc(chaindata string) error {
 			for {
 				select {
 				case v := <-ch:
-					blockNum, kk, vv := chainDataStorageDecoder(v.k, v.v)
+					blockNum, kk, vv, err := chainDataStorageDecoder(v.k, v.v)
+					if err != nil {
+						return err
+					}
 					cs := changeset.NewStorageChangeSet()
 					_ = cs.Add(v.k, v.v)
 					atomic.AddUint64(&currentSize, uint64(len(v.v)))
 					innerErr := testStorageEncoder(blockNum, cs, func(k, v []byte) error {
 						atomic.AddUint64(&newSize, uint64(len(v)))
-						_, a, b := testStorageDecoder(k, v)
+						_, a, b, err := testStorageDecoder(k, v)
+						if err != nil {
+							return err
+						}
 						if !bytes.Equal(kk, a) {
 							return fmt.Errorf("incorrect order. block: %d", blockNum)
 						}

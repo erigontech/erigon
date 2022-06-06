@@ -28,6 +28,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -230,7 +231,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er consens
 			panic(fmt.Errorf("proof produced by this engine is invalid: %w", err))
 		}
 		epochSet := list.validators
-		log.Debug("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
+		log.Trace("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
 		e.finalityChecker = NewRollingFinality(epochSet)
 		if proof.SignalNumber >= DEBUG_LOG_FROM {
 			fmt.Printf("new rolling finality: %d\n", proof.SignalNumber)
@@ -500,6 +501,11 @@ func nextStepTimeDuration(info StepDurationInfo, time uint64) (uint64, uint64, b
 	return info.TransitionStep + stepDiff, info.TransitionTimestamp + timeDiff, true
 }
 
+// Type returns underlying consensus engine
+func (c *AuRa) Type() params.ConsensusType {
+	return params.AuRaConsensus
+}
+
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func (c *AuRa) Author(header *types.Header) (common.Address, error) {
@@ -563,7 +569,7 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 	//nolint
 	if step == parentStep ||
 		(header.Number.Uint64() >= c.cfg.ValidateStepTransition && step <= parentStep) {
-		log.Debug("[engine] Multiple blocks proposed for step", "num", parentStep)
+		log.Trace("[aura] Multiple blocks proposed for step", "num", parentStep)
 		_ = setNumber
 		/*
 			self.validators.report_malicious(
@@ -696,13 +702,6 @@ func (c *AuRa) verifyFamily(chain consensus.ChainHeaderReader, e consensus.Epoch
 	return nil
 }
 
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
-// method returns a quit channel to abort the operations and a results channel to
-// retrieve the async verifications (the order is that of the input slice).
-func (c *AuRa) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
-	return nil
-}
-
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *AuRa) VerifyUncles(chain consensus.ChainReader, header *types.Header, uncles []*types.Header) error {
@@ -726,7 +725,7 @@ func (c *AuRa) VerifySeal(chain consensus.ChainHeaderReader, header *types.Heade
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *AuRa) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	return nil
 	/// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	//header.Coinbase = common.Address{}
@@ -832,11 +831,14 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 }
 
 //word `signal epoch` == word `pending epoch`
-func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+) (types.Transactions, types.Receipts, error) {
 	// accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 	beneficiaries, _, rewards, err := AccumulateRewards(config, c, header, uncles, syscall)
 	if err != nil {
-		return fmt.Errorf("buildAncestrySubChain: %w", err)
+		return nil, nil, fmt.Errorf("buildAncestrySubChain: %w", err)
 	}
 	for i := range beneficiaries {
 		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
@@ -845,18 +847,18 @@ func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state 
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
 	if header.Number.Uint64() >= DEBUG_LOG_FROM {
-		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(r))
+		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(receipts))
 	}
-	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, r)
+	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("insert_pending_trancition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(r), len(pendingTransitionProof))
+			fmt.Printf("insert_pending_trancition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
-			return err
+			return nil, nil, err
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
@@ -865,17 +867,17 @@ func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state 
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, e, finalized, header)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if epochEndProof != nil {
 		c.EpochManager.noteNewEpoch()
 		log.Info("[aura] epoch transition", "block_num", header.Number.Uint64())
 		if err := e.PutEpoch(header.Hash(), header.Number.Uint64(), epochEndProof); err != nil {
-			return err
+			return nil, nil, err
 		}
 	}
 
-	return nil
+	return txs, receipts, nil
 }
 
 func buildFinality(e *EpochManager, chain consensus.ChainHeaderReader, er consensus.EpochReader, validators ValidatorSet, header *types.Header, syscall consensus.SystemCall) []unAssembledHeader {
@@ -975,12 +977,17 @@ func allHeadersUntil(chain consensus.ChainHeaderReader, from *types.Header, to c
 //}
 
 // FinalizeAndAssemble implements consensus.Engine
-func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
-	c.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
+func (c *AuRa) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+) (*types.Block, types.Transactions, types.Receipts, error) {
+	outTxs, outReceipts, err := c.Finalize(chainConfig, header, state, txs, uncles, receipts, e, chain, syscall)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, uncles, r), nil
+	return types.NewBlock(header, outTxs, uncles, outReceipts), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1095,7 +1102,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 	// first check to avoid generating signature most of the time
 	// (but there's still a race to the `compare_exchange`)
 	if !c.step.canPropose.Load() {
-		log.Trace("[engine] Aborting seal generation. Can't propose.")
+		log.Trace("[aura] Aborting seal generation. Can't propose.")
 		return nil
 	}
 	parentStep, err := headerStep(parent)
@@ -1107,24 +1114,24 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 	// filter messages from old and future steps and different parents
 	expectedDiff := calculateScore(parentStep, step, 0)
 	if current.Difficulty.Cmp(expectedDiff.ToBig()) != 0 {
-		log.Debug(fmt.Sprintf("[engine] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
+		log.Trace(fmt.Sprintf("[aura] Aborting seal generation. The step or empty_steps have changed in the meantime. %d != %d", current.Difficulty, expectedDiff))
 		return nil
 	}
 
 	if parentStep > step {
-		log.Warn(fmt.Sprintf("[engine] Aborting seal generation for invalid step: %d > %d", parentStep, step))
+		log.Warn(fmt.Sprintf("[aura] Aborting seal generation for invalid step: %d > %d", parentStep, step))
 		return nil
 	}
 
 	validators, setNumber, err := c.epochSet(chain, nil, current, nil)
 	if err != nil {
-		log.Warn("[engine] Unable to generate seal", "err", err)
+		log.Warn("[aura] Unable to generate seal", "err", err)
 		return nil
 	}
 
 	stepProposerAddr, err := stepProposer(validators, current.ParentHash, step, call)
 	if err != nil {
-		log.Warn("[engine] Unable to get stepProposer", "err", err)
+		log.Warn("[aura] Unable to get stepProposer", "err", err)
 		return nil
 	}
 	if stepProposerAddr != current.Coinbase {
@@ -1142,7 +1149,7 @@ func (c *AuRa) GenerateSeal(chain consensus.ChainHeaderReader, current, parent *
 	/*
 		signature, err := c.sign(current.bareHash())
 			if err != nil {
-				log.Warn("[engine] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
+				log.Warn("[aura] generate_seal: FAIL: Accounts secret key unavailable.", "err", err)
 				return nil
 			}
 	*/
@@ -1244,7 +1251,7 @@ func (c *AuRa) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *AuRa) Close() error {
-	common.SafeClose(c.exitCh)
+	libcommon.SafeClose(c.exitCh)
 	return nil
 }
 
@@ -1484,7 +1491,7 @@ func (s *EmptyStep) author() (common.Address, error) {
 	if err != nil {
 		return common.Address{}, err
 	}
-	ecdsa, err := crypto.UnmarshalPubkey(public)
+	ecdsa, err := crypto.UnmarshalPubkeyStd(public)
 	if err != nil {
 		return common.Address{}, err
 	}

@@ -21,7 +21,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/params"
@@ -37,7 +36,7 @@ func TestHeaderVerification(t *testing.T) {
 	)
 	m := stages.MockWithGenesisEngine(t, gspec, engine)
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intemediateHashes */)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("genetate chain: %v", err)
 	}
@@ -47,10 +46,47 @@ func TestHeaderVerification(t *testing.T) {
 		for j, valid := range []bool{true, false} {
 			if valid {
 				engine := ethash.NewFaker()
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
 			} else {
 				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeaders(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, []*types.Header{chain.Headers[i]}, []bool{true})
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+			}
+			if (err == nil) != valid {
+				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
+			}
+		}
+
+		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
+			t.Fatalf("test %d: error inserting the block: %v", i, err)
+		}
+
+		engine.Close()
+	}
+}
+
+// Tests that simple header with seal verification works, for both good and bad blocks.
+func TestHeaderWithSealVerification(t *testing.T) {
+	// Create a simple chain to verify
+	var (
+		gspec  = &core.Genesis{Config: params.TestChainAuraConfig}
+		engine = ethash.NewFaker()
+	)
+	m := stages.MockWithGenesisEngine(t, gspec, engine)
+
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, nil, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("genetate chain: %v", err)
+	}
+
+	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
+	for i := 0; i < chain.Length; i++ {
+		for j, valid := range []bool{true, false} {
+			if valid {
+				engine := ethash.NewFaker()
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+			} else {
+				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
 			}
 			if (err == nil) != valid {
 				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)

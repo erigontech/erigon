@@ -36,10 +36,12 @@ var (
 // The empty slice marshals as "0x".
 type Bytes []byte
 
+const hexPrefix = `0x`
+
 // MarshalText implements encoding.TextMarshaler
 func (b Bytes) MarshalText() ([]byte, error) {
 	result := make([]byte, len(b)*2+2)
-	copy(result, `0x`)
+	copy(result, hexPrefix)
 	hex.Encode(result[2:], b)
 	return result, nil
 }

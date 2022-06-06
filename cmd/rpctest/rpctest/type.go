@@ -2,7 +2,6 @@ package rpctest
 
 import (
 	"fmt"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -40,6 +39,16 @@ type EthTransaction struct {
 	GasPrice hexutil.Big     `json:"gasPrice"`
 	Input    hexutil.Bytes   `json:"input"`
 	Value    hexutil.Big     `json:"value"`
+}
+
+type EthSendRawTransaction struct {
+	CommonResponse
+	TxnHash common.Hash `json:"result"`
+}
+
+type EthTxPool struct {
+	CommonResponse
+	Result interface{} `json:"result"`
 }
 
 type EthBlockByNumberResult struct {
@@ -219,17 +228,22 @@ type EthReceipt struct {
 	Result Receipt `json:"result"`
 }
 
-type EthLogs struct {
-	CommonResponse
-	Result []*Log `json:"result"`
-}
-
 type EthGetProof struct {
 	CommonResponse
 	Result AccountResult `json:"result"`
 }
 
-// Result structs for GetProof
+type EthGetLogs struct {
+	CommonResponse
+	Result []Log `json:"result"`
+}
+
+type EthGetTransactionCount struct {
+	CommonResponse
+	Result hexutil.Uint64 `json:"result"`
+}
+
+// AccountResult is the result struct for GetProof
 type AccountResult struct {
 	Address      common.Address  `json:"address"`
 	AccountProof []string        `json:"accountProof"`
@@ -243,4 +257,9 @@ type StorageResult struct {
 	Key   string       `json:"key"`
 	Value *hexutil.Big `json:"value"`
 	Proof []string     `json:"proof"`
+}
+
+type ParityListStorageKeysResult struct {
+	CommonResponse
+	Result []hexutil.Bytes `json:"result"`
 }

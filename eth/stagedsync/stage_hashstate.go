@@ -6,12 +6,16 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"runtime"
+	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -105,7 +109,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 }
 
 func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	// Currently it does not require unwinding because it does not create any Intemediate Hash records
+	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
 	prom := NewPromoter(tx, quit)
 	prom.TempDir = cfg.tmpDir
@@ -122,35 +126,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 }
 
 func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, quit <-chan struct{}) error {
-	err := etl.Transform(
+	if err := readPlainStateOnce(
 		logPrefix,
 		db,
-		kv.PlainState,
-		kv.HashedAccounts,
 		cfg.tmpDir,
-		keyTransformExtractAcc(transformPlainStateKey),
 		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			Quit: quit,
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	err = etl.Transform(
-		logPrefix,
-		db,
-		kv.PlainState,
-		kv.HashedStorage,
-		cfg.tmpDir,
-		keyTransformExtractStorage(transformPlainStateKey),
-		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			Quit: quit,
-		},
-	)
-	if err != nil {
+		quit,
+	); err != nil {
 		return err
 	}
 
@@ -168,6 +150,107 @@ func PromoteHashedStateCleanly(logPrefix string, db kv.RwTx, cfg HashStateCfg, q
 	)
 }
 
+func readPlainStateOnce(
+	logPrefix string,
+	db kv.RwTx,
+	tmpdir string,
+	loadFunc etl.LoadFunc,
+	quit <-chan struct{},
+) error {
+	bufferSize := etl.BufferOptimalSize
+
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
+	defer accCollector.Close()
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
+	defer storageCollector.Close()
+
+	t := time.Now()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	var m runtime.MemStats
+
+	c, err := db.Cursor(kv.PlainState)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	convertAccFunc := func(key []byte) ([]byte, error) {
+		hash, err := common.HashData(key)
+		return hash[:], err
+	}
+
+	convertStorageFunc := func(key []byte) ([]byte, error) {
+		addrHash, err := common.HashData(key[:length.Addr])
+		if err != nil {
+			return nil, err
+		}
+		inc := binary.BigEndian.Uint64(key[length.Addr:])
+		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
+		if err != nil {
+			return nil, err
+		}
+		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
+		return compositeKey, nil
+	}
+
+	var startkey []byte
+
+	// reading kv.PlainState
+	for k, v, e := c.Seek(startkey); k != nil; k, v, e = c.Next() {
+		if e != nil {
+			return e
+		}
+		if err := libcommon.Stopped(quit); err != nil {
+			return err
+		}
+
+		if len(k) == 20 {
+			newK, err := convertAccFunc(k)
+			if err != nil {
+				return err
+			}
+			if err := accCollector.Collect(newK, v); err != nil {
+				return err
+			}
+		} else {
+			newK, err := convertStorageFunc(k)
+			if err != nil {
+				return err
+			}
+			if err := storageCollector.Collect(newK, v); err != nil {
+				return err
+			}
+		}
+
+		select {
+		default:
+		case <-logEvery.C:
+			libcommon.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		}
+	}
+
+	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
+	defer func(t time.Time) {
+		log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
+	}(time.Now())
+
+	args := etl.TransformArgs{
+		Quit: quit,
+	}
+
+	if err := accCollector.Load(db, kv.HashedAccounts, loadFunc, args); err != nil {
+		return err
+	}
+
+	if err := storageCollector.Load(db, kv.HashedStorage, loadFunc, args); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
 	return func(k, v []byte, next etl.ExtractNextFunc) error {
 		newK, err := transformKey(k)
@@ -178,46 +261,20 @@ func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.Extr
 	}
 }
 
-func keyTransformExtractAcc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
-	return func(k, v []byte, next etl.ExtractNextFunc) error {
-		if len(k) != 20 {
-			return nil
-		}
-		newK, err := transformKey(k)
-		if err != nil {
-			return err
-		}
-		return next(k, newK, v)
-	}
-}
-
-func keyTransformExtractStorage(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
-	return func(k, v []byte, next etl.ExtractNextFunc) error {
-		if len(k) == 20 {
-			return nil
-		}
-		newK, err := transformKey(k)
-		if err != nil {
-			return err
-		}
-		return next(k, newK, v)
-	}
-}
-
 func transformPlainStateKey(key []byte) ([]byte, error) {
 	switch len(key) {
-	case common.AddressLength:
+	case length.Addr:
 		// account
 		hash, err := common.HashData(key)
 		return hash[:], err
-	case common.AddressLength + common.IncarnationLength + common.HashLength:
+	case length.Addr + length.Incarnation + length.Hash:
 		// storage
-		addrHash, err := common.HashData(key[:common.AddressLength])
+		addrHash, err := common.HashData(key[:length.Addr])
 		if err != nil {
 			return nil, err
 		}
-		inc := binary.BigEndian.Uint64(key[common.AddressLength:])
-		secKey, err := common.HashData(key[common.AddressLength+common.IncarnationLength:])
+		inc := binary.BigEndian.Uint64(key[length.Addr:])
+		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +287,7 @@ func transformPlainStateKey(key []byte) ([]byte, error) {
 }
 
 func transformContractCodeKey(key []byte) ([]byte, error) {
-	if len(key) != common.AddressLength+common.IncarnationLength {
+	if len(key) != length.Addr+length.Incarnation {
 		return nil, fmt.Errorf("could not convert code key from plain to hashed, unexpected len: %d", len(key))
 	}
 	address, incarnation := dbutils.PlainParseStoragePrefix(key)
@@ -278,7 +335,10 @@ type Promoter struct {
 func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _ := decode(dbKey, dbValue)
+		_, k, _, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		// ignoring value un purpose, we want the latest one and it is in PlainState
 		value, err := db.GetOne(kv.PlainState, k)
 		if err != nil {
@@ -296,7 +356,10 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, _ := decode(dbKey, dbValue)
+		_, k, _, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		value, err := db.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
@@ -304,18 +367,19 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 		if len(value) == 0 {
 			return nil
 		}
-		var a accounts.Account
-		if err = a.DecodeForStorage(value); err != nil {
+
+		incarnation, err := accounts.DecodeIncarnationFromStorage(value)
+		if err != nil {
 			return err
 		}
-		if a.Incarnation == 0 {
+		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		var codeHash []byte
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
-			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, a.Incarnation, err)
+			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, incarnation, err)
 		}
 		if codeHash == nil {
 			return nil
@@ -331,7 +395,10 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -343,7 +410,10 @@ func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -374,23 +444,25 @@ func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 	decode := changeset.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
-		_, k, v := decode(dbKey, dbValue)
+		_, k, v, err := decode(dbKey, dbValue)
+		if err != nil {
+			return err
+		}
 		if len(v) == 0 {
 			return nil
 		}
 		var (
-			a        accounts.Account
 			newK     []byte
 			codeHash []byte
-			err      error
 		)
-		if err = a.DecodeForStorage(v); err != nil {
+		incarnation, err := accounts.DecodeIncarnationFromStorage(v)
+		if err != nil {
 			return err
 		}
-		if a.Incarnation == 0 {
+		if incarnation == 0 {
 			return nil
 		}
-		plainKey := dbutils.PlainGenerateStoragePrefix(k, a.Incarnation)
+		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		codeHash, err = db.GetOne(kv.PlainContractCode, plainKey)
 		if err != nil {
 			return fmt.Errorf("getCodeUnwindExtractFunc: %w, key=%x", err, plainKey)

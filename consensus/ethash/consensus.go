@@ -22,14 +22,11 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -49,6 +46,11 @@ var (
 	ConstantinopleBlockReward     = uint256.NewInt(2e+18) // Block reward in wei for successfully mining a block upward from Constantinople
 	maxUncles                     = 2                     // Maximum number of uncles allowed in a single block
 	allowedFutureBlockTimeSeconds = int64(15)             // Max seconds from current time allowed for blocks, before they're considered future blocks
+
+	// calcDifficultyEip4345 is the difficulty adjustment algorithm as specified by EIP 4345.
+	// It offsets the bomb a total of 10.7M blocks.
+	// Specification EIP-4345: https://eips.ethereum.org/EIPS/eip-4345
+	calcDifficultyEip4345 = makeDifficultyCalculator(10700000)
 
 	// calcDifficultyEip3554 is the difficulty adjustment algorithm as specified by EIP 3554.
 	// It offsets the bomb a total of 9.7M blocks.
@@ -89,6 +91,11 @@ var (
 	errInvalidPoW        = errors.New("invalid proof-of-work")
 )
 
+// Type returns underlying consensus engine
+func (ethash *Ethash) Type() params.ConsensusType {
+	return params.EtHashConsensus
+}
+
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-work verified author of the block.
 func (ethash *Ethash) Author(header *types.Header) (common.Address, error) {
@@ -110,80 +117,6 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 	}
 	// Sanity checks passed, do a proper verification
 	return ethash.verifyHeader(chain, header, parent, false, seal)
-}
-
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers
-// concurrently. The method returns a quit channel to abort the operations and
-// a results channel to retrieve the async verifications.
-func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	if len(headers) == 0 {
-		return nil
-	}
-
-	// Spawn as many workers as allowed threads
-	workers := runtime.GOMAXPROCS(0)
-	if len(headers) < workers {
-		workers = len(headers)
-	}
-
-	// Create a task channel and spawn the verifiers
-	var (
-		errors = make([]error, len(headers))
-	)
-
-	wg := sync.WaitGroup{}
-
-	input := new(int64)
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer debug.LogPanic()
-			defer wg.Done()
-			var index int64
-			for {
-				index = atomic.AddInt64(input, 1) - 1
-				if int(index) > len(headers)-1 {
-					return
-				}
-				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, int(index))
-				if errors[index] != nil {
-					return
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	for _, err := range errors {
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int) error {
-	var parent *types.Header
-	if index == 0 {
-		parent = chain.GetHeader(headers[0].ParentHash, headers[0].Number.Uint64()-1)
-	} else if headers[index-1].Hash() == headers[index].ParentHash {
-		parent = headers[index-1]
-	}
-	if parent == nil {
-		if index-1 >= 0 && index-1 <= len(headers)-1 {
-			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers), "index-1", headers[index-1].Number.Uint64(), "index", headers[index].Number.Uint64())
-		} else {
-			log.Error("consensus.ErrUnknownAncestor", "index", index, "headers", len(headers))
-		}
-
-		return consensus.ErrUnknownAncestor
-	}
-	if chain.GetHeader(headers[index].Hash(), headers[index].Number.Uint64()) != nil {
-		return nil // known block
-	}
-	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index])
 }
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
@@ -280,9 +213,8 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return fmt.Errorf("invalid difficulty: have %v, want %v", header.Difficulty, expected)
 	}
 	// Verify that the gas limit is <= 2^63-1
-	cap := uint64(0x7fffffffffffffff)
-	if header.GasLimit > cap {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, cap)
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
@@ -345,6 +277,8 @@ func (ethash *Ethash) CalcDifficulty(chain consensus.ChainHeaderReader, time, pa
 func CalcDifficulty(config *params.ChainConfig, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
 	next := parentNumber + 1
 	switch {
+	case config.IsArrowGlacier(next):
+		return calcDifficultyEip4345(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsLondon(next):
 		return calcDifficultyEip3554(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 	case config.IsMuirGlacier(next):
@@ -587,7 +521,7 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 
 // Prepare implements consensus.Engine, initializing the difficulty field of a
 // header to conform to the ethash protocol. The changes are done inline.
-func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (ethash *Ethash) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
@@ -601,21 +535,29 @@ func (ethash *Ethash) Initialize(config *params.ChainConfig, chain consensus.Cha
 
 // Finalize implements consensus.Engine, accumulating the block and uncle rewards,
 // setting the final state on the header
-func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+) (types.Transactions, types.Receipts, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
-	return nil
+	return txs, r, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, accumulating the block and
 // uncle rewards, setting the final state and assembling the block.
-func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
+func (ethash *Ethash) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+) (*types.Block, types.Transactions, types.Receipts, error) {
 
 	// Finalize block
-	ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
+	outTxs, outR, err := ethash.Finalize(chainConfig, header, state, txs, uncles, r, e, chain, syscall)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, txs, uncles, r), nil
+	return types.NewBlock(header, outTxs, uncles, outR), outTxs, outR, nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

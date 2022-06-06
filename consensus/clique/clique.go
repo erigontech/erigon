@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"golang.org/x/crypto/sha3"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -173,9 +174,9 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
 	chainConfig    *params.ChainConfig
-	config         *params.CliqueConfig   // Consensus engine configuration parameters
-	snapshotConfig *params.SnapshotConfig // Consensus engine configuration parameters
-	db             kv.RwDB                // Database to store and retrieve snapshot checkpoints
+	config         *params.CliqueConfig            // Consensus engine configuration parameters
+	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
+	db             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
@@ -184,7 +185,7 @@ type Clique struct {
 
 	signer common.Address // Ethereum address of the signing key
 	signFn SignerFn       // Signer function to authorize hashes with
-	lock   sync.RWMutex   // Protects the signer fields
+	lock   sync.RWMutex   // Protects the signer and proposals fields
 
 	// The fields below are for testing only
 	FakeDiff bool // Skip difficulty verifications
@@ -194,7 +195,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueDB kv.RwDB) *Clique {
+func New(cfg *params.ChainConfig, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -223,12 +224,12 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueD
 	snapNum, err := lastSnapshot(cliqueDB)
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
-			log.Error("on Clique init while getting latest snapshot", "error", err)
+			log.Error("on Clique init while getting latest snapshot", "err", err)
 		}
 	} else {
 		snaps, err := c.snapshots(snapNum, warmupCacheSnapshots)
 		if err != nil {
-			log.Error("on Clique init", "error", err)
+			log.Error("on Clique init", "err", err)
 		}
 
 		for _, sn := range snaps {
@@ -237,6 +238,11 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.SnapshotConfig, cliqueD
 	}
 
 	return c
+}
+
+// Type returns underlying consensus engine
+func (c *Clique) Type() params.ConsensusType {
+	return params.CliqueConsensus
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
@@ -248,21 +254,6 @@ func (c *Clique) Author(header *types.Header) (common.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Clique) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	return c.verifyHeader(chain, header, nil)
-}
-
-// VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
-// method returns a quit channel to abort the operations and a results channel to
-// retrieve the async verifications (the order is that of the input slice).
-func (c *Clique) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
-	if len(headers) == 0 {
-		return nil
-	}
-	for i, header := range headers {
-		if err := c.verifyHeader(chain, header, headers[:i]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type VerifyHeaderResponse struct {
@@ -296,7 +287,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
-func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
 	header.Coinbase = common.Address{}
@@ -308,9 +299,8 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if err != nil {
 		return err
 	}
+	c.lock.RLock()
 	if number%c.config.Epoch != 0 {
-		c.lock.RLock()
-
 		// Gather all the proposals that make sense voting on
 		addresses := make([]common.Address, 0, len(c.proposals))
 		for address, authorize := range c.proposals {
@@ -327,10 +317,14 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 				copy(header.Nonce[:], nonceDropVote)
 			}
 		}
-		c.lock.RUnlock()
 	}
+
+	// Copy signer protected by mutex to avoid race condition
+	signer := c.signer
+	c.lock.RUnlock()
+
 	// Set the correct difficulty
-	header.Difficulty = calcDifficulty(snap, c.signer)
+	header.Difficulty = calcDifficulty(snap, signer)
 
 	// Ensure the extra data has all its components
 	if len(header.Extra) < ExtraVanity {
@@ -368,21 +362,26 @@ func (c *Clique) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, r types.Receipts, e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall) error {
+func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	return nil
+	return txs, r, nil
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, receipts types.Receipts,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call) (*types.Block, error) {
+func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+) (*types.Block, types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts), nil
+	return types.NewBlock(header, txs, nil, receipts), txs, receipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -483,7 +482,10 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, 
 	if err != nil {
 		return nil
 	}
-	return calcDifficulty(snap, c.signer)
+	c.lock.RLock()
+	signer := c.signer
+	c.lock.RUnlock()
+	return calcDifficulty(snap, signer)
 }
 
 func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
@@ -500,7 +502,7 @@ func (c *Clique) SealHash(header *types.Header) common.Hash {
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Clique) Close() error {
-	common.SafeClose(c.exitCh)
+	libcommon.SafeClose(c.exitCh)
 	return nil
 }
 

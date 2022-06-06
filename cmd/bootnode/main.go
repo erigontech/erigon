@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"net"
 	"os"
 
@@ -40,7 +41,7 @@ func main() {
 		writeAddr   = flag.Bool("writeaddress", false, "write out the node's public key and quit")
 		nodeKeyFile = flag.String("nodekey", "", "private key filename")
 		nodeKeyHex  = flag.String("nodekeyhex", "", "private key as hex (for testing)")
-		natdesc     = flag.String("nat", "none", "port mapping mechanism (any|none|upnp|pmp|extip:<IP>)")
+		natdesc     = flag.String(utils.NATFlag.Name, "", utils.NATFlag.Usage)
 		netrestrict = flag.String("netrestrict", "", "restrict network communication to the given IP networks (CIDR masks)")
 		runv5       = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
 		verbosity   = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
@@ -87,7 +88,7 @@ func main() {
 	}
 
 	if *writeAddr {
-		fmt.Printf("%x\n", crypto.FromECDSAPub(&nodeKey.PublicKey)[1:])
+		fmt.Printf("%x\n", crypto.MarshalPubkey(&nodeKey.PublicKey))
 		os.Exit(0)
 	}
 
@@ -110,7 +111,7 @@ func main() {
 
 	realaddr := conn.LocalAddr().(*net.UDPAddr)
 	if natm != nil {
-		if !realaddr.IP.IsLoopback() {
+		if !realaddr.IP.IsLoopback() && natm.SupportsMapping() {
 			go nat.Map(natm, nil, "udp", realaddr.Port, realaddr.Port, "ethereum discovery")
 		}
 		if ext, err := natm.ExternalIP(); err == nil {
@@ -129,12 +130,16 @@ func main() {
 		PrivateKey:  nodeKey,
 		NetRestrict: restrictList,
 	}
+
+	ctx, cancel := common.RootContext()
+	defer cancel()
+
 	if *runv5 {
-		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {
+		if _, err := discover.ListenV5(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	} else {
-		if _, err := discover.ListenUDP(conn, ln, cfg); err != nil {
+		if _, err := discover.ListenUDP(ctx, conn, ln, cfg); err != nil {
 			utils.Fatalf("%v", err)
 		}
 	}

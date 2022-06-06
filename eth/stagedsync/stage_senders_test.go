@@ -11,7 +11,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -107,18 +109,18 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := StageSendersCfg(db, params.TestChainConfig, "")
+	cfg := StageSendersCfg(db, params.TestChainConfig, "", prune.Mode{}, snapshotsync.NewBlockRetire(1, "", nil, db, nil, nil))
 	err := SpawnRecoverSendersStage(cfg, &StageState{ID: stages.Senders}, nil, tx, 3, ctx)
 	assert.NoError(t, err)
 
 	{
-		found := rawdb.ReadBody(tx, common.HexToHash("01"), 1)
+		found := rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("01"), 1)
 		assert.NotNil(t, found)
 		assert.Equal(t, 2, len(found.Transactions))
-		found = rawdb.ReadBody(tx, common.HexToHash("02"), 2)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("02"), 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Transactions))
-		found = rawdb.ReadBody(tx, common.HexToHash("03"), 3)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("03"), 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Transactions))
 		assert.NotNil(t, 2, len(found.Uncles))
@@ -136,15 +138,14 @@ func TestSenders(t *testing.T) {
 		assert.Equal(t, 0, len(senders))
 	}
 	{
-		txs, err := rawdb.ReadTransactions(tx, 0, 2)
+		txs, err := rawdb.CanonicalTransactions(tx, 1, 2)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(txs))
-		txs, err = rawdb.ReadTransactions(tx, 2, 3)
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 3)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(txs))
-		txs, err = rawdb.ReadTransactions(tx, 0, 1024)
+		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
 		assert.NoError(t, err)
-		assert.Equal(t, 5, len(txs))
+		assert.Equal(t, 3, len(txs))
 	}
-
 }

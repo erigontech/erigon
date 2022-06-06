@@ -23,12 +23,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, checkTEVM func(contractHash common.Hash) (bool, error)) vm.BlockContext {
+func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, author *common.Address, contractHasTEVM func(contractHash common.Hash) (bool, error)) vm.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
@@ -43,22 +45,40 @@ func NewEVMBlockContext(header *types.Header, getHeader func(hash common.Hash, n
 			panic(fmt.Errorf("header.BaseFee higher than 2^256-1"))
 		}
 	}
-	if checkTEVM == nil {
-		checkTEVM = func(_ common.Hash) (bool, error) {
+
+	difficulty := new(big.Int)
+
+	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
+		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
+		// TODO: Turn DIFFICULTY into RANDOM when the Merge is done.
+		difficulty.SetBytes(header.MixDigest[:])
+	} else {
+		difficulty.Set(header.Difficulty)
+	}
+	if contractHasTEVM == nil {
+		contractHasTEVM = func(_ common.Hash) (bool, error) {
 			return false, nil
 		}
 	}
+
+	var transferFunc vm.TransferFunc
+	if engine != nil && engine.Type() == params.BorConsensus {
+		transferFunc = BorTransfer
+	} else {
+		transferFunc = Transfer
+	}
+
 	return vm.BlockContext{
-		CanTransfer: CanTransfer,
-		Transfer:    Transfer,
-		GetHash:     GetHashFn(header, getHeader),
-		Coinbase:    beneficiary,
-		BlockNumber: header.Number.Uint64(),
-		Time:        header.Time,
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     &baseFee,
-		GasLimit:    header.GasLimit,
-		CheckTEVM:   checkTEVM,
+		CanTransfer:     CanTransfer,
+		Transfer:        transferFunc,
+		GetHash:         GetHashFn(header, getHeader),
+		Coinbase:        beneficiary,
+		BlockNumber:     header.Number.Uint64(),
+		Time:            header.Time,
+		Difficulty:      difficulty,
+		BaseFee:         &baseFee,
+		GasLimit:        header.GasLimit,
+		ContractHasTEVM: contractHasTEVM,
 	}
 }
 
@@ -116,4 +136,23 @@ func Transfer(db vm.IntraBlockState, sender, recipient common.Address, amount *u
 		db.SubBalance(sender, amount)
 	}
 	db.AddBalance(recipient, amount)
+}
+
+// BorTransfer transfer in Bor
+func BorTransfer(db vm.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
+	// get inputs before
+	input1 := db.GetBalance(sender).Clone()
+	input2 := db.GetBalance(recipient).Clone()
+
+	if !bailout {
+		db.SubBalance(sender, amount)
+	}
+	db.AddBalance(recipient, amount)
+
+	// get outputs after
+	output1 := db.GetBalance(sender).Clone()
+	output2 := db.GetBalance(recipient).Clone()
+
+	// add transfer log
+	AddTransferLog(db, sender, recipient, amount, input1, input2, output1, output2)
 }

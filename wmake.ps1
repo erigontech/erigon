@@ -14,13 +14,32 @@
    limitations under the License.
 #>
 
-
 Param(
     [Parameter(Position=0, 
     HelpMessage="Enter the build target")]
     [Alias("target")]
-    [ValidateSet("all", "clean", "test", "erigon","rpcdaemon","rpctest", "hack", "state", "integration", "db-tools", "sentry")]
-    [string[]]$BuildTargets=@("erigon","rpcdaemon","sentry","integration")
+    [ValidateSet(
+        "clean",
+        "cons",
+        "db-tools",
+        "devnettest",
+        "downloader",
+        "erigon",
+        "evm",
+        "hack",
+        "integration",
+        "observer",
+        "pics",
+        "rpcdaemon",
+        "rpctest",
+        "sentry",
+        "state",
+        "test",
+        "test-integration",
+        "txpool",
+        "all"
+    )]
+    [string[]]$BuildTargets=@("erigon", "rpcdaemon", "sentry", "downloader", "integration")
 )
 
 # Sanity checks on $BuildTargets
@@ -48,6 +67,24 @@ if ($BuildTargets.Count -gt 1) {
 
 }
 
+if ($BuildTargets[0] -eq "all") {
+    $BuildTargets = @(
+        "cons",
+        "devnettest",
+        "downloader",
+        "erigon",
+        "evm",
+        "hack",
+        "integration",
+        "observer",
+        "pics",
+        "rpcdaemon",
+        "rpctest",
+        "sentry",
+        "state",
+        "txpool"
+    )
+}
 
 # ====================================================================
 # Messages texts
@@ -61,7 +98,6 @@ $headerText = @"
  
 "@
 
-
 $gitErrorText = @"
 
  Requirement Error.
@@ -71,14 +107,19 @@ $gitErrorText = @"
 
 "@
 
+$goMinMinorVersion = 18
+$goMinVersion = "1.$goMinMinorVersion"
 
 $goErrorText = @"
 
  Requirement Error.
  You need to have Go Programming Language (aka golang) installed.
- Minimum required version is 1.16
+ Minimum required version is $goMinVersion
  Please visit https://golang.org/dl/ and download the appropriate
  installer.
+ Ensure that go.exe installation
+ directory is properly inserted into your PATH
+ environment variable. 
 
 "@
 
@@ -89,9 +130,9 @@ $chocolateyErrorText = @"
  chocolatey [https://chocolatey.org/] with the following
  mandatory components: 
 
- - cmake 3.20.2
- - make 4.3
- - mingw 10.2.0
+ - cmake
+ - make
+ - mingw
 
 "@
 
@@ -116,20 +157,6 @@ $privilegeErrorText = @"
 # ====================================================================
 # Functions
 # ====================================================================
-
-# -----------------------------------------------------------------------------
-# Function 		: Test-Administrator
-# -----------------------------------------------------------------------------
-# Description	: Checks the script is running with Administrator privileges
-# Returns       : $true / $false
-# -----------------------------------------------------------------------------
-function Test-Administrator {
-
-    $myWindowsID = [System.Security.Principal.WindowsIdentity]::GetCurrent();
-    $myWindowsPrincipal = New-Object System.Security.Principal.WindowsPrincipal($myWindowsID);
-    $adminRole = [System.Security.Principal.WindowsBuiltInRole]::Administrator;
-    Write-Output ($myWindowsPrincipal.IsInRole($adminRole))
-} 
 
 # -----------------------------------------------------------------------------
 # Function 		: Get-Env
@@ -183,20 +210,14 @@ function Get-Uninstall-Item {
 # Returns       : $true / $false
 # -----------------------------------------------------------------------------
 function Test-GO-Installed {
+	$versionStr = go.exe version
+	if (!($?)) {
+		return $false
+	}
 
-    $Private:item   = Get-Uninstall-Item "^Go\ Programming\ Language"
-    $Private:result = $false
-
-    if ($Private:item) {
-        $Private:versionMajor = [int]$item.VersionMajor
-        $Private:versionMinor = [int]$item.VersionMinor
-        if ($Private:versionMajor -ge 1 -and $Private:versionMinor -ge 16) {
-            Write-Host " Found GO version $($Private:item.DisplayVersion)"
-            $Private:result = $true
-        }
-    }
-
-    Write-Output $Private:result
+	$minorVersionStr = $versionStr.Substring(15, 2)
+	$minorVersion = [int]$minorVersionStr
+	return ($minorVersion -ge $goMinMinorVersion)
 }
 
 # -----------------------------------------------------------------------------
@@ -206,8 +227,7 @@ function Test-GO-Installed {
 # Returns       : $true / $false
 # -----------------------------------------------------------------------------
 function Test-Git-Installed {
-
-    $Private:item   = Get-Uninstall-Item "^Git\ "
+    $Private:item   = Get-Uninstall-Item "^Git version [0-9\.]{1,}|^Git$"
     $Private:result = $false
 
     if ($Private:item) {
@@ -225,7 +245,6 @@ function Test-Git-Installed {
 # Returns       : $true / $false
 # -----------------------------------------------------------------------------
 function Test-Choco-Installed {
-
     ## Test Chocolatey Install
     $script:chocolateyPath = Get-Env "chocolateyInstall"
     if(-not $chocolateyPath) {
@@ -339,34 +358,21 @@ if(!(Test-GO-Installed)) {
     Write-Host $goErrorText
     exit 1
 }
-Get-Command go.exe | Out-Null
-if (!($?)) {
-    Write-Host @"
-    
- Error !
- Though GO installation is found I could not get
- the GO binary executable. Ensure GO installation
- directory is properly inserted into your PATH
- environment variable.
-
-"@
-    exit 1
-}
-
-# ## Administrator Privileges
-# if (!(Test-Administrator)) {
-#    Write-Host $privilegeErrorText
-#    return
-# }
-
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
-$Erigon.Commit  = [string]@(git.exe rev-list -1 HEAD)
-$Erigon.Branch  = [string]@(git.exe rev-parse --abbrev-ref HEAD)
-$Erigon.Tag     = [string]@(git.exe describe --tags)
-$Erigon.Build   = "go build -v -trimpath -ldflags ""-X github.com/ledgerwatch/erigon/params.GitCommit=$($Erigon.Commit) -X github.com/ledgerwatch/erigon/params.GitBranch=$($Erigon.Branch) -X github.com/ledgerwatch/erigon/params.GitTag=$($Erigon.Tag)"""
-$Erigon.BinPath = [string](Join-Path $MyContext.StartDir "\build\bin")
+$Erigon.Commit     = [string]@(git.exe rev-list -1 HEAD)
+$Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
+$Erigon.Tag        = [string]@(git.exe describe --tags)
+
+$Erigon.BuildTags = "nosqlite,noboltdb"
+$Erigon.Package = "github.com/ledgerwatch/erigon"
+
+$Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false"
+$Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Erigon.Commit) -X $($Erigon.Package)/params.GitBranch=$($Erigon.Branch) -X $($Erigon.Package)/params.GitTag=$($Erigon.Tag)"""
+
+$Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
+$Erigon.Submodules = $false
 $env:GO111MODULE = "on"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
@@ -389,8 +395,9 @@ Write-Host @"
 "@
 
 foreach($BuildTarget in $BuildTargets) {
+
 ## Choco components for building db-tools
-if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
+if ($BuildTarget -eq "db-tools") {
     if(!(Test-choco-Installed)) {
         exit 1
     }
@@ -449,11 +456,9 @@ if ($BuildTarget -eq "all" -or $BuildTarget -eq "db-tools") {
     Set-Location $MyContext.Directory
     # Eventually move all mdbx_*.exe to ./build/bin directory
     Move-Item -Path "$($Erigon.MDBXBuildPath)/mdbx_*.exe" -Destination $Erigon.BinPath -Force
-
 }
     
 if ($BuildTarget -eq "clean") {
-
     Write-Host " Cleaning ..."
 
     # Remove ./build/bin directory
@@ -463,14 +468,23 @@ if ($BuildTarget -eq "clean") {
     go.exe clean -cache
 
 } elseif ($BuildTarget -eq "test") {
-    
     Write-Host " Running tests ..."
-    $env:GODEBUG="cgocheck=0"
-    go test ./... -p 2 --timeout 30m
-    $TestCommand = "go test ./... -p 2 --timeout 30m"
-    $TestCommand += ';$?'
-    $success = Invoke-Expression -Command $TestCommand
-    if (-not $success) {
+    $env:GODEBUG = "cgocheck=0"
+    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 --timeout 30s"
+    Invoke-Expression -Command $TestCommand | Out-Host
+    if (!($?)) {
+        Write-Host " ERROR : Tests failed"
+        exit 1
+    } else {
+        Write-Host "`n Tests completed"
+    }
+
+} elseif ($BuildTarget -eq "test-integration") {
+    Write-Host " Running integration tests ..."
+    $env:GODEBUG = "cgocheck=0"
+    $TestCommand = "go test $($Erigon.BuildFlags) ./... -p 2 --timeout 30m -tags $($Erigon.BuildTags),integration"
+    Invoke-Expression -Command $TestCommand | Out-Host
+    if (!($?)) {
         Write-Host " ERROR : Tests failed"
         exit 1
     } else {
@@ -478,81 +492,28 @@ if ($BuildTarget -eq "clean") {
     }
 
 } else {
-
-    $binaries = @()
-
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "erigon") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="erigon.exe" 
-            Source="./cmd/erigon"
+    if (!($Erigon.Submodules)) {
+        Write-Host " Updating git submodules ..."
+        Invoke-Expression -Command "git.exe submodule update --init --recursive --force" | Out-Host
+        if (!($?)) {
+            Write-Host " ERROR : Update submodules failed"
+            exit 1
         }
-        $binaries += $binary
+        $Erigon.Submodules = $true
     }
 
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "rpcdaemon") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="rpcdaemon.exe" 
-            Source="./cmd/rpcdaemon"
-        }
-        $binaries += $binary
-    }
-    
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "rpctest") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="rpctest.exe" 
-            Source="./cmd/rpctest"
-        }
-        $binaries += $binary
-    }
-
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "integration") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="integration.exe" 
-            Source="./cmd/integration"
-        }
-        $binaries += $binary
-    }
-    
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "state") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="state.exe" 
-            Source="./cmd/state"
-        }
-        $binaries += $binary
-    }
-
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "hack") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="hack.exe" 
-            Source="./cmd/hack"
-        }
-        $binaries += $binary
-    }
-        
-    if ($BuildTarget -eq "all" -or $BuildTarget -eq "sentry") {
-        $binary = New-Object -TypeName psobject -Property @{
-            Executable="sentry.exe" 
-            Source="./cmd/sentry"
-        }
-        $binaries += $binary
-    }
-    
-    if ($binaries.Count -gt 0) {
-        $binaries | ForEach-Object {
-            Write-Host "`n Building $($_.Executable)"
-            $outExecutable = [string](Join-Path $Erigon.BinPath $_.Executable)
-            $BuildCommand = "$($Erigon.Build) -o ""$($outExecutable)"" $($_.Source)"
-            $BuildCommand += ';$?'
-            $success = Invoke-Expression -Command $BuildCommand
-            if (-not $success) {
-                Write-Host " ERROR : Could not build $($_.Executable)"
-                exit 1
-            } else {
-                Write-Host "`n Built $($_.Executable). Run $($outExecutable) to launch"
-            }
-        }
+    Write-Host "`n Building $BuildTarget"
+    $outExecutable = [string](Join-Path $Erigon.BinPath "$BuildTarget.exe")
+    $BuildCommand = "go build $($Erigon.BuildFlags) -o ""$($outExecutable)"" ./cmd/$BuildTarget"
+    Invoke-Expression -Command $BuildCommand | Out-Host
+    if (!($?)) {
+        Write-Host " ERROR : Could not build $BuildTarget"
+        exit 1
+    } else {
+        Write-Host "`n Built $($BuildTarget). Run $($outExecutable) to launch"
     }
 }
 }
+
 # Return to source folder
 Set-Location $MyContext.Directory

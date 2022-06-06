@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"sort"
@@ -30,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/rs/cors"
 )
@@ -57,7 +57,7 @@ type rpcHandler struct {
 
 type httpServer struct {
 	log      log.Logger
-	timeouts rpc.HTTPTimeouts
+	timeouts rpccfg.HTTPTimeouts
 	mux      http.ServeMux // registered handlers go here
 
 	mu       sync.Mutex
@@ -81,8 +81,8 @@ type httpServer struct {
 	handlerNames map[string]string
 }
 
-func newHTTPServer(log log.Logger, timeouts rpc.HTTPTimeouts) *httpServer {
-	h := &httpServer{log: log, timeouts: timeouts, handlerNames: make(map[string]string)}
+func newHTTPServer(logger log.Logger, timeouts rpccfg.HTTPTimeouts) *httpServer {
+	h := &httpServer{log: logger, timeouts: timeouts, handlerNames: make(map[string]string)}
 
 	h.httpHandler.Store((*rpcHandler)(nil))
 	h.wsHandler.Store((*rpcHandler)(nil))
@@ -126,7 +126,7 @@ func (h *httpServer) start() error {
 
 	// Initialize the server.
 	h.server = &http.Server{Handler: h}
-	if h.timeouts != (rpc.HTTPTimeouts{}) {
+	if h.timeouts != (rpccfg.HTTPTimeouts{}) {
 		CheckTimeouts(&h.timeouts)
 		h.server.ReadTimeout = h.timeouts.ReadTimeout
 		h.server.WriteTimeout = h.timeouts.WriteTimeout
@@ -322,7 +322,7 @@ func (h *httpServer) enableWS(apis []rpc.API, config wsConfig, allowList rpc.All
 	}
 	h.wsConfig = config
 	h.wsHandler.Store(&rpcHandler{
-		Handler: srv.WebsocketHandler(config.Origins, false),
+		Handler: srv.WebsocketHandler(config.Origins, nil, false),
 		server:  srv,
 	})
 	return nil
@@ -440,7 +440,7 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 var gzPool = sync.Pool{
 	New: func() interface{} {
-		w := gzip.NewWriter(ioutil.Discard)
+		w := gzip.NewWriter(io.Discard)
 		return w
 	},
 }

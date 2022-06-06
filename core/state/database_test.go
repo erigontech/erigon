@@ -54,16 +54,15 @@ func TestCreate2Revive(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -247,16 +246,15 @@ func TestCreate2Polymorth(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -494,16 +492,15 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -644,13 +641,12 @@ func TestReorgOverStateChange(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -796,13 +792,12 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		funds        = big.NewInt(1000000000)
 		gspec        = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -895,29 +890,29 @@ func TestReproduceCrash(t *testing.T) {
 	value2 := uint256.NewInt(0x58c00a51)
 
 	_, tx := memdb.NewTestTx(t)
-	tsw := state.NewPlainStateWriter(tx, nil, 0)
-	intraBlockState := state.New(state.NewPlainState(tx, 0))
+	tsw := state.NewPlainStateWriter(tx, nil, 1)
+	intraBlockState := state.New(state.NewPlainState(tx, 1))
 	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
-	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
 	intraBlockState.SetState(contract, &storageKey1, *value1)
-	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey2, *value2)
-	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
 	intraBlockState.SubBalance(contract, uint256.NewInt(1000000000))
 	intraBlockState.SetState(contract, &storageKey1, *value0)
 	intraBlockState.SetState(contract, &storageKey2, *value0)
-	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 }
@@ -929,15 +924,14 @@ func TestEip2200Gas(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP150Block:         new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:      big.NewInt(1),
-				PetersburgBlock:     big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-				IstanbulBlock:       big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				PetersburgBlock:       big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
+				IstanbulBlock:         big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
@@ -1026,14 +1020,13 @@ func TestWrongIncarnation(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP150Block:    new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1140,14 +1133,13 @@ func TestWrongIncarnation2(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP150Block:    new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 		signer = types.LatestSignerForChainID(nil)
@@ -1295,8 +1287,8 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	intraBlockState.SetCode(contract, oldCode)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
-	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %w", err)
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	_, err := trie.CalcRoot("test", tx)
 	require.NoError(t, err)
@@ -1308,7 +1300,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
 	intraBlockState.SetCode(contract, newCode)
 
-	if err := intraBlockState.FinalizeTx(params.Rules{}, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
@@ -1333,10 +1325,10 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
-	if err := intraBlockState.FinalizeTx(params.Rules{}, w); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if err := intraBlockState.CommitBlock(params.Rules{}, w); err != nil {
+	if err := intraBlockState.CommitBlock(&params.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
 
@@ -1366,10 +1358,10 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	intraBlockState.SetCode(contract, code)
 	intraBlockState.AddBalance(contract, uint256.NewInt(1000000000))
-	if err := intraBlockState.FinalizeTx(params.Rules{}, w); err != nil {
+	if err := intraBlockState.FinalizeTx(&params.Rules{}, w); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if err := intraBlockState.CommitBlock(params.Rules{}, w); err != nil {
+	if err := intraBlockState.CommitBlock(&params.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
 
@@ -1402,7 +1394,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		gspec   = &core.Genesis{
 			Config: params.AllEthashProtocolChanges,
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address: core.GenesisAccount{Balance: funds},
 			},
 		}
 	)
@@ -1592,4 +1584,70 @@ func TestRecreateAndRewind(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+}
+func TestTxLookupUnwind(t *testing.T) {
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:               big.NewInt(1),
+				HomesteadBlock:        new(big.Int),
+				TangerineWhistleBlock: new(big.Int),
+				SpuriousDragonBlock:   big.NewInt(1),
+				ByzantiumBlock:        big.NewInt(1),
+				ConstantinopleBlock:   big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: core.GenesisAccount{Balance: funds},
+			},
+		}
+		signer = types.LatestSignerForChainID(nil)
+	)
+
+	m := stages.MockWithGenesis(t, gspec, key)
+	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
+		var tx types.Transaction
+		var e error
+		switch i {
+		case 1:
+			tx, e = types.SignTx(types.NewTransaction(block.TxNonce(address), address, uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if e != nil {
+				t.Fatal(e)
+			}
+			block.AddTx(tx)
+		}
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.InsertChain(chain1); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.InsertChain(chain2); err != nil {
+		t.Fatal(err)
+	}
+	var count uint64
+	if err = m.DB.View(context.Background(), func(tx kv.Tx) error {
+		c, e := tx.Cursor(kv.TxLookup)
+		if e != nil {
+			return e
+		}
+		defer c.Close()
+		if count, e = c.Count(); e != nil {
+			return e
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("txlookup record expected to be deleted, got %d", count)
+	}
 }

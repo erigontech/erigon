@@ -68,6 +68,7 @@ type jsonWriter interface {
 }
 
 type BlockNumber int64
+type Timestamp uint64
 
 const (
 	PendingBlockNumber  = BlockNumber(-2)
@@ -118,7 +119,7 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 }
 
 func (bn BlockNumber) Int64() int64 {
-	return (int64)(bn)
+	return int64(bn)
 }
 
 type BlockNumberOrHash struct {
@@ -134,6 +135,9 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 	if err == nil {
 		if e.BlockNumber != nil && e.BlockHash != nil {
 			return fmt.Errorf("cannot specify both BlockHash and BlockNumber, choose one or the other")
+		}
+		if e.BlockNumber == nil && e.BlockHash == nil {
+			return fmt.Errorf("at least one of BlockNumber or BlockHash is needed if a dictionary is provided")
 		}
 		bnh.BlockNumber = e.BlockNumber
 		bnh.BlockHash = e.BlockHash
@@ -218,4 +222,51 @@ func BlockNumberOrHashWithHash(hash common.Hash, canonical bool) BlockNumberOrHa
 		BlockHash:        &hash,
 		RequireCanonical: canonical,
 	}
+}
+
+// DecimalOrHex unmarshals a non-negative decimal or hex parameter into a uint64.
+type DecimalOrHex uint64
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (dh *DecimalOrHex) UnmarshalJSON(data []byte) error {
+	input := strings.TrimSpace(string(data))
+	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
+		input = input[1 : len(input)-1]
+	}
+
+	value, err := strconv.ParseUint(input, 10, 64)
+	if err != nil {
+		value, err = hexutil.DecodeUint64(input)
+	}
+	if err != nil {
+		return err
+	}
+	*dh = DecimalOrHex(value)
+	return nil
+}
+
+func (ts Timestamp) TurnIntoUint64() uint64 {
+	return uint64(ts)
+}
+
+func (ts *Timestamp) UnmarshalJSON(data []byte) error {
+	input := strings.TrimSpace(string(data))
+	if len(input) >= 2 && input[0] == '"' && input[len(input)-1] == '"' {
+		input = input[1 : len(input)-1]
+	}
+
+	// parse string to uint64
+	timestamp, err := strconv.ParseUint(input, 10, 64)
+	if err != nil {
+
+		// try hex number
+		if timestamp, err = hexutil.DecodeUint64(input); err != nil {
+			return err
+		}
+
+	}
+
+	*ts = Timestamp(timestamp)
+	return nil
+
 }

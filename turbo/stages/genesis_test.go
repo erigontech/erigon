@@ -44,28 +44,32 @@ func TestDefaultGenesisBlock(t *testing.T) {
 	var err error
 	block, _, err = core.DefaultRopstenGenesisBlock().ToBlock()
 	if err != nil {
-		t.Errorf("error: %w", err)
+		t.Errorf("error: %v", err)
 	}
 	if block.Hash() != params.RopstenGenesisHash {
-		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
-	}
-	block, _, err = core.DefaultCalaverasGenesisBlock().ToBlock()
-	if err != nil {
-		t.Errorf("error: %w", err)
-	}
-	if block.Hash() != params.CalaverasGenesisHash {
 		t.Errorf("wrong ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
 	}
 
 	block, _, err = core.DefaultSokolGenesisBlock().ToBlock()
 	if err != nil {
-		t.Errorf("error: %w", err)
+		t.Errorf("error: %v", err)
 	}
 	if block.Root() != params.SokolGenesisStateRoot {
 		t.Errorf("wrong sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
 	}
 	if block.Hash() != params.SokolGenesisHash {
 		t.Errorf("wrong sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
+	}
+
+	block, _, err = core.DefaultFermionGenesisBlock().ToBlock()
+	if err != nil {
+		t.Errorf("error: %v", err)
+	}
+	if block.Root() != params.FermionGenesisStateRoot {
+		t.Errorf("wrong fermion genesis state root, got %v, want %v", block.Root(), params.FermionGenesisStateRoot)
+	}
+	if block.Hash() != params.FermionGenesisHash {
+		t.Errorf("wrong fermion genesis hash, got %v, want %v", block.Hash(), params.FermionGenesisHash)
 	}
 }
 

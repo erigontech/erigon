@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path"
+	"path/filepath"
 	"time"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -357,14 +357,14 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 		}
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
-		dir := path.Join(tmpDir, "erigon_stress_test")
+		dir := filepath.Join(tmpDir, "erigon_stress_test")
 		if err = os.MkdirAll(dir, 0770); err != nil {
 			panic(err)
 		}
 
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
-				file := path.Join(dir, "results_"+route+"_"+method+".csv")
+				file := filepath.Join(dir, "results_"+route+"_"+method+".csv")
 				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
 					panic(err)
@@ -374,7 +374,7 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
-				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
+				file := filepath.Join(dir, "vegeta_"+route+"_"+method+".txt")
 				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 				if err != nil {
 					panic(err)

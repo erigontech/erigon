@@ -265,7 +265,7 @@ func Asset(name string) ([]byte, error) {
 	if f, ok := _bindata[canonicalName]; ok {
 		a, err := f()
 		if err != nil {
-			return nil, fmt.Errorf("Asset %s can't read by error: %v", name, err)
+			return nil, fmt.Errorf("Asset %s can't read by error: %w", name, err)
 		}
 		return a.bytes, nil
 	}
@@ -303,7 +303,7 @@ func AssetInfo(name string) (os.FileInfo, error) {
 	if f, ok := _bindata[canonicalName]; ok {
 		a, err := f()
 		if err != nil {
-			return nil, fmt.Errorf("AssetInfo %s can't read by error: %v", name, err)
+			return nil, fmt.Errorf("AssetInfo %s can't read by error: %w", name, err)
 		}
 		return a.info, nil
 	}
@@ -317,7 +317,7 @@ func AssetDigest(name string) ([sha256.Size]byte, error) {
 	if f, ok := _bindata[canonicalName]; ok {
 		a, err := f()
 		if err != nil {
-			return [sha256.Size]byte{}, fmt.Errorf("AssetDigest %s can't read by error: %v", name, err)
+			return [sha256.Size]byte{}, fmt.Errorf("AssetDigest %s can't read by error: %w", name, err)
 		}
 		return a.digest, nil
 	}

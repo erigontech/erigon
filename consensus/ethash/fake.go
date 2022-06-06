@@ -55,21 +55,6 @@ func newFakeEth(mode Mode) Ethash {
 	}
 }
 
-func (f *FakeEthash) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) error {
-	fakeSeals := make([]bool, len(seals))
-	if err := f.Ethash.VerifyHeaders(chain, headers, fakeSeals); err != nil {
-		return err
-	}
-	for i, header := range headers {
-		if seals[i] {
-			if err := f.VerifySeal(chain, header); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func (f *FakeEthash) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
 	err := f.Ethash.VerifyHeader(chain, header, false)
 	if err != nil {
@@ -157,11 +142,6 @@ func NewFullFaker() *FullFakeEthash {
 
 // If we're running a full engine faking, accept any input as valid
 func (f *FullFakeEthash) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
-	return nil
-}
-
-// If we're running a full engine faking, accept any input as valid
-func (f *FullFakeEthash) VerifyHeaders(_ consensus.ChainHeaderReader, headers []*types.Header, _ []bool) error {
 	return nil
 }
 

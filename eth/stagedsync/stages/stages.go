@@ -23,13 +23,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-// SyncStage represents the stages of syncronisation in the SyncMode.StagedSync mode
+// SyncStage represents the stages of syncronisation in the Mode.StagedSync mode
 // It is used to persist the information about the stage state into the database.
 // It should not be empty and should be unique.
 type SyncStage string
 
 var (
 	Headers             SyncStage = "Headers"             // Headers are downloaded, their Proof-Of-Work validity and chaining is verified
+	CumulativeIndex     SyncStage = "CumulativeIndex"     // Calculate how much gas has been used up to each block.
 	BlockHashes         SyncStage = "BlockHashes"         // Headers Number are written, fills blockHash => number bucket
 	Bodies              SyncStage = "Bodies"              // Block bodies are downloaded, TxHash and UncleHash are getting verified
 	Senders             SyncStage = "Senders"             // "From" recovered from signatures, bodies re-written
@@ -42,16 +43,12 @@ var (
 	LogIndex            SyncStage = "LogIndex"            // Generating logs index (from receipts)
 	CallTraces          SyncStage = "CallTraces"          // Generating call traces index
 	TxLookup            SyncStage = "TxLookup"            // Generating transactions lookup index
-	TxPool              SyncStage = "TxPoolDB"            // Starts Backend
+	Issuance            SyncStage = "WatchTheBurn"        // Compute ether issuance for each block
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
-
-	CreateHeadersSnapshot SyncStage = "CreateHeadersSnapshot"
-	CreateBodiesSnapshot  SyncStage = "CreateBodiesSnapshot"
-	CreateStateSnapshot   SyncStage = "CreateStateSnapshot"
 )
 
 var AllStages = []SyncStage{
@@ -68,7 +65,6 @@ var AllStages = []SyncStage{
 	LogIndex,
 	CallTraces,
 	TxLookup,
-	TxPool,
 	Finish,
 }
 

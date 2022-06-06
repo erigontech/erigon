@@ -18,3 +18,7 @@ const (
 func NewTEVMInterpreter(evm *EVM, cfg Config) *TEVMInterpreter {
 	return &TEVMInterpreter{NewEVMInterpreter(evm, cfg)}
 }
+
+func NewTEVMInterpreterByVM(vm *VM) *TEVMInterpreter {
+	return &TEVMInterpreter{NewEVMInterpreterByVM(vm)}
+}

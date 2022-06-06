@@ -5,7 +5,5 @@
 **/*.dSYM
 
 build
-tests/testdata
-tests/.git
+tests
 cmd/prometheus
-

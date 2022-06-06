@@ -4,20 +4,21 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"runtime"
-	"sort"
 	"time"
 
-	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-
-	"github.com/ledgerwatch/erigon/common"
+	commonold "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/etl"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -25,17 +26,20 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
 
-var stageExecutionGauge = metrics2.GetOrCreateCounter("stage_execution")
-
 const (
-	logInterval = 30 * time.Second
+	logInterval    = 20 * time.Second
+	lruDefaultSize = 1_000_000 // 56 MB
 )
 
 type HasChangeSetWriter interface {
@@ -55,6 +59,7 @@ type ExecuteBlockCfg struct {
 	tmpdir        string
 	stateStream   bool
 	accumulator   *shards.Accumulator
+	blockReader   services.FullBlockReader
 }
 
 func StageExecuteBlocksCfg(
@@ -68,6 +73,7 @@ func StageExecuteBlocksCfg(
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	tmpdir string,
+	blockReader services.FullBlockReader,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            kv,
@@ -80,16 +86,8 @@ func StageExecuteBlocksCfg(
 		tmpdir:        tmpdir,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
+		blockReader:   blockReader,
 	}
-}
-
-func readBlock(blockNum uint64, tx kv.Tx) (*types.Block, error) {
-	blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	b, _, err := rawdb.ReadBlockWithSenders(tx, blockHash, blockNum)
-	return b, err
 }
 
 func executeBlock(
@@ -101,19 +99,33 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	checkTEVM func(contractHash common.Hash) (bool, error),
+	contractHasTEVM func(contractHash commonold.Hash) (bool, error),
 	initialCycle bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter := newStateReaderWriter(batch, tx, blockNum, block.Hash(), writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, cfg.stateStream)
+	if err != nil {
+		return err
+	}
 
 	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	getHeader := func(hash commonold.Hash, number uint64) *types.Header {
+		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
+		return h
+	}
 
-	callTracer := NewCallTracer(checkTEVM)
+	callTracer := calltracer.NewCallTracer(contractHasTEVM)
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
-	receipts, err := core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx}, checkTEVM)
+
+	var receipts types.Receipts
+	var stateSyncReceipt *types.ReceiptForStorage
+	_, isPoSa := cfg.engine.(consensus.PoSA)
+	if isPoSa {
+		receipts, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+	} else {
+		receipts, stateSyncReceipt, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHeader, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, contractHasTEVM)
+	}
 	if err != nil {
 		return err
 	}
@@ -122,6 +134,13 @@ func executeBlock(
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
+
+		if stateSyncReceipt != nil {
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
+				return err
+			}
+		}
+
 	}
 
 	if cfg.changeSetHook != nil {
@@ -129,72 +148,21 @@ func executeBlock(
 			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
 		}
 	}
-
 	if writeCallTraces {
-		callTracer.tos[block.Coinbase()] = false
-		for _, uncle := range block.Uncles() {
-			callTracer.tos[uncle.Coinbase] = false
-		}
-		list := make(common.Addresses, len(callTracer.froms)+len(callTracer.tos))
-		i := 0
-		for addr := range callTracer.froms {
-			copy(list[i][:], addr[:])
-			i++
-		}
-		for addr := range callTracer.tos {
-			copy(list[i][:], addr[:])
-			i++
-		}
-		sort.Sort(list)
-		// List may contain duplicates
-		var blockNumEnc [8]byte
-		binary.BigEndian.PutUint64(blockNumEnc[:], blockNum)
-		var prev common.Address
-		var created bool
-		for j, addr := range list {
-			if j > 0 && prev == addr {
-				continue
-			}
-			var v [common.AddressLength + 1]byte
-			copy(v[:], addr[:])
-			if _, ok := callTracer.froms[addr]; ok {
-				v[common.AddressLength] |= 1
-			}
-			if _, ok := callTracer.tos[addr]; ok {
-				v[common.AddressLength] |= 2
-			}
-			// TEVM marking still untranslated contracts
-			if vmConfig.EnableTEMV {
-				if created = callTracer.tos[addr]; created {
-					v[common.AddressLength] |= 4
-				}
-			}
-			if j == 0 {
-				if err = tx.Append(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-					return err
-				}
-			} else {
-				if err = tx.AppendDup(kv.CallTraceSet, blockNumEnc[:], v[:]); err != nil {
-					return err
-				}
-			}
-			copy(prev[:], addr[:])
-		}
+		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
-
 	return nil
 }
 
 func newStateReaderWriter(
 	batch ethdb.Database,
 	tx kv.RwTx,
-	blockNum uint64,
-	blockHash common.Hash,
+	block *types.Block,
 	writeChangesets bool,
 	accumulator *shards.Accumulator,
 	initialCycle bool,
 	stateStream bool,
-) (state.StateReader, state.WriterWithChangeSets) {
+) (state.StateReader, state.WriterWithChangeSets, error) {
 
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
@@ -202,17 +170,21 @@ func newStateReaderWriter(
 	stateReader = state.NewPlainStateReader(batch)
 
 	if !initialCycle && stateStream {
-		accumulator.StartChange(blockNum, blockHash, false)
+		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
+		if err != nil {
+			return nil, nil, err
+		}
+		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, false)
 	} else {
 		accumulator = nil
 	}
 	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, tx, blockNum).SetAccumulator(accumulator)
+		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
 	} else {
 		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
 	}
 
-	return stateReader, stateWriter
+	return stateReader, stateWriter, nil
 }
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
@@ -239,7 +211,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
-		to = min(prevStageProgress, toBlock)
+		to = cmp.Min(prevStageProgress, toBlock)
 	}
 	if to <= s.BlockNumber {
 		return nil
@@ -248,27 +220,53 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	var batch ethdb.DbWithPendingMutations
-	batch = olddb.NewBatch(tx, quit)
-	defer batch.Rollback()
+	startTime := time.Now()
 
+	whitelistedTables := []string{kv.Code, kv.ContractCode}
+	var batch ethdb.DbWithPendingMutations
+	// Contract code is unlikely to change too much, so let's keep it cached
+	contractCodeCache, err := lru.New(lruDefaultSize)
+	if err != nil {
+		return err
+	}
+	// state is stored through ethdb batches
+	batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
+
+	defer batch.Rollback()
+	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 	stageProgress := s.BlockNumber
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
-	var gas uint64
+	var gas uint64             // used for logs
+	var currentStateGas uint64 // used for batch commits of state
+	// Transform batch_size limit into Ggas
+	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 2
 
+	startGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, s.BlockNumber)
+	if err != nil {
+		return err
+	}
+
+	totalGasUsed, err := rawdb.ReadCumulativeGasUsed(tx, to)
+	if err != nil {
+		return err
+	}
 	var stoppedErr error
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		var err error
-		var block *types.Block
-		if block, err = readBlock(blockNum, tx); err != nil {
+
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		block, _, err := cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+		if err != nil {
 			return err
 		}
 		if block == nil {
@@ -278,25 +276,26 @@ Loop:
 
 		lastLogTx += uint64(block.Transactions().Len())
 
-		var checkTEVMCode func(contractHash common.Hash) (bool, error)
+		var contractHasTEVM func(contractHash commonold.Hash) (bool, error)
 
 		if cfg.vmConfig.EnableTEMV {
-			checkTEVMCode = ethdb.GetCheckTEVM(tx)
+			contractHasTEVM = ethdb.GetHasTEVM(tx)
 		}
 
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, checkTEVMCode, initialCycle); err != nil {
-			log.Error(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "error", err)
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, contractHasTEVM, initialCycle); err != nil {
+			log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
 		stageProgress = blockNum
 
-		updateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if updateProgress {
+		if currentStateGas >= gasState {
+			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			currentStateGas = 0
 			if err = batch.Commit(); err != nil {
 				return err
 			}
@@ -314,20 +313,31 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewBatch(tx, quit)
+			batch = olddb.NewHashBatch(tx, quit, cfg.tmpdir, whitelistedTables, contractCodeCache)
 			// TODO: This creates stacked up deferrals
 			defer batch.Rollback()
 		}
 
 		gas = gas + block.GasUsed()
-
+		currentStateGas = currentStateGas + block.GasUsed()
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, batch)
+			cumulativeGas, err := rawdb.ReadCumulativeGasUsed(tx, blockNum)
+			if err != nil {
+				return err
+			}
+			totalGasTmp := new(big.Int).Set(totalGasUsed)
+			elapsed := time.Since(startTime)
+			estimateRatio := float64(cumulativeGas.Sub(cumulativeGas, startGasUsed).Uint64()) / float64(totalGasTmp.Sub(totalGasTmp, startGasUsed).Uint64())
+			var estimatedTime commonold.PrettyDuration
+			if estimateRatio != 0 {
+				estimatedTime = commonold.PrettyDuration((elapsed.Seconds() / estimateRatio) * float64(time.Second))
+			}
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), estimatedTime, batch)
 			gas = 0
 			tx.CollectMetrics()
-			stageExecutionGauge.Set(blockNum)
+			syncMetrics[stages.Execution].Set(blockNum)
 		}
 	}
 
@@ -348,53 +358,29 @@ Loop:
 	return stoppedErr
 }
 
-func pruneChangeSets(tx kv.RwTx, logPrefix string, table string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursorDupSort(table)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return fmt.Errorf("failed to move %s cleanup cursor: %w", table, err)
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", table, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-		}
-	}
-	return nil
-}
-
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, estimatedTime commonold.PrettyDuration, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
 	speedTx := float64(currentTx-prevTx) / (float64(interval) / float64(time.Second))
 	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
+
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	common.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
-		"blk/s", speed,
-		"tx/s", speedTx,
-		"Mgas/s", speedMgas,
+		"blk/s", fmt.Sprintf("%.1f", speed),
+		"tx/s", fmt.Sprintf("%.1f", speedTx),
+		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
+		"gasState", fmt.Sprintf("%.2f", gasState),
+	}
+	if estimatedTime > 0 {
+		logpairs = append(logpairs, "estimated duration", estimatedTime)
 	}
 	if batch != nil {
-		logpairs = append(logpairs, "batch", common.StorageSize(batch.BatchSize()))
+		logpairs = append(logpairs, "batch", common.ByteCount(uint64(batch.BatchSize())))
 	}
-	logpairs = append(logpairs, "alloc", common.StorageSize(m.Alloc), "sys", common.StorageSize(m.Sys))
+	logpairs = append(logpairs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	log.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime
@@ -434,25 +420,31 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan struct{}, cfg ExecuteBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
 	stateBucket := kv.PlainState
-	storageKeyLength := common.AddressLength + common.IncarnationLength + common.HashLength
+	storageKeyLength := length.Addr + length.Incarnation + length.Hash
 
 	var accumulator *shards.Accumulator
 	if !initialCycle && cfg.stateStream {
+		accumulator = cfg.accumulator
+
 		hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 		if err != nil {
 			return fmt.Errorf("read canonical hash of unwind point: %w", err)
 		}
-		accumulator.StartChange(u.UnwindPoint, hash, true /* unwind */)
+		txs, err := rawdb.RawTransactionsRange(tx, u.UnwindPoint, s.BlockNumber)
+		if err != nil {
+			return err
+		}
+		accumulator.StartChange(u.UnwindPoint, hash, txs, true)
 	}
 
-	changes := etl.NewCollector(cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
-	defer changes.Close(logPrefix)
+	changes := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	defer changes.Close()
 	errRewind := changeset.RewindData(tx, s.BlockNumber, u.UnwindPoint, changes, quit)
 	if errRewind != nil {
 		return fmt.Errorf("getting rewind data: %w", errRewind)
 	}
 
-	if err := changes.Load(logPrefix, tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := changes.Load(tx, stateBucket, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		if len(k) == 20 {
 			if len(v) > 0 {
 				var acc accounts.Account
@@ -462,7 +454,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 
 				// Fetch the code hash
 				recoverCodeHashPlain(&acc, tx, k)
-				var address common.Address
+				var address commonold.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
@@ -483,14 +475,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 				newV := make([]byte, acc.EncodingLengthForStorage())
 				acc.EncodeForStorage(newV)
 				if accumulator != nil {
-					accumulator.ChangeAccount(address, newV)
+					accumulator.ChangeAccount(address, acc.Incarnation, newV)
 				}
 				if err := next(k, k, newV); err != nil {
 					return err
 				}
 			} else {
 				if accumulator != nil {
-					var address common.Address
+					var address commonold.Address
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
@@ -501,13 +493,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 			return nil
 		}
 		if accumulator != nil {
-			var address common.Address
+			var address commonold.Address
 			var incarnation uint64
-			var location common.Hash
-			copy(address[:], k[:common.AddressLength])
-			incarnation = binary.BigEndian.Uint64(k[common.AddressLength:])
-			copy(location[:], k[common.AddressLength+common.IncarnationLength:])
-			accumulator.ChangeStorage(address, incarnation, location, common.CopyBytes(v))
+			var location commonold.Hash
+			copy(address[:], k[:length.Addr])
+			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
+			copy(location[:], k[length.Addr+length.Incarnation:])
+			accumulator.ChangeStorage(address, incarnation, location, common.Copy(v))
 		}
 		if len(v) > 0 {
 			if err := next(k, k[:storageKeyLength], v); err != nil {
@@ -528,11 +520,14 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 		return err
 	}
 
-	if err := rawdb.DeleteNewerReceipts(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking receipts: %w", err)
+	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate receipts: %w", err)
+	}
+	if err := rawdb.TruncateBorReceipts(tx, u.UnwindPoint+1); err != nil {
+		return fmt.Errorf("truncate bor receipts: %w", err)
 	}
 	if err := rawdb.DeleteNewerEpochs(tx, u.UnwindPoint+1); err != nil {
-		return fmt.Errorf("walking epoch: %w", err)
+		return fmt.Errorf("delete newer epochs: %w", err)
 	}
 
 	// Truncate CallTraceSet
@@ -556,20 +551,13 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, quit <-chan
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address common.Address
+	var address commonold.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
 			copy(acc.CodeHash[:], codeHash)
 		}
 	}
-}
-
-func min(a, b uint64) uint64 {
-	if a <= b {
-		return a
-	}
-	return b
 }
 
 func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
@@ -587,21 +575,25 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.prune.History.Enabled() {
-		if err = pruneChangeSets(tx, logPrefix, kv.AccountChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableDupSort(tx, kv.AccountChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
-		if err = pruneChangeSets(tx, logPrefix, kv.StorageChangeSet, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableDupSort(tx, kv.StorageChangeSet, logPrefix, cfg.prune.History.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
 
 	if cfg.prune.Receipts.Enabled() {
-		if err = pruneReceipts(tx, logPrefix, cfg.prune.Receipts.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTable(tx, kv.Receipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
+			return err
+		}
+		// LogIndex.Prune will read everything what not pruned here
+		if err = PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
 			return err
 		}
 	}
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTracesSet(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
+		if err = PruneTableDupSort(tx, kv.CallTraceSet, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
 			return err
 		}
 	}
@@ -612,91 +604,6 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func pruneReceipts(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursor(kv.Receipts)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-		if err != nil {
-			return err
-		}
-
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Receipts, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-		}
-	}
-
-	c, err = tx.RwCursor(kv.Log)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.Log, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrent(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
-		}
-	}
-	return nil
-}
-
-func pruneCallTracesSet(tx kv.RwTx, logPrefix string, pruneTo uint64, logEvery *time.Ticker, ctx context.Context) error {
-	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor for pruning %w", err)
-	}
-	defer c.Close()
-
-	for k, _, err := c.First(); k != nil; k, _, err = c.NextNoDup() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum >= pruneTo {
-			break
-		}
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Mode", logPrefix), "table", kv.CallTraceSet, "block", blockNum)
-		case <-ctx.Done():
-			return common.ErrStopped
-		default:
-		}
-		if err = c.DeleteCurrentDuplicates(); err != nil {
-			return fmt.Errorf("failed to remove for block %d: %w", blockNum, err)
 		}
 	}
 	return nil

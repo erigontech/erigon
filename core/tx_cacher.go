@@ -19,7 +19,7 @@ package core
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -70,7 +70,7 @@ func NewTxSenderCacher(threads int) *TxSenderCacher {
 // data structures.
 func (cacher *TxSenderCacher) cache() {
 	for task := range cacher.tasks {
-		if err := common.Stopped(cacher.exitCh); err != nil {
+		if err := libcommon.Stopped(cacher.exitCh); err != nil {
 			return
 		}
 
@@ -81,7 +81,7 @@ func (cacher *TxSenderCacher) cache() {
 }
 
 func (cacher *TxSenderCacher) Close() {
-	common.SafeClose(cacher.exitCh)
+	libcommon.SafeClose(cacher.exitCh)
 	close(cacher.tasks)
 	cacher.wg.Wait()
 }

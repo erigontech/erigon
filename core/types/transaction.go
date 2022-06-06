@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -44,6 +45,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
+	StarknetType
 )
 
 // Transaction is an Ethereum transaction.
@@ -60,7 +62,7 @@ type Transaction interface {
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *common.Address
-	AsMessage(s Signer, baseFee *big.Int) (Message, error)
+	AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	FakeSign(address common.Address) (Transaction, error)
 	Hash() common.Hash
@@ -81,6 +83,8 @@ type Transaction interface {
 	Sender(Signer) (common.Address, error)
 	GetSender() (common.Address, bool)
 	SetSender(common.Address)
+	IsContractDeploy() bool
+	IsStarkNet() bool
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -92,6 +96,16 @@ type TransactionMisc struct {
 	hash atomic.Value //nolint:structcheck
 	size atomic.Value //nolint:structcheck
 	from atomic.Value
+}
+
+type RawTransactions [][]byte
+
+func (t RawTransactions) Len() int {
+	return len(t)
+}
+
+func (t RawTransactions) EncodeIndex(i int, w *bytes.Buffer) {
+	w.Write(t[i])
 }
 
 func (tm TransactionMisc) Time() time.Time {
@@ -107,90 +121,57 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch kind {
-	case rlp.List:
+	if rlp.List == kind {
 		tx := &LegacyTx{}
 		if err = tx.DecodeRLP(s, size); err != nil {
 			return nil, err
 		}
 		return tx, nil
-	case rlp.String:
+	}
+	if rlp.String == kind {
 		s.NewList(size) // Hack - convert String (envelope) into List
-		var b []byte
-		if b, err = s.Bytes(); err != nil {
+	}
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return nil, err
+	}
+	if len(b) != 1 {
+		return nil, fmt.Errorf("%w, got %d bytes", rlp.ErrWrongTxTypePrefix, len(b))
+	}
+	var tx Transaction
+	switch b[0] {
+	case AccessListTxType:
+		t := &AccessListTx{}
+		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		if len(b) != 1 {
-			return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
+		tx = t
+	case DynamicFeeTxType:
+		t := &DynamicFeeTransaction{}
+		if err = t.DecodeRLP(s); err != nil {
+			return nil, err
 		}
-		var tx Transaction
-		switch b[0] {
-		case AccessListTxType:
-			t := &AccessListTx{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		case DynamicFeeTxType:
-			t := &DynamicFeeTransaction{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		default:
-			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
+		tx = t
+	case StarknetType:
+		t := &StarknetTransaction{}
+		if err = t.DecodeRLP(s); err != nil {
+			return nil, err
 		}
+		tx = t
+	default:
+		return nil, fmt.Errorf("%w, got: %d", rlp.ErrUnknownTxTypePrefix, b[0])
+	}
+	if kind == rlp.String {
 		if err = s.ListEnd(); err != nil {
 			return nil, err
 		}
-		return tx, nil
-	default:
-		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
 	}
+	return tx, nil
 }
 
 func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	kind, size, err := s.Kind()
-	if err != nil {
-		return nil, err
-	}
-	switch kind {
-	case rlp.List:
-		tx := &LegacyTx{}
-		if err = tx.DecodeRLP(s, size); err != nil {
-			return nil, err
-		}
-		return tx, nil
-	case rlp.Byte, rlp.String:
-		var b []byte
-		if b, err = s.Bytes(); err != nil {
-			return nil, err
-		}
-		if len(b) != 1 {
-			return nil, fmt.Errorf("only 1-byte tx type prefix is supported, got %d bytes", len(b))
-		}
-		var tx Transaction
-		switch b[0] {
-		case AccessListTxType:
-			t := &AccessListTx{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		case DynamicFeeTxType:
-			t := &DynamicFeeTransaction{}
-			if err = t.DecodeRLP(s); err != nil {
-				return nil, err
-			}
-			tx = t
-		default:
-			return nil, fmt.Errorf("unknown tx type prefix: %d", b[0])
-		}
-		return tx, nil
-	default:
-		return nil, fmt.Errorf("unexpected RLP kind: %v", kind)
-	}
+	return DecodeTransaction(s)
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
@@ -212,16 +193,22 @@ func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 	return result, nil
 }
 
-func UnmarshalTransactionsFromBinary(txs [][]byte) ([]Transaction, error) {
+func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 	result := make([]Transaction, len(txs))
 	var err error
 	for i := range txs {
-		result[i], err = UnmarshalTransactionFromBinary(txs[i])
+		s := rlp.NewStream(bytes.NewReader(txs[i]), uint64(len(txs[i])))
+		result[i], err = DecodeTransaction(s)
 		if err != nil {
 			return nil, err
 		}
 	}
 	return result, nil
+}
+
+func TypedTransactionMarshalledAsRlpString(data []byte) bool {
+	// Unless it's a single byte, serialized RLP strings have their first byte in the [0x80, 0xc0) range
+	return len(data) > 0 && 0x80 <= data[0] && data[0] < 0xc0
 }
 
 func sanityCheckSignature(v *uint256.Int, r *uint256.Int, s *uint256.Int, maybeProtected bool) error {

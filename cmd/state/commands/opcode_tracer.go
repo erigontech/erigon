@@ -15,19 +15,22 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -38,7 +41,7 @@ var (
 
 func init() {
 	withBlock(opcodeTracerCmd)
-	withDatadir(opcodeTracerCmd)
+	withDataDir(opcodeTracerCmd)
 	opcodeTracerCmd.Flags().Uint64Var(&numBlocks, "numBlocks", 1, "number of blocks to run the operation on")
 	opcodeTracerCmd.Flags().BoolVar(&saveOpcodes, "saveOpcodes", false, "set to save the opcodes")
 	opcodeTracerCmd.Flags().BoolVar(&saveBBlocks, "saveBBlocks", false, "set to save the basic blocks")
@@ -154,7 +157,7 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, codeHash common.Hash) error {
+func (ot *opcodeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
@@ -180,11 +183,9 @@ func (ot *opcodeTracer) CaptureStart(depth int, from common.Address, to common.A
 
 	// take note in our own stack that the tx stack has grown
 	ot.stack = append(ot.stack, &newTx)
-
-	return nil
 }
 
-func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
@@ -215,11 +216,11 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t t
 		currentEntry.Fault = errstr
 	}
 
-	return nil
 }
 
-func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, st *stack.Stack, rData []byte, contract *vm.Contract, opDepth int, err error) error {
+func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	//CaptureState sees the system as it is before the opcode is run. It seems to never get an error.
+	contract := scope.Contract
 
 	//sanity check
 	if pc > uint64(MaxUint16) {
@@ -227,7 +228,7 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	}
 
 	pc16 := uint16(pc)
-	currentTxHash := env.TxHash
+	currentTxHash := env.TxContext().TxHash
 	currentTxDepth := opDepth - 1
 
 	ls := len(ot.stack)
@@ -349,16 +350,14 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 
 	currentEntry.lastPc16 = pc16
 	currentEntry.lastOp = op
-	return nil
 }
 
-func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *stack.Stack, contract *vm.Contract, opDepth int, err error) error {
+func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 	// CaptureFault sees the system as it is after the fault happens
 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	e := ot.CaptureState(env, pc, op, gas, cost, memory, stack, nil, contract, opDepth, err)
+	ot.CaptureState(env, pc, op, gas, cost, scope, nil, opDepth, err)
 
-	return e
 }
 
 func (ot *opcodeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
@@ -433,14 +432,16 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				}
 
 				if fops == nil {
-					fops, e = os.Create("./opcodes-" + bnStr)
-					check(e)
+					if fops, e = os.Create("./opcodes-" + bnStr); e != nil {
+						panic(e)
+					}
 					fopsWriter = bufio.NewWriter(fops)
 					fopsEnc = gob.NewEncoder(fopsWriter)
 				}
 
-				e = fopsEnc.Encode(blockTxs)
-				check(e)
+				if e = fopsEnc.Encode(blockTxs); e != nil {
+					panic(e)
+				}
 
 			}
 
@@ -477,38 +478,45 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 				bnStr := strconv.Itoa(int(bn))
 
 				if f != nil && bn%1000 == 0 {
-					_, e = fWriter.WriteString("\n}")
-					check(e)
+					if _, e = fWriter.WriteString("\n}"); e != nil {
+						panic(e)
+					}
 					fWriter.Flush()
 					f.Close()
 					f = nil
 				}
 
 				if f == nil {
-					f, e = os.Create("./bblocks-" + bnStr + ".json")
-					check(e)
+					if f, e = os.Create("./bblocks-" + bnStr + ".json"); e != nil {
+						panic(e)
+					}
 					fWriter = bufio.NewWriter(f)
 					fwEnc = json.NewEncoder(fWriter)
 				}
 
-				_, e = fWriter.WriteString(",\n\"" + bnStr + "\":[\n")
-				check(e)
+				if _, e = fWriter.WriteString(",\n\"" + bnStr + "\":[\n"); e != nil {
+					panic(e)
+				}
 				for i := uint(0); i < sp.NumTxs; i++ {
 					if i != 0 {
-						_, e = fWriter.WriteString(",")
-						check(e)
+						if _, e = fWriter.WriteString(","); e != nil {
+							panic(e)
+						}
 					}
 					sd := <-chanSegDump
-					e = fwEnc.Encode(sd)
-					check(e)
+					if e = fwEnc.Encode(sd); e != nil {
+						panic(e)
+					}
 				}
-				_, e = fWriter.WriteString("]")
-				check(e)
+				if _, e = fWriter.WriteString("]"); e != nil {
+					panic(e)
+				}
 			}
 
 			if fWriter != nil {
-				_, e = fWriter.WriteString("\n}")
-				check(e)
+				if _, e = fWriter.WriteString("\n}"); e != nil {
+					panic(e)
+				}
 				fWriter.Flush()
 				f.Close()
 				f = nil
@@ -539,23 +547,26 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 		if fsum == nil {
 			var err error
-			fsum, err = os.Create("./summary-" + bnStr)
-			check(err)
+			if fsum, err = os.Create("./summary-" + bnStr); err != nil {
+				return err
+			}
+
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate := state.NewPlainState(historyTx, block.NumberU64()-1)
+		dbstate := state.NewPlainState(historyTx, block.NumberU64())
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
-		receipts, err1 := runBlock(intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, nil /* checkTEVM */, block, vmConfig)
+		contractHasTEVM := ethdb.GetHasTEVM(historyTx)
+		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, contractHasTEVM, block, vmConfig)
 		if err1 != nil {
 			return err1
 		}
-		if chainConfig.IsByzantium(block.Number().Uint64()) {
+		if chainConfig.IsByzantium(block.NumberU64()) {
 			receiptSha := types.DeriveSha(receipts)
-			if receiptSha != block.Header().ReceiptHash {
+			if receiptSha != block.ReceiptHash() {
 				return fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 			}
 		}
@@ -640,7 +651,9 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 			ot.fsumWriter.Flush()
 			fi, err := fsum.Stat()
-			check(err)
+			if err != nil {
+				return err
+			}
 			// if the summary file for the just-finished range of blocks is empty, delete it
 			if fi.Size() == 0 {
 				os.Remove(fi.Name())
@@ -657,41 +670,36 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 	return nil
 }
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
-func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, checkTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
+func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
+	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, contractHasTEVM func(common.Hash) (bool, error), block *types.Block, vmConfig vm.Config) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
-	engine := ethash.NewFullFaker()
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
 	rules := chainConfig.Rules(block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, checkTEVM)
+		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig, contractHasTEVM)
 		if err != nil {
-			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %v", i, tx.Hash(), err)
+			return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
 
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
-			return nil, fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
+		tx := block.Transactions()
+		if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
+			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
 		if err := ibs.CommitBlock(rules, blockWriter); err != nil {
-			return nil, fmt.Errorf("committing block %d failed: %v", block.NumberU64(), err)
+			return nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -37,7 +38,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	ctx, _ := utils.RootContext()
+	ctx, _ := common.RootContext()
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -50,7 +51,7 @@ func must(err error) {
 	}
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
 }

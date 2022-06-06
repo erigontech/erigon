@@ -188,7 +188,7 @@ func (c *Codec) Encode(id enode.ID, addr string, packet Packet, challenge *Whoar
 
 	// Generate masking IV.
 	if err = c.sc.maskingIVGen(head.IV[:]); err != nil {
-		return nil, Nonce{}, fmt.Errorf("can't generate masking IV: %v", err)
+		return nil, Nonce{}, fmt.Errorf("can't generate masking IV: %w", err)
 	}
 
 	// Encode header data.
@@ -266,7 +266,7 @@ func (c *Codec) encodeRandom(toID enode.ID) (Header, []byte, error) {
 	// Encode auth data.
 	auth := messageAuthData{SrcID: c.localnode.ID()}
 	if _, err := crand.Read(head.Nonce[:]); err != nil {
-		return head, nil, fmt.Errorf("can't get random data: %v", err)
+		return head, nil, fmt.Errorf("can't get random data: %w", err)
 	}
 	c.headbuf.Reset()
 	binary.Write(&c.headbuf, binary.BigEndian, auth) //nolint:errcheck
@@ -318,7 +318,7 @@ func (c *Codec) encodeHandshakeHeader(toID enode.ID, addr string, challenge *Who
 	// Generate nonce for message.
 	nonce, err := c.sc.nextNonce(session)
 	if err != nil {
-		return Header{}, nil, fmt.Errorf("can't generate nonce: %v", err)
+		return Header{}, nil, fmt.Errorf("can't generate nonce: %w", err)
 	}
 
 	// TODO: this should happen when the first authenticated message is received
@@ -363,7 +363,7 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr string, challenge *Whoarey
 	cdata := challenge.ChallengeData
 	idsig, err := makeIDSignature(c.sha256, c.privkey, cdata, ephpubkey, toID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("can't sign: %v", err)
+		return nil, nil, fmt.Errorf("can't sign: %w", err)
 	}
 	auth.signature = idsig
 	auth.h.SigSize = byte(len(auth.signature))
@@ -389,7 +389,7 @@ func (c *Codec) encodeMessageHeader(toID enode.ID, s *session) (Header, error) {
 	// Create the header.
 	nonce, err := c.sc.nextNonce(s)
 	if err != nil {
-		return Header{}, fmt.Errorf("can't generate nonce: %v", err)
+		return Header{}, fmt.Errorf("can't generate nonce: %w", err)
 	}
 	auth := messageAuthData{SrcID: c.localnode.ID()}
 	c.buf.Reset()
@@ -572,7 +572,7 @@ func (c *Codec) decodeHandshakeRecord(local *enode.Node, wantID enode.ID, remote
 		if local == nil || local.Seq() < record.Seq() {
 			n, err := enode.New(enode.ValidSchemes, &record)
 			if err != nil {
-				return nil, fmt.Errorf("invalid node record: %v", err)
+				return nil, fmt.Errorf("invalid node record: %w", err)
 			}
 			if n.ID() != wantID {
 				return nil, fmt.Errorf("record in handshake has wrong ID: %v", n.ID())

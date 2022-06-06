@@ -5,15 +5,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/emicklei/dot"
-	"github.com/holiman/uint256"
-	"github.com/logrusorgru/aurora"
-	"log"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/emicklei/dot"
+	"github.com/holiman/uint256"
 )
 
 //////////////////////////////////////////////////
@@ -527,13 +526,13 @@ func (cfg *Cfg) PrintAnlyState() {
 		}
 
 		if cfg.BadJumps[pc] {
-			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(cfg.D[pc].anlyCounter), aurora.Cyan(cfg.D[pc].worklistLen), aurora.Yellow(pc), aurora.Red(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), cfg.D[pc].String(false))
+			out := fmt.Sprintf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", cfg.D[pc].anlyCounter, cfg.D[pc].worklistLen, pc, valueStr, strings.Join(pc0s, ","), cfg.D[pc].String(false))
 			fmt.Print(out)
 			badJumpList = append(badJumpList, out)
 		} else if cfg.PrevEdgeMap[pc] != nil {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", aurora.Blue(cfg.D[pc].anlyCounter), aurora.Cyan(cfg.D[pc].worklistLen), aurora.Yellow(pc), aurora.Green(valueStr), aurora.Magenta(strings.Join(pc0s, ",")), cfg.D[pc].String(true))
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v %-10v %v\n", cfg.D[pc].anlyCounter, cfg.D[pc].worklistLen, pc, valueStr, strings.Join(pc0s, ","), cfg.D[pc].String(true))
 		} else {
-			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", aurora.Blue(cfg.D[pc].anlyCounter), aurora.Cyan(cfg.D[pc].worklistLen), aurora.Yellow(pc), valueStr)
+			fmt.Printf("[%5v] (w:%2v) %3v\t %-25v\n", cfg.D[pc].anlyCounter, cfg.D[pc].worklistLen, pc, valueStr)
 		}
 	}
 
@@ -785,7 +784,7 @@ func (cfg *Cfg) GenerateProof() *CfgProof {
 		pc1 := pc0
 		for !exits[pc1] {
 			if len(succEdgeMap[pc1]) != 1 {
-				log.Fatal("Inconsistent successors")
+				panic("Inconsistent successors")
 			}
 			pc1 = succEdgeMap[pc1][0]
 		}

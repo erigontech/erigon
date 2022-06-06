@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -184,24 +185,73 @@ func compareResults(trace, traceg *fastjson.Value) error {
 	return compareJsonValues("result", r, rg)
 }
 
-func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer) error {
+func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName string, errCtx string, errs *bufio.Writer) error {
+	if errVal != nil && errValg == nil {
+		if errs != nil {
+			fmt.Printf("different results for method %s, errCtx: %s\n", methodName, errCtx)
+			fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
+			fmt.Fprintf(errs, "Result (Erigon) returns error code=%d message=%s, while G/OE returns OK\n", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+			errs.Flush() // nolint:errcheck
+		} else {
+			return fmt.Errorf("different result (Erigon) returns error code=%d message=%s, while G/OE returns OK", errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+	} else if errVal == nil && errValg != nil {
+		if errs != nil {
+			fmt.Printf("different results for method %s, errCtx: %s\n", methodName, errCtx)
+			fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
+			fmt.Fprintf(errs, "Result (Erigon) returns OK, while G/OE returns error code=%d message=%s\n", errValg.GetInt("code"), errValg.GetStringBytes("message"))
+			errs.Flush() // nolint:errcheck
+		} else {
+			return fmt.Errorf("different result (Erigon) returns OK, while G/OE returns error code=%d message=%s", errValg.GetInt("code"), errValg.GetStringBytes("message"))
+		}
+	} else {
+		s1 := strings.ToUpper(string((errVal.GetStringBytes("message"))))
+		s2 := strings.ToUpper(string((errValg.GetStringBytes("message"))))
+		if strings.Compare(s1, s2) != 0 {
+			if errs != nil {
+				fmt.Printf("different error-message for method %s, errCtx: %s\n", methodName, errCtx)
+				fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
+				fmt.Fprintf(errs, "error-message (Erigon) returns message=%s, while G/OE returns message=%s\n", errVal.GetStringBytes("message"), errValg.GetStringBytes("message"))
+				errs.Flush() // nolint:errcheck
+			} else {
+				return fmt.Errorf("different error-message (Erigon) returns message=%s, while G/OE returns message=%s", errVal.GetStringBytes("message"), errValg.GetStringBytes("message"))
+			}
+		} else if errVal.GetInt("code") != errValg.GetInt("code") {
+			if errs != nil {
+				fmt.Printf("Different error-code for method %s, errCtx: %s\n", methodName, errCtx)
+				fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
+				fmt.Fprintf(errs, "error-code (Erigon) returns code=%d, while G/OE returns code=%d\n", errVal.GetInt("code"), errValg.GetInt("code"))
+				errs.Flush() // nolint:errcheck
+			} else {
+				return fmt.Errorf("different error-code (Erigon) returns code=%d, while G/OE returns code=%d", errVal.GetInt("code"), errValg.GetInt("code"))
+			}
+		}
+	}
+	return nil
+}
+
+func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult) error {
 	recording := rec != nil
 	res := reqGen.Erigon2(methodName, request)
 	if res.Err != nil {
-		return fmt.Errorf("could not invoke %s (Erigon): %w\n", methodName, res.Err)
+		return fmt.Errorf("could not invoke %s (Erigon): %w", methodName, res.Err)
 	}
-	if errVal := res.Result.Get("error"); errVal != nil {
-		return fmt.Errorf("error invoking %s (Erigon): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+	errVal := res.Result.Get("error")
+	if errVal != nil {
+		if !needCompare && channel == nil {
+			return fmt.Errorf("error invoking %s (Erigon): %d %s", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
+		}
+	}
+	if channel != nil {
+		channel <- res
 	}
 	if needCompare {
 		resg := reqGen.Geth2(methodName, request)
 		if resg.Err != nil {
-			return fmt.Errorf("could not invoke %s (Geth/OE): %w\n", methodName, res.Err)
+			return fmt.Errorf("could not invoke %s (Geth/OE): %w", methodName, res.Err)
 		}
-		if errVal := resg.Result.Get("error"); errVal != nil {
-			return fmt.Errorf("error invoking %s (Geth/OE): %d %s\n", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
-		}
-		if resg.Err == nil && resg.Result.Get("error") == nil {
+		errValg := resg.Result.Get("error")
+		if errVal == nil && errValg == nil {
 			if err := compareResults(res.Result, resg.Result); err != nil {
 				recording = false
 				if errs != nil {
@@ -213,11 +263,20 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					errs.Flush() // nolint:errcheck
 					// Keep going
 				} else {
-					fmt.Printf("TG response=================================\n%s\n", res.Response)
-					fmt.Printf("G response=================================\n%s\n", resg.Response)
-					return fmt.Errorf("different results for method %s, errCtx %s: %v\n", methodName, errCtx, err)
+					reqFile, _ := os.Create("request.json")                //nolint:errcheck
+					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.Close()                                        //nolint:errcheck
+					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
+					erigonRespFile.Write(res.Response)                     //nolint:errcheck
+					erigonRespFile.Close()                                 //nolint:errcheck
+					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
+					oeRespFile.Write(resg.Response)                        //nolint:errcheck
+					oeRespFile.Close()                                     //nolint:errcheck
+					return fmt.Errorf("different results for method %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
 				}
 			}
+		} else {
+			return compareErrors(errVal, errValg, methodName, errCtx, errs)
 		}
 	}
 	if recording {
@@ -561,6 +620,7 @@ func print(client *http.Client, url, request string) {
 		fmt.Printf("Could not print: %v\n", err)
 		return
 	}
+	defer r.Body.Close()
 	if r.StatusCode != 200 {
 		fmt.Printf("Status %s", r.Status)
 		return

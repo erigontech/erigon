@@ -6,7 +6,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -38,7 +38,7 @@ type TraceAPIImpl struct {
 }
 
 // NewTraceAPI returns NewTraceAPI instance
-func NewTraceAPI(base *BaseAPI, kv kv.RoDB, cfg *cli.Flags) *TraceAPIImpl {
+func NewTraceAPI(base *BaseAPI, kv kv.RoDB, cfg *httpcfg.HttpCfg) *TraceAPIImpl {
 	return &TraceAPIImpl{
 		BaseAPI:       base,
 		kv:            kv,

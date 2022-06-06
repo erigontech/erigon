@@ -23,38 +23,14 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
 )
 
-type dummyContractRef struct {
-	calledForEach bool
-}
-
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
-	d.calledForEach = true
-}
-func (d *dummyContractRef) SubBalance(amount *big.Int) {}
-func (d *dummyContractRef) AddBalance(amount *big.Int) {}
-func (d *dummyContractRef) SetBalance(*big.Int)        {}
-func (d *dummyContractRef) SetNonce(uint64)            {}
-func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
-
-type dummyStatedb struct {
-	state.IntraBlockState
-}
-
-func (*dummyStatedb) GetRefund() uint64 { return 1337 }
-
 func TestStoreCapture(t *testing.T) {
 	var (
 		env = NewEVM(BlockContext{
-			CheckTEVM: func(common.Hash) (bool, error) { return false, nil },
+			ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
 		}, TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 		logger   = NewStructLogger(nil)
 		mem      = NewMemory()
@@ -64,9 +40,12 @@ func TestStoreCapture(t *testing.T) {
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))
 	var index common.Hash
-	if err := logger.CaptureState(env, 0, SSTORE, 0, 0, mem, stack, nil, contract, 0, nil); err != nil {
-		t.Fatalf("error while caturing state %v", err)
-	}
+	logger.CaptureState(env, 0, SSTORE, 0, 0, &ScopeContext{
+		Memory:   mem,
+		Stack:    stack,
+		Contract: contract,
+	}, nil, 0, nil)
+
 	if len(logger.storage[contract.Address()]) == 0 {
 		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))
 	}

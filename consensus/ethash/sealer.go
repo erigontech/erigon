@@ -283,7 +283,7 @@ func (s *remoteSealer) sendNotification(ctx context.Context, url string, json []
 // any other error, like no pending work or stale mining result).
 func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash) bool {
 	if s.currentBlock == nil {
-		s.ethash.config.Log.Error("Pending work without block", "sealhash", sealhash)
+		s.ethash.config.Log.Warn("Pending work without block", "sealhash", sealhash)
 		return false
 	}
 	// Make sure the work submitted is present
@@ -318,7 +318,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash,
 	if solution.NumberU64()+staleThreshold > s.currentBlock.NumberU64() {
 		select {
 		case s.results <- solution:
-			s.ethash.config.Log.Debug("Work submitted is acceptable", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
+			s.ethash.config.Log.Trace("Work submitted is acceptable", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
 			return true
 		default:
 			s.ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "remote", "sealhash", sealhash)

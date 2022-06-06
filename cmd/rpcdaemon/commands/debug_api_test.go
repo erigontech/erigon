@@ -7,10 +7,13 @@ import (
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 var debugTraceTransactionTests = []struct {
@@ -35,9 +38,93 @@ var debugTraceTransactionNoRefundTests = []struct {
 	{"b6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059", 62899, false, ""},
 }
 
+func TestTraceBlockByNumber(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false)
+	ethApi := NewEthAPI(baseApi, db, nil, nil, nil, 5000000)
+	api := NewPrivateDebugAPI(baseApi, db, 0)
+	for _, tt := range debugTraceTransactionTests {
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		err = api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracers.TraceConfig{}, stream)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er []ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
+		if len(er) != int(*txcount) {
+			t.Fatalf("incorrect length: %v", err)
+		}
+	}
+	var buf bytes.Buffer
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+	err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(rpc.LatestBlockNumber), &tracers.TraceConfig{}, stream)
+	if err != nil {
+		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
+	}
+	if err = stream.Flush(); err != nil {
+		t.Fatalf("error flusing: %v", err)
+	}
+	var er []ethapi.ExecutionResult
+	if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+		t.Fatalf("parsing result: %v", err)
+	}
+}
+
+func TestTraceBlockByHash(t *testing.T) {
+	db := rpcdaemontest.CreateTestKV(t)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false)
+	ethApi := NewEthAPI(baseApi, db, nil, nil, nil, 5000000)
+	api := NewPrivateDebugAPI(baseApi, db, 0)
+	for _, tt := range debugTraceTransactionTests {
+		var buf bytes.Buffer
+		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		err = api.TraceBlockByHash(context.Background(), *tx.BlockHash, &tracers.TraceConfig{}, stream)
+		if err != nil {
+			t.Errorf("traceBlock %s: %v", tt.txHash, err)
+		}
+		if err = stream.Flush(); err != nil {
+			t.Fatalf("error flusing: %v", err)
+		}
+		var er []ethapi.ExecutionResult
+		if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
+			t.Fatalf("parsing result: %v", err)
+		}
+		if len(er) != int(*txcount) {
+			t.Fatalf("incorrect length: %v", err)
+		}
+	}
+}
+
 func TestTraceTransaction(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
-	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewPrivateDebugAPI(
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -66,7 +153,10 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
-	api := NewPrivateDebugAPI(NewBaseApi(nil), db, 0)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewPrivateDebugAPI(
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)

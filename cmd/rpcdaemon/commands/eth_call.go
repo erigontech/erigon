@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -14,15 +17,20 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
 )
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
-func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *map[common.Address]ethapi.Account) (hexutil.Bytes, error) {
+func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -38,7 +46,24 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, overrides, api.GasCap, chainConfig, api.filters)
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.BaseAPI.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +113,13 @@ func HeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.Block
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.
-func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+	var args ethapi.CallArgs
+	// if we actually get CallArgs here, we use them
+	if argsOrNil != nil {
+		args = *argsOrNil
+	}
+
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
@@ -123,9 +154,23 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		hi = h.GasLimit
 	}
 
+	var feeCap *big.Int
+	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
+	} else if args.GasPrice != nil {
+		feeCap = args.GasPrice.ToInt()
+	} else if args.MaxFeePerGas != nil {
+		feeCap = args.MaxFeePerGas.ToInt()
+	} else {
+		feeCap = common.Big0
+	}
 	// Recap the highest gas limit with account's available balance.
-	if args.GasPrice != nil && args.GasPrice.ToInt().Uint64() != 0 {
-		stateReader := state.NewPlainStateReader(dbtx)
+	if feeCap.Sign() != 0 {
+		cacheView, err := api.stateCache.View(ctx, dbtx)
+		if err != nil {
+			return 0, err
+		}
+		stateReader := state.NewCachedReader2(cacheView, dbtx)
 		state := state.New(stateReader)
 		if state == nil {
 			return 0, fmt.Errorf("can't get the current state")
@@ -139,17 +184,20 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 			}
 			available.Sub(available, args.Value.ToInt())
 		}
-		allowance := new(big.Int).Div(available, args.GasPrice.ToInt())
-		if hi > allowance.Uint64() {
+		allowance := new(big.Int).Div(available, feeCap)
+
+		// If the allowance is larger than maximum uint64, skip checking
+		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
 				transfer = new(hexutil.Big)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
-				"sent", transfer.ToInt(), "gasprice", args.GasPrice.ToInt(), "fundable", allowance)
+				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
 			hi = allowance.Uint64()
 		}
 	}
+
 	// Recap the highest gas allowance with specified gascap.
 	if hi > api.GasCap {
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
@@ -163,11 +211,30 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 		return 0, err
 	}
 
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(dbtx)
+	}
+
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
 		args.Gas = (*hexutil.Uint64)(&gas)
 
-		result, err := transactions.DoCall(ctx, args, dbtx, rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}, nil, api.GasCap, chainConfig, api.filters)
+		numOrHash := rpc.BlockNumberOrHash{BlockNumber: &lastBlockNum}
+		blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(numOrHash, dbtx, api.filters) // DoCall cannot be executed on non-canonical blocks
+		if err != nil {
+			return false, nil, err
+		}
+		block, err := api.BaseAPI.blockWithSenders(dbtx, hash, blockNumber)
+		if err != nil {
+			return false, nil, err
+		}
+		if block == nil {
+			return false, nil, nil
+		}
+
+		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
+			api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit
@@ -220,4 +287,167 @@ func (api *APIImpl) EstimateGas(ctx context.Context, args ethapi.CallArgs, block
 func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
 	var stub interface{}
 	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
+}
+
+// accessListResult returns an optional accesslist
+// Its the result of the `eth_createAccessList` RPC call.
+// It contains an error if the transaction itself failed.
+type accessListResult struct {
+	Accesslist *types.AccessList `json:"accessList"`
+	Error      string            `json:"error,omitempty"`
+	GasUsed    hexutil.Uint64    `json:"gasUsed"`
+}
+
+// CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
+// If the accesslist creation fails an error is returned.
+// If the transaction itself fails, an vmErr is returned.
+func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	contractHasTEVM := func(contractHash common.Hash) (bool, error) { return false, nil }
+	if api.TevmEnabled {
+		contractHasTEVM = ethdb.GetHasTEVM(tx)
+	}
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.BaseAPI.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	var stateReader state.StateReader
+	if latest {
+		cacheView, err := api.stateCache.View(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		stateReader = state.NewCachedReader2(cacheView, tx)
+	} else {
+		stateReader = state.NewPlainState(tx, blockNumber)
+	}
+
+	header := block.Header()
+	// If the gas amount is not set, extract this as it will depend on access
+	// lists and we'll need to reestimate every time
+	nogas := args.Gas == nil
+
+	var to common.Address
+	if args.To != nil {
+		to = *args.To
+	} else {
+		// Require nonce to calculate address of created contract
+		if args.Nonce == nil {
+			var nonce uint64
+			reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
+				Address: gointerfaces.ConvertAddressToH160(*args.From),
+			}, &grpc.EmptyCallOption{})
+			if err != nil {
+				return nil, err
+			}
+			if reply.Found {
+				nonce = reply.Nonce + 1
+			}
+			args.Nonce = (*hexutil.Uint64)(&nonce)
+		}
+		to = crypto.CreateAddress(*args.From, uint64(*args.Nonce))
+	}
+
+	// Retrieve the precompiles since they don't need to be added to the access list
+	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
+
+	// Create an initial tracer
+	prevTracer := logger.NewAccessListTracer(nil, *args.From, to, precompiles)
+	if args.AccessList != nil {
+		prevTracer = logger.NewAccessListTracer(*args.AccessList, *args.From, to, precompiles)
+	}
+	for {
+		state := state.New(stateReader)
+		// Retrieve the current access list to expand
+		accessList := prevTracer.AccessList()
+		log.Trace("Creating access list", "input", accessList)
+
+		// If no gas amount was specified, each unique access list needs it's own
+		// gas calculation. This is quite expensive, but we need to be accurate
+		// and it's convered by the sender only anyway.
+		if nogas {
+			args.Gas = nil
+		}
+		// Set the accesslist to the last al
+		args.AccessList = &accessList
+		baseFee, _ := uint256.FromBig(header.BaseFee)
+		msg, err := args.ToMessage(api.GasCap, baseFee)
+		if err != nil {
+			return nil, err
+		}
+
+		// Apply the transaction with the access list tracer
+		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
+		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, contractHasTEVM)
+
+		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
+		gp := new(core.GasPool).AddGas(msg.Gas())
+		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			return nil, err
+		}
+		if tracer.Equal(prevTracer) {
+			var errString string
+			if res.Err != nil {
+				errString = res.Err.Error()
+			}
+			accessList := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.UsedGas)}
+			if optimizeGas != nil && *optimizeGas {
+				optimizeToInAccessList(accessList, to)
+			}
+			return accessList, nil
+		}
+		prevTracer = tracer
+	}
+}
+
+// to address is warm already, so we can save by adding it to the access list
+// only if we are adding a lot of its storage slots as well
+func optimizeToInAccessList(accessList *accessListResult, to common.Address) {
+	indexToRemove := -1
+
+	for i := 0; i < len(*accessList.Accesslist); i++ {
+		entry := (*accessList.Accesslist)[i]
+		if entry.Address != to {
+			continue
+		}
+
+		// https://eips.ethereum.org/EIPS/eip-2930#charging-less-for-accesses-in-the-access-list
+		accessListSavingPerSlot := params.ColdSloadCostEIP2929 - params.WarmStorageReadCostEIP2929 - params.TxAccessListStorageKeyGas
+
+		numSlots := uint64(len(entry.StorageKeys))
+		if numSlots*accessListSavingPerSlot <= params.TxAccessListAddressGas {
+			indexToRemove = i
+		}
+	}
+
+	if indexToRemove >= 0 {
+		*accessList.Accesslist = removeIndex(*accessList.Accesslist, indexToRemove)
+	}
+}
+
+func removeIndex(s types.AccessList, index int) types.AccessList {
+	return append(s[:index], s[index+1:]...)
 }

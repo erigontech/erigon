@@ -123,6 +123,10 @@ func (n *upnp) DeleteMapping(protocol string, extport, intport int) error {
 	})
 }
 
+func (n *upnp) SupportsMapping() bool {
+	return true
+}
+
 func (n *upnp) String() string {
 	return "UPNP " + n.service
 }

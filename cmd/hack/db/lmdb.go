@@ -5,14 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+
 	// "errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -384,7 +384,7 @@ func (m *mdbx_meta) readMeta(page []byte) error {
 	m.txnID_b = _64(page, pos)
 	pos += 8
 
-	pos += (3 * 8) // pagesRetired, x, y
+	pos += 3 * 8 // pagesRetired, x, y
 
 	return nil
 }
@@ -502,7 +502,7 @@ func generate2(tx kv.RwTx, entries int) error {
 func generate3(_ kv.RwDB, tx kv.RwTx) (bool, error) {
 	for i := 0; i < 61; i++ {
 		k := fmt.Sprintf("table_%05d", i)
-		if err := tx.(kv.BucketMigrator).CreateBucket(k); err != nil {
+		if err := tx.CreateBucket(k); err != nil {
 			return false, err
 		}
 	}
@@ -773,7 +773,7 @@ func checkReader(tx kv.Tx, errorCh chan error) (bool, error) {
 }
 
 func defragSteps(filename string, bucketsCfg kv.TableCfg, generateFs ...func(kv.RwDB, kv.RwTx) (bool, error)) error {
-	dir, err := ioutil.TempDir(".", "db-vis")
+	dir, err := os.MkdirTemp(".", "db-vis")
 	if err != nil {
 		return fmt.Errorf("creating temp dir for db visualisation: %w", err)
 	}
@@ -941,17 +941,17 @@ func Defrag() error {
 func TextInfo(chaindata string, visStream io.Writer) error {
 	log.Info("Text Info", "db", chaindata)
 	fmt.Fprint(visStream, "digraph lmdb {\nrankdir=LR\n")
-	datafile := path.Join(chaindata, MdbxDataFile)
+	datafile := filepath.Join(chaindata, MdbxDataFile)
 
 	f, err := os.Open(datafile)
 	if err != nil {
-		return fmt.Errorf("opening %v: %v", MdbxDataFile, err)
+		return fmt.Errorf("opening %v: %w", MdbxDataFile, err)
 	}
 	defer f.Close()
 	var meta [PageSize]byte
 	// Read meta page 0
 	if _, err = f.ReadAt(meta[:], 0*PageSize); err != nil {
-		return fmt.Errorf("reading meta page 0: %v", err)
+		return fmt.Errorf("reading meta page 0: %w", err)
 	}
 
 	header1 := new(header)
@@ -967,12 +967,12 @@ func TextInfo(chaindata string, visStream io.Writer) error {
 	// meta1.print()
 
 	if err != nil {
-		return fmt.Errorf("reading meta page 0: %v", err)
+		return fmt.Errorf("reading meta page 0: %w", err)
 	}
 
 	// Read meta page 1
 	if _, err = f.ReadAt(meta[:], 1*PageSize); err != nil {
-		return fmt.Errorf("reading meta page 1: %v", err)
+		return fmt.Errorf("reading meta page 1: %w", err)
 	}
 
 	header2 := new(header)
@@ -988,7 +988,7 @@ func TextInfo(chaindata string, visStream io.Writer) error {
 	// meta2.print()
 
 	if err != nil {
-		return fmt.Errorf("reading meta page 1: %v", err)
+		return fmt.Errorf("reading meta page 1: %w", err)
 	}
 
 	var freeRoot, mainRoot uint32
@@ -1115,7 +1115,7 @@ func _conditions(f io.ReaderAt, visStream io.Writer, node *mdbx_node, _header *h
 func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, parentBlock int, level *int) error {
 	var page [PageSize]byte
 	if _, err := f.ReadAt(page[:], int64(pgno*PageSize)); err != nil {
-		return fmt.Errorf("reading page: %v, error: %v", pgno, err)
+		return fmt.Errorf("reading page: %v, error: %w", pgno, err)
 	}
 
 	_header := new(header)
@@ -1193,7 +1193,7 @@ func readPages(f io.ReaderAt, visStream io.Writer, pgno uint32, blockID *int, pa
 func freeDBPages(f io.ReaderAt, visStream io.Writer, freeRoot uint32) error {
 	var page [PageSize]byte
 	if _, err := f.ReadAt(page[:], int64(freeRoot*PageSize)); err != nil {
-		return fmt.Errorf("reading page: %v, error: %v", freeRoot, err)
+		return fmt.Errorf("reading page: %v, error: %w", freeRoot, err)
 	}
 
 	_header := new(header)

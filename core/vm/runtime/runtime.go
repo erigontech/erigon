@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 
@@ -51,29 +52,29 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
+	kv        kv.Has
 	GetHashFn func(n uint64) common.Hash
-	CheckTEVM func(common.Hash) (bool, error)
 }
 
 // sets defaults on the config
 func setDefaults(cfg *Config) {
 	if cfg.ChainConfig == nil {
 		cfg.ChainConfig = &params.ChainConfig{
-			ChainID:             big.NewInt(1),
-			HomesteadBlock:      new(big.Int),
-			DAOForkBlock:        new(big.Int),
-			DAOForkSupport:      false,
-			EIP150Block:         new(big.Int),
-			EIP150Hash:          common.Hash{},
-			EIP155Block:         new(big.Int),
-			EIP158Block:         new(big.Int),
-			ByzantiumBlock:      new(big.Int),
-			ConstantinopleBlock: new(big.Int),
-			PetersburgBlock:     new(big.Int),
-			IstanbulBlock:       new(big.Int),
-			MuirGlacierBlock:    new(big.Int),
-			BerlinBlock:         new(big.Int),
-			LondonBlock:         new(big.Int),
+			ChainID:               big.NewInt(1),
+			HomesteadBlock:        new(big.Int),
+			DAOForkBlock:          new(big.Int),
+			DAOForkSupport:        false,
+			TangerineWhistleBlock: new(big.Int),
+			TangerineWhistleHash:  common.Hash{},
+			SpuriousDragonBlock:   new(big.Int),
+			ByzantiumBlock:        new(big.Int),
+			ConstantinopleBlock:   new(big.Int),
+			PetersburgBlock:       new(big.Int),
+			IstanbulBlock:         new(big.Int),
+			MuirGlacierBlock:      new(big.Int),
+			BerlinBlock:           new(big.Int),
+			LondonBlock:           new(big.Int),
+			ArrowGlacierBlock:     new(big.Int),
 		}
 	}
 
@@ -100,9 +101,6 @@ func setDefaults(cfg *Config) {
 			return common.BytesToHash(crypto.Keccak256([]byte(new(big.Int).SetUint64(n).String())))
 		}
 	}
-	if cfg.CheckTEVM == nil {
-		cfg.CheckTEVM = func(common.Hash) (bool, error) { return false, nil }
-	}
 }
 
 // Execute executes the code using the input as call data during the execution.
@@ -121,6 +119,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -128,7 +127,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context.BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
 	}
 	cfg.State.CreateAccount(address, true)
@@ -159,13 +158,14 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
+		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context.BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, nil, vm.ActivePrecompiles(rules), nil)
 	}
 
@@ -191,7 +191,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	statedb := cfg.State
-	if rules := cfg.ChainConfig.Rules(vmenv.Context.BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
 		statedb.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
 	}
 

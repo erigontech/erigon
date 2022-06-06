@@ -54,7 +54,7 @@ func (t *NoopService) Protocols() []p2p.Protocol {
 			NodeInfo: func() interface{} {
 				return struct{}{}
 			},
-			PeerInfo: func(id enode.ID) interface{} {
+			PeerInfo: func(peerID [64]byte) interface{} {
 				return struct{}{}
 			},
 			Attributes: []enr.Entry{},

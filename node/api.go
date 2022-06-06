@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -72,7 +73,7 @@ func (api *privateAdminAPI) AddPeer(url string) (bool, error) {
 	// Try to add the url as a static peer and return
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.AddPeer(node)
 	return true, nil
@@ -88,7 +89,7 @@ func (api *privateAdminAPI) RemovePeer(url string) (bool, error) {
 	// Try to remove the url as a static peer and return
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.RemovePeer(node)
 	return true, nil
@@ -103,7 +104,7 @@ func (api *privateAdminAPI) AddTrustedPeer(url string) (bool, error) {
 	}
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.AddTrustedPeer(node)
 	return true, nil
@@ -119,7 +120,7 @@ func (api *privateAdminAPI) RemoveTrustedPeer(url string) (bool, error) {
 	}
 	node, err := enode.Parse(enode.ValidSchemes, url)
 	if err != nil {
-		return false, fmt.Errorf("invalid enode: %v", err)
+		return false, fmt.Errorf("invalid enode: %w", err)
 	}
 	server.RemoveTrustedPeer(node)
 	return true, nil
@@ -171,7 +172,7 @@ func (api *privateAdminAPI) StartRPC(host *string, port *int, cors *string, apis
 
 	// Determine host and port.
 	if host == nil {
-		h := DefaultHTTPHost
+		h := nodecfg.DefaultHTTPHost
 		if api.node.config.HTTPHost != "" {
 			h = api.node.config.HTTPHost
 		}
@@ -231,7 +232,7 @@ func (api *privateAdminAPI) StartWS(host *string, port *int, allowedOrigins *str
 
 	// Determine host and port.
 	if host == nil {
-		h := DefaultWSHost
+		h := nodecfg.DefaultWSHost
 		if api.node.config.WSHost != "" {
 			h = api.node.config.WSHost
 		}

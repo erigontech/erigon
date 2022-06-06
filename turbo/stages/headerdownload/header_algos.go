@@ -14,7 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -23,87 +28,90 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
-// Implements sort.Interface so we can sort the incoming header in the message by block height
-type HeadersByBlockHeight []*types.Header
+const POSPandaBanner = `
 
-func (h HeadersByBlockHeight) Len() int {
+    ,,,         ,,,                                               ,,,         ,,,
+  ;"   ^;     ;'   ",                                           ;"   ^;     ;'   ",
+  ;    s$$$$$$$s     ;                                          ;    s$$$$$$$s     ;
+  ,  ss$$$$$$$$$$s  ,'  ooooooooo.    .oooooo.   .oooooo..o     ,  ss$$$$$$$$$$s  ,'
+  ;s$$$$$$$$$$$$$$$     '888   'Y88. d8P'  'Y8b d8P'    'Y8     ;s$$$$$$$$$$$$$$$
+  $$$$$$$$$$$$$$$$$$     888   .d88'888      888Y88bo.          $$$$$$$$$$$$$$$$$$
+ $$$$P""Y$$$Y""W$$$$$    888ooo88P' 888      888 '"Y8888o.     $$$$P""Y$$$Y""W$$$$$
+ $$$$  p"$$$"q  $$$$$    888        888      888     '"Y88b    $$$$  p"$$$"q  $$$$$
+ $$$$  .$$$$$.  $$$$     888        '88b    d88'oo     .d8P    $$$$  .$$$$$.  $$$$
+  $$DcaU$$$$$$$$$$      o888o        'Y8bood8P' 8""88888P'      $$DcaU$$$$$$$$$$
+    "Y$$$"*"$$$Y"                                                 "Y$$$"*"$$$Y"
+        "$b.$$"                                                       "$b.$$"
+       .o.                   .   o8o                         .                 .o8
+      .888.                .o8   '"'                       .o8                "888
+     .8"888.     .ooooo. .o888oooooo oooo    ooo .oooo.  .o888oo .ooooo.  .oooo888
+    .8' '888.   d88' '"Y8  888  '888  '88.  .8' 'P  )88b   888  d88' '88bd88' '888
+   .88ooo8888.  888        888   888   '88..8'   .oP"888   888  888ooo888888   888
+  .8'     '888. 888   .o8  888 . 888    '888'   d8(  888   888 .888    .o888   888
+ o88o     o8888o'Y8bod8P'  "888"o888o    '8'    'Y888""8o  "888"'Y8bod8P''Y8bod88P"
+
+`
+
+// Implements sort.Interface so we can sort the incoming header in the message by block height
+type HeadersReverseSort []ChainSegmentHeader
+
+func (h HeadersReverseSort) Len() int {
 	return len(h)
 }
 
-func (h HeadersByBlockHeight) Less(i, j int) bool {
+func (h HeadersReverseSort) Less(i, j int) bool {
 	// Note - the ordering is the inverse ordering of the block heights
-	return h[i].Number.Cmp(h[j].Number) > 0
+	if h[i].Number != h[j].Number {
+		return h[i].Number > h[j].Number
+	}
+	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) > 0
 }
 
-func (h HeadersByBlockHeight) Swap(i, j int) {
+func (h HeadersReverseSort) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
 }
 
-// SplitIntoSegments converts message containing headers into a collection of chain segments
-func (hd *HeaderDownload) SplitIntoSegments(headersRaw [][]byte, msg []*types.Header) ([]*ChainSegment, Penalty, error) {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	sort.Sort(HeadersByBlockHeight(msg))
-	// Now all headers are order from the highest block height to the lowest
-	var segments []*ChainSegment                         // Segments being built
-	segmentMap := make(map[common.Hash]int)              // Mapping of the header hash to the index of the chain segment it belongs
-	childrenMap := make(map[common.Hash][]*types.Header) // Mapping parent hash to the children
-	dedupMap := make(map[common.Hash]struct{})           // Map used for detecting duplicate headers
-	for i, header := range msg {
-		headerHash := header.Hash()
-		if _, bad := hd.badHeaders[headerHash]; bad {
-			return nil, BadBlockPenalty, nil
-		}
-		if _, duplicate := dedupMap[headerHash]; duplicate {
-			return nil, DuplicateHeaderPenalty, nil
-		}
-		dedupMap[headerHash] = struct{}{}
-		var segmentIdx int
-		children := childrenMap[headerHash]
-		for _, child := range children {
-			if valid, penalty := hd.childParentValid(child, header); !valid {
-				return nil, penalty, nil
-			}
-		}
-		if len(children) == 1 {
-			// Single child, extract segmentIdx
-			segmentIdx = segmentMap[headerHash]
-		} else {
-			// No children, or more than one child, create new segment
-			segmentIdx = len(segments)
-			segments = append(segments, &ChainSegment{})
-		}
-		segments[segmentIdx].Headers = append(segments[segmentIdx].Headers, header)
-		segments[segmentIdx].HeadersRaw = append(segments[segmentIdx].HeadersRaw, headersRaw[i])
-		segmentMap[header.ParentHash] = segmentIdx
-		siblings := childrenMap[header.ParentHash]
-		siblings = append(siblings, header)
-		childrenMap[header.ParentHash] = siblings
-	}
-	return segments, NoPenalty, nil
+// Implements sort.Interface so we can sort the incoming header in the message by block height
+type HeadersSort []ChainSegmentHeader
+
+func (h HeadersSort) Len() int {
+	return len(h)
 }
 
-// Checks whether child-parent relationship between two headers is correct
-// (excluding Proof Of Work validity)
-func (hd *HeaderDownload) childParentValid(child, parent *types.Header) (bool, Penalty) {
-	if parent.Number.Uint64()+1 != child.Number.Uint64() {
-		return false, WrongChildBlockHeightPenalty
+func (h HeadersSort) Less(i, j int) bool {
+	// Note - the ordering is the inverse ordering of the block heights
+	if h[i].Number != h[j].Number {
+		return h[i].Number < h[j].Number
 	}
-	return true, NoPenalty
+	return bytes.Compare(h[i].Hash[:], h[j].Hash[:]) < 0
+}
+
+func (h HeadersSort) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
 }
 
 // SingleHeaderAsSegment converts message containing 1 header into one singleton chain segment
-func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header) ([]*ChainSegment, Penalty, error) {
+func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.Header, penalizePoSBlocks bool) ([]ChainSegmentHeader, Penalty, error) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	headerHash := header.Hash()
+
+	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
 		return nil, BadBlockPenalty, nil
 	}
-	return []*ChainSegment{{HeadersRaw: [][]byte{headerRaw}, Headers: []*types.Header{header}}}, NoPenalty, nil
+	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
+		return nil, NewBlockGossipAfterMergePenalty, nil
+	}
+	h := ChainSegmentHeader{
+		Header:    header,
+		HeaderRaw: headerRaw,
+		Hash:      headerHash,
+		Number:    header.Number.Uint64(),
+	}
+	return []ChainSegmentHeader{h}, NoPenalty, nil
 }
 
 // ReportBadHeader -
@@ -111,6 +119,10 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
+	// Find the link, remove it and all its descendands from all the queues
+	if link, ok := hd.links[headerHash]; ok {
+		hd.removeUpwards(link)
+	}
 }
 
 func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
@@ -120,244 +132,113 @@ func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
 	return ok
 }
 
-// FindAnchors attempts to find anchors to which given chain segment can be attached to
-func (hd *HeaderDownload) findAnchors(segment *ChainSegment) (found bool, start int) {
-	// Walk the segment from children towards parents
-	for i, header := range segment.Headers {
-		// Check if the header can be attached to an anchor of a working tree
-		if _, attaching := hd.anchors[header.Hash()]; attaching {
-			return true, i
-		}
-	}
-	return false, 0
+// See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+func (hd *HeaderDownload) SetPoSDownloaderTip(hash common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posDownloaderTip = hash
+}
+func (hd *HeaderDownload) PoSDownloaderTip() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.posDownloaderTip
+}
+func (hd *HeaderDownload) ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.badPoSHeaders[badHeader] = lastValidAncestor
+}
+func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastValidAncestor common.Hash) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	lastValidAncestor, bad = hd.badPoSHeaders[tipHash]
+	return
 }
 
-// FindLink attempts to find a non-persisted link that given chain segment can be attached to.
-func (hd *HeaderDownload) findLink(segment *ChainSegment, start int) (found bool, end int) {
-	if _, duplicate := hd.getLink(segment.Headers[start].Hash()); duplicate {
-		return false, 0
+func (hd *HeaderDownload) removeUpwards(link *Link) {
+	if link == nil {
+		return
 	}
-	// Walk the segment from children towards parents
-	for i, header := range segment.Headers[start:] {
-		// Check if the header can be attached to any links
-		if _, attaching := hd.getLink(header.ParentHash); attaching {
-			return true, start + i + 1
-		}
-	}
-	return false, len(segment.Headers)
-}
-
-func (hd *HeaderDownload) removeUpwards(toRemove []*Link) {
+	var toRemove []*Link = []*Link{link}
 	for len(toRemove) > 0 {
 		removal := toRemove[len(toRemove)-1]
 		toRemove = toRemove[:len(toRemove)-1]
-		delete(hd.links, removal.header.Hash())
-		heap.Remove(hd.linkQueue, removal.idx)
-		toRemove = append(toRemove, removal.next...)
+		delete(hd.links, removal.hash)
+		hd.moveLinkToQueue(removal, NoQueue)
+		for child := removal.fChild; child != nil; child, child.next = child.next, nil {
+			toRemove = append(toRemove, child)
+		}
 	}
 }
 
-func (hd *HeaderDownload) markPreverified(link *Link) {
-	// Go through all parent links that are not preveried and mark them too
-	for link != nil && !link.preverified {
-		link.preverified = true
-		link = hd.links[link.header.ParentHash]
+func (hd *HeaderDownload) MarkAllVerified() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	for hd.insertQueue.Len() > 0 {
+		link := hd.insertQueue[0]
+		if !link.verified {
+			link.linked = true
+			link.verified = true
+		}
+	}
+	for hd.linkQueue.Len() > 0 {
+		link := hd.linkQueue[0]
+		if !link.verified {
+			link.linked = true
+			link.verified = true
+			hd.moveLinkToQueue(link, InsertQueueID)
+		}
 	}
 }
 
-// ExtendUp extends a working tree up from the link, using given chain segment
-func (hd *HeaderDownload) extendUp(segment *ChainSegment, start, end int) error {
-	// Find attachment link again
-	linkHeader := segment.Headers[end-1]
-	attachmentLink, attaching := hd.getLink(linkHeader.ParentHash)
-	if !attaching {
-		return fmt.Errorf("extendUp attachment link not found for %x", linkHeader.ParentHash)
-	}
-	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
-		return fmt.Errorf("cannot extendUp from preverified link %d with children", attachmentLink.blockHeight)
-	}
-	// Iterate over headers backwards (from parents towards children)
-	prevLink := attachmentLink
-	for i := end - 1; i >= start; i-- {
-		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
-		prevLink.next = append(prevLink.next, link)
-		prevLink = link
-		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.markPreverified(link)
-		}
-	}
-
-	if _, bad := hd.badHeaders[attachmentLink.hash]; !bad && attachmentLink.persisted {
-		link := hd.links[linkHeader.Hash()]
-		hd.insertList = append(hd.insertList, link)
-	}
-	return nil
-}
-
-// ExtendDown extends some working trees down from the anchor, using given chain segment
-// it creates a new anchor and collects all the links from the attached anchors to it
-func (hd *HeaderDownload) extendDown(segment *ChainSegment, start, end int) (bool, error) {
-	// Find attachment anchor again
-	anchorHeader := segment.Headers[start]
-	if anchor, attaching := hd.anchors[anchorHeader.Hash()]; attaching {
-		anchorPreverified := false
-		for _, link := range anchor.links {
-			if link.preverified {
-				anchorPreverified = true
-				break
-			}
-		}
-		newAnchorHeader := segment.Headers[end-1]
-		var newAnchor *Anchor
-		newAnchor, preExisting := hd.anchors[newAnchorHeader.ParentHash]
-		if !preExisting {
-			newAnchor = &Anchor{
-				parentHash:  newAnchorHeader.ParentHash,
-				timestamp:   0,
-				peerID:      anchor.peerID,
-				blockHeight: newAnchorHeader.Number.Uint64(),
-			}
-			if newAnchor.blockHeight > 0 {
-				hd.anchors[newAnchorHeader.ParentHash] = newAnchor
-				heap.Push(hd.anchorQueue, newAnchor)
-			}
-		}
-
-		// Anchor is removed from the map, but not from the anchorQueue
-		// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
-		// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
-		delete(hd.anchors, anchor.parentHash)
-		// Add all headers in the segments as links to this anchor
-		var prevLink *Link
-		for i := end - 1; i >= start; i-- {
-			link := hd.addHeaderAsLink(segment.Headers[i], false /* pesisted */)
-			if prevLink == nil {
-				newAnchor.links = append(newAnchor.links, link)
-			} else {
-				prevLink.next = append(prevLink.next, link)
-			}
-			prevLink = link
-			if !anchorPreverified {
-				if _, ok := hd.preverifiedHashes[link.hash]; ok {
-					hd.markPreverified(link)
-				}
-			}
-		}
-		prevLink.next = anchor.links
-		anchor.links = nil
-		if anchorPreverified {
-			// Mark the entire segment as preverified
-			hd.markPreverified(prevLink)
-		}
-		return !preExisting, nil
-	}
-	return false, fmt.Errorf("extendDown attachment anchors not found for %x", anchorHeader.Hash())
-}
-
-// Connect connects some working trees using anchors of some, and a link of another
-func (hd *HeaderDownload) connect(segment *ChainSegment, start, end int) ([]PenaltyItem, error) {
-	// Find attachment link again
-	linkHeader := segment.Headers[end-1]
-	// Find attachement anchors again
-	anchorHeader := segment.Headers[start]
-	attachmentLink, ok1 := hd.getLink(linkHeader.ParentHash)
-	if !ok1 {
-		return nil, fmt.Errorf("connect attachment link not found for %x", linkHeader.ParentHash)
-	}
-	if attachmentLink.preverified && len(attachmentLink.next) > 0 {
-		return nil, fmt.Errorf("cannot connect to preverified link %d with children", attachmentLink.blockHeight)
-	}
-	anchor, ok2 := hd.anchors[anchorHeader.Hash()]
-	if !ok2 {
-		return nil, fmt.Errorf("connect attachment anchors not found for %x", anchorHeader.Hash())
-	}
-	anchorPreverified := false
-	for _, link := range anchor.links {
-		if link.preverified {
-			anchorPreverified = true
-			break
-		}
-	}
-	// Anchor is removed from the map, but not from the anchorQueue
-	// This is because it is hard to find the index under which the anchor is stored in the anchorQueue
-	// But removal will happen anyway, in th function RequestMoreHeaders, if it disapppears from the map
+func (hd *HeaderDownload) removeAnchor(anchor *Anchor) {
+	// Anchor is removed from the map, and from the priority queue
 	delete(hd.anchors, anchor.parentHash)
-	// Iterate over headers backwards (from parents towards children)
-	prevLink := attachmentLink
-	for i := end - 1; i >= start; i-- {
-		link := hd.addHeaderAsLink(segment.Headers[i], false /* persisted */)
-		prevLink.next = append(prevLink.next, link)
-		prevLink = link
-		if !anchorPreverified {
-			if _, ok := hd.preverifiedHashes[link.hash]; ok {
-				hd.markPreverified(link)
+	heap.Remove(hd.anchorQueue, anchor.idx)
+	anchor.idx = -1
+}
+
+func (hd *HeaderDownload) pruneLinkQueue() {
+	for hd.linkQueue.Len() > hd.linkLimit {
+		link := heap.Pop(&hd.linkQueue).(*Link)
+		delete(hd.links, link.hash)
+		for child := link.fChild; child != nil; child, child.next = child.next, nil {
+		}
+		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
+			var prevChild *Link
+			for child := parentLink.fChild; child != nil && child != link; child = child.next {
+				prevChild = child
+			}
+			if prevChild == nil {
+				parentLink.fChild = link.next
+			} else {
+				prevChild.next = link.next
+			}
+		}
+		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
+			var prevChild *Link
+			for child := anchor.fLink; child != nil && child != link; child = child.next {
+				prevChild = child
+			}
+			if prevChild == nil {
+				anchor.fLink = link.next
+			} else {
+				prevChild.next = link.next
+			}
+			if anchor.fLink == nil {
+				hd.removeAnchor(anchor)
 			}
 		}
 	}
-	prevLink.next = anchor.links
-	anchor.links = nil
-	if anchorPreverified {
-		// Mark the entire segment as preverified
-		hd.markPreverified(prevLink)
-	}
-	var penalties []PenaltyItem
-	if _, bad := hd.badHeaders[attachmentLink.hash]; bad {
-		hd.invalidateAnchor(anchor)
-		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
-	} else if attachmentLink.persisted {
-		link := hd.links[linkHeader.Hash()]
-		hd.insertList = append(hd.insertList, link)
-	}
-	return penalties, nil
 }
 
-// if anchor will be abandoned - given peerID will get Penalty
-func (hd *HeaderDownload) newAnchor(segment *ChainSegment, start, end int, peerID string) (bool, error) {
-	anchorHeader := segment.Headers[end-1]
-
-	var anchor *Anchor
-	anchor, preExisting := hd.anchors[anchorHeader.ParentHash]
-	if !preExisting {
-		if anchorHeader.Number.Uint64() < hd.highestInDb {
-			return false, fmt.Errorf("new anchor too far in the past: %d, latest header in db: %d", anchorHeader.Number.Uint64(), hd.highestInDb)
-		}
-		if len(hd.anchors) >= hd.anchorLimit {
-			return false, fmt.Errorf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit)
-		}
-		anchor = &Anchor{
-			parentHash:  anchorHeader.ParentHash,
-			peerID:      peerID,
-			timestamp:   0,
-			blockHeight: anchorHeader.Number.Uint64(),
-		}
-		hd.anchors[anchorHeader.ParentHash] = anchor
-		heap.Push(hd.anchorQueue, anchor)
-	}
-	// Iterate over headers backwards (from parents towards children)
-	var prevLink *Link
-	for i := end - 1; i >= start; i-- {
-		header := segment.Headers[i]
-		link := hd.addHeaderAsLink(header, false /* persisted */)
-		if prevLink == nil {
-			anchor.links = append(anchor.links, link)
-		} else {
-			prevLink.next = append(prevLink.next, link)
-		}
-		prevLink = link
-		if _, ok := hd.preverifiedHashes[link.hash]; ok {
-			hd.markPreverified(link)
-		}
-	}
-	return !preExisting, nil
-}
-
-func (hd *HeaderDownload) AnchorState() string {
+func (hd *HeaderDownload) LogAnchorState() {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.anchorState()
+	hd.logAnchorState()
 }
 
-func (hd *HeaderDownload) anchorState() string {
+func (hd *HeaderDownload) logAnchorState() {
 	//nolint:prealloc
 	var ss []string
 	for anchorParent, anchor := range hd.anchors {
@@ -366,7 +247,9 @@ func (hd *HeaderDownload) anchorState() string {
 		// Try to figure out end
 		var end uint64
 		var searchList []*Link
-		searchList = append(searchList, anchor.links...)
+		for child := anchor.fLink; child != nil; child = child.next {
+			searchList = append(searchList, child)
+		}
 		var bs []int
 		for len(searchList) > 0 {
 			link := searchList[len(searchList)-1]
@@ -374,13 +257,13 @@ func (hd *HeaderDownload) anchorState() string {
 				end = link.blockHeight
 			}
 			searchList = searchList[:len(searchList)-1]
-			if len(link.next) > 0 {
-				searchList = append(searchList, link.next...)
+			for child := link.fChild; child != nil; child = child.next {
+				searchList = append(searchList, child)
 			}
 			bs = append(bs, int(link.blockHeight))
 		}
 		var sbb strings.Builder
-		sort.Ints(bs)
+		slices.Sort(bs)
 		for j, b := range bs {
 			if j == 0 {
 				sbb.WriteString(fmt.Sprintf("%d", b))
@@ -410,56 +293,36 @@ func (hd *HeaderDownload) anchorState() string {
 		}
 		sb.WriteString(fmt.Sprintf("-%d links=%d (%s)}", end, len(bs), sbb.String()))
 		sb.WriteString(fmt.Sprintf(" => %x", anchorParent))
+		sb.WriteString(fmt.Sprintf(", anchorQueue.idx=%d", anchor.idx))
 		ss = append(ss, sb.String())
 	}
 	sort.Strings(ss)
-	return strings.Join(ss, "\n")
-}
-
-func InitPreverifiedHashes(chain string) (map[common.Hash]struct{}, uint64) {
-	var encodings []string
-	var height uint64
-	switch chain {
-	case params.MainnetChainName:
-		encodings = mainnetPreverifiedHashes
-		height = mainnetPreverifiedHeight
-	case params.RopstenChainName:
-		encodings = ropstenPreverifiedHashes
-		height = ropstenPreverifiedHeight
-	default:
-		log.Warn("Preverified hashes not found for", "chain", chain)
-		return nil, 0
+	log.Info("Queue sizes", "anchors", hd.anchorQueue.Len(), "links", hd.linkQueue.Len(), "persisted", hd.persistedLinkQueue.Len())
+	for _, s := range ss {
+		log.Info(s)
 	}
-	return DecodeHashes(encodings), height
-}
-
-func DecodeHashes(encodings []string) map[common.Hash]struct{} {
-	hashes := make(map[common.Hash]struct{}, len(encodings))
-
-	for _, encoding := range encodings {
-		hashes[common.HexToHash(encoding)] = struct{}{}
-	}
-
-	return hashes
-}
-
-func (hd *HeaderDownload) SetPreverifiedHashes(preverifiedHashes map[common.Hash]struct{}, preverifiedHeight uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.preverifiedHashes = preverifiedHashes
-	hd.preverifiedHeight = preverifiedHeight
 }
 
 func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
 	// Drain persistedLinksQueue and remove links
 	for hd.persistedLinkQueue.Len() > 0 {
-		link := heap.Pop(hd.persistedLinkQueue).(*Link)
+		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
+		for child := link.fChild; child != nil; child, child.next = child.next, nil {
+		}
 	}
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.Headers)
+		if err != nil {
+			return err
+		}
+		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
 		if err != nil {
 			return err
 		}
@@ -468,16 +331,27 @@ func (hd *HeaderDownload) RecoverFromDb(db kv.RoDB) error {
 			if err != nil {
 				return err
 			}
-			var h types.Header
-			if err = rlp.DecodeBytes(v, &h); err != nil {
+			var header types.Header
+			if err = rlp.DecodeBytes(v, &header); err != nil {
 				return err
 			}
-			hd.addHeaderAsLink(&h, true /* persisted */)
+			if header.Number.Uint64() <= hd.highestInDb {
+				h := ChainSegmentHeader{
+					HeaderRaw: v,
+					Header:    &header,
+					Hash:      types.RawRlpHash(v),
+					Number:    header.Number.Uint64(),
+				}
+				hd.addHeaderAsLink(h, true /* persisted */)
+			}
+
+			select {
+			case <-logEvery.C:
+				log.Info("recover headers from db", "left", hd.persistedLinkLimit-hd.persistedLinkQueue.Len())
+			default:
+			}
 		}
-		hd.highestInDb, err = stages.GetStageProgress(tx, stages.Headers)
-		if err != nil {
-			return err
-		}
+
 		return nil
 	})
 	if err != nil {
@@ -499,10 +373,12 @@ func (hd *HeaderDownload) ReadProgressFromDb(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor) {
-	log.Warn("Invalidating anchor for suspected unavailability", "height", anchor.blockHeight)
-	delete(hd.anchors, anchor.parentHash)
-	hd.removeUpwards(anchor.links)
+func (hd *HeaderDownload) invalidateAnchor(anchor *Anchor, reason string) {
+	log.Debug("Invalidating anchor", "height", anchor.blockHeight, "hash", anchor.parentHash, "reason", reason)
+	hd.removeAnchor(anchor)
+	for child := anchor.fLink; child != nil; child, child.next = child.next, nil {
+		hd.removeUpwards(child)
+	}
 }
 
 func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest, []PenaltyItem) {
@@ -510,128 +386,294 @@ func (hd *HeaderDownload) RequestMoreHeaders(currentTime uint64) (*HeaderRequest
 	defer hd.lock.Unlock()
 	var penalties []PenaltyItem
 	if hd.anchorQueue.Len() == 0 {
-		log.Debug("Empty anchor queue")
+		log.Trace("Empty anchor queue")
 		return nil, penalties
 	}
 	for hd.anchorQueue.Len() > 0 {
 		anchor := (*hd.anchorQueue)[0]
-		if _, ok := hd.anchors[anchor.parentHash]; ok {
-			if anchor.timestamp > currentTime {
-				// Anchor not ready for re-request yet
-				return nil, penalties
-			}
-			if anchor.timeouts < 10 {
-				return &HeaderRequest{Hash: anchor.parentHash, Number: anchor.blockHeight - 1, Length: 192, Skip: 0, Reverse: true}, penalties
-			} else {
-				// Ancestors of this anchor seem to be unavailable, invalidate and move on
-				hd.invalidateAnchor(anchor)
-				penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
-			}
+		// Only process the anchors for which the nextRetryTime has already come
+		if anchor.nextRetryTime > currentTime {
+			return nil, penalties
 		}
-		// Anchor disappeared or unavailable, pop from the queue and move on
-		heap.Remove(hd.anchorQueue, 0)
+		if anchor.timeouts < 10 {
+			// Produce a header request that would extend this anchor (add parent, parent of parent, etc.)
+			return &HeaderRequest{
+				Anchor:  anchor,
+				Hash:    anchor.parentHash,
+				Number:  anchor.blockHeight - 1,
+				Length:  192,
+				Skip:    0,
+				Reverse: true,
+			}, penalties
+		}
+		// Ancestors of this anchor seem to be unavailable, invalidate and move on
+		hd.invalidateAnchor(anchor, "suspected unavailability")
+		penalties = append(penalties, PenaltyItem{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID})
 	}
 	return nil, penalties
 }
 
-func (hd *HeaderDownload) SentRequest(req *HeaderRequest, currentTime, timeout uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	anchor, ok := hd.anchors[req.Hash]
-	if !ok {
+func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime uint64) (timeout bool, request *HeaderRequest, penalties []PenaltyItem) {
+	anchor := hd.posAnchor
+	if anchor == nil {
+		log.Trace("No PoS anchor")
 		return
 	}
-	anchor.timeouts++
-	anchor.timestamp = currentTime + timeout
-	heap.Fix(hd.anchorQueue, 0)
+
+	// Only process the anchors for which the nextRetryTime has already come
+	if anchor.nextRetryTime > currentTime {
+		return
+	}
+
+	timeout = anchor.timeouts >= 10
+	if timeout {
+		penalties = []PenaltyItem{{Penalty: AbandonedAnchorPenalty, PeerID: anchor.peerID}}
+		return
+	}
+
+	// Request ancestors
+	log.Info("Requested", "anchor", anchor.parentHash)
+	request = &HeaderRequest{
+		Anchor:  anchor,
+		Hash:    anchor.parentHash,
+		Number:  0, // Since posAnchor may be an estimate, do not specify it here
+		Length:  192,
+		Skip:    0,
+		Reverse: true,
+	}
+	return
+}
+
+func (hd *HeaderDownload) UpdateStats(req *HeaderRequest, skeleton bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if skeleton {
+		hd.stats.SkeletonRequests++
+		if hd.stats.SkeletonReqMinBlock == 0 || req.Number < hd.stats.SkeletonReqMinBlock {
+			hd.stats.SkeletonReqMinBlock = req.Number
+		}
+		if req.Number+req.Length*req.Skip > hd.stats.SkeletonReqMaxBlock {
+			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*req.Skip
+		}
+	} else {
+		hd.stats.Requests++
+		// We know that req is reverse request, with Skip == 0, therefore comparing Number with reqMax
+		if req.Number > hd.stats.ReqMaxBlock {
+			hd.stats.ReqMaxBlock = req.Number
+		}
+		if hd.stats.ReqMinBlock == 0 || req.Number < hd.stats.ReqMinBlock+req.Length {
+			if req.Number >= req.Length {
+				hd.stats.ReqMinBlock = req.Number - req.Length
+			}
+		}
+	}
+
+}
+
+func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime, timeout uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if req.Anchor.idx == -1 {
+		// Anchor has already been deleted
+		return
+	}
+	req.Anchor.timeouts++
+	req.Anchor.nextRetryTime = currentTime + timeout
+	heap.Fix(hd.anchorQueue, req.Anchor.idx)
 }
 
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeight, "highestInDb", hd.highestInDb)
-	if len(hd.anchors) > 16 {
-		return nil // Need to be below anchor threshold to produce skeleton request
-	}
+	log.Debug("Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
-	if hd.topSeenHeight < hd.highestInDb+stride {
-		return nil
-	}
-	length := (hd.topSeenHeight - hd.highestInDb) / stride
-	if length > 192 {
-		length = 192
-	}
-	return &HeaderRequest{Number: hd.highestInDb + stride, Length: length, Skip: stride, Reverse: false}
+	strideHeight := hd.highestInDb + stride
+	var length uint64 = 192
+	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
-// InsertHeaders attempts to insert headers into the database, verifying them first
-// It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf func(header *types.Header, blockHeight uint64) error, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
+	return hd.engine.VerifyHeader(hd.consensusHeaderReader, header, true /* seal */)
+}
+
+type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
+
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	var linksInFuture []*Link // Here we accumulate links that fail validation as "in the future"
-	for len(hd.insertList) > 0 {
-		// Make sure long insertions do not appear as a stuck stage 1
-		select {
-		case <-logChannel:
-			log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb)
-		default:
+	if hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
+		link := hd.insertQueue[0]
+		_, bad := hd.badHeaders[link.hash]
+		if !bad && !link.persisted {
+			_, bad = hd.badHeaders[link.header.ParentHash]
 		}
-		link := hd.insertList[len(hd.insertList)-1]
-		if link.blockHeight <= hd.preverifiedHeight && !link.preverified {
-			// Header should be preverified, but not yet, try again later
-			break
+		if bad {
+			// If the link or its parent is marked bad, throw it out
+			hd.moveLinkToQueue(link, NoQueue)
+			delete(hd.links, link.hash)
+			hd.removeUpwards(link)
+			return true, false, nil
 		}
-		hd.insertList = hd.insertList[:len(hd.insertList)-1]
-		skip := false
-		if !link.preverified {
-			if _, bad := hd.badHeaders[link.hash]; bad {
-				skip = true
-			} else if err := hd.engine.VerifyHeader(hd.headerReader, link.header, true /* seal */); err != nil {
-				log.Warn("Verification failed for header", "hash", link.header.Hash(), "height", link.blockHeight, "error", err)
+		if !link.verified {
+			if err := hd.VerifyHeader(link.header); err != nil {
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
-					linksInFuture = append(linksInFuture, link)
-					log.Warn("Added future link", "hash", link.header.Hash(), "height", link.blockHeight, "timestamp", link.header.Time)
-					continue // prevent removal of the link from the hd.linkQueue
+					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
+					return false, false, nil // prevent removal of the link from the hd.linkQueue
 				} else {
-					skip = true
-				}
-			} else {
-				if hd.seenAnnounces.Pop(link.hash) {
-					hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+					log.Debug("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
+					hd.moveLinkToQueue(link, NoQueue)
+					delete(hd.links, link.hash)
+					hd.removeUpwards(link)
+					return true, false, nil
 				}
 			}
 		}
-		if _, ok := hd.links[link.hash]; ok {
-			heap.Remove(hd.linkQueue, link.idx)
+		link.verified = true
+		// Make sure long insertions do not appear as a stuck stage 1
+		select {
+		case <-logChannel:
+			log.Info(fmt.Sprintf("[%s] Inserting headers", logPrefix), "progress", hd.highestInDb, "queue", hd.insertQueue.Len())
+		default:
 		}
-		if skip {
-			delete(hd.links, link.hash)
-			continue
+		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
+		if err != nil {
+			return false, false, err
 		}
-		if err := hf(link.header, link.blockHeight); err != nil {
-			return false, err
+		if td != nil {
+			if hd.seenAnnounces.Pop(link.hash) {
+				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
+			}
+			// Check if transition to proof-of-stake happened and stop forward syncing
+			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
+				hd.highestInDb = link.blockHeight
+				log.Info(POSPandaBanner)
+				return true, true, nil
+			}
 		}
+		if link.blockHeight == hd.latestMinedBlockNumber {
+			return false, true, nil
+		}
+
 		if link.blockHeight > hd.highestInDb {
+			if hd.trace {
+				log.Info("Highest in DB change", "number", link.blockHeight, "hash", link.hash)
+			}
 			hd.highestInDb = link.blockHeight
 		}
 		link.persisted = true
 		link.header = nil // Drop header reference to free memory, as we won't need it anymore
-		heap.Push(hd.persistedLinkQueue, link)
-		if len(link.next) > 0 {
-			hd.insertList = append(hd.insertList, link.next...)
+		link.headerRaw = nil
+		hd.moveLinkToQueue(link, PersistedQueueID)
+		for child := link.fChild; child != nil; child = child.next {
+			if !child.persisted {
+				hd.moveLinkToQueue(child, InsertQueueID)
+			}
 		}
 	}
 	for hd.persistedLinkQueue.Len() > hd.persistedLinkLimit {
-		link := heap.Pop(hd.persistedLinkQueue).(*Link)
+		link := heap.Pop(&hd.persistedLinkQueue).(*Link)
 		delete(hd.links, link.hash)
+		for child := link.fChild; child != nil; child, child.next = child.next, nil {
+		}
 	}
-	if len(linksInFuture) > 0 {
-		hd.insertList = append(hd.insertList, linksInFuture...)
-		linksInFuture = nil //nolint
+	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, false, nil
+}
+
+// InsertHeaders attempts to insert headers into the database, verifying them first
+// It returns true in the first return value if the system is "in sync"
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, error) {
+	var more bool = true
+	var err error
+	var force bool
+	for more {
+		if more, force, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+			return false, err
+		}
+		if force {
+			return true, nil
+		}
 	}
-	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeight > 0 && hd.highestInDb >= hd.topSeenHeight, nil
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
+}
+
+func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+
+	log.Trace("Set posAnchor", "blockHeight", height+1)
+	hd.posAnchor = &Anchor{
+		parentHash:  hash,
+		blockHeight: height + 1,
+	}
+}
+
+func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx kv.Getter, peerId [64]byte) ([]PenaltyItem, error) {
+	if len(csHeaders) == 0 {
+		return nil, nil
+	}
+	log.Trace("Collecting...", "from", csHeaders[0].Number, "to", csHeaders[len(csHeaders)-1].Number, "len", len(csHeaders))
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if hd.posAnchor == nil {
+		// May happen if peers are sending unrequested header packets after we've synced
+		log.Trace("posAnchor is nil")
+		return nil, nil
+	}
+	// We may have received answer from old request so not enough evidence for penalizing.
+	if hd.posAnchor.blockHeight != 1 && csHeaders[0].Number != hd.posAnchor.blockHeight-1 {
+		// hd.posAnchor.blockHeight == 1 is a special case when the height of the anchor is unknown (it is created from the fork choice message from beacon node)
+		log.Trace("posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+		return nil, nil
+	}
+
+	// Handle request after closing collectors
+	if hd.headersCollector == nil {
+		return nil, nil
+	}
+
+	for _, sh := range csHeaders {
+		header := sh.Header
+		headerHash := sh.Hash
+		if headerHash != hd.posAnchor.parentHash {
+			log.Warn("Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash)
+			return []PenaltyItem{{PeerID: peerId, Penalty: BadBlockPenalty}}, nil
+		}
+
+		headerNumber := header.Number.Uint64()
+		if err := hd.headersCollector.Collect(dbutils.HeaderKey(headerNumber, headerHash), sh.HeaderRaw); err != nil {
+			return nil, err
+		}
+
+		hh, err := hd.headerReader.Header(context.Background(), tx, header.ParentHash, headerNumber-1)
+		if err != nil {
+			return nil, err
+		}
+		if hh != nil {
+			log.Trace("Synced", "requestId", hd.requestId)
+			hd.posAnchor = nil
+			hd.posStatus = Synced
+			hd.BeaconRequestList.Interrupt(engineapi.Synced)
+			// Wake up stage loop if it is outside any of the stages
+			select {
+			case hd.DeliveryNotify <- struct{}{}:
+			default:
+			}
+			return nil, nil
+		}
+
+		hd.posAnchor = &Anchor{
+			parentHash:  header.ParentHash,
+			blockHeight: headerNumber,
+		}
+
+		if headerNumber <= 1 {
+			return nil, errors.New("wrong genesis in PoS sync")
+		}
+	}
+	return nil, nil
 }
 
 // GrabAnnounces - returns all available announces and forget them
@@ -646,7 +688,11 @@ func (hd *HeaderDownload) GrabAnnounces() []Announce {
 func (hd *HeaderDownload) Progress() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.highestInDb
+	if hd.posSync && hd.posAnchor != nil {
+		return hd.posAnchor.blockHeight - 1
+	} else {
+		return hd.highestInDb
+	}
 }
 
 func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
@@ -674,106 +720,123 @@ func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
 }
 
 // addHeaderAsLink wraps header into a link and adds it to either queue of persisted links or queue of non-persisted links
-func (hd *HeaderDownload) addHeaderAsLink(header *types.Header, persisted bool) *Link {
-	height := header.Number.Uint64()
-	linkHash := header.Hash()
+func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) *Link {
 	link := &Link{
-		blockHeight: height,
-		hash:        linkHash,
-		header:      header,
+		blockHeight: h.Number,
+		hash:        h.Hash,
+		header:      h.Header,
+		headerRaw:   h.HeaderRaw,
 		persisted:   persisted,
 	}
-	hd.links[linkHash] = link
 	if persisted {
-		heap.Push(hd.persistedLinkQueue, link)
+		link.linked = true
+		link.verified = true
+		link.header = nil // Drop header reference to free memory, as we won't need it anymore
+		link.headerRaw = nil
+	}
+	hd.links[h.Hash] = link
+	if persisted {
+		hd.moveLinkToQueue(link, PersistedQueueID)
 	} else {
-		heap.Push(hd.linkQueue, link)
+		hd.moveLinkToQueue(link, EntryQueueID)
 	}
 	return link
 }
 
-func (hi *HeaderInserter) FeedHeaderFunc(db kv.StatelessRwTx) func(header *types.Header, blockHeight uint64) error {
-	return func(header *types.Header, blockHeight uint64) error {
-		return hi.FeedHeader(db, header, blockHeight)
+func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader) FeedHeaderFunc {
+	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (*big.Int, error) {
+		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight)
 	}
-
 }
 
-func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, blockHeight uint64) error {
-	hash := header.Hash()
+// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
+// Most common case - forking point is the height of the parent header
+func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *types.Header) (forkingPoint uint64, err error) {
+	blockHeight := header.Number.Uint64()
+	var ch common.Hash
+	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
+		ch = fromCache.(common.Hash)
+	} else {
+		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
+			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
+		}
+	}
+	if ch == header.ParentHash {
+		forkingPoint = blockHeight - 1
+	} else {
+		// Going further back
+		ancestorHash := parent.ParentHash
+		ancestorHeight := blockHeight - 2
+		// Look in the cache first
+		for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
+			ch = fromCache.(common.Hash)
+			if ch == ancestorHash {
+				break
+			}
+			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
+			if err != nil {
+				return 0, err
+			}
+			ancestorHash = ancestor.ParentHash
+			ancestorHeight--
+		}
+		// Now look in the DB
+		for {
+			ch, err := hi.headerReader.CanonicalHash(context.Background(), db, ancestorHeight)
+			if err != nil {
+				return 0, fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
+			}
+			if ch == ancestorHash {
+				break
+			}
+			ancestor, err := hi.headerReader.Header(context.Background(), db, ancestorHash, ancestorHeight)
+			if err != nil {
+				return 0, err
+			}
+			ancestorHash = ancestor.ParentHash
+			ancestorHeight--
+		}
+		// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
+		forkingPoint = ancestorHeight
+	}
+	return
+}
+
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
-		return nil
+		return nil, nil
 	}
-	if blockHeight < hi.prevHeight {
-		return fmt.Errorf("[%s] headers are unexpectedly unsorted, got %d after %d", hi.logPrefix, blockHeight, hi.prevHeight)
+	oldH, err := headerReader.Header(context.Background(), db, hash, blockHeight)
+	if err != nil {
+		return nil, err
 	}
-	if oldH := rawdb.ReadHeader(db, hash, blockHeight); oldH != nil {
+	if oldH != nil {
 		// Already inserted, skip
-		return nil
+		return nil, nil
 	}
 	// Load parent header
-	parent := rawdb.ReadHeader(db, header.ParentHash, blockHeight-1)
+	parent, err := headerReader.Header(context.Background(), db, header.ParentHash, blockHeight-1)
+	if err != nil {
+		return nil, err
+	}
 	if parent == nil {
-		log.Warn(fmt.Sprintf("Could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight))
-		// Skip headers without parents
-		return nil
+		// Fail on headers without parent
+		return nil, fmt.Errorf("could not find parent with hash %x and height %d for header %x %d", header.ParentHash, blockHeight-1, hash, blockHeight)
 	}
 	// Parent's total difficulty
 	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
 	if err != nil || parentTd == nil {
-		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+		return nil, fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
 	}
 	// Calculate total difficulty of this header using parent's total difficulty
-	td := new(big.Int).Add(parentTd, header.Difficulty)
+	td = new(big.Int).Add(parentTd, header.Difficulty)
 	// Now we can decide wether this header will create a change in the canonical head
 	if td.Cmp(hi.localTd) > 0 {
 		hi.newCanonical = true
-		// Find the forking point - i.e. the latest header on the canonical chain which is an ancestor of this one
-		// Most common case - forking point is the height of the parent header
-		var forkingPoint uint64
-		var ch common.Hash
-		var err error
-		if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
-			ch = fromCache.(common.Hash)
-		} else {
-			if ch, err = rawdb.ReadCanonicalHash(db, blockHeight-1); err != nil {
-				return fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
-			}
-		}
-		if ch == header.ParentHash {
-			forkingPoint = blockHeight - 1
-		} else {
-			// Going further back
-			ancestorHash := parent.ParentHash
-			ancestorHeight := blockHeight - 2
-			// Look in the cache first
-			for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
-				ch = fromCache.(common.Hash)
-				if ch == ancestorHash {
-					break
-				}
-				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
-				ancestorHash = ancestor.ParentHash
-				ancestorHeight--
-			}
-			// Now look in the DB
-			for ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight); err == nil && ch != ancestorHash; ch, err = rawdb.ReadCanonicalHash(db, ancestorHeight) {
-				ancestor := rawdb.ReadHeader(db, ancestorHash, ancestorHeight)
-				ancestorHash = ancestor.ParentHash
-				ancestorHeight--
-			}
-			if err != nil {
-				return fmt.Errorf("[%s] reading canonical hash for %d: %w", hi.logPrefix, ancestorHeight, err)
-			}
-			// Loop above terminates when either err != nil (handled already) or ch == ancestorHash, therefore ancestorHeight is our forking point
-			forkingPoint = ancestorHeight
-		}
-		if err = rawdb.WriteHeadHeaderHash(db, hash); err != nil {
-			return fmt.Errorf("[%s] marking head header hash as %x: %w", hi.logPrefix, hash, err)
-		}
-		if err = stages.SaveStageProgress(db, stages.Headers, blockHeight); err != nil {
-			return fmt.Errorf("[%s] saving Headers progress: %w", hi.logPrefix, err)
+		forkingPoint, err := hi.ForkingPoint(db, header, parent)
+		if err != nil {
+			return nil, err
 		}
 		hi.highest = blockHeight
 		hi.highestHash = hash
@@ -784,20 +847,40 @@ func (hi *HeaderInserter) FeedHeader(db kv.StatelessRwTx, header *types.Header, 
 			hi.unwindPoint = forkingPoint
 			hi.unwind = true
 		}
-		// This makes sure we end up chosing the chain with the max total difficulty
+		// This makes sure we end up choosing the chain with the max total difficulty
 		hi.localTd.Set(td)
 	}
-	data, err2 := rlp.EncodeToBytes(header)
-	if err2 != nil {
-		return fmt.Errorf("[%s] failed to RLP encode header: %w", hi.logPrefix, err2)
+	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
+		return nil, fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
+
+	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), headerRaw); err != nil {
+		return nil, fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
+	}
+
+	hi.prevHash = hash
+	return td, nil
+}
+
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
+	blockHeight := header.Number.Uint64()
+	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
+
+	parentTd, err := rawdb.ReadTd(db, header.ParentHash, blockHeight-1)
+	if err != nil || parentTd == nil {
+		return fmt.Errorf("[%s] parent's total difficulty not found with hash %x and height %d for header %x %d: %v", hi.logPrefix, header.ParentHash, blockHeight-1, hash, blockHeight, err)
+	}
+	td := new(big.Int).Add(parentTd, header.Difficulty)
 	if err = rawdb.WriteTd(db, hash, blockHeight, td); err != nil {
 		return fmt.Errorf("[%s] failed to WriteTd: %w", hi.logPrefix, err)
 	}
-	if err = db.Put(kv.Headers, dbutils.HeaderKey(blockHeight, hash), data); err != nil {
-		return fmt.Errorf("[%s] failed to store header: %w", hi.logPrefix, err)
-	}
-	hi.prevHash = hash
+
+	rawdb.WriteHeader(db, header)
+
+	hi.highest = blockHeight
+	hi.highestHash = hash
+	hi.highestTimestamp = header.Time
+
 	return nil
 }
 
@@ -825,118 +908,129 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 	return hi.newCanonical
 }
 
-// ProcessSegment - handling single segment.
-// If segment were processed by extendDown or newAnchor method, then it returns `requestMore=true`
-// it allows higher-level algo immediately request more headers without waiting all stages precessing,
-// speeds up visibility of new blocks
-// It remember peerID - then later - if anchors created from segments will abandoned - this peerID gonna get Penalty
-func (hd *HeaderDownload) ProcessSegment(segment *ChainSegment, newBlock bool, peerID string) (requestMore bool, penalties []PenaltyItem) {
-	log.Debug("processSegment", "from", segment.Headers[0].Number.Uint64(), "to", segment.Headers[len(segment.Headers)-1].Number.Uint64())
+func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	foundAnchor, start := hd.findAnchors(segment)
-	foundTip, end := hd.findLink(segment, start) // We ignore penalty because we will check it as part of PoW check
-	if end == 0 {
-		log.Debug("Duplicate segment")
-		return
+	if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
+		hd.topSeenHeightPoW = sh.Number
 	}
-	height := segment.Headers[len(segment.Headers)-1].Number.Uint64()
-	hash := segment.Headers[len(segment.Headers)-1].Hash()
-	if newBlock || hd.seenAnnounces.Seen(hash) {
-		if height > hd.topSeenHeight {
-			hd.topSeenHeight = height
+	if sh.Number > hd.stats.RespMaxBlock {
+		hd.stats.RespMaxBlock = sh.Number
+	}
+	if hd.stats.RespMinBlock == 0 || sh.Number < hd.stats.RespMinBlock {
+		hd.stats.RespMinBlock = sh.Number
+	}
+	if _, ok := hd.links[sh.Hash]; ok {
+		hd.stats.Duplicates++
+		// Duplicate
+		return false
+	}
+	parent, foundParent := hd.links[sh.Header.ParentHash]
+	anchor, foundAnchor := hd.anchors[sh.Hash]
+	//fmt.Printf("sh = %d %x, foundParent=%t, foundAnchor=%t\n", sh.Number, sh.Hash, foundParent, foundAnchor)
+	if !foundParent && !foundAnchor {
+		if sh.Number < hd.highestInDb {
+			log.Debug(fmt.Sprintf("new anchor too far in the past: %d, latest header in db: %d", sh.Number, hd.highestInDb))
+			return false
+		}
+		if len(hd.anchors) >= hd.anchorLimit {
+			log.Debug(fmt.Sprintf("too many anchors: %d, limit %d", len(hd.anchors), hd.anchorLimit))
+			return false
 		}
 	}
-	startNum := segment.Headers[start].Number.Uint64()
-	endNum := segment.Headers[end-1].Number.Uint64()
-	// There are 4 cases
+	link := hd.addHeaderAsLink(sh, false /* persisted */)
 	if foundAnchor {
-		if foundTip {
-			// Connect
-			var err error
-			if penalties, err = hd.connect(segment, start, end); err != nil {
-				log.Debug("Connect failed", "error", err)
-				return
-			}
-			log.Debug("Connected", "start", startNum, "end", endNum)
-		} else {
-			// ExtendDown
-			var err error
-			if requestMore, err = hd.extendDown(segment, start, end); err != nil {
-				log.Debug("ExtendDown failed", "error", err)
-				return
-			}
-			log.Debug("Extended Down", "start", startNum, "end", endNum)
-		}
-	} else if foundTip {
-		if end > 0 {
-			// ExtendUp
-			if err := hd.extendUp(segment, start, end); err != nil {
-				log.Debug("ExtendUp failed", "error", err)
-				return
-			}
-			log.Debug("Extended Up", "start", startNum, "end", endNum)
+		link.fChild = anchor.fLink
+		hd.removeAnchor(anchor)
+		//fmt.Printf("removed anchor %d %x\n", anchor.blockHeight, anchor.parentHash)
+	}
+	if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
+		link.next = parentAnchor.fLink
+		parentAnchor.fLink = link
+	}
+	if foundParent {
+		//fmt.Printf("sh = %d %x, found parent\n", sh.Number, sh.Hash)
+		link.next = parent.fChild
+		parent.fChild = link
+		if parent.persisted {
+			link.linked = true
+			hd.moveLinkToQueue(link, InsertQueueID)
 		}
 	} else {
-		// NewAnchor
-		var err error
-		if requestMore, err = hd.newAnchor(segment, start, end, peerID); err != nil {
-			log.Debug("NewAnchor failed", "error", err)
-			return
+		if sh.Number+params.FullImmutabilityThreshold < hd.highestInDb {
+			log.Debug("Remove upwards", "height", link.blockHeight, "hash", link.blockHeight)
+			hd.removeUpwards(link)
+			return false
 		}
-		log.Debug("NewAnchor", "start", startNum, "end", endNum)
+		//fmt.Printf("sh = %d %x, nof found parent or anchor\n", sh.Number, sh.Hash)
+		// See if it links existing anchor
+		anchor = &Anchor{
+			parentHash:    sh.Header.ParentHash,
+			nextRetryTime: 0, // Will ensure this anchor will be top priority
+			peerID:        peerID,
+			blockHeight:   sh.Number,
+		}
+		anchor.fLink = link
+		hd.anchors[anchor.parentHash] = anchor
+		heap.Push(hd.anchorQueue, anchor)
+		return true
 	}
-	//log.Info(hd.anchorState())
-	log.Debug("Link queue", "size", hd.linkQueue.Len())
+	return false
+}
+
+func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
+	requestMore := false
+	for _, sh := range csHeaders {
+		// Lock is acquired for every invocation of ProcessHeader
+		if hd.ProcessHeader(sh, newBlock, peerID) {
+			requestMore = true
+		}
+	}
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.stats.Responses++
+	log.Trace("Link queue", "size", hd.linkQueue.Len())
 	if hd.linkQueue.Len() > hd.linkLimit {
-		log.Debug("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", end-start, "limit", hd.linkLimit)
+		log.Trace("Too many links, cutting down", "count", hd.linkQueue.Len(), "tried to add", len(csHeaders), "limit", hd.linkLimit)
+		hd.pruneLinkQueue()
 	}
-	for hd.linkQueue.Len() > hd.linkLimit {
-		link := heap.Pop(hd.linkQueue).(*Link)
-		delete(hd.links, link.hash)
-		if parentLink, ok := hd.links[link.header.ParentHash]; ok {
-			for i, n := range parentLink.next {
-				if n == link {
-					if i == len(parentLink.next)-1 {
-						parentLink.next = parentLink.next[:i]
-					} else {
-						parentLink.next = append(parentLink.next[:i], parentLink.next[i+1:]...)
-					}
-					break
-				}
-			}
-		}
-		if anchor, ok := hd.anchors[link.header.ParentHash]; ok {
-			for i, n := range anchor.links {
-				if n == link {
-					if i == len(anchor.links)-1 {
-						anchor.links = anchor.links[:i]
-					} else {
-						anchor.links = append(anchor.links[:i], anchor.links[i+1:]...)
-					}
-					break
-				}
-			}
-		}
-	}
+	// Wake up stage loop if it is outside any of the stages
 	select {
 	case hd.DeliveryNotify <- struct{}{}:
 	default:
 	}
 
-	return hd.requestChaining && requestMore, penalties
+	return hd.requestChaining && requestMore
+}
+
+func (hd *HeaderDownload) ExtractStats() Stats {
+	s := hd.stats
+	hd.stats = Stats{}
+	return s
 }
 
 func (hd *HeaderDownload) TopSeenHeight() uint64 {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.topSeenHeight
+	if hd.topSeenHeightPoW > hd.topSeenHeightPoS {
+		return hd.topSeenHeightPoW
+	} else {
+		return hd.topSeenHeightPoS
+	}
+}
+
+func (hd *HeaderDownload) UpdateTopSeenHeightPoS(blockHeight uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	if blockHeight > hd.topSeenHeightPoS {
+		hd.topSeenHeightPoS = blockHeight
+	}
 }
 
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.headerReader = headerReader
+	hd.consensusHeaderReader = headerReader
 }
 
 func (hd *HeaderDownload) EnableRequestChaining() {
@@ -945,10 +1039,46 @@ func (hd *HeaderDownload) EnableRequestChaining() {
 	hd.requestChaining = true
 }
 
-func (hd *HeaderDownload) SetFetching(fetching bool) {
+func (hd *HeaderDownload) SetFetchingNew(fetching bool) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.fetching = fetching
+	hd.fetchingNew = fetching
+}
+
+func (hd *HeaderDownload) SetPosStatus(status SyncStatus) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posStatus = status
+}
+
+func (hd *HeaderDownload) HeadersCollector() *etl.Collector {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.headersCollector
+}
+
+func (hd *HeaderDownload) SetHeadersCollector(collector *etl.Collector) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.headersCollector = collector
+}
+
+func (hd *HeaderDownload) SetPOSSync(posSync bool) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.posSync = posSync
+}
+
+func (hd *HeaderDownload) POSSync() bool {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.posSync
+}
+
+func (hd *HeaderDownload) PosStatus() SyncStatus {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.posStatus
 }
 
 func (hd *HeaderDownload) RequestChaining() bool {
@@ -957,10 +1087,195 @@ func (hd *HeaderDownload) RequestChaining() bool {
 	return hd.requestChaining
 }
 
-func (hd *HeaderDownload) Fetching() bool {
+func (hd *HeaderDownload) FetchingNew() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.fetching
+	return hd.fetchingNew
+}
+
+func (hd *HeaderDownload) GetPendingPayloadStatus() common.Hash {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.pendingPayloadStatus
+}
+
+func (hd *HeaderDownload) SetPendingPayloadStatus(header common.Hash) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadStatus = header
+}
+
+func (hd *HeaderDownload) ClearPendingPayloadStatus() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.pendingPayloadStatus = common.Hash{}
+}
+
+func (hd *HeaderDownload) GetUnsettledForkChoice() (*engineapi.ForkChoiceMessage, uint64) {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.unsettledForkChoice, hd.unsettledHeadHeight
+}
+
+func (hd *HeaderDownload) SetUnsettledForkChoice(forkChoice *engineapi.ForkChoiceMessage, headHeight uint64) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.unsettledForkChoice = forkChoice
+	hd.unsettledHeadHeight = headHeight
+}
+
+func (hd *HeaderDownload) ClearUnsettledForkChoice() {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.unsettledForkChoice = nil
+	hd.unsettledHeadHeight = 0
+}
+
+func (hd *HeaderDownload) RequestId() int {
+	hd.lock.RLock()
+	defer hd.lock.RUnlock()
+	return hd.requestId
+}
+
+func (hd *HeaderDownload) SetRequestId(requestId int) {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	hd.requestId = requestId
+}
+
+func (hd *HeaderDownload) AddMinedHeader(header *types.Header) error {
+	buf := bytes.NewBuffer(nil)
+	if err := header.EncodeRLP(buf); err != nil {
+		return err
+	}
+	segments, _, err := hd.SingleHeaderAsSegment(buf.Bytes(), header, false /* penalizePoSBlocks */)
+	if err != nil {
+		return err
+	}
+
+	peerID := [64]byte{'m', 'i', 'n', 'e', 'r'} // "miner"
+
+	_ = hd.ProcessHeaders(segments, false /* newBlock */, peerID)
+	hd.latestMinedBlockNumber = header.Number.Uint64()
+	return nil
+}
+
+func (hd *HeaderDownload) AddHeadersFromSnapshot(tx kv.Tx, n uint64, r services.FullBlockReader) error {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	for i := n; i > 0 && hd.persistedLinkQueue.Len() < hd.persistedLinkLimit; i-- {
+		header, err := r.HeaderByNumber(context.Background(), tx, i)
+		if err != nil {
+			return err
+		}
+		if header == nil {
+			continue
+		}
+		v, err := rlp.EncodeToBytes(header)
+		if err != nil {
+			return err
+		}
+		h := ChainSegmentHeader{
+			HeaderRaw: v,
+			Header:    header,
+			Hash:      header.Hash(),
+			Number:    header.Number.Uint64(),
+		}
+		link := hd.addHeaderAsLink(h, true /* persisted */)
+		link.verified = true
+	}
+	if hd.highestInDb < n {
+		hd.highestInDb = n
+	}
+	if hd.preverifiedHeight < n {
+		hd.preverifiedHeight = n
+	}
+
+	return nil
+}
+
+const (
+	logInterval = 30 * time.Second
+)
+
+func (hd *HeaderDownload) cleanUpPoSDownload() {
+	if hd.headersCollector != nil {
+		hd.headersCollector.Close()
+		hd.headersCollector = nil
+	}
+	hd.posStatus = Idle
+}
+
+func (hd *HeaderDownload) StartPoSDownloader(
+	ctx context.Context,
+	headerReqSend func(context.Context, *HeaderRequest) ([64]byte, bool),
+	penalize func(context.Context, []PenaltyItem),
+) {
+	go func() {
+		prevProgress := uint64(0)
+
+		logEvery := time.NewTicker(logInterval)
+		defer logEvery.Stop()
+
+		for {
+			var req *HeaderRequest
+			var penalties []PenaltyItem
+			var currentTime uint64
+
+			hd.lock.Lock()
+			if hd.posStatus == Syncing {
+				currentTime = uint64(time.Now().Unix())
+				var timeout bool
+				timeout, req, penalties = hd.requestMoreHeadersForPOS(currentTime)
+				if timeout {
+					log.Warn("Timeout", "requestId", hd.requestId)
+					hd.BeaconRequestList.Remove(hd.requestId)
+					hd.cleanUpPoSDownload()
+				}
+			} else {
+				prevProgress = 0
+			}
+			hd.lock.Unlock()
+
+			if req != nil {
+				_, sentToPeer := headerReqSend(ctx, req)
+				if sentToPeer {
+					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
+					hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+					log.Trace("Sent request", "height", req.Number)
+				}
+			}
+			if len(penalties) > 0 {
+				penalize(ctx, penalties)
+			}
+
+			// Sleep and check for logs
+			timer := time.NewTimer(2 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				hd.lock.Lock()
+				hd.cleanUpPoSDownload()
+				hd.lock.Unlock()
+				hd.BeaconRequestList.Interrupt(engineapi.Stopping)
+				return
+			case <-logEvery.C:
+				if hd.PosStatus() == Syncing {
+					progress := hd.Progress()
+					if prevProgress == 0 {
+						prevProgress = progress
+					} else if progress <= prevProgress {
+						diff := prevProgress - progress
+						log.Info("Downloaded PoS Headers", "now", progress,
+							"blk/sec", float64(diff)/float64(logInterval/time.Second))
+						prevProgress = progress
+					}
+				}
+			case <-timer.C:
+			}
+			// Cleanup timer
+			timer.Stop()
+		}
+	}()
 }
 
 func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
@@ -997,7 +1312,8 @@ func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
 			return nil, fmt.Errorf("parsing hard coded header on %d: %w", i, err)
 		}
 
-		hardTips[h.Hash()] = HeaderRecord{Raw: b, Header: &h}
+		headerHash := types.RawRlpHash(res)
+		hardTips[headerHash] = HeaderRecord{Raw: b, Header: &h}
 
 		buf.Reset()
 	}

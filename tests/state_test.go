@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+
 package tests
 
 import (
@@ -27,30 +29,22 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestState(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win, need generally improve speed of this tests
 	}
 	t.Parallel()
 
 	st := new(testMatcher)
-	// Long tests:
-	st.slow(`^stAttackTest/ContractCreationSpam`)
-	st.slow(`^stBadOpcode/badOpcodes`)
-	st.slow(`^stPreCompiledContracts/modexp`)
-	st.slow(`^stQuadraticComplexityTest/`)
-	st.slow(`^stStaticCall/static_Call50000`)
-	st.slow(`^stStaticCall/static_Return50000`)
-	st.slow(`^stSystemOperationsTest/CallRecursiveBomb`)
-	st.slow(`^stTransactionTest/Opcodes_TransactionInit`)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
-
-	// Uses 1GB RAM per tested fork
-	st.skipLoad(`^stStaticCall/static_Call1MB`)
+	st.skipLoad(`.*vmPerformance/loop.*`)
 
 	// Broken tests:
 	st.skipLoad(`^stCreate2/create2collisionStorage.json`)
@@ -58,50 +52,40 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stSStoreTest/InitCollision.json`)
 	st.skipLoad(`^stEIP1559/typeTwoBerlin.json`)
 
-	// Expected failures:
-	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium/0`, "bug in test")
-	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium/3`, "bug in test")
-	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople/0`, "bug in test")
-	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople/3`, "bug in test")
-	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/0`, "bug in test")
-	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/3`, "bug in test")
+	// value exceeding 256 bit is not supported
+	st.skipLoad(`^stTransactionTest/ValueOverflow.json`)
 
-	// For Istanbul, older tests were moved into LegacyTests
-	for _, dir := range []string{
-		stateTestDir,
-		legacyStateTestDir,
-	} {
-		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
-			db := memdb.NewTestDB(t)
-			for _, subtest := range test.Subtests() {
-				subtest := subtest
-				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-				t.Run(key, func(t *testing.T) {
-					withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-						config, ok := Forks[subtest.Fork]
-						if !ok {
-							return UnsupportedForkError{subtest.Fork}
-						}
-						rules := config.Rules(1)
-						tx, err := db.BeginRw(context.Background())
-						if err != nil {
-							t.Fatal(err)
-						}
-						defer tx.Rollback()
-						_, err = test.Run(rules, tx, subtest, vmconfig)
-						tx.Rollback()
-						return st.checkFailure(t, err)
-					})
+	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
+		db := memdb.NewTestDB(t)
+		for _, subtest := range test.Subtests() {
+			subtest := subtest
+			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
+			t.Run(key, func(t *testing.T) {
+				withTrace(t, func(vmconfig vm.Config) error {
+					config, ok := Forks[subtest.Fork]
+					if !ok {
+						return UnsupportedForkError{subtest.Fork}
+					}
+					rules := config.Rules(1)
+					tx, err := db.BeginRw(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					_, err = test.Run(rules, tx, subtest, vmconfig)
+					tx.Rollback()
+					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
+						// Ignore expected errors
+						return nil
+					}
+					return st.checkFailure(t, err)
 				})
-			}
-		})
-	}
+			})
+		}
+	})
 }
 
-// Transactions with gasLimit above this value will not get a VM trace on failure.
-const traceErrorLimit = 400000
-
-func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
+func withTrace(t *testing.T, test func(vm.Config) error) {
 	// Use config from command line arguments.
 	config := vm.Config{}
 	err := test(config)
@@ -111,10 +95,6 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 
 	// Test failed, re-run with tracing enabled.
 	t.Error(err)
-	if gasLimit > traceErrorLimit {
-		t.Log("gas limit too high for EVM trace")
-		return
-	}
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
 	tracer := vm.NewJSONLogger(&vm.LogConfig{DisableMemory: true}, w)

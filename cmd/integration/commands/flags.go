@@ -11,7 +11,6 @@ import (
 var (
 	chaindata                      string
 	databaseVerbosity              int
-	snapshotMode, snapshotDir      string
 	referenceChaindata             string
 	block, pruneTo, unwind         uint64
 	unwindEvery                    uint64
@@ -22,11 +21,15 @@ var (
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
+	HeimdallURL                    string
 	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
+	pruneHBefore, pruneRBefore     uint64
+	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+	snapshotsBool                  bool
 )
 
 func must(err error) {
@@ -38,8 +41,7 @@ func must(err error) {
 func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")
-	cmd.Flags().Uint64("miner.gastarget", ethconfig.Defaults.Miner.GasFloor, "Target gas floor for mined blocks")
-	cmd.Flags().Uint64("miner.gaslimit", ethconfig.Defaults.Miner.GasCeil, "Target gas ceiling for mined blocks")
+	cmd.Flags().Uint64("miner.gaslimit", ethconfig.Defaults.Miner.GasLimit, "Target gas limit for mined blocks")
 	cmd.Flags().Int64("miner.gasprice", ethconfig.Defaults.Miner.GasPrice.Int64(), "Target gas price for mined blocks")
 	cmd.Flags().String("miner.etherbase", "0", "Public address for block mining rewards (default = first account")
 	cmd.Flags().String("miner.extradata", "", "Block extra data set by the miner (default = client version)")
@@ -87,25 +89,23 @@ func withBucket(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&bucket, "bucket", "", "reset given stage")
 }
 
-func withDatadir2(cmd *cobra.Command) {
-	cmd.Flags().String(utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+func withDataDir2(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
+	cmd.Flags().BoolVar(&snapshotsBool, "snapshots", true, utils.SnapshotFlag.Usage)
 }
 
-func withDatadir(cmd *cobra.Command) {
+func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
 
-	cmd.Flags().StringVar(&snapshotMode, "snapshot.mode", "", "set of snapshots to use")
-	cmd.Flags().StringVar(&snapshotDir, "snapshot.dir", "", "snapshot dir")
-	must(cmd.MarkFlagDirname("snapshot.dir"))
-
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning")
+	cmd.Flags().BoolVar(&snapshotsBool, "snapshots", true, utils.SnapshotFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -113,7 +113,7 @@ func withBatchSize(cmd *cobra.Command) {
 }
 
 func withIntegrityChecks(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", true, "enable slow data-integrity checks")
+	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
 	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
 }
 
@@ -127,4 +127,8 @@ func withTxTrace(cmd *cobra.Command) {
 
 func withChain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, ropsten, etc.)")
+}
+
+func withHeimdall(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
 }

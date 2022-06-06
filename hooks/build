@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# This is needed to pass build ARGs to Dockerfile.
+# see https://docs.docker.com/docker-hub/builds/advanced/
+
+DOCKER_FLAGS="-t $IMAGE_NAME" \
+GIT_TAG=$(git describe --tags '--match=v*' --dirty) \
+    make docker

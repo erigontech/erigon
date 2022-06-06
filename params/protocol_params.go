@@ -18,14 +18,17 @@ package params
 
 import "math/big"
 
+// GasLimitBoundDivisor it can be changed by BSC
+var (
+	GasLimitBoundDivisor uint64 = 1024 // The bound divisor of the gas limit, used in update calculations.
+)
+
 const (
-	GasLimitBoundDivisor uint64 = 1024    // The bound divisor of the gas limit, used in update calculations.
-	MinGasLimit          uint64 = 5000    // Minimum the gas limit may ever be.
-	GenesisGasLimit      uint64 = 4712388 // Gas limit of the Genesis block.
+	MinGasLimit     uint64 = 5000               // Minimum the gas limit may ever be.
+	MaxGasLimit     uint64 = 0x7fffffffffffffff // Maximum the gas limit may ever be.
+	GenesisGasLimit uint64 = 4712388            // Gas limit of the Genesis block.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
-	ExpByteGas            uint64 = 10    // Times ceil(log256(exponent)) for the EXP instruction.
-	SloadGas              uint64 = 50    // Multiplied by the number of 32-byte words that are copied (round up) for any *COPY operation and added.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.
 	CallNewAccountGas     uint64 = 25000 // Paid for CALL when the destination address didn't exist prior.
 	TxGas                 uint64 = 21000 // Per transaction not creating a contract. NOTE: Not payable on data of calls between transactions.
@@ -90,7 +93,7 @@ const (
 
 	// These have been changed during the course of the chain
 	CallGasFrontier              uint64 = 40  // Once per CALL operation & message call transaction.
-	CallGasEIP150                uint64 = 700 // Static portion of gas for CALL-derivates after EIP 150 (Tangerine)
+	CallGasEIP150                uint64 = 700 // Static portion of gas for CALL-derivatives after EIP 150 (Tangerine)
 	BalanceGasFrontier           uint64 = 20  // The cost of a BALANCE operation
 	BalanceGasEIP150             uint64 = 400 // The cost of a BALANCE operation after Tangerine
 	BalanceGasEIP1884            uint64 = 700 // The cost of a BALANCE operation after EIP 1884 (part of Istanbul)
@@ -106,7 +109,7 @@ const (
 
 	// EXP has a dynamic portion depending on the size of the exponent
 	ExpByteFrontier uint64 = 10 // was set to 10 in Frontier
-	ExpByteEIP158   uint64 = 50 // was raised to 50 during Eip158 (Spurious Dragon)
+	ExpByteEIP160   uint64 = 50 // was raised to 50 during EIP 160 (Spurious Dragon)
 
 	// Extcodecopy has a dynamic AND a static cost. This represents only the
 	// static portion of the gas. It was changed during EIP 150 (Tangerine)
@@ -125,6 +128,9 @@ const (
 	MaxCodeSize = 24576 // Maximum bytecode to permit for a contract
 
 	// Precompiled contract gas prices
+
+	TendermintHeaderValidateGas uint64 = 3000 // Gas for validate tendermiint consensus state
+	IAVLMerkleProofValidateGas  uint64 = 3000 // Gas for validate merkle proof
 
 	EcrecoverGas        uint64 = 3000 // Elliptic curve sender recovery gas price
 	Sha256BaseGas       uint64 = 60   // Base price for a SHA256 operation
@@ -167,3 +173,7 @@ var (
 	MinimumDifficulty      = big.NewInt(131072) // The minimum that the difficulty may ever be.
 	DurationLimit          = big.NewInt(13)     // The decision boundary on the blocktime duration used to determine whether difficulty should go up or not.
 )
+
+func ApplyBinanceSmartChainParams() {
+	GasLimitBoundDivisor = 256
+}

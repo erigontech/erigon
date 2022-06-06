@@ -2,13 +2,15 @@ package commands
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"text/tabwriter"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -20,7 +22,7 @@ var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common.RootContext()
 		logger := log.New()
 		db := openDB(chaindata, logger, true)
 		defer db.Close()
@@ -36,7 +38,7 @@ var cmdResetState = &cobra.Command{
 }
 
 func init() {
-	withDatadir(cmdResetState)
+	withDataDir(cmdResetState)
 	withChain(cmdResetState)
 
 	rootCmd.AddCommand(cmdResetState)
@@ -65,14 +67,11 @@ func resetState(db kv.RwDB, logger log.Logger, ctx context.Context) error {
 	if err := db.Update(ctx, resetTxLookup); err != nil {
 		return err
 	}
-	if err := db.Update(ctx, resetTxPool); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, resetFinish); err != nil {
 		return err
 	}
 
-	genesis, _ := byChain()
+	genesis, _ := byChain(chain)
 	if err := db.Update(ctx, func(tx kv.RwTx) error { return resetExec(tx, genesis) }); err != nil {
 		return err
 	}
@@ -141,6 +140,9 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 	if err := tx.ClearBucket(kv.PendingEpoch); err != nil {
 		return err
 	}
+	if err := tx.ClearBucket(kv.BorReceipts); err != nil {
+		return err
+	}
 	if err := stages.SaveStageProgress(tx, stages.Execution, 0); err != nil {
 		return err
 	}
@@ -148,8 +150,7 @@ func resetExec(tx kv.RwTx, g *core.Genesis) error {
 		return err
 	}
 
-	_, _, err := core.OverrideGenesisBlock(tx, g)
-	if err != nil {
+	if _, _, err := g.WriteGenesisState(tx); err != nil {
 		return err
 	}
 	return nil
@@ -223,16 +224,6 @@ func resetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
-func resetTxPool(tx kv.RwTx) error {
-	if err := stages.SaveStageProgress(tx, stages.TxPool, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.TxPool, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
 func resetFinish(tx kv.RwTx) error {
 	if err := stages.SaveStageProgress(tx, stages.Finish, 0); err != nil {
 		return err
@@ -243,7 +234,7 @@ func resetFinish(tx kv.RwTx) error {
 	return nil
 }
 
-func printStages(db kv.Getter) error {
+func printStages(db kv.Tx) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -267,5 +258,37 @@ func printStages(db kv.Getter) error {
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
+
+	s1, err := db.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	s2, err := db.ReadSequence(kv.NonCanonicalTxs)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
+
+	{
+		firstNonGenesis, err := rawdb.SecondKey(db, kv.Headers)
+		if err != nil {
+			return err
+		}
+		if firstNonGenesis != nil {
+			fmt.Fprintf(w, "first header in db: %d\n", binary.BigEndian.Uint64(firstNonGenesis))
+		} else {
+			fmt.Fprintf(w, "no headers in db\n")
+		}
+		firstNonGenesis, err = rawdb.SecondKey(db, kv.BlockBody)
+		if err != nil {
+			return err
+		}
+		if firstNonGenesis != nil {
+			fmt.Fprintf(w, "first body in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
+		} else {
+			fmt.Fprintf(w, "no bodies in db\n\n")
+		}
+	}
+
 	return nil
 }

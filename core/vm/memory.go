@@ -76,7 +76,7 @@ func (m *Memory) GetCopy(offset, size uint64) (cpy []byte) {
 
 	if uint64(len(m.store)) > offset {
 		cpy = make([]byte, size)
-		copy(cpy, m.store[offset:offset+size])
+		copy(cpy, m.store[offset:])
 
 		return
 	}

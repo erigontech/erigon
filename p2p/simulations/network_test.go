@@ -118,7 +118,7 @@ OUTER:
 				checkIds[ev.Conn.One] = append(checkIds[ev.Conn.One], ev.Conn.Other)
 				checkIds[ev.Conn.Other] = append(checkIds[ev.Conn.Other], ev.Conn.One)
 				connEventCount--
-				log.Debug("ev", "count", connEventCount)
+				log.Trace("ev", "count", connEventCount)
 				if connEventCount == 0 {
 					break OUTER
 				}
@@ -135,7 +135,7 @@ OUTER:
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Debug("snapshot taken", "nodes", len(snap.Nodes), "conns", len(snap.Conns), "json", string(j))
+	log.Trace("snapshot taken", "nodes", len(snap.Nodes), "conns", len(snap.Conns), "json", string(j))
 
 	// verify that the snap element numbers check out
 	if len(checkIds) != len(snap.Conns) || len(checkIds) != len(snap.Nodes) {
@@ -214,11 +214,11 @@ OuterTwo:
 				if !ev.Conn.Up {
 					t.Fatalf("unexpected disconnect: %v -> %v", ev.Conn.One, ev.Conn.Other)
 				}
-				log.Debug("conn", "on", ev.Conn.One, "other", ev.Conn.Other)
+				log.Trace("conn", "on", ev.Conn.One, "other", ev.Conn.Other)
 				checkIds[ev.Conn.One] = append(checkIds[ev.Conn.One], ev.Conn.Other)
 				checkIds[ev.Conn.Other] = append(checkIds[ev.Conn.Other], ev.Conn.One)
 				connEventCount--
-				log.Debug("ev", "count", connEventCount)
+				log.Trace("ev", "count", connEventCount)
 				if connEventCount == 0 {
 					break OuterTwo
 				}
@@ -473,7 +473,7 @@ func TestGetNodeIDs(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID())
 		}
 	}
 
@@ -484,7 +484,7 @@ func TestGetNodeIDs(t *testing.T) {
 	}
 	for _, nodeID := range gotNodeIDsExcl {
 		if bytes.Equal(excludeNodeID.Bytes(), nodeID.Bytes()) {
-			t.Fatalf("GetNodeIDs returned the node ID we excluded, ID: %s", nodeID.String())
+			t.Fatalf("GetNodeIDs returned the node ID we excluded, ID: %s", nodeID)
 		}
 	}
 }
@@ -523,7 +523,7 @@ func TestGetNodes(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node was not returned by GetNodes(), ID: %s", node1.ID())
 		}
 	}
 
@@ -534,7 +534,7 @@ func TestGetNodes(t *testing.T) {
 	}
 	for _, node := range gotNodesExcl {
 		if bytes.Equal(excludeNodeID.Bytes(), node.ID().Bytes()) {
-			t.Fatalf("GetNodes returned the node we excluded, ID: %s", node.ID().String())
+			t.Fatalf("GetNodes returned the node we excluded, ID: %s", node.ID())
 		}
 	}
 }
@@ -579,7 +579,7 @@ func TestGetNodesByID(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node was not returned by GetNodesByID(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node was not returned by GetNodesByID(), ID: %s", node1.ID())
 		}
 	}
 }
@@ -625,7 +625,7 @@ func TestGetNodesByProperty(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("A created node with property was not returned by GetNodesByProperty(), ID: %s", node1.ID().String())
+			t.Fatalf("A created node with property was not returned by GetNodesByProperty(), ID: %s", node1.ID())
 		}
 	}
 }
@@ -672,7 +672,7 @@ func TestGetNodeIDsByProperty(t *testing.T) {
 		}
 
 		if !match {
-			t.Fatalf("Not all nodes IDs were returned by GetNodeIDsByProperty(), ID: %s", id1.String())
+			t.Fatalf("Not all nodes IDs were returned by GetNodeIDsByProperty(), ID: %s", id1)
 		}
 	}
 }
@@ -760,7 +760,7 @@ func benchmarkMinimalServiceTmp(b *testing.B) {
 		defer cancel()
 		for nodid, peers := range protoCMap {
 			for peerid, peerC := range peers {
-				log.Debug("getting ", "node", nodid, "peer", peerid)
+				log.Trace("getting ", "node", nodid, "peer", peerid)
 				select {
 				case <-ctx.Done():
 					b.Fatal(ctx.Err())

@@ -30,9 +30,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -41,8 +43,8 @@ var (
 	testNodeKey, _ = crypto.GenerateKey()
 )
 
-func testNodeConfig(t *testing.T) *Config {
-	return &Config{
+func testNodeConfig(t *testing.T) *nodecfg.Config {
+	return &nodecfg.Config{
 		Name:    "test node",
 		P2P:     p2p.Config{PrivateKey: testNodeKey},
 		DataDir: t.TempDir(),
@@ -105,7 +107,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a new node based on the data directory
-	original, originalErr := New(&Config{DataDir: dir})
+	original, originalErr := New(&nodecfg.Config{DataDir: dir})
 	if originalErr != nil {
 		t.Fatalf("failed to create original protocol stack: %v", originalErr)
 	}
@@ -115,8 +117,8 @@ func TestNodeUsedDataDir(t *testing.T) {
 	}
 
 	// Create a second node based on the same data directory and ensure failure
-	if _, err := New(&Config{DataDir: dir}); !errors.Is(err, ErrDatadirUsed) {
-		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDatadirUsed)
+	if _, err := New(&nodecfg.Config{DataDir: dir}); !errors.Is(err, ErrDataDirUsed) {
+		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDataDirUsed)
 	}
 }
 
@@ -172,7 +174,7 @@ func TestNodeCloseClosesDB(t *testing.T) {
 	stack, _ := New(testNodeConfig(t))
 	defer stack.Close()
 
-	db, err := OpenDatabase(stack.Config(), log.New(), kv.ChainDB)
+	db, err := OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
 	if err != nil {
 		t.Fatal("can't open DB:", err)
 	}
@@ -196,14 +198,14 @@ func TestNodeOpenDatabaseFromLifecycleStart(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	stack, _ := New(testNodeConfig(t))
+	stack, err := New(testNodeConfig(t))
+	require.NoError(t, err)
 	defer stack.Close()
 
 	var db kv.RwDB
-	var err error
 	stack.RegisterLifecycle(&InstrumentedService{
 		startHook: func() {
-			db, err = OpenDatabase(stack.Config(), log.New(), kv.ChainDB)
+			db, err = OpenDatabase(stack.Config(), log.New(), kv.SentryDB)
 			if err != nil {
 				t.Fatal("can't open DB:", err)
 			}
@@ -447,6 +449,7 @@ func TestRegisterHandler_Successful(t *testing.T) {
 
 	// check response
 	resp := doHTTPRequest(t, httpReq)
+	defer resp.Body.Close()
 	buf := make([]byte, 7)
 	_, err = io.ReadFull(resp.Body, buf)
 	if err != nil {
@@ -462,7 +465,7 @@ func TestRegisterHandler_Unsuccessful(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 
-	node, err := New(&DefaultConfig)
+	node, err := New(&nodecfg.DefaultConfig)
 	if err != nil {
 		t.Fatalf("could not create new node: %v", err)
 	}
@@ -574,7 +577,7 @@ func TestNodeRPCPrefix(t *testing.T) {
 		test := test
 		name := fmt.Sprintf("http=%s ws=%s", test.httpPrefix, test.wsPrefix)
 		t.Run(name, func(t *testing.T) {
-			cfg := &Config{
+			cfg := &nodecfg.Config{
 				HTTPHost:       "127.0.0.1",
 				HTTPPathPrefix: test.httpPrefix,
 				WSHost:         "127.0.0.1",
@@ -607,12 +610,14 @@ func (test rpcPrefixTest) check(t *testing.T, node *Node) {
 		if resp.StatusCode != 200 {
 			t.Errorf("Error: %s: bad status code %d, want 200", path, resp.StatusCode)
 		}
+		resp.Body.Close()
 	}
 	for _, path := range test.wantNoHTTP {
 		resp := rpcRequest(t, httpBase+path)
 		if resp.StatusCode != 404 {
 			t.Errorf("Error: %s: bad status code %d, want 404", path, resp.StatusCode)
 		}
+		resp.Body.Close()
 	}
 	for _, path := range test.wantWS {
 		err := wsRequest(t, wsBase+path, "")
@@ -630,7 +635,7 @@ func (test rpcPrefixTest) check(t *testing.T, node *Node) {
 }
 
 func createNode(t *testing.T, httpPort, wsPort int) *Node {
-	conf := &Config{
+	conf := &nodecfg.Config{
 		HTTPHost: "127.0.0.1",
 		HTTPPort: httpPort,
 		WSHost:   "127.0.0.1",

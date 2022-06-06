@@ -40,6 +40,22 @@ type testBackend struct {
 	cfg *params.ChainConfig
 }
 
+func (b *testBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
+	tx, err := b.db.BeginRo(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	return rawdb.ReadReceiptsByHash(tx, hash)
+}
+
+func (b *testBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
+	return nil, nil
+	//if b.pending {
+	//	block := b.chain.GetBlockByNumber(testHead + 1)
+	//	return block, b.chain.GetReceiptsByHash(block.Hash())
+	//}
+}
 func (b *testBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	tx, err := b.db.BeginRo(context.Background())
 	if err != nil {
@@ -131,7 +147,7 @@ func TestSuggestPrice(t *testing.T) {
 	oracle := gasprice.NewOracle(backend, config)
 
 	// The gas price sampled is: 32G, 31G, 30G, 29G, 28G, 27G
-	got, err := oracle.SuggestPrice(context.Background())
+	got, err := oracle.SuggestTipCap(context.Background())
 	if err != nil {
 		t.Fatalf("Failed to retrieve recommended gas price: %v", err)
 	}

@@ -62,7 +62,6 @@ right_*.txt
 root_*.txt
 
 __pycache__
-docker-compose.dev.yml
 /build
 *.tmp
 
@@ -70,3 +69,9 @@ docker-compose.dev.yml
 
 libmdbx/build/*
 tests/testdata/*
+
+go.work
+
+/goerli
+
+docker-compose.*.yml

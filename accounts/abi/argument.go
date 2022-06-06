@@ -46,7 +46,7 @@ func (argument *Argument) UnmarshalJSON(data []byte) error {
 	var arg ArgumentMarshaling
 	err := json.Unmarshal(data, &arg)
 	if err != nil {
-		return fmt.Errorf("argument json err: %v", err)
+		return fmt.Errorf("argument json err: %w", err)
 	}
 
 	argument.Type, err = NewType(arg.Type, arg.InternalType, arg.Components)

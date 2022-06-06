@@ -66,9 +66,9 @@ var (
 // ChainReader, ChainStateReader, ContractBackend, ContractCaller, ContractFilterer, ContractTransactor,
 // DeployBackend, GasEstimator, GasPricer, LogFilterer, PendingContractCaller, TransactionReader, and TransactionSender
 type SimulatedBackend struct {
-	m         *stages.MockSentry
-	getHeader func(hash common.Hash, number uint64) *types.Header
-	checkTEVM func(common.Hash) (bool, error)
+	m               *stages.MockSentry
+	getHeader       func(hash common.Hash, number uint64) *types.Header
+	contractHasTEVM func(common.Hash) (bool, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -105,7 +105,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 			return h
 		},
 	}
-	backend.checkTEVM = ethdb.GetCheckTEVM(olddb.NewObjectDatabase(m.DB))
+	backend.contractHasTEVM = ethdb.GetHasTEVM(olddb.NewObjectDatabase(m.DB))
 	backend.events = filters.NewEventSystem(&filterBackend{m.DB, backend})
 	backend.emptyPendingBlock()
 	return backend
@@ -125,9 +125,8 @@ func (b *SimulatedBackend) DB() kv.RwDB {
 }
 
 // Close terminates the underlying blockchain's update loop.
-func (b *SimulatedBackend) Close() error {
-	b.m.DB.Close()
-	return nil
+func (b *SimulatedBackend) Close() {
+	b.m.Close()
 }
 
 // Commit imports all the pending transactions as a single block and starts a
@@ -174,9 +173,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()))
+		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1))
 	}
-	return state.New(state.NewPlainState(db, uint64(blockNumber.Int64())))
+	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -267,7 +266,14 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if txn != nil {
 		return txn, true, nil
 	}
-	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash)
+	blockNumber, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	if err != nil {
+		return nil, false, err
+	}
+	if blockNumber == nil {
+		return nil, false, ethereum.NotFound
+	}
+	txn, _, _, _, err = rawdb.ReadTransaction(tx, txHash, *blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
@@ -558,7 +564,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 		hi = b.pendingBlock.GasLimit()
 	}
 	// Recap the highest gas allowance with account's balance.
-	if call.GasPrice != nil && call.GasPrice.BitLen() != 0 {
+	if call.GasPrice != nil && !call.GasPrice.IsZero() {
 		balance := b.pendingState.GetBalance(call.From) // from can't be nil
 		available := balance.ToBig()
 		if call.Value != nil {
@@ -637,9 +643,16 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
 func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) (*core.ExecutionResult, error) {
+	const baseFeeUpperLimit = 880000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = u256.Num1
+	}
+	if call.FeeCap == nil {
+		call.FeeCap = uint256.NewInt(baseFeeUpperLimit)
+	}
+	if call.Tip == nil {
+		call.Tip = uint256.NewInt(baseFeeUpperLimit)
 	}
 	if call.Gas == 0 {
 		call.Gas = 50000000
@@ -654,7 +667,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	msg := callMsg{call}
 
 	txContext := core.NewEVMTxContext(msg)
-	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.checkTEVM)
+	evmContext := core.NewEVMBlockContext(block.Header(), b.getHeader, b.m.Engine, nil, b.contractHasTEVM)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
@@ -673,7 +686,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
-		return fmt.Errorf("invalid transaction: %v", senderErr)
+		return fmt.Errorf("invalid transaction: %w", senderErr)
 	}
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.GetNonce() != nonce {
@@ -687,7 +700,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}, b.checkTEVM); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{}, b.contractHasTEVM); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
@@ -868,7 +881,15 @@ func (fb *filterBackend) GetReceipts(ctx context.Context, hash common.Hash) (typ
 		return nil, err
 	}
 	defer tx.Rollback()
-	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, err
+	}
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
+	if err != nil {
+		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+	}
+	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}
@@ -881,7 +902,15 @@ func (fb *filterBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*ty
 		return nil, err
 	}
 	defer tx.Rollback()
-	b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
+	number := rawdb.ReadHeaderNumber(tx, hash)
+	if number == nil {
+		return nil, err
+	}
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, *number)
+	if err != nil {
+		return nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
+	}
+	b, senders, err := rawdb.ReadBlockWithSenders(tx, hash, *number)
 	if err != nil {
 		return nil, err
 	}

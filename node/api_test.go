@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/stretchr/testify/assert"
 )
@@ -38,7 +39,7 @@ func TestStartRPC(t *testing.T) {
 	}
 	type test struct {
 		name string
-		cfg  Config
+		cfg  nodecfg.Config
 		fn   func(*testing.T, *Node, *privateAdminAPI)
 
 		// Checks. These run after the node is configured and all API calls have been made.
@@ -51,7 +52,7 @@ func TestStartRPC(t *testing.T) {
 	tests := []test{
 		{
 			name: "all off",
-			cfg:  Config{},
+			cfg:  nodecfg.Config{},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 			},
 			wantReachable: false,
@@ -61,7 +62,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "rpc enabled through config",
-			cfg:  Config{HTTPHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{HTTPHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 			},
 			wantReachable: true,
@@ -71,7 +72,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "rpc enabled through API",
-			cfg:  Config{},
+			cfg:  nodecfg.Config{},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				_, err := api.StartRPC(sp("127.0.0.1"), ip(0), nil, nil, nil)
 				assert.NoError(t, err)
@@ -83,7 +84,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "rpc start again after failure",
-			cfg:  Config{},
+			cfg:  nodecfg.Config{},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				// Listen on a random port.
 				listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -111,7 +112,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "rpc stopped through API",
-			cfg:  Config{HTTPHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{HTTPHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				_, err := api.StopRPC()
 				assert.NoError(t, err)
@@ -123,7 +124,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "rpc stopped twice",
-			cfg:  Config{HTTPHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{HTTPHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				_, err := api.StopRPC()
 				assert.NoError(t, err)
@@ -138,7 +139,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name:          "ws enabled through config",
-			cfg:           Config{WSHost: "127.0.0.1"},
+			cfg:           nodecfg.Config{WSHost: "127.0.0.1"},
 			wantReachable: true,
 			wantHandlers:  false,
 			wantRPC:       false,
@@ -146,7 +147,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "ws enabled through API",
-			cfg:  Config{},
+			cfg:  nodecfg.Config{},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				_, err := api.StartWS(sp("127.0.0.1"), ip(0), nil, nil)
 				assert.NoError(t, err)
@@ -158,7 +159,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "ws stopped through API",
-			cfg:  Config{WSHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{WSHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				_, err := api.StopWS()
 				assert.NoError(t, err)
@@ -170,7 +171,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "ws stopped twice",
-			cfg:  Config{WSHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{WSHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				_, err := api.StopWS()
 				assert.NoError(t, err)
@@ -185,7 +186,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "ws enabled after RPC",
-			cfg:  Config{HTTPHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{HTTPHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				wsport := n.http.port
 				_, err := api.StartWS(sp("127.0.0.1"), ip(wsport), nil, nil)
@@ -198,7 +199,7 @@ func TestStartRPC(t *testing.T) {
 		},
 		{
 			name: "ws enabled after RPC then stopped",
-			cfg:  Config{HTTPHost: "127.0.0.1"},
+			cfg:  nodecfg.Config{HTTPHost: "127.0.0.1"},
 			fn: func(t *testing.T, n *Node, api *privateAdminAPI) {
 				wsport := n.http.port
 				_, err := api.StartWS(sp("127.0.0.1"), ip(wsport), nil, nil)
@@ -254,7 +255,7 @@ func TestStartRPC(t *testing.T) {
 
 			// Apply some sane defaults.
 			config := test.cfg //nolint:scopelint
-			// config.Logger = testlog.Logger(t, log.LvlDebug)
+			// config.Log = testlog.Log(t, log.LvlDebug)
 			config.P2P.NoDiscovery = true
 
 			// Create Node.

@@ -55,7 +55,7 @@ const (
 	tableIPLimit, tableSubnet   = 10, 24
 
 	refreshInterval    = 30 * time.Minute
-	revalidateInterval = 10 * time.Second
+	revalidateInterval = 5 * time.Second
 	copyNodesInterval  = 30 * time.Second
 	seedMinTableTime   = 5 * time.Minute
 	seedCount          = 30
@@ -71,6 +71,8 @@ type Table struct {
 	nursery []*node           // bootstrap nodes
 	rand    *mrand.Rand       // source of randomness, periodically reseeded
 	ips     netutil.DistinctNetSet
+
+	revalidateInterval time.Duration
 
 	log        log.Logger
 	db         *enode.DB // database of known nodes
@@ -100,7 +102,13 @@ type bucket struct {
 	ips          netutil.DistinctNetSet
 }
 
-func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, log log.Logger) (*Table, error) {
+func newTable(
+	t transport,
+	db *enode.DB,
+	bootnodes []*enode.Node,
+	revalidateInterval time.Duration,
+	logger log.Logger,
+) (*Table, error) {
 	tab := &Table{
 		net:        t,
 		db:         db,
@@ -110,7 +118,10 @@ func newTable(t transport, db *enode.DB, bootnodes []*enode.Node, log log.Logger
 		closed:     make(chan struct{}),
 		rand:       mrand.New(mrand.NewSource(0)),
 		ips:        netutil.DistinctNetSet{Subnet: tableSubnet, Limit: tableIPLimit},
-		log:        log,
+
+		revalidateInterval: revalidateInterval,
+
+		log: logger,
 	}
 	if err := tab.setFallbackNodes(bootnodes); err != nil {
 		return nil, err
@@ -188,7 +199,7 @@ func (tab *Table) close() {
 func (tab *Table) setFallbackNodes(nodes []*enode.Node) error {
 	for _, n := range nodes {
 		if err := n.ValidateComplete(); err != nil {
-			return fmt.Errorf("bad bootstrap node %q: %v", n, err)
+			return fmt.Errorf("bad bootstrap node %q: %w", n, err)
 		}
 	}
 	tab.nursery = wrapNodes(nodes)
@@ -218,7 +229,7 @@ func (tab *Table) refresh() <-chan struct{} {
 // loop schedules runs of doRefresh, doRevalidate and copyLiveNodes.
 func (tab *Table) loop() {
 	var (
-		revalidate     = time.NewTimer(tab.nextRevalidateTime())
+		revalidate     = time.NewTimer(tab.revalidateInterval)
 		refresh        = time.NewTicker(refreshInterval)
 		copyNodes      = time.NewTicker(copyNodesInterval)
 		refreshDone    = make(chan struct{})           // where doRefresh reports completion
@@ -257,7 +268,7 @@ loop:
 			revalidateDone = make(chan struct{})
 			go tab.doRevalidate(revalidateDone)
 		case <-revalidateDone:
-			revalidate.Reset(tab.nextRevalidateTime())
+			revalidate.Reset(tab.revalidateInterval)
 			revalidateDone = nil
 		case <-copyNodes.C:
 			go tab.copyLiveNodes()
@@ -305,6 +316,7 @@ func (tab *Table) doRefresh(done chan struct{}) {
 
 func (tab *Table) loadSeedNodes() {
 	seeds := wrapNodes(tab.db.QuerySeeds(seedCount, seedMaxAge))
+	tab.log.Debug("QuerySeeds read nodes from the node DB", "count", len(seeds))
 	seeds = append(seeds, tab.nursery...)
 	for i := range seeds {
 		seed := seeds[i]
@@ -332,7 +344,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	// Also fetch record if the node replied and returned a higher sequence number.
 	if last.Seq() < remoteSeq {
 		if n, err := tab.net.RequestENR(unwrapNode(last)); err != nil {
-			tab.log.Debug("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
+			tab.log.Trace("ENR request failed", "id", last.ID(), "addr", last.addr(), "err", err)
 		} else {
 			last = &node{Node: *n, addedAt: last.addedAt, livenessChecks: last.livenessChecks}
 		}
@@ -344,16 +356,16 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 	if rErr == nil {
 		// The node responded, move it to the front.
 		last.livenessChecks++
-		tab.log.Debug("Revalidated node", "b", bi, "id", last.ID(), "checks", last.livenessChecks)
+		tab.log.Trace("Revalidated node", "b", bi, "id", last.ID(), "checks", last.livenessChecks)
 		tab.bumpInBucket(b, last)
 		return
 	}
 	// No reply received, pick a replacement or delete the node if there aren't
 	// any replacements.
 	if r := tab.replace(b, last); r != nil {
-		tab.log.Debug("Replaced dead node", "b", bi, "id", last.ID(), "ip", last.IP(), "checks", last.livenessChecks, "r", r.ID(), "rip", r.IP())
+		tab.log.Trace("Replaced dead node", "b", bi, "id", last.ID(), "ip", last.IP(), "checks", last.livenessChecks, "r", r.ID(), "rip", r.IP())
 	} else {
-		tab.log.Debug("Removed dead node", "b", bi, "id", last.ID(), "ip", last.IP(), "checks", last.livenessChecks)
+		tab.log.Trace("Removed dead node", "b", bi, "id", last.ID(), "ip", last.IP(), "checks", last.livenessChecks)
 	}
 }
 
@@ -370,13 +382,6 @@ func (tab *Table) nodeToRevalidate() (n *node, bi int) {
 		}
 	}
 	return nil, 0
-}
-
-func (tab *Table) nextRevalidateTime() time.Duration {
-	tab.mutex.Lock()
-	defer tab.mutex.Unlock()
-
-	return time.Duration(tab.rand.Int63n(int64(revalidateInterval)))
 }
 
 // copyLiveNodes adds nodes from the table to the database if they have been in the table
@@ -552,11 +557,11 @@ func (tab *Table) addIP(b *bucket, ip net.IP) bool {
 		return true
 	}
 	if !tab.ips.Add(ip) {
-		tab.log.Debug("IP exceeds table limit", "ip", ip)
+		tab.log.Trace("IP exceeds table limit", "ip", ip)
 		return false
 	}
 	if !b.ips.Add(ip) {
-		tab.log.Debug("IP exceeds bucket limit", "ip", ip)
+		tab.log.Trace("IP exceeds bucket limit", "ip", ip)
 		tab.ips.Remove(ip)
 		return false
 	}

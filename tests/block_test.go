@@ -14,47 +14,28 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+
 package tests
 
 import (
 	"runtime"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func TestBlockchain(t *testing.T) {
+	defer log.Root().SetHandler(log.Root().GetHandler())
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // after remove ChainReader from consensus engine - this test can be changed to create less databases, then can enable on win. now timeout after 20min
 	}
 
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
-	// For speedier CI-runs, the line below can be uncommented, so those are skipped.
-	// For now, in hardfork-times (Berlin), we run the tests both as StateTests and
-	// as blockchain tests, since the latter also covers things like receipt root
-	//bt.skipLoad(`^GeneralStateTests/`)
-
-	// Skip random failures due to selfish mining test
-	bt.skipLoad(`.*bcForgedTest/bcForkUncle\.json`)
-
-	// Slow tests
-	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
-	bt.slow(`.*bcExploitTest/ShanghaiLove.json`)
-	bt.slow(`.*bcExploitTest/SuicideIssue.json`)
-	bt.slow(`.*/bcForkStressTest/`)
-	bt.slow(`.*/bcGasPricerTest/RPC_API_Test.json`)
-	bt.slow(`.*/bcWalletTest/`)
-
-	// Very slow test
-	bt.skipLoad(`.*/stTimeConsuming/.*`)
-
-	// test takes a lot for time and goes easily OOM because of sha3 calculation on a huge range,
-	// using 4.6 TGas
-	bt.skipLoad(`.*randomStatetest94.json.*`)
-
-	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_EIP150`, "No receipt validation before Byzantium")
-	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_EIP158`, "No receipt validation before Byzantium")
-	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Frontier`, "No receipt validation before Byzantium")
-	bt.fails(`(?m)^TestBlockchain/InvalidBlocks/bcInvalidHeaderTest/wrongReceiptTrie.json/wrongReceiptTrie_Homestead`, "No receipt validation before Byzantium")
+	// For speedier CI-runs those are skipped.
+	bt.skipLoad(`^GeneralStateTests/`)
 
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		// import pre accounts & construct test genesis block & state root
@@ -62,8 +43,4 @@ func TestBlockchain(t *testing.T) {
 			t.Error(err)
 		}
 	})
-
-	// There is also a LegacyTests folder, containing blockchain tests generated
-	// prior to Istanbul. However, they are all derived from GeneralStateTests,
-	// which run natively, so there's no reason to run them here.
 }

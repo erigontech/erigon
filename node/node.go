@@ -17,6 +17,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -27,6 +28,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+
+	"github.com/gofrs/flock"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -34,18 +41,17 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/prometheus/tsdb/fileutil"
 )
 
 // Node is a container on which services can be registered.
 type Node struct {
-	config        *Config
+	config        *nodecfg.Config
 	log           log.Logger
-	dirLock       fileutil.Releaser // prevents concurrent use of instance directory
-	stop          chan struct{}     // Channel to wait for termination notifications
-	server        *p2p.Server       // Currently running P2P networking layer
-	startStopLock sync.Mutex        // Start/Stop are protected by an additional lock
-	state         int               // Tracks state of node lifecycle
+	dirLock       *flock.Flock  // prevents concurrent use of instance directory
+	stop          chan struct{} // Channel to wait for termination notifications
+	server        *p2p.Server   // Currently running P2P networking layer
+	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
+	state         int           // Tracks state of node lifecycle
 
 	lock          sync.Mutex
 	lifecycles    []Lifecycle // All registered backends, services, and auxiliary services that have a lifecycle
@@ -66,7 +72,7 @@ const (
 )
 
 // New creates a new P2P node, ready for protocol registration.
-func New(conf *Config) (*Node, error) {
+func New(conf *nodecfg.Config) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
 	// working directory don't affect the node.
 	confCopy := *conf
@@ -78,8 +84,8 @@ func New(conf *Config) (*Node, error) {
 		}
 		conf.DataDir = absdatadir
 	}
-	if conf.Logger == nil {
-		conf.Logger = log.New()
+	if conf.Log == nil {
+		conf.Log = log.New()
 	}
 
 	// Ensure that the instance name doesn't cause weird conflicts with
@@ -94,7 +100,7 @@ func New(conf *Config) (*Node, error) {
 	node := &Node{
 		config:        conf,
 		inprocHandler: rpc.NewServer(50),
-		log:           conf.Logger,
+		log:           conf.Log,
 		stop:          make(chan struct{}),
 		databases:     make([]kv.Closer, 0),
 	}
@@ -119,7 +125,7 @@ func New(conf *Config) (*Node, error) {
 
 	// Configure RPC servers.
 	node.http = newHTTPServer(node.log, conf.HTTPTimeouts)
-	node.ws = newHTTPServer(node.log, rpc.DefaultHTTPTimeouts)
+	node.ws = newHTTPServer(node.log, rpccfg.DefaultHTTPTimeouts)
 	// Check for uncaught crashes from the previous boot and notify the user if
 	// there are any
 	//debug.CheckForCrashes(conf.DataDir)
@@ -273,24 +279,28 @@ func (n *Node) openDataDir() error {
 		return nil // ephemeral
 	}
 
-	instdir := n.config.instanceDir()
+	instdir := n.config.DataDir
 	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
 	// Lock the instance directory to prevent concurrent use by another instance as well as
 	// accidental use of the instance directory as a database.
-	release, _, err := fileutil.Flock(filepath.Join(instdir, "LOCK"))
+	l := flock.New(filepath.Join(instdir, "LOCK"))
+	locked, err := l.TryLock()
 	if err != nil {
 		return convertFileLockError(err)
 	}
-	n.dirLock = release
+	if !locked {
+		return fmt.Errorf("%w: %s\n", ErrDataDirUsed, instdir)
+	}
+	n.dirLock = l
 	return nil
 }
 
 func (n *Node) closeDataDir() {
 	// Release instance directory lock.
 	if n.dirLock != nil {
-		if err := n.dirLock.Release(); err != nil {
+		if err := n.dirLock.Unlock(); err != nil {
 			n.log.Error("Can't release datadir lock", "err", err)
 		}
 		n.dirLock = nil
@@ -449,7 +459,7 @@ func (n *Node) RPCHandler() (*rpc.Server, error) {
 }
 
 // Config returns the configuration of node.
-func (n *Node) Config() *Config {
+func (n *Node) Config() *nodecfg.Config {
 	return n.config
 }
 
@@ -464,14 +474,8 @@ func (n *Node) Server() *p2p.Server {
 }
 
 // DataDir retrieves the current datadir used by the protocol stack.
-// Deprecated: No files should be stored in this directory, use InstanceDir instead.
 func (n *Node) DataDir() string {
 	return n.config.DataDir
-}
-
-// InstanceDir retrieves the instance directory used by the protocol stack.
-func (n *Node) InstanceDir() string {
-	return n.config.instanceDir()
 }
 
 // HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not
@@ -488,7 +492,7 @@ func (n *Node) WSEndpoint() string {
 	return "ws://" + n.ws.listenAddr() + n.ws.wsConfig.prefix
 }
 
-func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
+func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv.RwDB, error) {
 	var name string
 	switch label {
 	case kv.ChainDB:
@@ -503,14 +507,23 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		db = memdb.New()
 		return db, nil
 	}
-	dbPath := config.ResolvePath(name)
+
+	oldDbPath := filepath.Join(config.DataDir, "erigon", name)
+	dbPath := filepath.Join(config.DataDir, name)
+	if _, err := os.Stat(oldDbPath); err == nil {
+		log.Error("Old directory location found", "path", oldDbPath, "please move to new path", dbPath)
+		return nil, fmt.Errorf("safety error, see log message")
+	}
 
 	var openFunc func(exclusive bool) (kv.RwDB, error)
-	log.Info("Opening Database", "label", name)
+	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
 		opts := mdbx.NewMDBX(logger).Path(dbPath).Label(label).DBVerbosity(config.DatabaseVerbosity)
 		if exclusive {
 			opts = opts.Exclusive()
+		}
+		if label == kv.ChainDB {
+			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
 		}
 		return opts.Open()
 	}
@@ -520,6 +533,10 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		return nil, err
 	}
 	migrator := migrations.NewMigrator(label)
+	if err := migrator.VerifyVersion(db); err != nil {
+		return nil, err
+	}
+
 	has, err := migrator.HasPendingMigrations(db)
 	if err != nil {
 		return nil, err
@@ -539,6 +556,12 @@ func OpenDatabase(config *Config, logger log.Logger, label kv.Label) (kv.RwDB, e
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	if err := db.Update(context.Background(), func(tx kv.RwTx) (err error) {
+		return params.SetErigonVersion(tx, params.VersionKeyCreated)
+	}); err != nil {
+		return nil, err
 	}
 
 	return db, nil

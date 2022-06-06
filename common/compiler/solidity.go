@@ -109,7 +109,7 @@ func CompileSolidityString(solc, source string) (map[string]*Contract, error) {
 		return nil, err
 	}
 	args := append(s.makeArgs(), "--")
-	cmd := exec.Command(s.Path, append(args, "-")...)
+	cmd := exec.Command(s.Path, append(args, "-")...) //nolint:gosec
 	cmd.Stdin = strings.NewReader(source)
 	return s.run(cmd, source)
 }
@@ -128,7 +128,7 @@ func CompileSolidity(solc string, sourcefiles ...string) (map[string]*Contract, 
 		return nil, err
 	}
 	args := append(s.makeArgs(), "--")
-	cmd := exec.Command(s.Path, append(args, sourcefiles...)...)
+	cmd := exec.Command(s.Path, append(args, sourcefiles...)...) //nolint:gosec
 	return s.run(cmd, source)
 }
 
@@ -137,7 +137,7 @@ func (s *Solidity) run(cmd *exec.Cmd, source string) (map[string]*Contract, erro
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("solc: %v\n%s", err, stderr.Bytes())
+		return nil, fmt.Errorf("solc: %w\n%s", err, stderr.Bytes())
 	}
 	return ParseCombinedJSON(stdout.Bytes(), source, s.Version, s.Version, strings.Join(s.makeArgs(), " "))
 }
@@ -163,7 +163,7 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 		// Parse the individual compilation results.
 		var abi interface{}
 		if err := json.Unmarshal([]byte(info.Abi), &abi); err != nil {
-			return nil, fmt.Errorf("solc: error reading abi definition (%v)", err)
+			return nil, fmt.Errorf("solc: error reading abi definition (%w)", err)
 		}
 		var userdoc, devdoc interface{}
 		json.Unmarshal([]byte(info.Userdoc), &userdoc)

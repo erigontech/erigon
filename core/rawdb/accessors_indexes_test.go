@@ -56,7 +56,7 @@ func TestLookupStorage(t *testing.T) {
 
 			// Check that no transactions entries are in a pristine database
 			for i, txn := range txs {
-				if txn2, _, _, _, _ := ReadTransaction(tx, txn.Hash()); txn2 != nil {
+				if txn2, _, _, _, _ := ReadTransactionByHash(tx, txn.Hash()); txn2 != nil {
 					t.Fatalf("txn #%d [%x]: non existent transaction returned: %v", i, txn.Hash(), txn2)
 				}
 			}
@@ -73,7 +73,7 @@ func TestLookupStorage(t *testing.T) {
 			tc.writeTxLookupEntries(tx, block)
 
 			for i, txn := range txs {
-				if txn2, hash, number, index, _ := ReadTransaction(tx, txn.Hash()); txn2 == nil {
+				if txn2, hash, number, index, _ := ReadTransactionByHash(tx, txn.Hash()); txn2 == nil {
 					t.Fatalf("txn #%d [%x]: transaction not found", i, txn.Hash())
 				} else {
 					if hash != block.Hash() || number != block.NumberU64() || index != uint64(i) {
@@ -89,7 +89,7 @@ func TestLookupStorage(t *testing.T) {
 				if err := DeleteTxLookupEntry(tx, txn.Hash()); err != nil {
 					t.Fatal(err)
 				}
-				if txn2, _, _, _, _ := ReadTransaction(tx, txn.Hash()); txn2 != nil {
+				if txn2, _, _, _, _ := ReadTransactionByHash(tx, txn.Hash()); txn2 != nil {
 					t.Fatalf("txn #%d [%x]: deleted transaction returned: %v", i, txn.Hash(), txn2)
 				}
 			}

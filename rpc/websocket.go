@@ -37,7 +37,7 @@ const (
 	wsWriteBuffer      = 1024
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
-	wsMessageSizeLimit = 15 * 1024 * 1024
+	wsMessageSizeLimit = 32 * 1024 * 1024
 )
 
 var wsBufferPool = new(sync.Pool)
@@ -46,8 +46,8 @@ var wsBufferPool = new(sync.Pool)
 //
 // allowedOrigins should be a comma-separated list of allowed origin URLs.
 // To allow connections with any origin, pass "*".
-func (s *Server) WebsocketHandler(allowedOrigins []string, compression bool) http.Handler {
-	var upgrader = websocket.Upgrader{
+func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, compression bool) http.Handler {
+	upgrader := websocket.Upgrader{
 		EnableCompression: compression,
 		ReadBufferSize:    wsReadBuffer,
 		WriteBufferSize:   wsWriteBuffer,
@@ -55,9 +55,12 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, compression bool) htt
 		CheckOrigin:       wsHandshakeValidator(allowedOrigins),
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if jwtSecret != nil && !CheckJwtSecret(w, r, jwtSecret) {
+			return
+		}
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Debug("WebSocket upgrade failed", "err", err)
+			log.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
 		codec := newWebsocketCodec(conn)
@@ -87,7 +90,7 @@ func wsHandshakeValidator(allowedOrigins []string) func(*http.Request) bool {
 			origins.Add("http://" + hostname)
 		}
 	}
-	log.Debug(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
+	log.Trace(fmt.Sprintf("Allowed origin(s) for WS RPC interface %v", origins.ToSlice()))
 
 	f := func(req *http.Request) bool {
 		// Skip origin verification if no Origin header is present. The origin check
@@ -140,12 +143,12 @@ func ruleAllowsOrigin(allowedOrigin string, browserOrigin string) bool {
 	)
 	allowedScheme, allowedHostname, allowedPort, err = parseOriginURL(allowedOrigin)
 	if err != nil {
-		log.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "error", err)
+		log.Warn("Error parsing allowed origin specification", "spec", allowedOrigin, "err", err)
 		return false
 	}
 	browserScheme, browserHostname, browserPort, err = parseOriginURL(browserOrigin)
 	if err != nil {
-		log.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "error", err)
+		log.Warn("Error parsing browser 'Origin' field", "Origin", browserOrigin, "err", err)
 		return false
 	}
 	if allowedScheme != "" && allowedScheme != browserScheme {
@@ -189,6 +192,7 @@ func DialWebsocketWithDialer(ctx context.Context, endpoint, origin string, diale
 		return nil, err
 	}
 	return newClient(ctx, func(ctx context.Context) (ServerCodec, error) {
+		//nolint
 		conn, resp, err := dialer.DialContext(ctx, endpoint, header)
 		if err != nil {
 			hErr := wsHandshakeError{err: err}
@@ -271,7 +275,7 @@ func (wc *websocketCodec) writeJSON(ctx context.Context, v interface{}) error {
 
 // pingLoop sends periodic ping frames when the connection is idle.
 func (wc *websocketCodec) pingLoop() {
-	var timer = time.NewTimer(wsPingInterval)
+	timer := time.NewTimer(wsPingInterval)
 	defer wc.wg.Done()
 	defer timer.Stop()
 

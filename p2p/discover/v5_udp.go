@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
@@ -83,6 +84,7 @@ type UDPv5 struct {
 	callCh        chan *callV5
 	callDoneCh    chan *callV5
 	respTimeoutCh chan *callTimeout
+	replyTimeout  time.Duration
 
 	// state of dispatch
 	codec            codecV5
@@ -123,8 +125,8 @@ type callTimeout struct {
 }
 
 // ListenV5 listens on the given connection.
-func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	t, err := newUDPv5(conn, ln, cfg)
+func ListenV5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	t, err := newUDPv5(ctx, conn, ln, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -136,9 +138,9 @@ func ListenV5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 }
 
 // newUDPv5 creates a UDPv5 transport, but doesn't start any goroutines.
-func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
-	closeCtx, cancelCloseCtx := context.WithCancel(context.Background())
-	cfg = cfg.withDefaults()
+func newUDPv5(ctx context.Context, conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
+	closeCtx, cancelCloseCtx := context.WithCancel(ctx)
+	cfg = cfg.withDefaults(respTimeoutV5)
 	t := &UDPv5{
 		// static fields
 		conn:         conn,
@@ -156,6 +158,7 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		callCh:        make(chan *callV5),
 		callDoneCh:    make(chan *callV5),
 		respTimeoutCh: make(chan *callTimeout),
+		replyTimeout:  cfg.ReplyTimeout,
 		// state of dispatch
 		codec:            v5wire.NewCodec(ln, cfg.PrivateKey, cfg.Clock),
 		activeCallByNode: make(map[enode.ID]*callV5),
@@ -165,7 +168,7 @@ func newUDPv5(conn UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv5, error) {
 		closeCtx:       closeCtx,
 		cancelCloseCtx: cancelCloseCtx,
 	}
-	tab, err := newTable(t, t.db, cfg.Bootnodes, cfg.Log)
+	tab, err := newTable(t, t.db, cfg.Bootnodes, cfg.TableRevalidateInterval, cfg.Log)
 	if err != nil {
 		return nil, err
 	}
@@ -382,13 +385,13 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 			for _, record := range response.Nodes {
 				node, err := t.verifyResponseNode(c, record, distances, seen)
 				if err != nil {
-					t.log.Debug("Invalid record in "+response.Name(), "id", c.node.ID(), "err", err)
+					t.log.Trace("Invalid record in "+response.Name(), "id", c.node.ID(), "err", err)
 					continue
 				}
 				nodes = append(nodes, node)
 			}
 			if total == -1 {
-				total = min(int(response.Total), totalNodesResponseLimit)
+				total = common2.Min(int(response.Total), totalNodesResponseLimit)
 			}
 			if received++; received == total {
 				return nodes, nil
@@ -549,7 +552,7 @@ func (t *UDPv5) startResponseTimeout(c *callV5) {
 		timer mclock.Timer
 		done  = make(chan struct{})
 	)
-	timer = t.clock.AfterFunc(respTimeoutV5, func() {
+	timer = t.clock.AfterFunc(t.replyTimeout, func() {
 		<-done
 		select {
 		case t.respTimeoutCh <- &callTimeout{c, timer}:
@@ -622,12 +625,12 @@ func (t *UDPv5) readLoop() {
 		nbytes, from, err := t.conn.ReadFromUDP(buf)
 		if netutil.IsTemporaryError(err) {
 			// Ignore temporary read errors.
-			t.log.Debug("Temporary UDP read error", "err", err)
+			t.log.Trace("Temporary UDP read error", "err", err)
 			continue
 		} else if err != nil {
 			// Shut down the loop for permament errors.
 			if err != io.EOF {
-				t.log.Debug("UDP read error", "err", err)
+				t.log.Trace("UDP read error", "err", err)
 			}
 			return
 		}
@@ -650,7 +653,7 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 	addr := fromAddr.String()
 	fromID, fromNode, packet, err := t.codec.Decode(rawpacket, addr)
 	if err != nil {
-		t.log.Debug("Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
+		t.log.Trace("Bad discv5 packet", "id", fromID, "addr", addr, "err", err)
 		return err
 	}
 	if fromNode != nil {
@@ -669,15 +672,15 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 func (t *UDPv5) handleCallResponse(fromID enode.ID, fromAddr *net.UDPAddr, p v5wire.Packet) bool {
 	ac := t.activeCallByNode[fromID]
 	if ac == nil || !bytes.Equal(p.RequestID(), ac.reqid) {
-		t.log.Debug(fmt.Sprintf("Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(fmt.Sprintf("Unsolicited/late %s response", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if !fromAddr.IP.Equal(ac.node.IP()) || fromAddr.Port != ac.node.UDP() {
-		t.log.Debug(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(fmt.Sprintf("%s from wrong endpoint", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	if p.Kind() != ac.responseType {
-		t.log.Debug(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
+		t.log.Trace(fmt.Sprintf("Wrong discv5 response type %s", p.Name()), "id", fromID, "addr", fromAddr)
 		return false
 	}
 	t.startResponseTimeout(ac)
@@ -827,11 +830,11 @@ func packNodes(reqid []byte, nodes []*enode.Node) []*v5wire.Nodes {
 		return []*v5wire.Nodes{{ReqID: reqid, Total: 1}}
 	}
 
-	total := uint8(math.Ceil(float64(len(nodes)) / 3))
+	total := uint8(math.Ceil(float64(len(nodes)) / nodesResponseItemLimit))
 	var resp []*v5wire.Nodes
 	for len(nodes) > 0 {
 		p := &v5wire.Nodes{ReqID: reqid, Total: total}
-		items := min(nodesResponseItemLimit, len(nodes))
+		items := common2.Min(nodesResponseItemLimit, len(nodes))
 		for i := 0; i < items; i++ {
 			p.Nodes = append(p.Nodes, nodes[i].Record())
 		}

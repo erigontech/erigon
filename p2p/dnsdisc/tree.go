@@ -23,7 +23,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/crypto"
@@ -31,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/exp/slices"
 )
 
 // Tree is a merkle tree of node records.
@@ -183,9 +183,7 @@ func (t *Tree) build(entries []entry) entry {
 }
 
 func sortByID(nodes []*enode.Node) []*enode.Node {
-	sort.Slice(nodes, func(i, j int) bool {
-		return bytes.Compare(nodes[i].ID().Bytes(), nodes[j].ID().Bytes()) < 0
-	})
+	slices.SortFunc(nodes, func(i, j *enode.Node) bool { return bytes.Compare(i.ID().Bytes(), j.ID().Bytes()) < 0 })
 	return nodes
 }
 
@@ -247,7 +245,7 @@ func (e *rootEntry) sigHash() []byte {
 
 func (e *rootEntry) verifySignature(pubkey *ecdsa.PublicKey) bool {
 	sig := e.sig[:crypto.RecoveryIDOffset] // remove recovery id
-	enckey := crypto.FromECDSAPub(pubkey)
+	enckey := crypto.MarshalPubkeyStd(pubkey)
 	return crypto.VerifySignature(enckey, e.sigHash(), sig)
 }
 

@@ -186,7 +186,6 @@ func init() {
 		stateTestCommand,
 		stateTransitionCommand,
 	}
-	cli.CommandHelpTemplate = flags.OriginCommandHelpTemplate
 }
 
 func main() {

@@ -39,11 +39,13 @@ var (
 )
 
 type Config struct {
-	Blocks      int
-	Percentile  int
-	Default     *big.Int `toml:",omitempty"`
-	MaxPrice    *big.Int `toml:",omitempty"`
-	IgnorePrice *big.Int `toml:",omitempty"`
+	Blocks           int
+	Percentile       int
+	MaxHeaderHistory int
+	MaxBlockHistory  int
+	Default          *big.Int `toml:",omitempty"`
+	MaxPrice         *big.Int `toml:",omitempty"`
+	IgnorePrice      *big.Int `toml:",omitempty"`
 }
 
 // OracleBackend includes all necessary background APIs for oracle.
@@ -51,6 +53,9 @@ type OracleBackend interface {
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
 	ChainConfig() *params.ChainConfig
+
+	GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error)
+	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 
 // Oracle recommends gas prices based on the content of recent
@@ -63,8 +68,9 @@ type Oracle struct {
 	ignorePrice *big.Int
 	cacheLock   sync.RWMutex
 
-	checkBlocks int
-	percentile  int
+	checkBlocks                       int
+	percentile                        int
+	maxHeaderHistory, maxBlockHistory int
 }
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
@@ -95,20 +101,22 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
 	}
 	return &Oracle{
-		backend:     backend,
-		lastPrice:   params.Default,
-		maxPrice:    maxPrice,
-		ignorePrice: ignorePrice,
-		checkBlocks: blocks,
-		percentile:  percent,
+		backend:          backend,
+		lastPrice:        params.Default,
+		maxPrice:         maxPrice,
+		ignorePrice:      ignorePrice,
+		checkBlocks:      blocks,
+		percentile:       percent,
+		maxHeaderHistory: params.MaxHeaderHistory,
+		maxBlockHistory:  params.MaxBlockHistory,
 	}
 }
 
-// SuggestPrice returns a TipCap so that newly created transaction can
+// SuggestTipCap returns a TipCap so that newly created transaction can
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
-func (gpo *Oracle) SuggestPrice(ctx context.Context) (*big.Int, error) {
+func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 	head, _ := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
 	headHash := head.Hash()
 
@@ -206,12 +214,12 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	ignoreUnder, overflow := uint256.FromBig(ingoreUnderBig)
 	if overflow {
 		err := errors.New("overflow in getBlockPrices, gasprice.go: ignoreUnder too large")
-		log.Error("gasprice.go: getBlockPrices", "error", err)
+		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
 	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if block == nil {
-		log.Error("gasprice.go: getBlockPrices", "error", err)
+		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
 	blockTxs := block.Transactions()
@@ -224,7 +232,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		baseFee, overflow = uint256.FromBig(block.BaseFee())
 		if overflow {
 			err := errors.New("overflow in getBlockPrices, gasprice.go: baseFee > 2^256-1")
-			log.Error("gasprice.go: getBlockPrices", "error", err)
+			log.Error("gasprice.go: getBlockPrices", "err", err)
 			return err
 		}
 	}

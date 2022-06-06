@@ -130,7 +130,7 @@ Table "PlainState"
 Store together Accounts and Storage. 
 
 Accounts: key="account address", value="current state of each account". 
-Storage: key="account address+incarnation+sorage hash", value="current value of storage".
+Storage: key="account address+incarnation+storage hash", value="current value of storage".
 
 The accounts encoded by function `account.go:EncodeForStorage()` so that the first byte of a 
 field is its length and bytes afterward the field itself. 

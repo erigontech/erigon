@@ -24,19 +24,21 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
 )
 
 type Prestate struct {
@@ -71,6 +73,7 @@ type stEnv struct {
 	BlockHashes map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
 	Ommers      []ommer                             `json:"ommers,omitempty"`
 	BaseFee     *big.Int                            `json:"currentBaseFee,omitempty"`
+	Random      *common.Hash                        `json:"currentRandom,omitempty"`
 }
 
 type rejectedTx struct {
@@ -115,7 +118,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	defer tx.Rollback()
 
 	var (
-		ibs         = MakePreState(chainConfig.Rules(0), tx, pre.Pre)
+		rules0      = chainConfig.Rules(0)
+		rules1      = chainConfig.Rules(1)
+		rules       = chainConfig.Rules(pre.Env.Number)
+		ibs         = MakePreState(rules0, tx, pre.Pre)
 		signer      = types.MakeSigner(chainConfig, pre.Env.Number)
 		gaspool     = new(core.GasPool)
 		blockHash   = common.Hash{0x13, 0x37}
@@ -126,16 +132,25 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		txIndex     = 0
 	)
 	gaspool.AddGas(pre.Env.GasLimit)
+
+	difficulty := new(big.Int)
+	if pre.Env.Random == nil {
+		difficulty = pre.Env.Difficulty
+	} else {
+		// We are on POS hence difficulty opcode is now supplant with RANDOM
+		random := pre.Env.Random.Bytes()
+		difficulty.SetBytes(random)
+	}
 	vmContext := vm.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		Coinbase:    pre.Env.Coinbase,
-		BlockNumber: pre.Env.Number,
-		CheckTEVM:   func(common.Hash) (bool, error) { return false, nil },
-		Time:        pre.Env.Timestamp,
-		Difficulty:  pre.Env.Difficulty,
-		GasLimit:    pre.Env.GasLimit,
-		GetHash:     getHash,
+		CanTransfer:     core.CanTransfer,
+		Transfer:        core.Transfer,
+		Coinbase:        pre.Env.Coinbase,
+		BlockNumber:     pre.Env.Number,
+		ContractHasTEVM: func(common.Hash) (bool, error) { return false, nil },
+		Time:            pre.Env.Timestamp,
+		Difficulty:      difficulty,
+		GasLimit:        pre.Env.GasLimit,
+		GetHash:         getHash,
 	}
 	// If currentBaseFee is defined, add it to the vmContext.
 	if pre.Env.BaseFee != nil {
@@ -152,11 +167,12 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		chainConfig.DAOForkBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
+	systemcontracts.UpgradeBuildInSystemContract(chainConfig, new(big.Int).SetUint64(pre.Env.Number), ibs)
 
 	for i, txn := range txs {
-		msg, err := txn.AsMessage(*signer, pre.Env.BaseFee)
+		msg, err := txn.AsMessage(*signer, pre.Env.BaseFee, rules)
 		if err != nil {
-			log.Warn("rejected txn", "index", i, "hash", txn.Hash(), "error", err)
+			log.Warn("rejected txn", "index", i, "hash", txn.Hash(), "err", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
@@ -175,7 +191,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		msgResult, err := core.ApplyMessage(evm, msg, gaspool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			ibs.RevertToSnapshot(snapshot)
-			log.Info("rejected txn", "index", i, "hash", txn.Hash(), "from", msg.From(), "error", err)
+			log.Info("rejected txn", "index", i, "hash", txn.Hash(), "from", msg.From(), "err", err)
 			rejectedTxs = append(rejectedTxs, &rejectedTx{i, err.Error()})
 			continue
 		}
@@ -200,7 +216,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 			// If the transaction created a contract, store the creation address in the receipt.
 			if msg.To() == nil {
-				receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, txn.GetNonce())
+				receipt.ContractAddress = crypto.CreateAddress(evm.TxContext().Origin, txn.GetNonce())
 			}
 
 			// Set the receipt logs and create a bloom for filtering
@@ -242,7 +258,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 
 	// Commit block
 	var root common.Hash
-	if err = ibs.FinalizeTx(chainConfig.Rules(1), state.NewPlainStateWriter(tx, tx, 1)); err != nil {
+	if err = ibs.FinalizeTx(rules1, state.NewPlainStateWriter(tx, tx, 1)); err != nil {
 		return nil, nil, err
 	}
 	root, err = trie.CalcRoot("", tx)
@@ -265,7 +281,7 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 	return db, execRs, nil
 }
 
-func MakePreState(chainRules params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
+func MakePreState(chainRules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc) *state.IntraBlockState {
 	var blockNr uint64 = 0
 	r, _ := state.NewPlainStateReader(tx), state.NewPlainStateWriter(tx, tx, blockNr)
 	statedb := state.New(r)

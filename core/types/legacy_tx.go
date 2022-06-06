@@ -26,17 +26,24 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type CommonTx struct {
 	TransactionMisc
+
+	ChainID *uint256.Int
 	Nonce   uint64          // nonce of sender account
 	Gas     uint64          // gas limit
 	To      *common.Address `rlp:"nil"` // nil means contract creation
 	Value   *uint256.Int    // wei amount
 	Data    []byte          // contract invocation input data
 	V, R, S uint256.Int     // signature values
+}
+
+func (ct CommonTx) GetChainID() *uint256.Int {
+	return ct.ChainID
 }
 
 func (ct CommonTx) GetNonce() uint64 {
@@ -59,6 +66,29 @@ func (ct CommonTx) GetData() []byte {
 	return ct.Data
 }
 
+func (ct CommonTx) GetSender() (common.Address, bool) {
+	if sc := ct.from.Load(); sc != nil {
+		return sc.(common.Address), true
+	}
+	return common.Address{}, false
+}
+
+func (ct *CommonTx) SetSender(addr common.Address) {
+	ct.from.Store(addr)
+}
+
+func (ct CommonTx) Protected() bool {
+	return true
+}
+
+func (ct CommonTx) IsContractDeploy() bool {
+	return ct.GetTo() == nil
+}
+
+func (ct CommonTx) IsStarkNet() bool {
+	return false
+}
+
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx
@@ -77,7 +107,7 @@ func (tx LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	if gasFeeCap.Lt(baseFee) {
 		return uint256.NewInt(0)
 	}
-	effectiveFee := gasFeeCap.Sub(gasFeeCap, baseFee)
+	effectiveFee := new(uint256.Int).Sub(gasFeeCap, baseFee)
 	if tx.GetTip().Lt(effectiveFee) {
 		return tx.GetTip()
 	} else {
@@ -369,11 +399,8 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		return fmt.Errorf("read Nonce: %w", err)
 	}
 	var b []byte
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read GasPrice: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for GasPrice: %d", len(b))
 	}
 	tx.GasPrice = new(uint256.Int).SetBytes(b)
 	if tx.Gas, err = s.Uint(); err != nil {
@@ -389,35 +416,23 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		tx.To = &common.Address{}
 		copy((*tx.To)[:], b)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read Value: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for Value: %d", len(b))
 	}
 	tx.Value = new(uint256.Int).SetBytes(b)
 	if tx.Data, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read Data: %w", err)
 	}
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read V: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for V: %d", len(b))
-	}
 	tx.V.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read R: %w", err)
 	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for R: %d", len(b))
-	}
 	tx.R.SetBytes(b)
-	if b, err = s.Bytes(); err != nil {
+	if b, err = s.Uint256Bytes(); err != nil {
 		return fmt.Errorf("read S: %w", err)
-	}
-	if len(b) > 32 {
-		return fmt.Errorf("wrong size for S: %d", len(b))
 	}
 	tx.S.SetBytes(b)
 	if err = s.ListEnd(); err != nil {
@@ -427,7 +442,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx LegacyTx) AsMessage(s Signer, _ *big.Int) (Message, error) {
+func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *params.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -527,15 +542,4 @@ func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
 	}
 	tx.from.Store(addr)
 	return addr, nil
-}
-
-func (tx LegacyTx) GetSender() (common.Address, bool) {
-	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), true
-	}
-	return common.Address{}, false
-}
-
-func (tx *LegacyTx) SetSender(addr common.Address) {
-	tx.from.Store(addr)
 }

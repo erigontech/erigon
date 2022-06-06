@@ -99,7 +99,7 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.Sign() == 0 && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.IsZero() && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
 }
 
 // newObject creates a state object.
@@ -156,6 +156,11 @@ func (so *stateObject) touch() {
 
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		*out = so.fakeStorage[*key]
+		return
+	}
 	value, dirty := so.dirtyStorage[*key]
 	if dirty {
 		*out = value
@@ -167,6 +172,11 @@ func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
+	// If the fake storage is set, only lookup the state here(in the debugging mode)
+	if so.fakeStorage != nil {
+		*out = so.fakeStorage[*key]
+		return
+	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[*key]
@@ -197,6 +207,16 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 
 // SetState updates a value in account storage.
 func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
+	// If the fake storage is set, put the temporary state update here.
+	if so.fakeStorage != nil {
+		so.db.journal.append(fakeStorageChange{
+			account:  &so.address,
+			key:      *key,
+			prevalue: so.fakeStorage[*key],
+		})
+		so.fakeStorage[*key] = value
+		return
+	}
 	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	so.GetState(key, &prev)
@@ -297,18 +317,6 @@ func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
 }
 
-func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := newObject(db, so.address, &so.data, &so.original)
-	stateObject.code = so.code
-	stateObject.dirtyStorage = so.dirtyStorage.Copy()
-	stateObject.originStorage = so.originStorage.Copy()
-	stateObject.blockOriginStorage = so.blockOriginStorage.Copy()
-	stateObject.suicided = so.suicided
-	stateObject.dirtyCode = so.dirtyCode
-	stateObject.deleted = so.deleted
-	return stateObject
-}
-
 //
 // Attribute accessors
 //
@@ -328,7 +336,7 @@ func (so *stateObject) Code() []byte {
 	}
 	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, common.BytesToHash(so.CodeHash()))
 	if err != nil {
-		so.setError(fmt.Errorf("can't load code hash %x: %v", so.CodeHash(), err))
+		so.setError(fmt.Errorf("can't load code hash %x: %w", so.CodeHash(), err))
 	}
 	so.code = code
 	return code

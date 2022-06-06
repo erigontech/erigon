@@ -179,19 +179,22 @@ func TestDialSchedStaticDial(t *testing.T) {
 				d.addStatic(newNode(uintID(0x05), "127.0.0.5:30303"))
 				d.addStatic(newNode(uintID(0x06), "127.0.0.6:30303"))
 				d.addStatic(newNode(uintID(0x07), "127.0.0.7:30303"))
-				d.addStatic(newNode(uintID(0x08), "127.0.0.8:30303"))
-				d.addStatic(newNode(uintID(0x09), "127.0.0.9:30303"))
 			},
 			wantNewDials: []*enode.Node{
 				newNode(uintID(0x03), "127.0.0.3:30303"),
 				newNode(uintID(0x04), "127.0.0.4:30303"),
 				newNode(uintID(0x05), "127.0.0.5:30303"),
 				newNode(uintID(0x06), "127.0.0.6:30303"),
+				newNode(uintID(0x07), "127.0.0.7:30303"),
 			},
 		},
 		// Dial to 0x03 completes, filling a peer slot. One slot remains,
 		// two dials are launched to attempt to fill it.
 		{
+			update: func(d *dialScheduler) {
+				d.addStatic(newNode(uintID(0x08), "127.0.0.8:30303"))
+				d.addStatic(newNode(uintID(0x09), "127.0.0.9:30303"))
+			},
 			succeeded: []enode.ID{
 				uintID(0x03),
 			},
@@ -235,7 +238,7 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 		maxDialPeers:   1,
 	}
 	runDialTest(t, config, []dialTestRound{
-		// Add static nodes.
+		// Add static nodes. Ignore maxActiveDials config
 		{
 			update: func(d *dialScheduler) {
 				d.addStatic(newNode(uintID(0x01), "127.0.0.1:30303"))
@@ -244,10 +247,15 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 			},
 			wantNewDials: []*enode.Node{
 				newNode(uintID(0x01), "127.0.0.1:30303"),
+				newNode(uintID(0x02), "127.0.0.2:30303"),
+				newNode(uintID(0x03), "127.0.0.3:30303"),
 			},
 		},
 		// Dial to 0x01 fails.
 		{
+			update: func(d *dialScheduler) {
+				d.addStatic(newNode(uintID(0x04), "127.0.0.4:30303"))
+			},
 			failed: []enode.ID{
 				uintID(0x01),
 			},
@@ -255,7 +263,7 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 				uintID(0x01): nil,
 			},
 			wantNewDials: []*enode.Node{
-				newNode(uintID(0x02), "127.0.0.2:30303"),
+				newNode(uintID(0x04), "127.0.0.4:30303"),
 			},
 		},
 		// All static nodes are removed. 0x01 is in history, 0x02 is being
@@ -265,6 +273,7 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 				d.removeStatic(newNode(uintID(0x01), "127.0.0.1:30303"))
 				d.removeStatic(newNode(uintID(0x02), "127.0.0.2:30303"))
 				d.removeStatic(newNode(uintID(0x03), "127.0.0.3:30303"))
+				d.removeStatic(newNode(uintID(0x04), "127.0.0.4:30303"))
 			},
 			failed: []enode.ID{
 				uintID(0x02),
@@ -275,39 +284,6 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 		},
 		// Since all static nodes are removed, they should not be dialed again.
 		{}, {}, {},
-	})
-}
-
-// This test checks that static dials are selected at random.
-func TestDialSchedManyStaticNodes(t *testing.T) {
-	t.Parallel()
-
-	config := dialConfig{maxDialPeers: 2}
-	runDialTest(t, config, []dialTestRound{
-		{
-			peersAdded: []*conn{
-				{flags: dynDialedConn, node: newNode(uintID(0xFFFE), "")},
-				{flags: dynDialedConn, node: newNode(uintID(0xFFFF), "")},
-			},
-			update: func(d *dialScheduler) {
-				for id := uint16(0); id < 2000; id++ {
-					n := newNode(uintID(id), "127.0.0.1:30303")
-					d.addStatic(n)
-				}
-			},
-		},
-		{
-			peersRemoved: []enode.ID{
-				uintID(0xFFFE),
-				uintID(0xFFFF),
-			},
-			wantNewDials: []*enode.Node{
-				newNode(uintID(0x0085), "127.0.0.1:30303"),
-				newNode(uintID(0x02dc), "127.0.0.1:30303"),
-				newNode(uintID(0x0285), "127.0.0.1:30303"),
-				newNode(uintID(0x00cb), "127.0.0.1:30303"),
-			},
-		},
 	})
 }
 
@@ -422,7 +398,7 @@ func runDialTest(t *testing.T, config dialConfig, rounds []dialTestRound) {
 	config.clock = clock
 	config.dialer = dialer
 	config.resolver = resolver
-	config.log = testlog.Logger(t, log.LvlTrace)
+	config.log = testlog.Logger(t, log.LvlError)
 	config.rand = rand.New(rand.NewSource(0x1111))
 
 	// Set up the dialer. The setup function below runs on the dialTask
@@ -615,11 +591,13 @@ func (d *dialTestDialer) waitForDials(nodes []*enode.Node) error {
 	return d.checkUnexpectedDial()
 }
 
+var dialTestDialerUnexpectedDialTimeout = time.Millisecond
+
 func (d *dialTestDialer) checkUnexpectedDial() error {
 	select {
 	case req := <-d.init:
 		return fmt.Errorf("attempt to dial unexpected node %v", req.n.ID())
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(dialTestDialerUnexpectedDialTimeout):
 		return nil
 	}
 }

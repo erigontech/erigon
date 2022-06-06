@@ -21,11 +21,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"path"
+	"path/filepath"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
@@ -259,12 +261,30 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 			return err
 		}
 	}
+	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
+	var overflow bool
 	// Now, read the transaction itself
-	var tx types.Transaction
-	if err := json.Unmarshal(input, &tx); err != nil {
+	var txJson commands.RPCTransaction
+
+	if err := json.Unmarshal(input, &txJson); err != nil {
 		return err
 	}
-	t.tx = tx
+
+	if txJson.Value != nil {
+		value, overflow = uint256.FromBig((*big.Int)(txJson.Value))
+		if overflow {
+			return fmt.Errorf("value field caused an overflow (uint256)")
+		}
+	}
+
+	if txJson.GasPrice != nil {
+		gasPrice, overflow = uint256.FromBig((*big.Int)(txJson.GasPrice))
+		if overflow {
+			return fmt.Errorf("gasPrice field caused an overflow (uint256)")
+		}
+	}
+	// assemble transaction
+	t.tx = types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
 	return nil
 }
 
@@ -285,7 +305,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 		tx := txWithKey.tx
 		key := txWithKey.key
 		v, r, s := tx.RawSignatureValues()
-		if key != nil && v.BitLen()+r.BitLen()+s.BitLen() == 0 {
+		if key != nil && v.IsZero() && r.IsZero() && s.IsZero() {
 			// This transaction needs to be signed
 			signed, err := types.SignTx(tx, signer, key)
 			if err != nil {
@@ -328,8 +348,8 @@ func saveFile(baseDir, filename string, data interface{}) error {
 	if err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
 	}
-	location := path.Join(baseDir, filename)
-	if err = ioutil.WriteFile(location, b, 0644); err != nil { //nolint:gosec
+	location := filepath.Join(baseDir, filename)
+	if err = os.WriteFile(location, b, 0644); err != nil { //nolint:gosec
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
 	}
 	log.Info("Wrote file", "file", location)

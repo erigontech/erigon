@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+// BenchEthGetLogs compares response of Erigon with Geth
+// but also can be used for comparing RPCDaemon with Geth or infura
+// parameters:
+// needCompare - if false - doesn't call Erigon and doesn't compare responses
+//                  false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Erigon
+//                  recordFile stores all eth_getlogs returned with success
+//                  errorFile stores information when erigon and geth doesn't return same data
 func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint64, blockTo uint64, recordFile string, errorFile string) {
 	setRoutes(erigonURL, gethURL)
 	var client = &http.Client{
@@ -37,9 +44,13 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		errs = bufio.NewWriter(ferr)
 		defer errs.Flush()
 	}
-	resultsCh := make(chan CallResult, 1000)
-	defer close(resultsCh)
-	go vegetaWrite(false, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
+
+	var resultsCh chan CallResult = nil
+	if !needCompare {
+		resultsCh = make(chan CallResult, 1000)
+		defer close(resultsCh)
+		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
+	}
 
 	var res CallResult
 	reqGen := &RequestGenerator{
@@ -81,7 +92,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 				reqGen.reqID++
 				request := reqGen.getLogs(prevBn, bn, account)
 				errCtx := fmt.Sprintf("account %x blocks %d-%d", account, prevBn, bn)
-				if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs); err != nil {
+				if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
 					fmt.Println(err)
 					return
 				}
@@ -91,7 +102,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					reqGen.reqID++
 					request = reqGen.getLogs1(prevBn, bn+10000, account, topic)
 					errCtx := fmt.Sprintf("account %x topic %x blocks %d-%d", account, topic, prevBn, bn)
-					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
 						fmt.Println(err)
 						return
 					}
@@ -106,7 +117,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 					reqGen.reqID++
 					request = reqGen.getLogs2(prevBn, bn+100000, account, topics[idx1], topics[idx2])
 					errCtx := fmt.Sprintf("account %x topic1 %x topic2 %x blocks %d-%d", account, topics[idx1], topics[idx2], prevBn, bn)
-					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs); err != nil {
+					if err := requestAndCompare(request, "eth_getLogs", errCtx, reqGen, needCompare, rec, errs, resultsCh); err != nil {
 						fmt.Println(err)
 						return
 					}

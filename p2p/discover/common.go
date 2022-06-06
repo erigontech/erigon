@@ -17,8 +17,12 @@
 package discover
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"net"
+	"time"
+
+	"github.com/ledgerwatch/erigon/crypto"
 
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -47,9 +51,16 @@ type Config struct {
 	Log          log.Logger         // if set, log messages go here
 	ValidSchemes enr.IdentityScheme // allowed identity schemes
 	Clock        mclock.Clock
+	ReplyTimeout time.Duration
+
+	PingBackDelay time.Duration
+
+	PrivateKeyGenerator func() (*ecdsa.PrivateKey, error)
+
+	TableRevalidateInterval time.Duration
 }
 
-func (cfg Config) withDefaults() Config {
+func (cfg Config) withDefaults(defaultReplyTimeout time.Duration) Config {
 	if cfg.Log == nil {
 		cfg.Log = log.Root()
 	}
@@ -59,12 +70,24 @@ func (cfg Config) withDefaults() Config {
 	if cfg.Clock == nil {
 		cfg.Clock = mclock.System{}
 	}
+	if cfg.ReplyTimeout == 0 {
+		cfg.ReplyTimeout = defaultReplyTimeout
+	}
+	if cfg.PingBackDelay == 0 {
+		cfg.PingBackDelay = respTimeout
+	}
+	if cfg.PrivateKeyGenerator == nil {
+		cfg.PrivateKeyGenerator = crypto.GenerateKey
+	}
+	if cfg.TableRevalidateInterval == 0 {
+		cfg.TableRevalidateInterval = revalidateInterval
+	}
 	return cfg
 }
 
 // ListenUDP starts listening for discovery packets on the given UDP socket.
-func ListenUDP(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
-	return ListenV4(c, ln, cfg)
+func ListenUDP(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
+	return ListenV4(ctx, c, ln, cfg)
 }
 
 // ReadPacket is a packet that couldn't be handled. Those packets are sent to the unhandled
@@ -72,11 +95,4 @@ func ListenUDP(c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
 type ReadPacket struct {
 	Data []byte
 	Addr *net.UDPAddr
-}
-
-func min(x, y int) int {
-	if x > y {
-		return y
-	}
-	return x
 }

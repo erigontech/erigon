@@ -15,17 +15,15 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
-	grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_cons "github.com/ledgerwatch/erigon-lib/gointerfaces/consensus"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml"
@@ -40,7 +38,7 @@ var configs embed.FS
 
 func init() {
 	withApiAddr(cliqueCmd)
-	withDatadir(cliqueCmd)
+	withDataDir(cliqueCmd)
 	withConfig(cliqueCmd)
 	rootCmd.AddCommand(cliqueCmd)
 }
@@ -49,7 +47,7 @@ var cliqueCmd = &cobra.Command{
 	Use:   "clique",
 	Short: "Run clique consensus engine",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := utils.RootContext()
+		ctx, _ := common2.RootContext()
 		logger := log.New()
 		return cliqueEngine(ctx, logger)
 	},
@@ -87,7 +85,7 @@ func cliqueEngine(ctx context.Context, logger log.Logger) error {
 		}
 	}
 	server.db = openDB(filepath.Join(datadir, "clique", "db"), logger)
-	server.c = clique.New(server.chainConfig, &params.SnapshotConfig{}, server.db)
+	server.c = clique.New(server.chainConfig, params.CliqueSnapshot, server.db)
 	<-ctx.Done()
 	return nil
 }
@@ -109,10 +107,10 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 		streamInterceptors []grpc.StreamServerInterceptor
 		unaryInterceptors  []grpc.UnaryServerInterceptor
 	)
-	if metrics.Enabled {
-		streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-		unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	}
+	//if metrics.Enabled {
+	//streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
+	//unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
+	//}
 	streamInterceptors = append(streamInterceptors, grpc_recovery.StreamServerInterceptor())
 	unaryInterceptors = append(unaryInterceptors, grpc_recovery.UnaryServerInterceptor())
 	var grpcServer *grpc.Server
@@ -125,6 +123,12 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			Time: 10 * time.Minute,
 		}),
+		// Don't drop the connection, settings accordign to this comment on GitHub
+		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(streamInterceptors...)),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(unaryInterceptors...)),
 	}
@@ -135,9 +139,9 @@ func grpcCliqueServer(ctx context.Context, testServer bool) (*CliqueServerImpl, 
 	if testServer {
 		proto_cons.RegisterTestServer(grpcServer, cliqueServer)
 	}
-	if metrics.Enabled {
-		grpc_prometheus.Register(grpcServer)
-	}
+	//if metrics.Enabled {
+	//	grpc_prometheus.Register(grpcServer)
+	//}
 	go func() {
 		if err1 := grpcServer.Serve(lis); err1 != nil {
 			log.Error("Clique server fail", "err", err1)
@@ -223,10 +227,9 @@ func (cs *CliqueServerImpl) initAndConfig(configuration []byte) error {
 		case "homestead":
 			chainConfig.HomesteadBlock = bigNumber
 		case "tangerine":
-			chainConfig.EIP150Block = bigNumber
+			chainConfig.TangerineWhistleBlock = bigNumber
 		case "spurious":
-			chainConfig.EIP155Block = bigNumber
-			chainConfig.EIP158Block = bigNumber
+			chainConfig.SpuriousDragonBlock = bigNumber
 		case "byzantium":
 			chainConfig.ByzantiumBlock = bigNumber
 		case "constantinople":

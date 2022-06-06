@@ -48,7 +48,7 @@ func TestNewID(t *testing.T) {
 
 func TestSubscriptions(t *testing.T) {
 	var (
-		namespaces        = []string{"eth", "shh", "bzz"}
+		namespaces        = []string{"eth", "bzz"}
 		service           = &notificationTestService{}
 		subCount          = len(namespaces)
 		notificationCount = 3
@@ -195,13 +195,13 @@ func waitForMessages(in *json.Decoder, successes chan subConfirmation, notificat
 func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionResult, error) {
 	var msg jsonrpcMessage
 	if err := in.Decode(&msg); err != nil {
-		return nil, nil, fmt.Errorf("decode error: %v", err)
+		return nil, nil, fmt.Errorf("decode error: %w", err)
 	}
 	switch {
 	case msg.isNotification():
 		var res subscriptionResult
 		if err := json.Unmarshal(msg.Params, &res); err != nil {
-			return nil, nil, fmt.Errorf("invalid subscription result: %v", err)
+			return nil, nil, fmt.Errorf("invalid subscription result: %w", err)
 		}
 		return nil, &res, nil
 	case msg.isResponse():
@@ -209,7 +209,7 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 		if msg.Error != nil {
 			return nil, nil, msg.Error
 		} else if err := json.Unmarshal(msg.Result, &c.subid); err != nil {
-			return nil, nil, fmt.Errorf("invalid response: %v", err)
+			return nil, nil, fmt.Errorf("invalid response: %w", err)
 		} else {
 			json.Unmarshal(msg.ID, &c.reqid)
 			return &c, nil, nil

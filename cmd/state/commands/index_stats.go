@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withDatadir(indexStatsCmd)
+	withDataDir(indexStatsCmd)
 	withStatsfile(indexStatsCmd)
 	withIndexBucket(indexStatsCmd)
 	rootCmd.AddCommand(indexStatsCmd)

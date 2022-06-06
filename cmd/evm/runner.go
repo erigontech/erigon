@@ -21,7 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/big"
 	"os"
 	goruntime "runtime"
@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/urfave/cli"
 
@@ -94,11 +95,11 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.bytesAllocated = result.AllocedBytesPerOp()
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
-		goruntime.ReadMemStats(&memStatsBefore)
+		common2.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
 		output, gasLeft, err = execFunc()
 		stats.time = time.Since(startTime)
-		goruntime.ReadMemStats(&memStatsAfter)
+		common2.ReadMemStats(&memStatsAfter)
 		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
 		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}
@@ -173,13 +174,13 @@ func runCmd(ctx *cli.Context) error {
 			// If - is specified, it means that code comes from stdin
 			if codeFileFlag == "-" {
 				//Try reading from stdin
-				if hexcode, err = ioutil.ReadAll(os.Stdin); err != nil {
+				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
 					fmt.Printf("Could not load code from stdin: %v\n", err)
 					os.Exit(1)
 				}
 			} else {
 				// Codefile with hex assembly
-				if hexcode, err = ioutil.ReadFile(codeFileFlag); err != nil {
+				if hexcode, err = os.ReadFile(codeFileFlag); err != nil {
 					fmt.Printf("Could not load code from file: %v\n", err)
 					os.Exit(1)
 				}
@@ -195,7 +196,7 @@ func runCmd(ctx *cli.Context) error {
 		code = common.FromHex(string(hexcode))
 	} else if fn := ctx.Args().First(); len(fn) > 0 {
 		// EASM-file to compile
-		src, err := ioutil.ReadFile(fn)
+		src, err := os.ReadFile(fn)
 		if err != nil {
 			return err
 		}
@@ -248,7 +249,7 @@ func runCmd(ctx *cli.Context) error {
 	var hexInput []byte
 	if inputFileFlag := ctx.GlobalString(InputFileFlag.Name); inputFileFlag != "" {
 		var err error
-		if hexInput, err = ioutil.ReadFile(inputFileFlag); err != nil {
+		if hexInput, err = os.ReadFile(inputFileFlag); err != nil {
 			fmt.Printf("could not load input from file: %v\n", err)
 			os.Exit(1)
 		}
@@ -277,7 +278,7 @@ func runCmd(ctx *cli.Context) error {
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		var rules params.Rules
+		rules := &params.Rules{}
 		if chainConfig != nil {
 			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64())
 		}

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -77,7 +78,11 @@ func doTestEncodingStorageNew(
 		}
 		ch2 := m.New()
 		err = m.Encode(0, ch, func(k, v []byte) error {
-			_, k, v = m.Decode(k, v)
+			var err error
+			_, k, v, err = m.Decode(k, v)
+			if err != nil {
+				return err
+			}
 			return ch2.Add(k, v)
 		})
 		if err != nil {
@@ -155,7 +160,9 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 
 		i := 0
 		err := m.Encode(0, ch, func(k, v []byte) error {
-			_, k, v = m.Decode(k, v)
+			var err error
+			_, k, v, err = m.Decode(k, v)
+			assert.NoError(t, err)
 			if !bytes.Equal(k, ch.Changes[i].Key) {
 				t.Log(common.Bytes2Hex(ch.Changes[i].Key))
 				t.Log(common.Bytes2Hex(k))
@@ -267,7 +274,7 @@ func doTestFind(
 		require.NoError(t, err)
 
 		err = m.Encode(1, ch, func(k, v []byte) error {
-			if err2 := c.Put(common.CopyBytes(k), common.CopyBytes(v)); err2 != nil {
+			if err2 := c.Put(libcommon.Copy(k), libcommon.Copy(v)); err2 != nil {
 				return err2
 			}
 			return nil
@@ -320,8 +327,9 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 	var ch2 *ChangeSet
 	for i := 0; i < t.N; i++ {
 		err := EncodeStorage(1, ch, func(k, v []byte) error {
-			_, _, _ = DecodeStorage(k, v)
-			return nil
+			var err error
+			_, _, _, err = DecodeStorage(k, v)
+			return err
 		})
 		if err != nil {
 			t.Fatal(err)

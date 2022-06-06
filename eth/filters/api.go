@@ -504,7 +504,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 				if strAddr, ok := addr.(string); ok {
 					addr, err := decodeAddress(strAddr)
 					if err != nil {
-						return fmt.Errorf("invalid address at index %d: %v", i, err)
+						return fmt.Errorf("invalid address at index %d: %w", i, err)
 					}
 					args.Addresses = append(args.Addresses, addr)
 				} else {
@@ -514,7 +514,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 		case string:
 			addr, err := decodeAddress(rawAddr)
 			if err != nil {
-				return fmt.Errorf("invalid address: %v", err)
+				return fmt.Errorf("invalid address: %w", err)
 			}
 			args.Addresses = []common.Address{addr}
 		default:

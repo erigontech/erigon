@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestRuntimeMemStatsBlocking(t *testing.T) {
@@ -14,7 +16,7 @@ func TestRuntimeMemStatsBlocking(t *testing.T) {
 	go testRuntimeMemStatsBlocking(ch)
 	var memStats runtime.MemStats
 	t0 := time.Now()
-	runtime.ReadMemStats(&memStats)
+	common.ReadMemStats(&memStats)
 	t1 := time.Now()
 	t.Log("i++ during runtime.ReadMemStats:", <-ch)
 	go testRuntimeMemStatsBlocking(ch)

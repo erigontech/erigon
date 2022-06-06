@@ -1,4 +1,4 @@
-// +build tools
+//go:build tools
 
 package tools
 
@@ -20,6 +20,5 @@ import (
 	_ "github.com/fjl/gencodec"
 	_ "github.com/kevinburke/go-bindata"
 	_ "github.com/ugorji/go/codec/codecgen"
-	_ "golang.org/x/tools/cmd/stringer"
 	_ "google.golang.org/grpc/cmd/protoc-gen-go-grpc"
 )

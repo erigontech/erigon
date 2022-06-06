@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
@@ -54,21 +55,33 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//}
 	//prev = sealHash
 
+	// If we are on POS, we will send the result on the POS channel
+	isTrans, err := rawdb.Transitioned(tx, block.Header().Number.Uint64(), cfg.chainConfig.TerminalTotalDifficulty)
+	if err != nil {
+		return err
+	}
+
+	if isTrans {
+		cfg.miningState.MiningResultPOSCh <- block
+		return nil
+	}
 	// Tests may set pre-calculated nonce
-	if block.Header().Nonce.Uint64() != 0 {
+	if block.NonceU64() != 0 {
 		cfg.miningState.MiningResultCh <- block
 		return nil
 	}
 
 	cfg.miningState.PendingResultCh <- block
 
-	log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
-		"number", block.NumberU64(),
-		"transactions", block.Transactions().Len(),
-		"gas_used", block.GasUsed(),
-		"gas_limit", block.GasLimit(),
-		"difficulty", block.Difficulty(),
-	)
+	if block.Transactions().Len() > 0 {
+		log.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
+			"blocn_num", block.NumberU64(),
+			"transactions", block.Transactions().Len(),
+			"gas_used", block.GasUsed(),
+			"gas_limit", block.GasLimit(),
+			"difficulty", block.Difficulty(),
+		)
+	}
 
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
 	if err := cfg.engine.Seal(chain, block, cfg.miningState.MiningResultCh, cfg.sealCancel); err != nil {
