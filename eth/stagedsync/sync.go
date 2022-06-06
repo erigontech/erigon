@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -223,7 +222,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 
 		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
 			log.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			os.Exit(1)
+			return libcommon.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
