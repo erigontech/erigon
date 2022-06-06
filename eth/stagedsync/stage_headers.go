@@ -727,13 +727,13 @@ Loop:
 			}
 			break
 		}
-		currentTime := uint64(time.Now().Unix())
+		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
@@ -747,7 +747,7 @@ Loop:
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
+					cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
 					cfg.hd.UpdateStats(req, false /* skeleton */)
 
