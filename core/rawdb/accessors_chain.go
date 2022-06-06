@@ -145,6 +145,18 @@ func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 	}
 }
 
+// ReadForkchoiceHead retrieves headBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceHead(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("headBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceHead failed", "err", err)
+	}
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+	return common.BytesToHash(data)
+}
+
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
