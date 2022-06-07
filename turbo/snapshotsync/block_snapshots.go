@@ -375,6 +375,11 @@ func (s *RoSnapshots) AsyncOpenAll(ctx context.Context) {
 	}()
 }
 
+// OptimisticReopen - optimistically open snapshots (ignoring error), useful at App startup because:
+// - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
+// - RPC return Nil for historical blocks if snapshots are not open
+func (s *RoSnapshots) OptimisticReopen() { _ = s.Reopen() }
+
 func (s *RoSnapshots) Reopen() error {
 	s.Headers.lock.Lock()
 	defer s.Headers.lock.Unlock()
