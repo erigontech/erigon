@@ -212,11 +212,11 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 
 func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
 	preverified := snapshothashes.KnownConfig(chainName).Preverified
-	keep := map[string]bool{}
+	keep := map[string]struct{}{}
 	for _, p := range preverified {
 		ext := filepath.Ext(p.Name)
 		withoutExt := p.Name[0 : len(p.Name)-len(ext)]
-		keep[withoutExt] = true
+		keep[withoutExt] = struct{}{}
 	}
 	list, err := Segments(snapDir)
 	if err != nil {
@@ -230,7 +230,9 @@ func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
 			_ = os.Remove(f.Path)
 		} else {
 			if f.T == Transactions {
-				keep[IdxFileName(f.From, f.To, Transactions2Block.String())] = true
+				idxPath := IdxFileName(f.From, f.To, Transactions2Block.String())
+				idxExt := filepath.Ext(idxPath)
+				keep[idxPath[0:len(idxPath)-len(idxExt)]] = struct{}{}
 			}
 		}
 	}
