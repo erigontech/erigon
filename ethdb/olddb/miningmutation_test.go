@@ -52,6 +52,11 @@ func TestLastMiningDB(t *testing.T) {
 
 	require.Equal(t, key, []byte("CCAA"))
 	require.Equal(t, value, []byte("value3"))
+
+	key, value, err = cursor.Next()
+	require.NoError(t, err)
+	require.Equal(t, key, []byte(nil))
+	require.Equal(t, value, []byte(nil))
 }
 
 func TestLastMiningMem(t *testing.T) {
@@ -72,4 +77,9 @@ func TestLastMiningMem(t *testing.T) {
 
 	require.Equal(t, key, []byte("DCAA"))
 	require.Equal(t, value, []byte("value5"))
+
+	key, value, err = cursor.Next()
+	require.NoError(t, err)
+	require.Equal(t, key, []byte(nil))
+	require.Equal(t, value, []byte(nil))
 }
