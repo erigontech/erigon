@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
@@ -33,6 +34,7 @@ var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
 		txsBeginEnd,
+		resetBlocks,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
@@ -41,7 +43,7 @@ var migrations = map[kv.Label][]Migration{
 type Callback func(tx kv.RwTx, progress []byte, isDone bool) error
 type Migration struct {
 	Name string
-	Up   func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) error
+	Up   func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) error
 }
 
 var (
@@ -151,10 +153,11 @@ func (m *Migrator) VerifyVersion(db kv.RwDB) error {
 	return nil
 }
 
-func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
+func (m *Migrator) Apply(db kv.RwDB, dataDir string) error {
 	if len(m.Migrations) == 0 {
 		return nil
 	}
+	dirs := datadir.New(dataDir)
 
 	var applied map[string][]byte
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
@@ -198,7 +201,8 @@ func (m *Migrator) Apply(db kv.RwDB, datadir string) error {
 			return fmt.Errorf("migrator.Apply: %w", err)
 		}
 
-		if err := v.Up(db, filepath.Join(datadir, "migrations", v.Name), progress, func(tx kv.RwTx, key []byte, isDone bool) error {
+		dirs.Tmp = filepath.Join(dirs.DataDir, "migrations", v.Name)
+		if err := v.Up(db, dirs, progress, func(tx kv.RwTx, key []byte, isDone bool) error {
 			if !isDone {
 				if key != nil {
 					if err := tx.Put(kv.Migrations, []byte("_progress_"+v.Name), key); err != nil {

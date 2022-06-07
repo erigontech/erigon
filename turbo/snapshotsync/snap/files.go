@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapshothashes"
 	"golang.org/x/exp/slices"
 )
 
@@ -207,4 +208,39 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 	})
 
 	return res, nil
+}
+
+func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
+	preverified := snapshothashes.KnownConfig(chainName).Preverified
+	keep := map[string]bool{}
+	for _, p := range preverified {
+		ext := filepath.Ext(p.Name)
+		withoutExt := p.Name[0 : len(p.Name)-len(ext)]
+		keep[withoutExt] = true
+	}
+	list, err := Segments(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range list {
+		_, fname := filepath.Split(f.Path)
+		ext := filepath.Ext(fname)
+		withoutExt := fname[0 : len(fname)-len(ext)]
+		if _, ok := keep[withoutExt]; !ok {
+			_ = os.Remove(f.Path)
+		}
+	}
+	list, err = IdxFiles(snapDir)
+	if err != nil {
+		return err
+	}
+	for _, f := range list {
+		_, fname := filepath.Split(f.Path)
+		ext := filepath.Ext(fname)
+		withoutExt := fname[0 : len(fname)-len(ext)]
+		if _, ok := keep[withoutExt]; !ok {
+			_ = os.Remove(f.Path)
+		}
+	}
+	return nil
 }
