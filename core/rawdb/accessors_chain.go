@@ -145,6 +145,13 @@ func WriteHeadBlockHash(db kv.Putter, hash common.Hash) {
 	}
 }
 
+// DeleteHeaderNumber removes hash->number mapping.
+func DeleteHeaderNumber(db kv.Deleter, hash common.Hash) {
+	if err := db.Delete(kv.HeaderNumber, hash[:], nil); err != nil {
+		log.Crit("Failed to delete hash mapping", "err", err)
+	}
+}
+
 // ReadForkchoiceHead retrieves headBlockHash from the last Engine API forkChoiceUpdated.
 func ReadForkchoiceHead(db kv.Getter) common.Hash {
 	data, err := db.GetOne(kv.LastForkchoice, []byte("headBlockHash"))
@@ -187,7 +194,7 @@ func WriteForkchoiceSafe(db kv.Putter, hash common.Hash) {
 }
 
 // ReadForkchoiceFinalized retrieves finalizedBlockHash from the last Engine API forkChoiceUpdated.
-func ReadForkchoiceFinalize(db kv.Getter) common.Hash {
+func ReadForkchoiceFinalized(db kv.Getter) common.Hash {
 	data, err := db.GetOne(kv.LastForkchoice, []byte("finalizedBlockHash"))
 	if err != nil {
 		log.Error("ReadForkchoiceFinalize failed", "err", err)
@@ -202,7 +209,7 @@ func ReadForkchoiceFinalize(db kv.Getter) common.Hash {
 }
 
 // WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
-func WriteForkchoiceFinalize(db kv.Putter, hash common.Hash) {
+func WriteForkchoiceFinalized(db kv.Putter, hash common.Hash) {
 	if err := db.Put(kv.LastForkchoice, []byte("finalizedBlockHash"), hash[:]); err != nil {
 		log.Crit("Failed to safe finalized block hash", "err", err)
 	}
