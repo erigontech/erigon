@@ -765,9 +765,10 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 
 	if isSnapshotEnabled {
 		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
-		//if err = allSnapshots.Reopen(); err != nil {
-		//	return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
-		//}
+		// Optimistically open snapshots:
+		// - ignore error because user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
+		// - useful because RPC return Nil for historical blocks if snapshots are not open
+		_ = allSnapshots.Reopen()
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
