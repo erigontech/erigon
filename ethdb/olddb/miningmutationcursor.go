@@ -54,27 +54,39 @@ func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
 	return common.CopyBytes(m.currentPair.key), common.CopyBytes(m.currentPair.value), nil
 }
 
+func (m *miningmutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte) (newDbKey []byte, newDbValue []byte, err error) {
+	newDbKey = dbKey
+	newDbValue = dbValue
+	// Check for duplicates
+	if bytes.Compare(memKey, dbKey) == 0 {
+		if !m.isDupsort {
+			if newDbKey, newDbValue, err = m.cursor.Next(); err != nil {
+				return
+			}
+		} else if bytes.Compare(memValue, dbValue) == 0 {
+			if newDbKey, newDbValue, err = m.dupCursor.NextDup(); err != nil {
+				return
+			}
+		} else if len(memValue) >= 32 && len(dbValue) >= 32 && m.table == kv.HashedStorage && bytes.Compare(memValue[:32], dbValue[:32]) == 0 {
+			if newDbKey, newDbValue, err = m.dupCursor.NextDup(); err != nil {
+				return
+			}
+		}
+	}
+	return
+}
+
 func (m *miningmutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte) ([]byte, []byte, error) {
 	var err error
 	if memValue == nil && dbValue == nil {
 		return nil, nil, nil
 	}
-	// Check for duplicates
-	if bytes.Compare(memKey, dbKey) == 0 {
-		if !m.isDupsort {
-			if dbKey, dbValue, err = m.cursor.Next(); err != nil {
-				return nil, nil, err
-			}
-		} else if bytes.Compare(memValue, dbValue) == 0 {
-			if dbKey, dbValue, err = m.dupCursor.NextDup(); err != nil {
-				return nil, nil, err
-			}
-		} else if len(memValue) >= 32 && len(dbValue) >= 32 && m.table == kv.HashedStorage && bytes.Compare(memValue[:32], dbValue[:32]) == 0 {
-			if dbKey, dbValue, err = m.dupCursor.NextDup(); err != nil {
-				return nil, nil, err
-			}
-		}
+
+	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue)
+	if err != nil {
+		return nil, nil, err
 	}
+
 	m.currentDbEntry = cursorentry{dbKey, dbValue}
 	m.currentMemEntry = cursorentry{memKey, memValue}
 	// compare entries
@@ -242,7 +254,45 @@ func (m *miningmutationcursor) Last() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	return m.goForward(memKey, memValue, dbKey, dbValue)
+	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	m.currentDbEntry = cursorentry{dbKey, dbValue}
+	m.currentMemEntry = cursorentry{memKey, memValue}
+	// Basic checks
+	if dbValue == nil {
+		m.isPrevFromDb = false
+		return memKey, memValue, nil
+	}
+
+	if memValue == nil {
+		m.isPrevFromDb = true
+		return dbKey, dbValue, nil
+	}
+	// Check which one is last and return it
+	keyCompare := bytes.Compare(memKey, dbKey)
+	if keyCompare == 0 {
+		if bytes.Compare(memValue, dbValue) > 0 {
+			m.currentDbEntry = cursorentry{}
+			m.isPrevFromDb = false
+			return memKey, memValue, nil
+		}
+		m.currentMemEntry = cursorentry{}
+		m.isPrevFromDb = true
+		return dbKey, dbValue, nil
+	}
+
+	if keyCompare > 0 {
+		m.currentDbEntry = cursorentry{}
+		m.isPrevFromDb = false
+		return memKey, memValue, nil
+	}
+
+	m.currentMemEntry = cursorentry{}
+	m.isPrevFromDb = true
+	return dbKey, dbValue, nil
 }
 
 func (m *miningmutationcursor) Prev() ([]byte, []byte, error) {
