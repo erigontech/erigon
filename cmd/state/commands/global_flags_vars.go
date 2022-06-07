@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	datadirCli      string
+	datadir         string
 	chaindata       string
 	statsfile       string
 	block           uint64
@@ -29,7 +29,7 @@ func withBlock(cmd *cobra.Command) {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadirCli, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")

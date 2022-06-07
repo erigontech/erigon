@@ -48,7 +48,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if chaindata == "" {
-			chaindata = filepath.Join(datadirCli, "chaindata")
+			chaindata = filepath.Join(datadir, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

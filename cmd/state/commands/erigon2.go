@@ -94,7 +94,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		interruptCh <- true
 	}()
 
-	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadirCli, "chaindata")).Open()
+	historyDb, err := kv2.NewMDBX(logger).Path(path.Join(datadir, "chaindata")).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)
 	}
@@ -106,7 +106,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		return err1
 	}
 	defer historyTx.Rollback()
-	stateDbPath := path.Join(datadirCli, "statedb")
+	stateDbPath := path.Join(datadir, "statedb")
 	if block == 0 {
 		if _, err = os.Stat(stateDbPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -122,7 +122,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	}
 	defer db.Close()
 
-	aggPath := filepath.Join(datadirCli, "aggregator")
+	aggPath := filepath.Join(datadir, "aggregator")
 	if block == 0 {
 		if _, err = os.Stat(aggPath); err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
@@ -226,7 +226,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	var allSnapshots *snapshotsync.RoSnapshots
 	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
 	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadir, "snapshots"))
 		defer allSnapshots.Close()
 		if err := allSnapshots.Reopen(); err != nil {
 			return fmt.Errorf("reopen snapshot segments: %w", err)
@@ -627,17 +627,17 @@ func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, sna
 	switch {
 	case chainConfig.Clique != nil:
 		c := params.CliqueSnapshot
-		c.DBPath = filepath.Join(datadirCli, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots)
+		c.DBPath = filepath.Join(datadir, "clique", "db")
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Aura != nil:
-		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadirCli, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots)
+		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Parlia != nil:
-		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadirCli, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots)
+		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadirCli, snapshots)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "http://localhost:1317", false, datadir, snapshots)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}
