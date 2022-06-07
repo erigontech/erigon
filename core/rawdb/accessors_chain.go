@@ -157,6 +157,57 @@ func ReadForkchoiceHead(db kv.Getter) common.Hash {
 	return common.BytesToHash(data)
 }
 
+// WriteForkchoiceHead stores headBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceHead(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("headBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to store head block hash", "err", err)
+	}
+}
+
+// ReadForkchoiceSafe retrieves safeBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceSafe(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("safeBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceSafe failed", "err", err)
+		return common.Hash{}
+	}
+
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceSafe stores safeBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceSafe(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("safeBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to store safe block hash", "err", err)
+	}
+}
+
+// ReadForkchoiceFinalized retrieves finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func ReadForkchoiceFinalize(db kv.Getter) common.Hash {
+	data, err := db.GetOne(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	if err != nil {
+		log.Error("ReadForkchoiceFinalize failed", "err", err)
+		return common.Hash{}
+	}
+
+	if len(data) == 0 {
+		return common.Hash{}
+	}
+
+	return common.BytesToHash(data)
+}
+
+// WriteForkchoiceFinalized stores finalizedBlockHash from the last Engine API forkChoiceUpdated.
+func WriteForkchoiceFinalize(db kv.Putter, hash common.Hash) {
+	if err := db.Put(kv.LastForkchoice, []byte("finalizedBlockHash"), hash[:]); err != nil {
+		log.Crit("Failed to safe finalized block hash", "err", err)
+	}
+}
+
 // ReadHeaderRLP retrieves a block header in its raw RLP database encoding.
 func ReadHeaderRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
 	data, err := db.GetOne(kv.Headers, dbutils.HeaderKey(number, hash))
