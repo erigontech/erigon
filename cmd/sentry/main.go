@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
 )
@@ -69,10 +70,11 @@ var rootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p := eth.ETH66
 
+		dirs := datadir.New(datadirCli)
 		nodeConfig := node2.NewNodeConfig()
 		p2pConfig, err := utils.NewP2PConfig(
 			nodiscover,
-			datadirCli,
+			dirs,
 			netRestrict,
 			natSetting,
 			maxPeers,
@@ -87,7 +89,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		return sentry.Sentry(cmd.Context(), datadirCli, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
+		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
 	},
 }
 

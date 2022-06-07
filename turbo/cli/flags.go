@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -280,12 +279,11 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	jwtSecretPath := ctx.GlobalString(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
-		jwtSecretPath = cfg.DataDir + "/jwt.hex"
+		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
 	c := &httpcfg.HttpCfg{
 		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
-		DataDir: cfg.DataDir,
-		Dirs:    datadir.New(cfg.DataDir),
+		Dirs:    cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,

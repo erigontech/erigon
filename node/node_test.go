@@ -45,13 +45,11 @@ var (
 )
 
 func testNodeConfig(t *testing.T) *nodecfg.Config {
-	cfg := &nodecfg.Config{
-		Name:    "test node",
-		P2P:     p2p.Config{PrivateKey: testNodeKey},
-		DataDir: t.TempDir(),
+	return &nodecfg.Config{
+		Name: "test node",
+		P2P:  p2p.Config{PrivateKey: testNodeKey},
+		Dirs: datadir.New(t.TempDir()),
 	}
-	cfg.Dirs = datadir.New(cfg.DataDir)
-	return cfg
 }
 
 // Tests that an empty protocol stack can be closed more than once.
@@ -110,7 +108,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	dir := t.TempDir()
 
 	// Create a new node based on the data directory
-	original, originalErr := New(&nodecfg.Config{DataDir: dir})
+	original, originalErr := New(&nodecfg.Config{Dirs: datadir.New(dir)})
 	if originalErr != nil {
 		t.Fatalf("failed to create original protocol stack: %v", originalErr)
 	}
@@ -120,7 +118,7 @@ func TestNodeUsedDataDir(t *testing.T) {
 	}
 
 	// Create a second node based on the same data directory and ensure failure
-	if _, err := New(&nodecfg.Config{DataDir: dir}); !errors.Is(err, ErrDataDirUsed) {
+	if _, err := New(&nodecfg.Config{Dirs: datadir.New(dir)}); !errors.Is(err, ErrDataDirUsed) {
 		t.Fatalf("duplicate datadir failure mismatch: have %v, want %v", err, ErrDataDirUsed)
 	}
 }
