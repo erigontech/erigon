@@ -16,7 +16,7 @@ import (
 
 var (
 	consensusAddr string // Address of the consensus engine <host>:<port>
-	datadir       string // Path to the working dir
+	datadirCli    string // Path to the working dir
 	config        string // `file:<path>`` to specify config file in file system, `embed:<path>`` to use embedded file, `test` to register test interface and receive config from test driver
 )
 
@@ -52,7 +52,7 @@ func must(err error) {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
+	cmd.Flags().StringVar(&datadirCli, "datadir", paths.DefaultDataDir(), "directory where databases and temporary files are kept")
 	must(cmd.MarkFlagDirname("datadir"))
 }
 
