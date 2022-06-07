@@ -12,7 +12,7 @@ import (
 )
 
 var resetBlocks = Migration{
-	Name: "reset_blocks",
+	Name: "reset_blocks_3",
 	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) (err error) {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
