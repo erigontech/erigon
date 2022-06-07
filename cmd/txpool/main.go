@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 )
@@ -33,7 +34,7 @@ var (
 	traceSenders   []string
 	privateApiAddr string
 	txpoolApiAddr  string
-	datadir        string // Path to td working dir
+	datadirCli     string // Path to td working dir
 
 	TLSCertfile string
 	TLSCACert   string
@@ -52,7 +53,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
 	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
-	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -95,7 +96,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("could not connect to remoteKv: %w", err)
 		}
 
-		log.Info("TxPool started", "db", filepath.Join(datadir, "txpool"))
+		log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
 
 		sentryClients := make([]direct.SentryClient, len(sentryAddr))
 		for i := range sentryAddr {
@@ -112,7 +113,9 @@ var rootCmd = &cobra.Command{
 		}
 
 		cfg := txpool.DefaultConfig
-		cfg.DBDir = filepath.Join(datadir, "txpool")
+		dirs := datadir.New(datadirCli)
+
+		cfg.DBDir = dirs.TxPool
 		cfg.CommitEvery = 30 * time.Second
 		cfg.PendingSubPoolLimit = pendingPoolLimit
 		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit

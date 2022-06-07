@@ -766,11 +766,11 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, config *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
 	var err error
 
 	if isSnapshotEnabled {
-		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
+		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
 		if err = allSnapshots.Reopen(); err != nil {
 			return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
 		}
@@ -781,7 +781,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 			s.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			s.downloader, err = downloader.New(config.Torrent)
+			s.downloader, err = downloader.New(cfg.Torrent)
 			if err != nil {
 				return nil, nil, err
 			}

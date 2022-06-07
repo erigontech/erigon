@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/torrentcfg"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -1068,6 +1069,7 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	} else {
 		cfg.DataDir = DataDirForNetwork(cfg.DataDir, ctx.GlobalString(ChainFlag.Name))
 	}
+	cfg.Dirs = datadir.New(cfg.DataDir)
 
 	if err := cfg.MdbxPageSize.UnmarshalText([]byte(ctx.GlobalString(DbPageSizeFlag.Name))); err != nil {
 		panic(err)
@@ -1101,7 +1103,7 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	}
 
 	cfg.DataDir = DataDirForNetwork(cfg.DataDir, chain)
-
+	cfg.Dirs = datadir.New(cfg.DataDir)
 }
 
 func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
@@ -1370,7 +1372,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
 	cfg.Sync.UseSnapshots = ctx.GlobalBoolT(SnapshotFlag.Name)
-	cfg.SnapDir = filepath.Join(nodeConfig.DataDir, "snapshots")
+	cfg.Dirs = datadir.New(nodeConfig.DataDir)
 	cfg.Snapshot.KeepBlocks = ctx.GlobalBool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.GlobalBool(SnapStopFlag.Name)
 	if !ctx.GlobalIsSet(DownloaderAddrFlag.Name) {
@@ -1388,7 +1390,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err != nil {
 			panic(err)
 		}
-		cfg.Torrent, err = torrentcfg.New(cfg.SnapDir,
+		cfg.Torrent, err = torrentcfg.New(cfg.Dirs.Snap,
 			lvl,
 			nodeConfig.P2P.NAT,
 			downloadRate, uploadRate,

@@ -30,6 +30,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
@@ -83,6 +84,7 @@ func New(conf *nodecfg.Config) (*Node, error) {
 			return nil, err
 		}
 		conf.DataDir = absdatadir
+		conf.Dirs = datadir.New(conf.DataDir)
 	}
 	if conf.Log == nil {
 		conf.Log = log.New()
