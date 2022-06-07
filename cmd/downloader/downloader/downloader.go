@@ -63,7 +63,7 @@ func New(cfg *torrentcfg.Cfg) (*Downloader, error) {
 	if common.FileExist(cfg.DataDir + "_tmp") { // migration from prev versions
 		_ = os.Rename(cfg.DataDir+"_tmp", filepath.Join(cfg.DataDir, "tmp")) // ignore error, because maybe they are on different drive, or target folder already created manually, all is fine
 	}
-	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) {
+	if !common.FileExist(filepath.Join(cfg.DataDir, "db")) && !HasSegFile(cfg.DataDir) { // it's ok to remove "datadir/snapshots/db" dir or add .seg files manually
 		cfg.DataDir = filepath.Join(cfg.DataDir, "tmp")
 	} else {
 		if err := copyFromTmp(cfg.DataDir); err != nil {
@@ -366,4 +366,20 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 			}
 		}
 	}
+}
+
+func HasSegFile(dir string) bool {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		if filepath.Ext(f.Name()) == ".seg" {
+			return true
+		}
+	}
+	return false
 }
