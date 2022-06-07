@@ -50,7 +50,7 @@ func testNodeConfig(t *testing.T) *nodecfg.Config {
 		P2P:     p2p.Config{PrivateKey: testNodeKey},
 		DataDir: t.TempDir(),
 	}
-	cfg.Dirs = dirs.MakeDirs(cfg.DataDir)
+	cfg.Dirs = dirs.FromDataDir(cfg.DataDir)
 	return cfg
 }
 

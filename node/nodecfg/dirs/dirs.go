@@ -11,7 +11,7 @@ type Dirs struct {
 	Snap      string
 }
 
-func MakeDirs(datadir string) Dirs {
+func FromDataDir(datadir string) Dirs {
 	return Dirs{
 		Data:      datadir,
 		Chaindata: filepath.Join(datadir, "chaindata"),

@@ -56,7 +56,7 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	nodeConfig.Name = "erigon"
 	if ctx.GlobalIsSet(utils.DataDirFlag.Name) {
 		nodeConfig.DataDir = ctx.GlobalString(utils.DataDirFlag.Name)
-		nodeConfig.Dirs = dirs.MakeDirs(nodeConfig.DataDir)
+		nodeConfig.Dirs = dirs.FromDataDir(nodeConfig.DataDir)
 	}
 	return &nodeConfig
 }

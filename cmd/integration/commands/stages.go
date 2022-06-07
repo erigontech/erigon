@@ -1158,7 +1158,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Dirs = dirs.MakeDirs(datadir)
+	cfg.Dirs = dirs.FromDataDir(datadir)
 	allSn := allSnapshots(chainConfig, db)
 	cfg.Snapshot = allSn.Cfg()
 	cfg.SnapDir = filepath.Join(datadir, "snapshots")

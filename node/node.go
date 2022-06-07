@@ -84,7 +84,7 @@ func New(conf *nodecfg.Config) (*Node, error) {
 			return nil, err
 		}
 		conf.DataDir = absdatadir
-		conf.Dirs = dirs.MakeDirs(conf.DataDir)
+		conf.Dirs = dirs.FromDataDir(conf.DataDir)
 	}
 	if conf.Log == nil {
 		conf.Log = log.New()
