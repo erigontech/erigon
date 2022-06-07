@@ -56,6 +56,10 @@ var resetBlocks = Migration{
 			return err
 		}
 
+		if err := rawdbreset.ResetTxLookup(tx); err != nil {
+			return err
+		}
+
 		// This migration is no-op, but it forces the migration mechanism to apply it and thus write the DB schema version info
 		if err := BeforeCommit(tx, nil, true); err != nil {
 			return err

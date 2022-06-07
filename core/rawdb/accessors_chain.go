@@ -1262,10 +1262,13 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				return err
 			}
 		}
-		if err := tx.Delete(kv.Headers, k, nil); err != nil {
+		// Copying k because otherwise the same memory will be reused
+		// for the next key and Delete below will end up deleting 1 more record than required
+		kCopy := common.CopyBytes(k)
+		if err := tx.Delete(kv.Headers, kCopy, nil); err != nil {
 			return err
 		}
-		if err := tx.Delete(kv.BlockBody, k, nil); err != nil {
+		if err := tx.Delete(kv.BlockBody, kCopy, nil); err != nil {
 			return err
 		}
 
