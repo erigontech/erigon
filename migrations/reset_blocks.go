@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 )
 
@@ -29,11 +29,13 @@ var resetBlocks = Migration{
 			return
 		}
 
-		if err := rawdb.ResetBlocks(tx); err != nil {
+		//allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, filepath.Join(cfg.DataDir, "snapshots"))
+
+		if err := rawdbreset.ResetBlocks(tx); err != nil {
 			return err
 		}
 
-		if err := rawdb.ResetSenders(tx); err != nil {
+		if err := rawdbreset.ResetSenders(tx); err != nil {
 			return err
 		}
 

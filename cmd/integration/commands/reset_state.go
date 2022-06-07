@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/log/v3"
@@ -28,7 +29,7 @@ var cmdResetState = &cobra.Command{
 		}
 
 		genesis, _ := genesisByChain(chain)
-		err := rawdb.ResetState(db, ctx, genesis)
+		err := reset2.ResetState(db, ctx, genesis)
 		if err != nil {
 			log.Error(err.Error())
 			return err

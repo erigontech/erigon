@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/internal/flags"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/dirs"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/urfave/cli"
@@ -55,6 +56,7 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	nodeConfig.Name = "erigon"
 	if ctx.GlobalIsSet(utils.DataDirFlag.Name) {
 		nodeConfig.DataDir = ctx.GlobalString(utils.DataDirFlag.Name)
+		nodeConfig.Dirs = dirs.MakeDirs(nodeConfig.DataDir)
 	}
 	return &nodeConfig
 }

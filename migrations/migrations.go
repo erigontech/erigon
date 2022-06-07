@@ -33,6 +33,7 @@ var migrations = map[kv.Label][]Migration{
 	kv.ChainDB: {
 		dbSchemaVersion5,
 		txsBeginEnd,
+		resetBlocks,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},

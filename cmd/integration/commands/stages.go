@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -29,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/node/nodecfg/dirs"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -445,7 +447,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 		}
 
 		if reset {
-			if err := rawdb.ResetBlocks(tx); err != nil {
+			if err := reset2.ResetBlocks(tx); err != nil {
 				return err
 			}
 			return nil
@@ -582,7 +584,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	}
 
 	if reset {
-		err = rawdb.ResetSenders(tx)
+		err = reset2.ResetSenders(tx)
 		if err != nil {
 			return err
 		}
@@ -637,7 +639,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 
 	if reset {
 		genesis, _ := genesisByChain(chain)
-		if err := db.Update(ctx, func(tx kv.RwTx) error { return rawdb.ResetExec(tx, genesis) }); err != nil {
+		if err := db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetExec(tx, genesis) }); err != nil {
 			return err
 		}
 		return nil
@@ -810,7 +812,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if reset {
-		err = rawdb.ResetLogIndex(tx)
+		err = reset2.ResetLogIndex(tx)
 		if err != nil {
 			return err
 		}
@@ -865,7 +867,7 @@ func stageCallTraces(kv kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if reset {
-		err = rawdb.ResetCallTraces(tx)
+		err = reset2.ResetCallTraces(tx)
 		if err != nil {
 			return err
 		}
@@ -926,7 +928,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if reset {
-		err = rawdb.ResetHistory(tx)
+		err = reset2.ResetHistory(tx)
 		if err != nil {
 			return err
 		}
@@ -997,7 +999,7 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	defer tx.Rollback()
 
 	if reset {
-		err = rawdb.ResetTxLookup(tx)
+		err = reset2.ResetTxLookup(tx)
 		if err != nil {
 			return err
 		}
@@ -1156,6 +1158,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
+	cfg.Dirs = dirs.MakeDirs(datadir)
 	allSn := allSnapshots(chainConfig, db)
 	cfg.Snapshot = allSn.Cfg()
 	cfg.SnapDir = filepath.Join(datadir, "snapshots")

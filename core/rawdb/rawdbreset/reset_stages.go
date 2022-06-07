@@ -1,4 +1,4 @@
-package rawdb
+package rawdbreset
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
@@ -43,7 +44,7 @@ func ResetState(db kv.RwDB, ctx context.Context, g *core.Genesis) error {
 
 func ResetBlocks(tx kv.RwTx) error {
 	// keep Genesis
-	if err := TruncateBlocks(context.Background(), tx, 1); err != nil {
+	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {
@@ -54,17 +55,17 @@ func ResetBlocks(tx kv.RwTx) error {
 	}
 
 	// remove all canonical markers from this point
-	if err := TruncateCanonicalHash(tx, 1); err != nil {
+	if err := rawdb.TruncateCanonicalHash(tx, 1); err != nil {
 		return err
 	}
-	if err := TruncateTd(tx, 1); err != nil {
+	if err := rawdb.TruncateTd(tx, 1); err != nil {
 		return err
 	}
-	hash, err := ReadCanonicalHash(tx, 0)
+	hash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return err
 	}
-	if err = WriteHeadHeaderHash(tx, hash); err != nil {
+	if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 		return err
 	}
 
@@ -78,10 +79,10 @@ func ResetBlocks(tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.EthTx); err != nil {
 		return err
 	}
-	if err := ResetSequence(tx, kv.EthTx, 0); err != nil {
+	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
 		return err
 	}
-	if err := ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
+	if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
 		return err
 	}
 

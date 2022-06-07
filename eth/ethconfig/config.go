@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	"github.com/ledgerwatch/erigon/node/nodecfg/dirs"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -174,6 +175,8 @@ type Config struct {
 
 	Snapshot Snapshot
 	Torrent  *torrentcfg.Cfg
+
+	Dirs dirs.Dirs
 
 	SnapDir string
 
