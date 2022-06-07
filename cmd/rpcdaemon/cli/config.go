@@ -341,14 +341,15 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
 			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			if err := allSnapshots.Reopen(); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
-			}
+			allSnapshots.OptimisticReopen()
 			log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
 			// don't reopen it right here, because snapshots may be not ready yet
 			onNewSnapshot = func() {
-				allSnapshots.Reopen()
-				log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+				if err := allSnapshots.Reopen(); err != nil {
+					log.Error("[Snapshots] reopen", "err", err)
+				} else {
+					log.Info("[Snapshots] see new", "blocks", allSnapshots.BlocksAvailable())
+				}
 			}
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 		} else {
