@@ -36,7 +36,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -150,7 +149,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
-	tmpdir := filepath.Join(stack.Config().DataDir, etl.TmpDirName)
+	tmpdir := stack.Config().Dirs.Tmp
 	if err := os.RemoveAll(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
@@ -242,7 +241,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = filepath.Join(stack.Config().DataDir, "nodes", "eth66")
+		cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
 		server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
