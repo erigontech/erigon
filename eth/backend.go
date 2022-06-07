@@ -267,11 +267,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
-	if err != nil {
-		return nil, err
-	}
-
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {
@@ -286,8 +281,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		consensusConfig = &config.Ethash
 	}
-
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
@@ -310,10 +303,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-			blockReader, allSnapshots, err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
-			if err != nil {
-				return err
-			}
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
@@ -321,6 +310,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}); err != nil {
 		return nil, err
 	}
+
+	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
+	if err != nil {
+		return nil, err
+	}
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -770,9 +765,9 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 
 	if isSnapshotEnabled {
 		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
-		if err = allSnapshots.Reopen(); err != nil {
-			return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
-		}
+		//if err = allSnapshots.Reopen(); err != nil {
+		//	return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
+		//}
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
