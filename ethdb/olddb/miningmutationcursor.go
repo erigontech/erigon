@@ -49,6 +49,43 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 	return m.goForward(memKey, memValue, dbKey, dbValue)
 }
 
+func (m *miningmutationcursor) getNextOnDb(dup bool) (key []byte, value []byte, err error) {
+	if dup {
+		key, value, err = m.dupCursor.NextDup()
+		if err != nil {
+			return
+		}
+	} else {
+		key, value, err = m.cursor.Next()
+		if err != nil {
+			return
+		}
+	}
+
+	for key != nil && value != nil && m.mutation.isEntryDeleted(m.table, m.convertAutoDupsort(key, value)) {
+		if dup {
+			key, value, err = m.dupCursor.NextDup()
+			if err != nil {
+				return
+			}
+		} else {
+			key, value, err = m.cursor.Next()
+			if err != nil {
+				return
+			}
+		}
+	}
+	return
+}
+
+func (m *miningmutationcursor) convertAutoDupsort(key []byte, value []byte) []byte {
+	// The only dupsorted table we are interested is HashedStorage
+	if m.table != kv.HashedStorage {
+		return key
+	}
+	return append(key, value[:32]...)
+}
+
 // Current return the current key and values the cursor is on.
 func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
 	return common.CopyBytes(m.currentPair.key), common.CopyBytes(m.currentPair.value), nil
@@ -60,15 +97,15 @@ func (m *miningmutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	// Check for duplicates
 	if bytes.Compare(memKey, dbKey) == 0 {
 		if !m.isDupsort {
-			if newDbKey, newDbValue, err = m.cursor.Next(); err != nil {
+			if newDbKey, newDbValue, err = m.getNextOnDb(false); err != nil {
 				return
 			}
 		} else if bytes.Compare(memValue, dbValue) == 0 {
-			if newDbKey, newDbValue, err = m.dupCursor.NextDup(); err != nil {
+			if newDbKey, newDbValue, err = m.getNextOnDb(true); err != nil {
 				return
 			}
 		} else if len(memValue) >= 32 && len(dbValue) >= 32 && m.table == kv.HashedStorage && bytes.Compare(memValue[:32], dbValue[:32]) == 0 {
-			if newDbKey, newDbValue, err = m.dupCursor.NextDup(); err != nil {
+			if newDbKey, newDbValue, err = m.getNextOnDb(true); err != nil {
 				return
 			}
 		}
@@ -113,7 +150,7 @@ func (m *miningmutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte
 // Next returns the next element of the mutation.
 func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 	if m.isPrevFromDb {
-		k, v, err := m.cursor.Next()
+		k, v, err := m.getNextOnDb(false)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -131,7 +168,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 // NextDup returns the next element of the mutation.
 func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 	if m.isPrevFromDb {
-		k, v, err := m.dupCursor.NextDup()
+		k, v, err := m.getNextOnDb(true)
 
 		if err != nil {
 			return nil, nil, err
@@ -152,6 +189,14 @@ func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 	dbKey, dbValue, err := m.cursor.Seek(seek)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// If the entry is marked as DB find one that is not
+	if dbKey != nil && m.mutation.isEntryDeleted(m.table, dbKey) {
+		dbKey, dbValue, err = m.getNextOnDb(false)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	memKey, memValue, err := m.memCursor.Seek(seek)
@@ -182,7 +227,7 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	if dbKey != nil {
+	if dbKey != nil && !m.mutation.isEntryDeleted(m.table, seek) {
 		m.currentDbEntry.key = dbKey
 		m.currentDbEntry.value = dbValue
 		m.currentMemEntry.key, m.currentMemEntry.value, err = m.memCursor.Seek(seek)
@@ -232,6 +277,13 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	dbValue, err := m.dupCursor.SeekBothRange(key, value)
 	if err != nil {
 		return nil, err
+	}
+
+	if dbValue != nil && m.mutation.isEntryDeleted(m.table, m.convertAutoDupsort(key, dbValue)) {
+		_, dbValue, err = m.getNextOnDb(true)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	memValue, err := m.memDupCursor.SeekBothRange(key, value)
