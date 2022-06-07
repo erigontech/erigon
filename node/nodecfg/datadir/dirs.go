@@ -9,16 +9,19 @@ import (
 // registered services, instead those can use utility methods to create/access
 // databases or flat files
 type Dirs struct {
-	DataDir   string
-	Chaindata string
-	Tmp       string
-	Snap      string
-	TxPool    string
-	Nodes     string
+	DataDir         string
+	RelativeDataDir string // like dataDir, but without filepath.Abs() resolution
+	Chaindata       string
+	Tmp             string
+	Snap            string
+	TxPool          string
+	Nodes           string
 }
 
 func New(datadir string) Dirs {
+	relativeDataDir := datadir
 	if datadir != "" {
+		var err error
 		absdatadir, err := filepath.Abs(datadir)
 		if err != nil {
 			panic(err)
@@ -27,11 +30,12 @@ func New(datadir string) Dirs {
 	}
 
 	return Dirs{
-		DataDir:   datadir,
-		Chaindata: filepath.Join(datadir, "chaindata"),
-		Tmp:       filepath.Join(datadir, "etl-temp"),
-		Snap:      filepath.Join(datadir, "snapshots"),
-		TxPool:    filepath.Join(datadir, "txpool"),
-		Nodes:     filepath.Join(datadir, "nodes"),
+		RelativeDataDir: relativeDataDir,
+		DataDir:         datadir,
+		Chaindata:       filepath.Join(datadir, "chaindata"),
+		Tmp:             filepath.Join(datadir, "etl-temp"),
+		Snap:            filepath.Join(datadir, "snapshots"),
+		TxPool:          filepath.Join(datadir, "txpool"),
+		Nodes:           filepath.Join(datadir, "nodes"),
 	}
 }
