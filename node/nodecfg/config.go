@@ -190,7 +190,7 @@ func (c *Config) IPCEndpoint() string {
 		if c.Dirs.DataDir == "" {
 			return filepath.Join(os.TempDir(), c.IPCPath)
 		}
-		return filepath.Join(c.Dirs.DataDir, c.IPCPath)
+		return filepath.Join(c.Dirs.RelativeDataDir, c.IPCPath)
 	}
 	return c.IPCPath
 }
