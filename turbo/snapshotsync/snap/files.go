@@ -228,6 +228,10 @@ func RemoveNonPreverifiedFiles(chainName, snapDir string) error {
 		withoutExt := fname[0 : len(fname)-len(ext)]
 		if _, ok := keep[withoutExt]; !ok {
 			_ = os.Remove(f.Path)
+		} else {
+			if f.T == Transactions {
+				keep[IdxFileName(f.From, f.To, Transactions2Block.String())] = true
+			}
 		}
 	}
 	list, err = IdxFiles(snapDir)
