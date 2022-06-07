@@ -17,7 +17,7 @@ var (
 	batchSizeStr                   string
 	reset                          bool
 	bucket                         string
-	datadir, toChaindata           string
+	datadirCli, toChaindata        string
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
@@ -90,7 +90,7 @@ func withBucket(cmd *cobra.Command) {
 }
 
 func withDataDir2(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	cmd.Flags().IntVar(&databaseVerbosity, "database.verbosity", 2, "Enabling internal db logs. Very high verbosity levels may require recompile db. Default: 2, means warning.")
@@ -98,7 +98,7 @@ func withDataDir2(cmd *cobra.Command) {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
+	cmd.Flags().StringVar(&datadirCli, "datadir", paths.DefaultDataDir(), "data directory for temporary ELT files")
 	must(cmd.MarkFlagDirname("datadir"))
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
