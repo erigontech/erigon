@@ -46,6 +46,12 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
+	if dbKey != nil && m.mutation.isEntryDeleted(m.table, dbKey) {
+		if dbKey, dbValue, err = m.getNextOnDb(false); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	return m.goForward(memKey, memValue, dbKey, dbValue)
 }
 
@@ -313,7 +319,14 @@ func (m *miningmutationcursor) Last() ([]byte, []byte, error) {
 
 	m.currentDbEntry = cursorentry{dbKey, dbValue}
 	m.currentMemEntry = cursorentry{memKey, memValue}
+
 	// Basic checks
+	if dbKey != nil && m.mutation.isEntryDeleted(m.table, dbKey) {
+		m.currentDbEntry = cursorentry{}
+		m.isPrevFromDb = false
+		return memKey, memValue, nil
+	}
+
 	if dbValue == nil {
 		m.isPrevFromDb = false
 		return memKey, memValue, nil

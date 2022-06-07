@@ -83,3 +83,30 @@ func TestLastMiningMem(t *testing.T) {
 	require.Equal(t, key, []byte(nil))
 	require.Equal(t, value, []byte(nil))
 }
+
+func TestDeleteMining(t *testing.T) {
+	rwTx, err := memdb.New().BeginRw(context.Background())
+	require.NoError(t, err)
+
+	initializeDB(rwTx)
+	batch := NewMiningBatch(rwTx)
+	batch.Put(kv.HashedAccounts, []byte("BAAA"), []byte("value4"))
+	batch.Put(kv.HashedAccounts, []byte("DCAA"), []byte("value5"))
+	batch.Put(kv.HashedAccounts, []byte("FCAA"), []byte("value5"))
+
+	batch.Delete(kv.HashedAccounts, []byte("BAAA"), nil)
+	batch.Delete(kv.HashedAccounts, []byte("CBAA"), nil)
+
+	cursor, err := batch.Cursor(kv.HashedAccounts)
+	require.NoError(t, err)
+
+	key, value, err := cursor.SeekExact([]byte("BAAA"))
+	require.NoError(t, err)
+	require.Equal(t, key, []byte(nil))
+	require.Equal(t, value, []byte(nil))
+
+	key, value, err = cursor.SeekExact([]byte("CBAA"))
+	require.NoError(t, err)
+	require.Equal(t, key, []byte(nil))
+	require.Equal(t, value, []byte(nil))
+}
