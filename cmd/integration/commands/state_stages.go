@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"time"
@@ -59,7 +58,7 @@ Examples:
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
 		logger := log.New()
-		db := openDB(path.Join(cfg.DataDir, "chaindata"), logger, true)
+		db := openDB(cfg.Dirs.Chaindata, logger, true)
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {

@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli"
@@ -283,9 +283,9 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		jwtSecretPath = cfg.DataDir + "/jwt.hex"
 	}
 	c := &httpcfg.HttpCfg{
-		Enabled:   ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
-		DataDir:   cfg.DataDir,
-		Chaindata: filepath.Join(cfg.DataDir, "chaindata"),
+		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
+		DataDir: cfg.DataDir,
+		Dirs:    datadir.New(cfg.DataDir),
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,

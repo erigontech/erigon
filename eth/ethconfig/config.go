@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/node/nodecfg/dirs"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -176,9 +176,7 @@ type Config struct {
 	Snapshot Snapshot
 	Torrent  *torrentcfg.Cfg
 
-	Dirs dirs.Dirs
-
-	SnapDir string
+	Dirs datadir.Dirs
 
 	// Address to connect to external snapshot downloader
 	// empty if you want to use internal bittorrent snapshot downloader

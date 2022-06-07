@@ -1,21 +1,23 @@
-package dirs
+package datadir
 
 import (
 	"path/filepath"
 )
 
 type Dirs struct {
-	Data      string
+	DataDir   string
 	Chaindata string
 	Tmp       string
 	Snap      string
+	TxPool    string
 }
 
-func FromDataDir(datadir string) Dirs {
+func New(datadir string) Dirs {
 	return Dirs{
-		Data:      datadir,
+		DataDir:   datadir,
 		Chaindata: filepath.Join(datadir, "chaindata"),
 		Tmp:       filepath.Join(datadir, "etl-temp"),
 		Snap:      filepath.Join(datadir, "snapshots"),
+		TxPool:    filepath.Join(datadir, "txpool"),
 	}
 }

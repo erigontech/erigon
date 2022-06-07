@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/node/nodecfg/dirs"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -1158,7 +1158,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
-	cfg.Dirs = dirs.FromDataDir(datadir)
+	cfg.Dirs = datadir.New(datadir)
 	allSn := allSnapshots(chainConfig, db)
 	cfg.Snapshot = allSn.Cfg()
 	cfg.SnapDir = filepath.Join(datadir, "snapshots")

@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg/dirs"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
@@ -50,7 +50,7 @@ func testNodeConfig(t *testing.T) *nodecfg.Config {
 		P2P:     p2p.Config{PrivateKey: testNodeKey},
 		DataDir: t.TempDir(),
 	}
-	cfg.Dirs = dirs.FromDataDir(cfg.DataDir)
+	cfg.Dirs = datadir.New(cfg.DataDir)
 	return cfg
 }
 
