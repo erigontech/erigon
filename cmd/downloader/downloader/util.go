@@ -347,6 +347,8 @@ func AddTorrentFile(ctx context.Context, torrentFilePath string, torrentClient *
 	return t, nil
 }
 
+var ErrSkip = fmt.Errorf("skip")
+
 func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
@@ -379,12 +381,12 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			return err
 		}
 
-		err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
+		if err = verifyTorrent(&info, snapDir, func(i int, good bool) error {
 			j++
 			if !good {
 				failsAmount++
 				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", info.Name)
-				return nil
+				return ErrSkip
 			}
 			select {
 			case <-logEvery.C:
@@ -394,8 +396,10 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			default:
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
+			if errors.Is(ErrSkip, err) {
+				continue
+			}
 			return err
 		}
 	}
