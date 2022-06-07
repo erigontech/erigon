@@ -42,7 +42,7 @@ var resetBlocks = Migration{
 		if err != nil {
 			return err
 		}
-		log.Warn("Please read: this migration will remove recent blocks (and senders) to fix several recent bugs. Your node will re-download last ~400K blocks, must be not take very long")
+		log.Warn("NOTE: this migration will remove recent blocks (and senders) to fix several recent bugs. Your node will re-download last ~400K blocks, should not take very long")
 
 		if err := snap.RemoveNonPreverifiedFiles(chainConfig.ChainName, dirs.Snap); err != nil {
 			return err
