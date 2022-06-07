@@ -58,13 +58,12 @@ type Config struct {
 	// in the devp2p node identifier.
 	Version string `toml:"-"`
 
-	// DataDir is the file system folder the node should use for any data storage
+	// Dirs is the file system folder the node should use for any data storage
 	// requirements. The configured data directory will not be directly shared with
 	// registered services, instead those can use utility methods to create/access
 	// databases or flat files. This enables ephemeral nodes which can fully reside
 	// in memory.
-	DataDir string
-	Dirs    datadir.Dirs
+	Dirs datadir.Dirs
 
 	// Configuration of peer-to-peer networking.
 	P2P p2p.Config
@@ -188,10 +187,10 @@ func (c *Config) IPCEndpoint() string {
 	}
 	// Resolve names into the data directory full paths otherwise
 	if filepath.Base(c.IPCPath) == c.IPCPath {
-		if c.DataDir == "" {
+		if c.Dirs.DataDir == "" {
 			return filepath.Join(os.TempDir(), c.IPCPath)
 		}
-		return filepath.Join(c.DataDir, c.IPCPath)
+		return filepath.Join(c.Dirs.DataDir, c.IPCPath)
 	}
 	return c.IPCPath
 }
@@ -209,7 +208,7 @@ func DefaultIPCEndpoint(clientIdentifier string) string {
 			panic("empty executable name")
 		}
 	}
-	config := &Config{DataDir: paths.DefaultDataDir(), IPCPath: clientIdentifier + ".ipc"}
+	config := &Config{Dirs: datadir.New(paths.DefaultDataDir()), IPCPath: clientIdentifier + ".ipc"}
 	return config.IPCEndpoint()
 }
 
@@ -279,10 +278,10 @@ func (c *Config) ResolvePath(path string) string {
 	if filepath.IsAbs(path) {
 		return path
 	}
-	if c.DataDir == "" {
+	if c.Dirs.DataDir == "" {
 		return ""
 	}
-	return filepath.Join(c.DataDir, path)
+	return filepath.Join(c.Dirs.DataDir, path)
 }
 
 // StaticNodes returns a list of node enode URLs configured as static nodes.
@@ -301,7 +300,7 @@ func (c *Config) TrustedNodes() ([]*enode.Node, error) {
 // file from within the data directory.
 func (c *Config) parsePersistentNodes(w *bool, path string) []*enode.Node {
 	// Short circuit if no node config is present
-	if c.DataDir == "" {
+	if c.Dirs.DataDir == "" {
 		return nil
 	}
 	if _, err := os.Stat(path); err != nil {
