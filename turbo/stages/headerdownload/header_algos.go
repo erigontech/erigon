@@ -926,14 +926,6 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 		// Duplicate
 		return false
 	}
-	if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
-		// Alternative branch connected to an existing anchor
-		// Adding link as another child to the anchor and quit (not to overwrite the anchor)
-		link := hd.addHeaderAsLink(sh, false /* persisted */)
-		link.next = parentAnchor.fLink
-		parentAnchor.fLink = link
-		return false
-	}
 	parent, foundParent := hd.links[sh.Header.ParentHash]
 	anchor, foundAnchor := hd.anchors[sh.Hash]
 	if !foundParent && !foundAnchor {
@@ -951,6 +943,13 @@ func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, pe
 		// The new link is what anchor was pointing to, so the link takes over the child links of the anchor and the anchor is removed
 		link.fChild = anchor.fLink
 		hd.removeAnchor(anchor)
+	}
+	if parentAnchor, ok := hd.anchors[sh.Header.ParentHash]; ok {
+		// Alternative branch connected to an existing anchor
+		// Adding link as another child to the anchor and quit (not to overwrite the anchor)
+		link.next = parentAnchor.fLink
+		parentAnchor.fLink = link
+		return false
 	}
 	if foundParent {
 		// Add this link as another child to the parent that is found
