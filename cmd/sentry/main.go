@@ -18,7 +18,7 @@ import (
 
 var (
 	sentryAddr string // Address of the sentry <host>:<port>
-	datadir    string // Path to td working dir
+	datadirCli string // Path to td working dir
 
 	natSetting   string   // NAT setting
 	port         int      // Listening port
@@ -37,7 +37,7 @@ func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
-	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, utils.NATFlag.Name, utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().IntVar(&port, utils.ListenPortFlag.Name, utils.ListenPortFlag.Value, utils.ListenPortFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&staticPeers, utils.StaticPeersFlag.Name, []string{}, utils.StaticPeersFlag.Usage)
@@ -72,7 +72,7 @@ var rootCmd = &cobra.Command{
 		nodeConfig := node2.NewNodeConfig()
 		p2pConfig, err := utils.NewP2PConfig(
 			nodiscover,
-			datadir,
+			datadirCli,
 			netRestrict,
 			natSetting,
 			maxPeers,
@@ -87,7 +87,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		return sentry.Sentry(cmd.Context(), datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
+		return sentry.Sentry(cmd.Context(), datadirCli, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
 	},
 }
 
