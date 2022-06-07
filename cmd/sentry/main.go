@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -19,7 +18,6 @@ import (
 
 var (
 	sentryAddr string // Address of the sentry <host>:<port>
-	chaindata  string // Path to chaindata
 	datadir    string // Path to td working dir
 
 	natSetting   string   // NAT setting
@@ -63,9 +61,6 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
-		}
-		if chaindata == "" {
-			chaindata = filepath.Join(datadir, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {

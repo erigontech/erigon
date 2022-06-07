@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
@@ -44,11 +45,13 @@ var (
 )
 
 func testNodeConfig(t *testing.T) *nodecfg.Config {
-	return &nodecfg.Config{
+	cfg := &nodecfg.Config{
 		Name:    "test node",
 		P2P:     p2p.Config{PrivateKey: testNodeKey},
 		DataDir: t.TempDir(),
 	}
+	cfg.Dirs = datadir.New(cfg.DataDir)
+	return cfg
 }
 
 // Tests that an empty protocol stack can be closed more than once.

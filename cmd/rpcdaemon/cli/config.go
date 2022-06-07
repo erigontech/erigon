@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -63,7 +64,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	cfg := &httpcfg.HttpCfg{StateCache: kvcache.DefaultCoherentConfig}
 	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
-	rootCmd.PersistentFlags().StringVar(&cfg.Chaindata, "chaindata", "", "path to the database")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.EngineHTTPListenAddress, "engine.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface for engineAPI")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
@@ -100,22 +100,17 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	if err := rootCmd.MarkPersistentFlagDirname("datadir"); err != nil {
 		panic(err)
 	}
-	if err := rootCmd.MarkPersistentFlagDirname("chaindata"); err != nil {
-		panic(err)
-	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		if err := utils.SetupCobra(cmd); err != nil {
 			return err
 		}
-		cfg.WithDatadir = cfg.DataDir != "" || cfg.Chaindata != ""
+		cfg.WithDatadir = cfg.DataDir != ""
 		if cfg.WithDatadir {
 			if cfg.DataDir == "" {
 				cfg.DataDir = paths.DefaultDataDir()
 			}
-			if cfg.Chaindata == "" {
-				cfg.Chaindata = filepath.Join(cfg.DataDir, "chaindata")
-			}
+			cfg.Dirs = datadir.New(cfg.DataDir)
 		}
 		if cfg.TxPoolApiAddr == "" {
 			cfg.TxPoolApiAddr = cfg.PrivateApiAddr
@@ -251,9 +246,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	// If PrivateApiAddr is checked first, the Chaindata option will never work
 	if cfg.WithDatadir {
 		var rwKv kv.RwDB
-		log.Trace("Creating chain db", "path", cfg.Chaindata)
+		log.Trace("Creating chain db", "path", cfg.Dirs.Chaindata)
 		limiter := make(chan struct{}, cfg.DBReadConcurrency)
-		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Chaindata).Readonly().Open()
+		rwKv, err = kv2.NewMDBX(logger).RoTxsLimiter(limiter).Path(cfg.Dirs.Chaindata).Readonly().Open()
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, ff, err
 		}
@@ -345,7 +340,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	onNewSnapshot := func() {}
 	if cfg.WithDatadir {
 		if cfg.Snap.Enabled {
-			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, filepath.Join(cfg.DataDir, "snapshots"))
+			allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
 			if err := allSnapshots.Reopen(); err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("allSnapshots.Reopen: %w", err)
 			}
