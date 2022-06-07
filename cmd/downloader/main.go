@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
@@ -32,7 +33,7 @@ import (
 )
 
 var (
-	datadir                        string
+	datadirCli                     string
 	forceRebuild                   bool
 	forceVerify                    bool
 	downloaderApiAddr              string
@@ -74,7 +75,7 @@ func init() {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
 	}
@@ -112,7 +113,7 @@ var rootCmd = &cobra.Command{
 }
 
 func Downloader(ctx context.Context) error {
-	snapDir := filepath.Join(datadir, "snapshots")
+	dirs := datadir.New(datadirCli)
 	torrentLogLevel, err := torrentcfg.Str2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
@@ -126,13 +127,13 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", datadir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	cfg, err := torrentcfg.New(snapDir, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
+	cfg, err := torrentcfg.New(dirs.Snap, torrentLogLevel, natif, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
 	}
@@ -164,16 +165,16 @@ var printTorrentHashes = &cobra.Command{
 	Use:     "torrent_hashes",
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		snapDir := filepath.Join(datadir, "snapshots")
+		dirs := datadir.New(datadirCli)
 		ctx := cmd.Context()
 
 		if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-			return downloader.VerifyDtaFiles(ctx, snapDir)
+			return downloader.VerifyDtaFiles(ctx, dirs.Snap)
 		}
 
 		if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 			//removePieceCompletionStorage(snapDir)
-			files, err := downloader.AllTorrentPaths(snapDir)
+			files, err := downloader.AllTorrentPaths(dirs.Snap)
 			if err != nil {
 				return err
 			}
@@ -182,13 +183,13 @@ var printTorrentHashes = &cobra.Command{
 					return err
 				}
 			}
-			if err := downloader.BuildTorrentFilesIfNeed(ctx, snapDir); err != nil {
+			if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs.Snap); err != nil {
 				return err
 			}
 		}
 
 		res := map[string]string{}
-		files, err := downloader.AllTorrentPaths(snapDir)
+		files, err := downloader.AllTorrentPaths(dirs.Snap)
 		if err != nil {
 			return err
 		}

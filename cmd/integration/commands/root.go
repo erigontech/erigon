@@ -21,7 +21,7 @@ var rootCmd = &cobra.Command{
 			panic(err)
 		}
 		if chaindata == "" {
-			chaindata = filepath.Join(datadir, "chaindata")
+			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -46,7 +46,7 @@ func openDB(path string, logger log.Logger, applyMigrations bool) kv.RwDB {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = openKV(label, logger, path, true)
-			if err := migrations.NewMigrator(label).Apply(db, datadir); err != nil {
+			if err := migrations.NewMigrator(label).Apply(db, datadirCli); err != nil {
 				panic(err)
 			}
 			db.Close()

@@ -77,13 +77,6 @@ func New(conf *nodecfg.Config) (*Node, error) {
 	// working directory don't affect the node.
 	confCopy := *conf
 	conf = &confCopy
-	if conf.DataDir != "" {
-		absdatadir, err := filepath.Abs(conf.DataDir)
-		if err != nil {
-			return nil, err
-		}
-		conf.DataDir = absdatadir
-	}
 	if conf.Log == nil {
 		conf.Log = log.New()
 	}
@@ -275,11 +268,11 @@ func (n *Node) stopServices(running []Lifecycle) error {
 }
 
 func (n *Node) openDataDir() error {
-	if n.config.DataDir == "" {
+	if n.config.Dirs.DataDir == "" {
 		return nil // ephemeral
 	}
 
-	instdir := n.config.DataDir
+	instdir := n.config.Dirs.DataDir
 	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
@@ -475,7 +468,7 @@ func (n *Node) Server() *p2p.Server {
 
 // DataDir retrieves the current datadir used by the protocol stack.
 func (n *Node) DataDir() string {
-	return n.config.DataDir
+	return n.config.Dirs.DataDir
 }
 
 // HTTPEndpoint returns the URL of the HTTP server. Note that this URL does not
@@ -503,18 +496,12 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		name = "test"
 	}
 	var db kv.RwDB
-	if config.DataDir == "" {
+	if config.Dirs.DataDir == "" {
 		db = memdb.New()
 		return db, nil
 	}
 
-	oldDbPath := filepath.Join(config.DataDir, "erigon", name)
-	dbPath := filepath.Join(config.DataDir, name)
-	if _, err := os.Stat(oldDbPath); err == nil {
-		log.Error("Old directory location found", "path", oldDbPath, "please move to new path", dbPath)
-		return nil, fmt.Errorf("safety error, see log message")
-	}
-
+	dbPath := filepath.Join(config.Dirs.DataDir, name)
 	var openFunc func(exclusive bool) (kv.RwDB, error)
 	log.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc = func(exclusive bool) (kv.RwDB, error) {
@@ -548,7 +535,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		if err != nil {
 			return nil, err
 		}
-		if err = migrator.Apply(db, config.DataDir); err != nil {
+		if err = migrator.Apply(db, config.Dirs.DataDir); err != nil {
 			return nil, err
 		}
 		db.Close()

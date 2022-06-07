@@ -36,7 +36,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -150,7 +149,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
-	tmpdir := filepath.Join(stack.Config().DataDir, etl.TmpDirName)
+	tmpdir := stack.Config().Dirs.Tmp
 	if err := os.RemoveAll(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
@@ -242,7 +241,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 
 		cfg66 := stack.Config().P2P
-		cfg66.NodeDatabase = filepath.Join(stack.Config().DataDir, "nodes", "eth66")
+		cfg66.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, "eth66")
 		server66 := sentry.NewGrpcServer(backend.sentryCtx, d66, readNodeInfo, &cfg66, eth.ETH66)
 		backend.sentryServers = append(backend.sentryServers, server66)
 		sentries = []direct.SentryClient{direct.NewSentryClientDirect(eth.ETH66, server66)}
@@ -268,11 +267,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}()
 	}
 
-	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
-	if err != nil {
-		return nil, err
-	}
-
 	var consensusConfig interface{}
 
 	if chainConfig.Clique != nil {
@@ -287,8 +281,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		consensusConfig = &config.Ethash
 	}
-
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	log.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	log.Info("Using snapshots", "on", config.Snapshot.Enabled)
@@ -311,10 +303,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
-			blockReader, allSnapshots, err = backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
-			if err != nil {
-				return err
-			}
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String())
 
@@ -322,6 +310,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}); err != nil {
 		return nil, err
 	}
+
+	blockReader, allSnapshots, err := backend.setUpBlockReader(ctx, config.Snapshot.Enabled, config, stack)
+	if err != nil {
+		return nil, err
+	}
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
 		chainKv,
@@ -766,14 +760,12 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, config *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool, cfg *ethconfig.Config, stack *node.Node) (services.FullBlockReader, *snapshotsync.RoSnapshots, error) {
 	var err error
 
 	if isSnapshotEnabled {
-		allSnapshots := snapshotsync.NewRoSnapshots(config.Snapshot, config.SnapDir)
-		if err = allSnapshots.Reopen(); err != nil {
-			return nil, nil, fmt.Errorf("[Snapshots] Reopen: %w", err)
-		}
+		allSnapshots := snapshotsync.NewRoSnapshots(cfg.Snapshot, cfg.Dirs.Snap)
+		allSnapshots.OptimisticReopen()
 		blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 		if len(stack.Config().DownloaderAddr) > 0 {
@@ -781,7 +773,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, isSnapshotEnabled bool,
 			s.downloaderClient, err = downloadergrpc.NewClient(ctx, stack.Config().DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			s.downloader, err = downloader.New(config.Torrent)
+			s.downloader, err = downloader.New(cfg.Torrent)
 			if err != nil {
 				return nil, nil, err
 			}
