@@ -146,7 +146,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	}
 	notifyFrom++
 
-	var notifyTo uint64
+	var notifyTo uint64 = notifyFrom
 	var headersRlp [][]byte
 	if err := tx.ForEach(kv.Headers, dbutils.EncodeBlockNumber(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
