@@ -158,6 +158,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper22,
 	txNum := txNumStart
 	for i, tx := range block.Transactions() {
 		hw.r.SetTxNum(txNum)
+		hw.txNum = txNum
 		ibs := state.New(hw)
 		if daoBlock {
 			misc.ApplyDAOHardFork(ibs)
@@ -174,6 +175,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper22,
 		receipts = append(receipts, receipt)
 		txNum++
 		hw.r.SetTxNum(txNum)
+		hw.txNum = txNum
 	}
 
 	return txNum, receipts, nil
@@ -182,11 +184,12 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper22,
 // Implements StateReader and StateWriter
 type HistoryWrapper22 struct {
 	r     *libstate.Aggregator
+	txNum uint64
 	trace bool
 }
 
 func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := hw.r.ReadAccountData(address.Bytes(), nil /* roTx */)
+	enc, err := hw.r.ReadAccountDataAfterTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +229,7 @@ func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.A
 }
 
 func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), nil /* roTx */)
+	enc, err := hw.r.ReadAccountStorageAfterTxNum(address.Bytes(), key.Bytes(), hw.txNum, nil /* roTx */)
 	if hw.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
@@ -245,11 +248,11 @@ func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnati
 }
 
 func (hw *HistoryWrapper22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return hw.r.ReadAccountCode(address.Bytes(), nil /* roTx */)
+	return hw.r.ReadAccountCodeAfterTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
 }
 
 func (hw *HistoryWrapper22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	return hw.r.ReadAccountCodeSize(address.Bytes(), nil /* roTx */)
+	return hw.r.ReadAccountCodeSizeAfterTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
 }
 
 func (hw *HistoryWrapper22) ReadAccountIncarnation(address common.Address) (uint64, error) {
