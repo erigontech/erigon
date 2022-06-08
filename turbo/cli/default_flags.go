@@ -125,5 +125,5 @@ var DefaultFlags = []cli.Flag{
 	utils.WithoutHeimdallFlag,
 	utils.EthStatsURLFlag,
 	utils.OverrideTerminalTotalDifficulty,
-	utils.OverrideMergeForkBlock,
+	utils.OverrideMergeNetsplitBlock,
 }
