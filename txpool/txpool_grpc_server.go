@@ -52,7 +52,7 @@ type txPool interface {
 
 	Best(n uint16, txs *types.TxsRlp, tx kv.Tx) error
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	AddLocalTxs(ctx context.Context, newTxs types.TxSlots) ([]DiscardReason, error)
+	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]DiscardReason, error)
 	deprecatedForEach(_ context.Context, f func(rlp, sender []byte, t SubPoolType), tx kv.Tx)
 	CountContent() (int, int, int)
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
@@ -212,7 +212,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpool_proto.AddRequest) (*txp
 		j++
 	}
 
-	discardReasons, err := s.txPool.AddLocalTxs(ctx, slots)
+	discardReasons, err := s.txPool.AddLocalTxs(ctx, slots, tx)
 	if err != nil {
 		return nil, err
 	}

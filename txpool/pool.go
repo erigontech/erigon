@@ -91,19 +91,19 @@ var DefaultConfig = Config{
 	QueuedSubPoolLimit:  10_000,
 
 	MinFeeCap:    1,
-	AccountSlots: 16, //TODO: to choose right value (16 to be compat with Geth)
+	AccountSlots: 16, //TODO: to choose right value (16 to be compatible with Geth)
 	PriceBump:    10, // Price bump percentage to replace an already existing transaction
 }
 
 // Pool is interface for the transaction pool
-// This interface exists for the convinience of testing, and not yet because
+// This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
 type Pool interface {
 	ValidateSerializedTxn(serializedTxn []byte) error
 
 	// Handle 3 main events - new remote txs from p2p, new local txs from RPC, new blocks from execution layer
 	AddRemoteTxs(ctx context.Context, newTxs types.TxSlots)
-	AddLocalTxs(ctx context.Context, newTxs types.TxSlots) ([]DiscardReason, error)
+	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]DiscardReason, error)
 	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error
 
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
@@ -788,7 +788,7 @@ func fillDiscardReasons(reasons []DiscardReason, newTxs types.TxSlots, discardRe
 	return reasons
 }
 
-func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots) ([]DiscardReason, error) {
+func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
 	coreTx, err := p.coreDB().BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -800,12 +800,17 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots)
 		return nil, err
 	}
 
-	if !p.Started() {
-		return nil, fmt.Errorf("pool not started yet")
-	}
-
 	p.lock.Lock()
 	defer p.lock.Unlock()
+
+	if !p.Started() {
+		if err := p.fromDB(ctx, tx, coreTx); err != nil {
+			return nil, fmt.Errorf("loading txs from DB: %w", err)
+		}
+		if p.started.CAS(false, true) {
+			log.Info("[txpool] Started")
+		}
+	}
 
 	if err = p.senders.registerNewSenders(&newTransactions); err != nil {
 		return nil, err
@@ -1521,7 +1526,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	}
 
 	// clean - in-memory data structure as later as possible - because if during this Tx will happen error,
-	// DB will stay consitant but some in-memory structures may be alread cleaned, and retry will not work
+	// DB will stay consistent but some in-memory structures may be already cleaned, and retry will not work
 	// failed write transaction must not create side-effects
 	p.deletedTxs = p.deletedTxs[:0]
 	return nil

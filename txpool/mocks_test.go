@@ -144,7 +144,7 @@ type PoolMock struct {
 }
 
 // AddLocalTxs calls AddLocalTxsFunc.
-func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots) ([]DiscardReason, error) {
+func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
 	callInfo := struct {
 		Ctx    context.Context
 		NewTxs types2.TxSlots
