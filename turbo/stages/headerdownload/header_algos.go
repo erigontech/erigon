@@ -499,9 +499,11 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
 
-func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, error) {
+func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
+	var returnTd *big.Int
+	var lastD *big.Int
 	if hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1 {
 		link := hd.insertQueue[0]
 		_, bad := hd.badHeaders[link.hash]
@@ -513,20 +515,20 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			hd.moveLinkToQueue(link, NoQueue)
 			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
-			return true, false, nil
+			return true, false, 0, nil
 		}
 		if !link.verified {
 			if err := hd.VerifyHeader(link.header); err != nil {
 				if errors.Is(err, consensus.ErrFutureBlock) {
 					// This may become valid later
 					log.Warn("Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
-					return false, false, nil // prevent removal of the link from the hd.linkQueue
+					return false, false, 0, nil // prevent removal of the link from the hd.linkQueue
 				} else {
 					log.Debug("Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
-					return true, false, nil
+					return true, false, 0, nil
 				}
 			}
 		}
@@ -539,21 +541,25 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
-			return false, false, err
+			return false, false, 0, err
 		}
 		if td != nil {
 			if hd.seenAnnounces.Pop(link.hash) {
 				hd.toAnnounce = append(hd.toAnnounce, Announce{Hash: link.hash, Number: link.blockHeight})
 			}
 			// Check if transition to proof-of-stake happened and stop forward syncing
-			if terminalTotalDifficulty != nil && td.Cmp(terminalTotalDifficulty) >= 0 {
-				hd.highestInDb = link.blockHeight
-				log.Info(POSPandaBanner)
-				return true, true, nil
+			if terminalTotalDifficulty != nil {
+				if td.Cmp(terminalTotalDifficulty) >= 0 {
+					hd.highestInDb = link.blockHeight
+					log.Info(POSPandaBanner)
+					return true, true, 0, nil
+				}
+				returnTd = td
+				lastD = link.header.Difficulty
 			}
 		}
 		if link.blockHeight == hd.latestMinedBlockNumber {
-			return false, true, nil
+			return false, true, 0, nil
 		}
 
 		if link.blockHeight > hd.highestInDb {
@@ -578,7 +584,17 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		for child := link.fChild; child != nil; child, child.next = child.next, nil {
 		}
 	}
-	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, false, nil
+	var blocksToTTD uint64
+	if terminalTotalDifficulty != nil && returnTd != nil && lastD != nil {
+		// Calculate the estimation of when TTD will be hit
+		var x big.Int
+		x.Sub(terminalTotalDifficulty, returnTd)
+		x.Div(&x, lastD)
+		if x.IsUint64() {
+			blocksToTTD = x.Uint64()
+		}
+	}
+	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, false, blocksToTTD, nil
 }
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
@@ -587,13 +603,17 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	var more bool = true
 	var err error
 	var force bool
+	var blocksToTTD uint64
 	for more {
-		if more, force, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
+		if more, force, blocksToTTD, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
 		}
 		if force {
 			return true, nil
 		}
+	}
+	if blocksToTTD > 0 {
+		log.Info("Estimated to reaching TTD", "blocks", blocksToTTD)
 	}
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
