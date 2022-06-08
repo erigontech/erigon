@@ -132,7 +132,7 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 
-	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader-origin < 8096 && highestSeenHeader-finishProgressBefore < 8096
+	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+8096 && highestSeenHeader < finishProgressBefore+8096
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
@@ -186,7 +186,6 @@ func StageLoopStep(
 			log.Error("snapshot migration failed", "err", err)
 		}
 	}
-	rotx.Rollback()
 
 	headTd256, overflow := uint256.FromBig(headTd)
 	if overflow {
@@ -195,11 +194,8 @@ func StageLoopStep(
 	updateHead(ctx, head, headHash, headTd256)
 
 	if notifications != nil && notifications.Accumulator != nil {
-		if err := db.View(ctx, func(tx kv.Tx) error {
-			header := rawdb.ReadCurrentHeader(tx)
-			if header == nil {
-				return nil
-			}
+		header := rawdb.ReadCurrentHeader(rotx)
+		if header != nil {
 
 			pendingBaseFee := misc.CalcBaseFee(notifications.Accumulator.ChainConfig(), header)
 			if header.Number.Uint64() == 0 {
@@ -207,9 +203,9 @@ func StageLoopStep(
 			}
 			notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), header.GasLimit)
 
-			return stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx)
-		}); err != nil {
-			return headBlockHash, err
+			if err = stagedsync.NotifyNewHeaders(ctx, finishProgressBefore, head, sync.PrevUnwindPoint(), notifications.Events, tx); err != nil {
+				return headBlockHash, nil
+			}
 		}
 	}
 
