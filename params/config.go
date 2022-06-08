@@ -248,7 +248,7 @@ type ChainConfig struct {
 	TerminalTotalDifficulty *big.Int    `json:"terminalTotalDifficulty,omitempty"` // The merge happens when terminal total difficulty is reached
 	TerminalBlockNumber     *big.Int    `json:"terminalBlockNumber,omitempty"`     // Enforce particular terminal block; see TerminalBlockNumber in EIP-3675
 	TerminalBlockHash       common.Hash `json:"terminalBlockHash,omitempty"`       // Enforce particular terminal block; see TERMINAL_BLOCK_HASH in EIP-3675
-	MergeForkBlock          *big.Int    `json:"mergeForkBlock,omitempty"`
+	MergeNetsplitBlock      *big.Int    `json:"mergeNetsplitBlock,omitempty"`      // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`

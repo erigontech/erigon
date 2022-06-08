@@ -224,7 +224,7 @@ type Config struct {
 	Ethstats string
 
 	// FORK_NEXT_VALUE (see EIP-3675) block override
-	OverrideMergeForkBlock *big.Int `toml:",omitempty"`
+	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`
 
 	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
 }
