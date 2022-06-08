@@ -713,8 +713,12 @@ var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad3
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 	// Override the default period to the user requested one
-	config := *params.AllCliqueProtocolChanges
-	config.Clique.Period = period
+	// config := *params.AllCliqueProtocolChanges
+	config := *params.MumbaiChainConfig
+	config.ChainID = big.NewInt(1337)
+	config.Bor.Period = map[string]uint64{
+		"0": period,
+	}
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
 	return &Genesis{
