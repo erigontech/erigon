@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -280,12 +279,11 @@ func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 	jwtSecretPath := ctx.GlobalString(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
-		jwtSecretPath = cfg.DataDir + "/jwt.hex"
+		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
 	c := &httpcfg.HttpCfg{
-		Enabled:   ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
-		DataDir:   cfg.DataDir,
-		Chaindata: filepath.Join(cfg.DataDir, "chaindata"),
+		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
+		Dirs:    cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,

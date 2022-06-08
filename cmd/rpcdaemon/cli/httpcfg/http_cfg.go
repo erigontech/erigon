@@ -3,6 +3,7 @@ package httpcfg
 import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 )
 
 type HttpCfg struct {
@@ -10,7 +11,7 @@ type HttpCfg struct {
 	PrivateApiAddr          string
 	WithDatadir             bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	DataDir                 string
-	Chaindata               string
+	Dirs                    datadir.Dirs
 	HttpListenAddress       string
 	EngineHTTPListenAddress string
 	TLSCertfile             string

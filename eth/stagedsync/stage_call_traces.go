@@ -185,7 +185,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		case <-logEvery.C:
 			var m runtime.MemStats
 			libcommon.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Pruning call trace intermediate table", logPrefix), "number", blockNum,
+			log.Info(fmt.Sprintf("[%s] Pruning call trace table", logPrefix), "number", blockNum,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
 		if err = traceCursor.DeleteCurrentDuplicates(); err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -25,7 +26,7 @@ var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was
 
 var txsBeginEnd = Migration{
 	Name: "txs_begin_end",
-	Up: func(db kv.RwDB, tmpdir string, progress []byte, BeforeCommit Callback) (err error) {
+	Up: func(db kv.RwDB, dirs datadir.Dirs, progress []byte, BeforeCommit Callback) (err error) {
 		logEvery := time.NewTicker(10 * time.Second)
 		defer logEvery.Stop()
 

@@ -207,7 +207,9 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if !safeIsCanonical {
+		if safeIsCanonical {
+			rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
+		} else {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical SafeBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			if sendErrResponse {
 				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -223,7 +225,9 @@ func safeAndFinalizedBlocksAreCanonical(
 		if err != nil {
 			return false, err
 		}
-		if !finalizedIsCanonical {
+		if finalizedIsCanonical {
+			rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
+		} else {
 			log.Warn(fmt.Sprintf("[%s] Non-canonical FinalizedBlockHash", s.LogPrefix()), "forkChoice", forkChoice)
 			if sendErrResponse {
 				cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
@@ -366,6 +370,7 @@ func finishHandlingForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
+	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
 	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
 	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, sendErrResponse)
@@ -727,13 +732,13 @@ Loop:
 			}
 			break
 		}
-		currentTime := uint64(time.Now().Unix())
+		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5 /* timeout */)
+				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 				log.Trace("Sent request", "height", req.Number)
 			}
 		}
@@ -747,7 +752,7 @@ Loop:
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					cfg.hd.UpdateRetryTime(req, currentTime, 5 /*timeout */)
+					cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /*timeout */)
 					log.Trace("Sent request", "height", req.Number)
 					cfg.hd.UpdateStats(req, false /* skeleton */)
 

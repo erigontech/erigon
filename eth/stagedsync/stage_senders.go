@@ -63,6 +63,10 @@ func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, tmpdir string, pr
 }
 
 func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context) error {
+	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && cfg.blockRetire.Snapshots().Cfg().Enabled && s.BlockNumber < cfg.blockRetire.Snapshots().BlocksAvailable() {
+		s.BlockNumber = cfg.blockRetire.Snapshots().BlocksAvailable()
+	}
+
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -94,9 +98,6 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
-	canonical := make([]common.Hash, to-s.BlockNumber)
-	currentHeaderIdx := uint64(0)
-
 	canonicalC, err := tx.Cursor(kv.HeaderCanonical)
 	if err != nil {
 		return err
@@ -104,9 +105,8 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer canonicalC.Close()
 
 	startFrom := s.BlockNumber + 1
-	if cfg.blockRetire != nil && cfg.blockRetire.Snapshots() != nil && startFrom < cfg.blockRetire.Snapshots().BlocksAvailable() {
-		startFrom = cfg.blockRetire.Snapshots().BlocksAvailable()
-	}
+	currentHeaderIdx := uint64(0)
+	canonical := make([]common.Hash, to-s.BlockNumber)
 
 	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
@@ -209,7 +209,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer bodiesC.Close()
 
 Loop:
-	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber + 1)); k != nil; k, _, err = bodiesC.Next() {
+	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, _, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
@@ -219,6 +219,7 @@ Loop:
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
 		blockHash := common.BytesToHash(k[8:])
+
 		if blockNumber > to {
 			break
 		}
@@ -227,6 +228,7 @@ Loop:
 			// non-canonical case
 			continue
 		}
+
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
 
 		select {
@@ -364,7 +366,6 @@ func UnwindSendersStage(s *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.
 func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -392,6 +393,7 @@ func PruneSendersStage(s *PruneState, tx kv.RwTx, cfg SendersCfg, ctx context.Co
 			}
 		}
 	} else if cfg.prune.TxIndex.Enabled() {
+		to := cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
 		if err = PruneTable(tx, kv.Senders, to, ctx, 1_000); err != nil {
 			return err
 		}

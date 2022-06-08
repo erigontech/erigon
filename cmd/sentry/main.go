@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -11,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/internal/debug"
+	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/spf13/cobra"
 )
@@ -19,8 +19,7 @@ import (
 
 var (
 	sentryAddr string // Address of the sentry <host>:<port>
-	chaindata  string // Path to chaindata
-	datadir    string // Path to td working dir
+	datadirCli string // Path to td working dir
 
 	natSetting   string   // NAT setting
 	port         int      // Listening port
@@ -39,7 +38,7 @@ func init() {
 	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
 
 	rootCmd.Flags().StringVar(&sentryAddr, "sentry.api.addr", "localhost:9091", "grpc addresses")
-	rootCmd.Flags().StringVar(&datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	rootCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, utils.NATFlag.Name, utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().IntVar(&port, utils.ListenPortFlag.Name, utils.ListenPortFlag.Value, utils.ListenPortFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&staticPeers, utils.StaticPeersFlag.Name, []string{}, utils.StaticPeersFlag.Usage)
@@ -64,9 +63,6 @@ var rootCmd = &cobra.Command{
 		if err := debug.SetupCobra(cmd); err != nil {
 			panic(err)
 		}
-		if chaindata == "" {
-			chaindata = filepath.Join(datadir, "chaindata")
-		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
@@ -74,10 +70,11 @@ var rootCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p := eth.ETH66
 
+		dirs := datadir.New(datadirCli)
 		nodeConfig := node2.NewNodeConfig()
 		p2pConfig, err := utils.NewP2PConfig(
 			nodiscover,
-			datadir,
+			dirs,
 			netRestrict,
 			natSetting,
 			maxPeers,
@@ -92,7 +89,7 @@ var rootCmd = &cobra.Command{
 			return err
 		}
 
-		return sentry.Sentry(cmd.Context(), datadir, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
+		return sentry.Sentry(cmd.Context(), dirs, sentryAddr, discoveryDNS, p2pConfig, uint(p), healthCheck)
 	},
 }
 
