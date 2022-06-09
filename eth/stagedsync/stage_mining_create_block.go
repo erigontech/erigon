@@ -46,6 +46,15 @@ type MiningState struct {
 
 func NewMiningState(cfg *params.MiningConfig) MiningState {
 	return MiningState{
+		MiningConfig:    cfg,
+		PendingResultCh: make(chan *types.Block, 1),
+		MiningResultCh:  make(chan *types.Block, 1),
+		MiningBlock:     &MiningBlock{},
+	}
+}
+
+func NewProposingState(cfg *params.MiningConfig) MiningState {
+	return MiningState{
 		MiningConfig:      cfg,
 		PendingResultCh:   make(chan *types.Block, 1),
 		MiningResultCh:    make(chan *types.Block, 1),
