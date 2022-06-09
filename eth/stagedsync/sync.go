@@ -287,14 +287,13 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 
 	if len(logCtx) > 0 { // also don't print this logs if everything is fast
 		buckets := []string{
-			"freelist",
 			kv.PlainState,
 			kv.AccountChangeSet,
 			kv.StorageChangeSet,
 			kv.EthTx,
 			kv.Log,
 		}
-		bucketSizes := make([]interface{}, 0, 2*len(buckets))
+		bucketSizes := make([]interface{}, 0, 2*(len(buckets)+2))
 		for _, bucket := range buckets {
 			sz, err1 := tx.BucketSize(bucket)
 			if err1 != nil {
@@ -302,6 +301,14 @@ func printLogs(tx kv.RwTx, timings []Timing) error {
 			}
 			bucketSizes = append(bucketSizes, bucket, libcommon.ByteCount(sz))
 		}
+
+		sz, err1 := tx.BucketSize("freelist")
+		if err1 != nil {
+			return err1
+		}
+		bucketSizes = append(bucketSizes, "FreeList", libcommon.ByteCount(sz))
+		amountOfFreePagesInDb := sz / 4 // page_id encoded as bigEndian_u32
+		bucketSizes = append(bucketSizes, "ReclaimableSpace", libcommon.ByteCount(amountOfFreePagesInDb*4096))
 		log.Info("Tables", bucketSizes...)
 	}
 	tx.CollectMetrics()
