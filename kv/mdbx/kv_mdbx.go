@@ -332,6 +332,8 @@ type MdbxKV struct {
 	closed       atomic.Bool
 }
 
+func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
+
 // openDBIs - first trying to open existing DBI's in RO transaction
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
@@ -1007,6 +1009,14 @@ func (tx *MdbxTx) BucketStat(name string) (*mdbx.Stat, error) {
 		return nil, fmt.Errorf("bucket: %s, %w", name, err)
 	}
 	return st, nil
+}
+
+func (tx *MdbxTx) DBSize() (uint64, error) {
+	info, err := tx.db.env.Info(tx.tx)
+	if err != nil {
+		return 0, err
+	}
+	return info.Geo.Current, err
 }
 
 func (tx *MdbxTx) RwCursor(bucket string) (kv.RwCursor, error) {

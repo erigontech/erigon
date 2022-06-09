@@ -165,6 +165,7 @@ type RoDB interface {
 	//	Commit and Rollback while it has active child transactions.
 	BeginRo(ctx context.Context) (Tx, error)
 	AllBuckets() TableCfg
+	PageSize() uint64
 }
 
 // RwDB low-level database interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
@@ -248,6 +249,8 @@ type Tx interface {
 	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
 	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+
+	DBSize() (uint64, error)
 }
 
 type RwTx interface {

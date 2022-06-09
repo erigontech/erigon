@@ -94,9 +94,8 @@ func NewRemote(v gointerfaces.Version, logger log.Logger, remoteKV remote.KVClie
 	return remoteOpts{bucketsCfg: mdbx.WithChaindataTables, version: v, log: logger, remoteKV: remoteKV}
 }
 
-func (db *RemoteKV) AllBuckets() kv.TableCfg {
-	return db.buckets
-}
+func (db *RemoteKV) PageSize() uint64        { panic("not implemented") }
+func (db *RemoteKV) AllBuckets() kv.TableCfg { return db.buckets }
 
 func (db *RemoteKV) EnsureVersionCompatibility() bool {
 	versionReply, err := db.remoteKV.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
@@ -114,8 +113,7 @@ func (db *RemoteKV) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func (db *RemoteKV) Close() {
-}
+func (db *RemoteKV) Close() {}
 
 func (db *RemoteKV) BeginRo(ctx context.Context) (kv.Tx, error) {
 	select {
@@ -175,6 +173,7 @@ func (tx *remoteTx) Rollback() {
 	// don't close opened cursors - just close stream, server will cleanup everything well
 	tx.closeGrpcStream()
 }
+func (tx *remoteTx) DBSize() (uint64, error) { panic("not implemented") }
 
 func (tx *remoteTx) statelessCursor(bucket string) (kv.Cursor, error) {
 	if tx.statelessCursors == nil {
