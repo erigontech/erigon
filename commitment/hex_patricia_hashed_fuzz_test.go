@@ -41,30 +41,22 @@ func Fuzz_ProcessUpdate(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		branchNodeUpdates, err := hph.ProcessUpdates(plainKeys, hashedKeys, updates)
+		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
-		rootHash, err := hph.RootHash()
-		if err != nil {
-			t.Fatalf("failed to evaluate root hash: %v", err)
-		}
 		if len(rootHash) != 32 {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
 
-		branchNodeUpdates, err = hphAnother.ProcessUpdates(plainKeys, hashedKeys, updates)
+		rootHashAnother, branchNodeUpdates, err := hphAnother.ReviewKeys(plainKeys, hashedKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
 		ms2.applyBranchNodeUpdates(branchNodeUpdates)
 
-		rootHashAnother, err := hphAnother.RootHash()
-		if err != nil {
-			t.Fatalf("failed to evaluate root hash: %v", err)
-		}
 		if len(rootHashAnother) > 32 {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
@@ -121,29 +113,21 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		branchNodeUpdates, err := hph.ProcessUpdates(plainKeys, hashedKeys, updates)
+		rootHash, branchNodeUpdates, err := hph.ReviewKeys(plainKeys, hashedKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		ms.applyBranchNodeUpdates(branchNodeUpdates)
-		rootHash, err := hph.RootHash()
-		if err != nil {
-			t.Fatalf("failed to evaluate root hash: %v", err)
-		}
 		if len(rootHash) != 32 {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}
 
-		branchNodeUpdates, err = hphAnother.ProcessUpdates(plainKeys, hashedKeys, updates)
+		rootHashAnother, branchNodeUpdates, err := hphAnother.ReviewKeys(plainKeys, hashedKeys)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		rootHashAnother, err := hphAnother.RootHash()
-		if err != nil {
-			t.Fatalf("failed to evaluate root hash: %v", err)
-		}
 		if len(rootHashAnother) > 32 {
 			t.Fatalf("invalid root hash length: expected 32 bytes, got %v", len(rootHash))
 		}

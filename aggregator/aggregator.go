@@ -1413,11 +1413,12 @@ func encodeU64(i uint64, to []byte) []byte {
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
-func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBuf []byte) ([]byte, error) {
+func (cvt *CommitmentValTransform) commitmentValTransform(val, transValBuf commitment.BranchData) ([]byte, error) {
 	if len(val) == 0 {
 		return transValBuf, nil
 	}
-	accountPlainKeys, storagePlainKeys, err := commitment.ExtractPlainKeys(val)
+
+	accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
 	if err != nil {
 		return nil, err
 	}
@@ -1492,7 +1493,7 @@ func (cvt *CommitmentValTransform) commitmentValTransform(val []byte, transValBu
 		}
 		transStoragePks = append(transStoragePks, storagePlainKey)
 	}
-	if transValBuf, err = commitment.ReplacePlainKeys(val, transAccountPks, transStoragePks, transValBuf); err != nil {
+	if transValBuf, err = val.ReplacePlainKeys(transAccountPks, transStoragePks, transValBuf); err != nil {
 		return nil, err
 	}
 	return transValBuf, nil
@@ -1534,8 +1535,8 @@ func (a *Aggregator) backgroundMerge() {
 				}
 			}
 			if len(toRemove[fType]) > 1 {
-				var valTransform func([]byte, []byte) ([]byte, error)
-				var mergeFunc func([]byte, []byte, []byte) ([]byte, error)
+				var valTransform func(commitment.BranchData, commitment.BranchData) ([]byte, error)
+				var mergeFunc commitmentMerger
 				if fType == Commitment {
 					valTransform = cvt.commitmentValTransform
 					mergeFunc = mergeCommitments
@@ -1665,13 +1666,13 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 	return nil
 }
 
-type commitmentMerger func(prev, current, target []byte) ([]byte, error)
+type commitmentMerger func(prev, current, target commitment.BranchData) (commitment.BranchData, error)
 
-func mergeReplace(preval, val, buf []byte) ([]byte, error) {
+func mergeReplace(preval, val, buf commitment.BranchData) (commitment.BranchData, error) {
 	return append(buf, val...), nil
 }
 
-func mergeBitmaps(preval, val, buf []byte) ([]byte, error) {
+func mergeBitmaps(preval, val, buf commitment.BranchData) (commitment.BranchData, error) {
 	preef, _ := eliasfano32.ReadEliasFano(preval)
 	ef, _ := eliasfano32.ReadEliasFano(val)
 	//fmt.Printf("mergeBitmaps [%x] (count=%d,max=%d) + [%x] (count=%d,max=%d)\n", preval, preef.Count(), preef.Max(), val, ef.Count(), ef.Max())
@@ -1688,8 +1689,8 @@ func mergeBitmaps(preval, val, buf []byte) ([]byte, error) {
 	return newEf.AppendBytes(buf), nil
 }
 
-func mergeCommitments(preval, val, buf []byte) ([]byte, error) {
-	return commitment.MergeHexBranches(preval, val, buf)
+func mergeCommitments(preval, val, buf commitment.BranchData) (commitment.BranchData, error) {
+	return preval.MergeHexBranches(val, buf)
 }
 
 func (a *Aggregator) backgroundHistoryMerge() {
@@ -1976,7 +1977,7 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 	if fType == Commitment {
 		// Transform references
 		if len(val) > 0 {
-			accountPlainKeys, storagePlainKeys, err := commitment.ExtractPlainKeys(val)
+			accountPlainKeys, storagePlainKeys, err := commitment.BranchData(val).ExtractPlainKeys()
 			if err != nil {
 				panic(fmt.Errorf("value %x: %w", val, err))
 			}
@@ -2009,7 +2010,7 @@ func (a *Aggregator) readFromFiles(fType FileType, lock bool, blockNum uint64, f
 				}
 				transStoragePks = append(transStoragePks, spkBuf)
 			}
-			if val, err = commitment.ReplacePlainKeys(val, transAccountPks, transStoragePks, nil); err != nil {
+			if val, err = commitment.BranchData(val).ReplacePlainKeys(transAccountPks, transStoragePks, nil); err != nil {
 				panic(err)
 			}
 		}
@@ -2176,7 +2177,6 @@ func (w *Writer) Reset(blockNum uint64, tx kv.RwTx) error {
 type CommitmentItem struct {
 	plainKey  []byte
 	hashedKey []byte
-	u         commitment.Update
 }
 
 func (i *CommitmentItem) Less(than btree.Item) bool {
@@ -2198,23 +2198,23 @@ func (w *Writer) branchFn(prefix []byte) ([]byte, error) {
 	}
 	// Look in the files and merge, while it becomes complete
 	var startBlock = w.blockNum + 1
-	for mergedVal == nil || !commitment.IsComplete(mergedVal) {
+	for mergedVal == nil || !commitment.BranchData(mergedVal).IsComplete() {
 		if startBlock == 0 {
-			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactToHex(prefix), mergedVal, startBlock))
+			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.KeyToHex(prefix), mergedVal, startBlock))
 		}
-		var val []byte
+		var val commitment.BranchData
 		val, startBlock = w.a.readFromFiles(Commitment, false /* lock */, startBlock-1, prefix, false /* trace */)
 		if val == nil {
 			if mergedVal == nil {
 				return nil, nil
 			}
-			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.CompactToHex(prefix), mergedVal, startBlock))
+			panic(fmt.Sprintf("Incomplete branch data prefix [%x], mergeVal=[%x], startBlock=%d\n", commitment.KeyToHex(prefix), mergedVal, startBlock))
 		}
 		var err error
 		//fmt.Printf("Pre-merge prefix [%x] [%x]+[%x], startBlock %d\n", commitment.CompactToHex(prefix), val, mergedVal, startBlock)
 		if mergedVal == nil {
 			mergedVal = val
-		} else if mergedVal, err = commitment.MergeHexBranches(val, mergedVal, nil); err != nil {
+		} else if mergedVal, err = val.MergeHexBranches(mergedVal, nil); err != nil {
 			return nil, err
 		}
 		//fmt.Printf("Post-merge prefix [%x] [%x], startBlock %d\n", commitment.CompactToHex(prefix), mergedVal, startBlock)
@@ -2330,30 +2330,6 @@ func (w *Writer) captureCommitmentData(trace bool) {
 			c.hashedKey[i*2] = (b >> 4) & 0xf
 			c.hashedKey[i*2+1] = b & 0xf
 		}
-		c.u.Flags = commitment.CODE_UPDATE
-		item := commTree.Get(&CommitmentItem{hashedKey: c.hashedKey})
-		if item != nil {
-			itemC := item.(*CommitmentItem)
-			if itemC.u.Flags&commitment.BALANCE_UPDATE != 0 {
-				c.u.Flags |= commitment.BALANCE_UPDATE
-				c.u.Balance.Set(&itemC.u.Balance)
-			}
-			if itemC.u.Flags&commitment.NONCE_UPDATE != 0 {
-				c.u.Flags |= commitment.NONCE_UPDATE
-				c.u.Nonce = itemC.u.Nonce
-			}
-			if itemC.u.Flags == commitment.DELETE_UPDATE && len(val) == 0 {
-				c.u.Flags = commitment.DELETE_UPDATE
-			} else {
-				h.Reset()
-				h.Write(val)
-				h.(io.Reader).Read(c.u.CodeHashOrStorage[:])
-			}
-		} else {
-			h.Reset()
-			h.Write(val)
-			h.(io.Reader).Read(c.u.CodeHashOrStorage[:])
-		}
 		commTree.ReplaceOrInsert(c)
 	})
 	w.captureCommitmentType(Account, trace, func(commTree *btree.BTree, h hash.Hash, key, val []byte) {
@@ -2364,20 +2340,6 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		for i, b := range hashedKey {
 			c.hashedKey[i*2] = (b >> 4) & 0xf
 			c.hashedKey[i*2+1] = b & 0xf
-		}
-		if len(val) == 0 {
-			c.u.Flags = commitment.DELETE_UPDATE
-		} else {
-			c.u.DecodeForStorage(val)
-			c.u.Flags = commitment.BALANCE_UPDATE | commitment.NONCE_UPDATE
-			item := commTree.Get(&CommitmentItem{hashedKey: c.hashedKey})
-			if item != nil {
-				itemC := item.(*CommitmentItem)
-				if itemC.u.Flags&commitment.CODE_UPDATE != 0 {
-					c.u.Flags |= commitment.CODE_UPDATE
-					copy(c.u.CodeHashOrStorage[:], itemC.u.CodeHashOrStorage[:])
-				}
-			}
 		}
 		commTree.ReplaceOrInsert(c)
 	})
@@ -2393,15 +2355,6 @@ func (w *Writer) captureCommitmentData(trace bool) {
 		for i, b := range hashedKey {
 			c.hashedKey[i*2] = (b >> 4) & 0xf
 			c.hashedKey[i*2+1] = b & 0xf
-		}
-		c.u.ValLength = len(val)
-		if len(val) > 0 {
-			copy(c.u.CodeHashOrStorage[:], val)
-		}
-		if len(val) == 0 {
-			c.u.Flags = commitment.DELETE_UPDATE
-		} else {
-			c.u.Flags = commitment.STORAGE_UPDATE
 		}
 		commTree.ReplaceOrInsert(c)
 	})
@@ -2423,28 +2376,28 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 
 	plainKeys := make([][]byte, w.commTree.Len())
 	hashedKeys := make([][]byte, w.commTree.Len())
-	updates := make([]commitment.Update, w.commTree.Len())
 	j := 0
 	w.commTree.Ascend(func(i btree.Item) bool {
 		item := i.(*CommitmentItem)
 		plainKeys[j] = item.plainKey
 		hashedKeys[j] = item.hashedKey
-		updates[j] = item.u
 		j++
 		return true
 	})
 
-	if len(updates) == 0 {
+	if len(plainKeys) == 0 {
 		return w.a.hph.RootHash()
 	}
 
 	w.a.hph.Reset()
 	w.a.hph.ResetFns(w.branchFn, w.accountFn, w.storageFn)
 	w.a.hph.SetTrace(trace)
-	branchNodeUpdates, err := w.a.hph.ProcessUpdates(plainKeys, hashedKeys, updates)
+
+	rootHash, branchNodeUpdates, err := w.a.hph.ReviewKeys(plainKeys, hashedKeys)
 	if err != nil {
 		return nil, err
 	}
+
 	for prefixStr, branchNodeUpdate := range branchNodeUpdates {
 		if branchNodeUpdate == nil {
 			continue
@@ -2459,7 +2412,7 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 			prevNum = binary.BigEndian.Uint32(prevV[:4])
 		}
 
-		var original []byte
+		var original commitment.BranchData
 		if prevV == nil {
 			original, _ = w.a.readFromFiles(Commitment, true /* lock */, w.blockNum, prefix, false)
 		} else {
@@ -2467,14 +2420,14 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 		}
 		if original != nil {
 			// try to merge previous (original) and current (branchNodeUpdate) into one update
-			mergedVal, err := commitment.MergeHexBranches(original, branchNodeUpdate, nil)
+			mergedVal, err := original.MergeHexBranches(branchNodeUpdate, nil)
 			if err != nil {
 				return nil, err
 			}
-			//fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", commitment.CompactToHex(prefix), original, branchNodeUpdate, mergedVal)
+			if w.a.trace {
+				fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", commitment.KeyToHex(prefix), original, branchNodeUpdate, mergedVal)
+			}
 			branchNodeUpdate = mergedVal
-
-			//fmt.Printf("bstat: %v\n", w.a.hph.(*commitment.BinPatriciaTrie).StatString())
 		}
 
 		//fmt.Printf("computeCommitment set [%x] [%x]\n", commitment.CompactToHex(prefix), branchNodeUpdate)
@@ -2496,10 +2449,6 @@ func (w *Writer) computeCommitment(trace bool) ([]byte, error) {
 		}
 	}
 
-	var rootHash []byte
-	if rootHash, err = w.a.hph.RootHash(); err != nil {
-		return nil, err
-	}
 	return rootHash, nil
 }
 
@@ -2946,7 +2895,7 @@ func (a *Aggregator) findLargestMerge(fType FileType, maxTo uint64, maxSpan uint
 
 func (a *Aggregator) computeAggregation(fType FileType,
 	toAggregate []*byEndBlockItem, aggFrom uint64, aggTo uint64,
-	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
+	valTransform func(val, transValBuf commitment.BranchData) ([]byte, error),
 	mergeFunc commitmentMerger,
 	valCompressed bool,
 	withIndex bool, prefixLen int) (*byEndBlockItem, error) {
@@ -3078,8 +3027,8 @@ func (w *Writer) aggregateUpto(blockFrom, blockTo uint64) error {
 // mergeIntoStateFile assumes that all entries in the cp heap have type FILE_CURSOR
 func (a *Aggregator) mergeIntoStateFile(cp *CursorHeap, prefixLen int,
 	fType FileType, startBlock, endBlock uint64, dir string,
-	valTransform func(val []byte, transValBuf []byte) ([]byte, error),
-	mergeFunc func(preval, val, buf []byte) ([]byte, error),
+	valTransform func(val, transValBuf commitment.BranchData) ([]byte, error),
+	mergeFunc commitmentMerger,
 	valCompressed bool,
 ) (*compress.Decompressor, int, error) {
 	datPath := filepath.Join(dir, fmt.Sprintf("%s.%d-%d.dat", fType.String(), startBlock, endBlock))
