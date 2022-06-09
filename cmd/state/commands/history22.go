@@ -193,10 +193,10 @@ func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.A
 	if err != nil {
 		return nil, err
 	}
-	if hw.trace {
-		fmt.Printf("ReadAccountData [%x] => [%x]\n", address, enc)
-	}
 	if len(enc) == 0 {
+		if hw.trace {
+			fmt.Printf("ReadAccountData [%x] => []\n", address)
+		}
 		return nil, nil
 	}
 	var a accounts.Account
@@ -227,6 +227,9 @@ func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.A
 	pos++
 	if incBytes > 0 {
 		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+	}
+	if hw.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
 	}
 	return &a, nil
 }
