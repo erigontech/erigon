@@ -56,12 +56,42 @@ func (ii *InvertedIndex) endTxNumMinimax() uint64 {
 	return minimax
 }
 
+type DomainRanges struct {
+	valuesStartTxNum  uint64
+	valuesEndTxNum    uint64
+	values            bool
+	historyStartTxNum uint64
+	historyEndTxNum   uint64
+	history           bool
+}
+
+func (r DomainRanges) any() bool {
+	return r.values || r.history
+}
+
 // findMergeRange assumes that all fTypes in d.files have items at least as far as maxEndTxNum
 // That is why only Values type is inspected
-func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
-	var minFound bool
-	var startTxNum, endTxNum uint64
+func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
+	var r DomainRanges
 	d.files[Values].Ascend(func(i btree.Item) bool {
+		item := i.(*filesItem)
+		if item.endTxNum > maxEndTxNum {
+			return false
+		}
+		endStep := item.endTxNum / d.aggregationStep
+		spanStep := endStep & -endStep // Extract rightmost bit in the binary representation of endStep, this corresponds to size of maximally possible merge ending at endStep
+		span := spanStep * d.aggregationStep
+		start := item.endTxNum - span
+		if start < item.startTxNum {
+			if !r.values || start < r.valuesStartTxNum {
+				r.values = true
+				r.valuesStartTxNum = start
+				r.valuesEndTxNum = item.endTxNum
+			}
+		}
+		return true
+	})
+	d.files[History].Ascend(func(i btree.Item) bool {
 		item := i.(*filesItem)
 		if item.endTxNum > maxEndTxNum {
 			return false
@@ -74,15 +104,15 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint
 		}
 		start := item.endTxNum - span
 		if start < item.startTxNum {
-			if !minFound || start < startTxNum {
-				minFound = true
-				startTxNum = start
-				endTxNum = item.endTxNum
+			if !r.history || start < r.historyStartTxNum {
+				r.history = true
+				r.historyStartTxNum = start
+				r.historyEndTxNum = item.endTxNum
 			}
 		}
 		return true
 	})
-	return minFound, startTxNum, endTxNum
+	return r
 }
 
 func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint64, uint64) {
@@ -114,10 +144,24 @@ func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint
 
 // staticFilesInRange returns list of static files with txNum in specified range [startTxNum; endTxNum)
 // files are in the descending order of endTxNum
-func (d *Domain) staticFilesInRange(startTxNum, endTxNum uint64) ([][NumberOfTypes]*filesItem, int) {
+func (d *Domain) staticFilesInRange(r DomainRanges) ([][NumberOfTypes]*filesItem, int) {
 	var files [][NumberOfTypes]*filesItem
 	var startJ int
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
+		var startTxNum, endTxNum uint64
+		if fType == Values {
+			if !r.values {
+				continue
+			}
+			startTxNum = r.valuesStartTxNum
+			endTxNum = r.valuesEndTxNum
+		} else {
+			if !r.history {
+				continue
+			}
+			startTxNum = r.historyStartTxNum
+			endTxNum = r.historyEndTxNum
+		}
 		startJ = 0
 		j := 0
 		d.files[fType].Ascend(func(i btree.Item) bool {
@@ -178,7 +222,7 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	return newEf.AppendBytes(buf), nil
 }
 
-func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, startTxNum, endTxNum uint64, maxSpan uint64) ([NumberOfTypes]*filesItem, error) {
+func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, maxSpan uint64) ([NumberOfTypes]*filesItem, error) {
 	var outItems [NumberOfTypes]*filesItem
 	var comp *compress.Compressor
 	var decomp *compress.Decompressor
@@ -207,6 +251,20 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, startTxNum, endTx
 		}
 	}()
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
+		var startTxNum, endTxNum uint64
+		if fType == Values {
+			if !r.values {
+				continue
+			}
+			startTxNum = r.valuesStartTxNum
+			endTxNum = r.valuesEndTxNum
+		} else {
+			if !r.history {
+				continue
+			}
+			startTxNum = r.historyStartTxNum
+			endTxNum = r.historyEndTxNum
+		}
 		valCompressed := fType != EfHistory
 		removeVals := fType == History && (endTxNum-startTxNum) == maxSpan
 		tmpPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.tmp", d.filenameBase, fType.String(), startTxNum, endTxNum))
@@ -224,6 +282,9 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, startTxNum, endTx
 		heap.Init(&cp)
 		for _, filesByType := range files {
 			item := filesByType[fType]
+			if item == nil {
+				continue
+			}
 			g := item.decompressor.MakeGetter()
 			g.Reset(0)
 			if g.HasNext() {
@@ -385,6 +446,9 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, startTxNum, endTx
 			}
 			decomp.Close()
 			decomp = nil
+			if err = os.Remove(tmpPath); err != nil {
+				return outItems, fmt.Errorf("merge %s remove tmp file %s: %w", d.filenameBase, tmpPath, err)
+			}
 			if outItem.index, err = recsplit.OpenIndex(idxPath); err != nil {
 				return outItems, fmt.Errorf("merge %s open index %s [%d-%d]: %w", d.filenameBase, fType.String(), startTxNum, endTxNum, err)
 			}
@@ -520,6 +584,9 @@ func (d *Domain) integrateMergedFiles(outs [][NumberOfTypes]*filesItem, in [Numb
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		d.files[fType].ReplaceOrInsert(in[fType])
 		for _, out := range outs {
+			if out[fType] == nil {
+				continue
+			}
 			d.files[fType].Delete(out[fType])
 			out[fType].decompressor.Close()
 			out[fType].index.Close()
@@ -539,6 +606,9 @@ func (ii *InvertedIndex) integrateMergedFiles(outs []*filesItem, in *filesItem) 
 func (d *Domain) deleteFiles(outs [][NumberOfTypes]*filesItem) error {
 	for fType := FileType(0); fType < NumberOfTypes; fType++ {
 		for _, out := range outs {
+			if out[fType] == nil {
+				continue
+			}
 			datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), out[fType].startTxNum, out[fType].endTxNum))
 			if err := os.Remove(datPath); err != nil {
 				return err

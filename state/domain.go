@@ -982,12 +982,12 @@ func (d *Domain) readFromFiles(fType FileType, filekey []byte) ([]byte, bool) {
 	return val, found
 }
 
-// historyAfterTxNum searches history for a value of specified key after txNum
+// historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
-func (d *Domain) historyAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
+func (d *Domain) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	var search filesItem
-	search.startTxNum = txNum + 1
-	search.endTxNum = txNum + 1
+	search.startTxNum = txNum
+	search.endTxNum = txNum
 	var foundTxNum uint64
 	var foundEndTxNum uint64
 	var foundStartTxNum uint64
@@ -1002,7 +1002,7 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 		if keyMatch, _ := g.Match(key); keyMatch {
 			eliasVal, _ := g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			if n, ok := ef.Search(txNum + 1); ok {
+			if n, ok := ef.Search(txNum); ok {
 				foundTxNum = n
 				foundEndTxNum = item.endTxNum
 				foundStartTxNum = item.startTxNum
@@ -1032,13 +1032,12 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 				if g.HasNext() {
 					if keyMatch, _ := g.Match(key); keyMatch {
 						val, _ = g.Next(nil)
-						found = true
 						return false
 					}
 				}
 				return true
 			})
-			return val, found, nil
+			return val, true, nil
 		}
 		// Value not found in history files, look in the recent history
 		if roTx == nil {
@@ -1050,7 +1049,7 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 		}
 		defer indexCursor.Close()
 		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], txNum+1)
+		binary.BigEndian.PutUint64(txKey[:], txNum)
 		var foundTxNumVal []byte
 		if foundTxNumVal, err = indexCursor.SeekBothRange(key, txKey[:]); err != nil {
 			return nil, false, err
@@ -1096,10 +1095,10 @@ func (d *Domain) historyAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte
 	return v, true, nil
 }
 
-// GetAfterTxNum does not always require usage of roTx. If it is possible to determine
+// GetBeforeTxNum does not always require usage of roTx. If it is possible to determine
 // historical value based only on static files, roTx will not be used.
-func (d *Domain) GetAfterTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	v, hOk, err := d.historyAfterTxNum(key, txNum, roTx)
+func (d *Domain) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	v, hOk, err := d.historyBeforeTxNum(key, txNum, roTx)
 	if err != nil {
 		return nil, err
 	}

@@ -334,7 +334,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			label := fmt.Sprintf("txNum=%d, keyNum=%d", txNum, keyNum)
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], valNum)
-			val, err := d.GetAfterTxNum(k[:], txNum, roTx)
+			val, err := d.GetBeforeTxNum(k[:], txNum+1, roTx)
 			require.NoError(t, err, label)
 			if txNum >= keyNum {
 				require.Equal(t, v[:], val, label)
@@ -491,13 +491,12 @@ func collateAndMerge(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 			err = tx.Commit()
 			require.NoError(t, err)
 			tx = nil
-			var found bool
-			var startTxNum, endTxNum uint64
+			var r DomainRanges
 			maxEndTxNum := d.endTxNumMinimax()
 			maxSpan := uint64(16 * 16)
-			for found, startTxNum, endTxNum = d.findMergeRange(maxEndTxNum, maxSpan); found; found, startTxNum, endTxNum = d.findMergeRange(maxEndTxNum, maxSpan) {
-				outs, _ := d.staticFilesInRange(startTxNum, endTxNum)
-				in, err := d.mergeFiles(outs, startTxNum, endTxNum, maxSpan)
+			for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
+				outs, _ := d.staticFilesInRange(r)
+				in, err := d.mergeFiles(outs, r, maxSpan)
 				require.NoError(t, err)
 				d.integrateMergedFiles(outs, in)
 				err = d.deleteFiles(outs)
@@ -573,7 +572,7 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
-		val, err := d.GetAfterTxNum([]byte("key1"), txNum, roTx)
+		val, err := d.GetBeforeTxNum([]byte("key1"), txNum+1, roTx)
 		require.NoError(t, err)
 		label := fmt.Sprintf("txNum=%d", txNum)
 		if txNum%2 == 0 {
@@ -581,7 +580,7 @@ func TestDelete(t *testing.T) {
 		} else {
 			require.Nil(t, val, label)
 		}
-		val, err = d.GetAfterTxNum([]byte("key2"), txNum, roTx)
+		val, err = d.GetBeforeTxNum([]byte("key2"), txNum+1, roTx)
 		require.NoError(t, err)
 		require.Nil(t, val, label)
 	}
