@@ -433,7 +433,6 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 	}
 
 	// Request ancestors
-	log.Info("Requested", "anchor", anchor.parentHash)
 	request = &HeaderRequest{
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
