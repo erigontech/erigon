@@ -268,6 +268,7 @@ func startHandlingForkChoice(
 			}
 			return err
 		}
+		rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 		if canonical && requestStatus == engineapi.New {
 			cfg.hd.PayloadStatusCh <- privateapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
@@ -370,7 +371,6 @@ func finishHandlingForkChoice(
 	if err := rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
 		return err
 	}
-	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
 	sendErrResponse := cfg.hd.GetPendingPayloadStatus() != (common.Hash{})
 	canonical, err := safeAndFinalizedBlocksAreCanonical(forkChoice, s, tx, cfg, sendErrResponse)
@@ -380,6 +380,8 @@ func finishHandlingForkChoice(
 	if !canonical {
 		cfg.hd.ClearPendingPayloadStatus()
 	}
+
+	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
 
 	if err := s.Update(tx, headHeight); err != nil {
 		return err
