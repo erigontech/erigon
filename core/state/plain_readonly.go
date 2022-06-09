@@ -156,6 +156,9 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	if err != nil {
 		return nil, err
 	}
+	if s.trace {
+		fmt.Printf("ReadAccountData [%x] [%x]\n", address, enc)
+	}
 	if len(enc) == 0 {
 		return nil, nil
 	}

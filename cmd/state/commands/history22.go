@@ -193,6 +193,9 @@ func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.A
 	if err != nil {
 		return nil, err
 	}
+	if hw.trace {
+		fmt.Printf("ReadAccountData [%x] => [%x]\n", address, enc)
+	}
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -230,16 +233,16 @@ func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.A
 
 func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	enc, err := hw.r.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hw.txNum, nil /* roTx */)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		return nil, err
+	}
 	if hw.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
 		} else {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc)
 		}
-	}
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return nil, err
 	}
 	if enc == nil {
 		return nil, nil
@@ -248,11 +251,25 @@ func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnati
 }
 
 func (hw *HistoryWrapper22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return hw.r.ReadAccountCodeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	enc, err := hw.r.ReadAccountCodeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	if err != nil {
+		return nil, err
+	}
+	if hw.trace {
+		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, enc)
+	}
+	return enc, nil
 }
 
 func (hw *HistoryWrapper22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	return hw.r.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	size, err := hw.r.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	if err != nil {
+		return 0, err
+	}
+	if hw.trace {
+		fmt.Printf("ReadAccountCodeSize [%x] => [%d]\n", address, size)
+	}
+	return size, nil
 }
 
 func (hw *HistoryWrapper22) ReadAccountIncarnation(address common.Address) (uint64, error) {
