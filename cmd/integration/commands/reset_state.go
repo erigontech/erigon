@@ -22,7 +22,7 @@ var cmdResetState = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx) }); err != nil {
 			return err
