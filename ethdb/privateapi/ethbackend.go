@@ -372,13 +372,6 @@ func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.E
 
 // EngineGetPayloadV1 retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayload, error) {
-	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
-
-	log.Trace("[GetPayload] acquiring lock")
-	s.syncCond.L.Lock()
-	defer s.syncCond.L.Unlock()
-	log.Trace("[GetPayload] lock acquired")
-
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
@@ -387,8 +380,15 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
+	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
+	log.Trace("[GetPayload] acquiring lock")
+	s.syncCond.L.Lock()
+	defer s.syncCond.L.Unlock()
+	log.Trace("[GetPayload] lock acquired")
+
 	payload, ok := s.pendingPayloads[req.PayloadId]
 	if !ok {
+		log.Warn("Payload not stored", "payloadId", req.PayloadId)
 		return nil, &UnknownPayloadErr
 	}
 
@@ -409,6 +409,7 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 	if err != nil {
 		return nil, err
 	}
+	log.Info("Block request successful", "hash", block.Header().Hash(), "transactions count", len(encodedTransactions), "number", block.NumberU64())
 
 	return &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(block.Header().ParentHash),
@@ -593,9 +594,7 @@ func (s *EthBackendServer) StartProposer() {
 			}
 
 			log.Trace("[Proposer] starting assembling...")
-			s.syncCond.L.Unlock()
 			block, err := s.assemblePayloadPOS(&param)
-			s.syncCond.L.Lock()
 			log.Trace("[Proposer] payload assembled")
 
 			if err != nil {

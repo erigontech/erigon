@@ -377,7 +377,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 	// proof-of-stake mining
 	assembleBlockPOS := func(param *core.BlockProposerParametersPOS) (*types.Block, error) {
-		miningStatePos := stagedsync.NewMiningState(&config.Miner)
+		miningStatePos := stagedsync.NewProposingState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
