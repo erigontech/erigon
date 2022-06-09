@@ -78,8 +78,6 @@ func convertPayloadStatus(x *remote.EnginePayloadStatus) map[string]interface{} 
 	}
 	if x.LatestValidHash != nil {
 		json["latestValidHash"] = common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
-	} else {
-		json["latestValidHash"] = common.Hash{}
 	}
 	if x.ValidationError != "" {
 		json["validationError"] = x.ValidationError
