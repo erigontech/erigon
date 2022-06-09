@@ -77,6 +77,10 @@ func NewMDBX(log log.Logger) MdbxOpts {
 	}
 }
 
+func (opts MdbxOpts) GetLabel() kv.Label  { return opts.label }
+func (opts MdbxOpts) GetInMem() bool      { return opts.inMem }
+func (opts MdbxOpts) GetPageSize() uint64 { return opts.pageSize }
+
 func (opts MdbxOpts) Label(label kv.Label) MdbxOpts {
 	opts.label = label
 	return opts
