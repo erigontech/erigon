@@ -42,7 +42,7 @@ var history22Cmd = &cobra.Command{
 	Short: "Exerimental command to re-execute historical transactions in erigon2 format",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return History2(genesis, logger)
+		return History22(genesis, logger)
 	},
 }
 
@@ -189,7 +189,7 @@ type HistoryWrapper22 struct {
 }
 
 func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := hw.r.ReadAccountDataAfterTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	enc, err := hw.r.ReadAccountDataBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.A
 }
 
 func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := hw.r.ReadAccountStorageAfterTxNum(address.Bytes(), key.Bytes(), hw.txNum, nil /* roTx */)
+	enc, err := hw.r.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hw.txNum, nil /* roTx */)
 	if hw.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
@@ -248,11 +248,11 @@ func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnati
 }
 
 func (hw *HistoryWrapper22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return hw.r.ReadAccountCodeAfterTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	return hw.r.ReadAccountCodeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
 }
 
 func (hw *HistoryWrapper22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	return hw.r.ReadAccountCodeSizeAfterTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
+	return hw.r.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
 }
 
 func (hw *HistoryWrapper22) ReadAccountIncarnation(address common.Address) (uint64, error) {

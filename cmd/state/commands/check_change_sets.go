@@ -148,7 +148,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			break
 		}
 		reader := state.NewPlainState(historyTx, blockNum)
-		//reader.SetTrace(blockNum == uint64(block))
+		reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
 		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)
 		var blockWriter state.StateWriter
@@ -166,7 +166,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			return h
 		}
 		contractHasTEVM := ethdb.GetHasTEVM(rwtx)
-		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig)
+		receipts, err1 := runBlock(engine, intraBlockState, noOpWriter, blockWriter, chainConfig, getHeader, contractHasTEVM, b, vmConfig, blockNum == uint64(block))
 		if err1 != nil {
 			return err1
 		}
