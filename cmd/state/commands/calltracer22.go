@@ -14,7 +14,7 @@ type CallTracer struct {
 	tos   map[common.Address]struct{}
 }
 
-func NewCallTracer(hasTEVM func(contractHash common.Hash) (bool, error)) *CallTracer {
+func NewCallTracer() *CallTracer {
 	return &CallTracer{
 		froms: map[common.Address]struct{}{},
 		tos:   map[common.Address]struct{}{},

@@ -322,8 +322,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		var ct CallTracer
-		vmConfig.Tracer = &ct
+		ct := NewCallTracer()
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
