@@ -48,6 +48,7 @@ func dbCfg(label kv.Label, logger log.Logger, path string) kv2.MdbxOpts {
 func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 	label := kv.ChainDB
 	db := opts.MustOpen()
+	opts.Label()
 	if applyMigrations {
 		has, err := migrations.NewMigrator(label).HasPendingMigrations(db)
 		if err != nil {
