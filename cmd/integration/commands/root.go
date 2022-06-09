@@ -34,38 +34,35 @@ func RootCommand() *cobra.Command {
 	return rootCmd
 }
 
-func openDB(path string, logger log.Logger, applyMigrations bool) kv.RwDB {
-	label := kv.ChainDB
-	db := openKV(label, logger, path, false)
+func dbCfg(label kv.Label, logger log.Logger, path string) kv2.MdbxOpts {
+	opts := kv2.NewMDBX(logger).Path(path).Label(label)
+	if label == kv.ChainDB {
+		opts = opts.MapSize(8 * datasize.TB)
+	}
+	if databaseVerbosity != -1 {
+		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
+	}
+	return opts
+}
+
+func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
+	db := opts.MustOpen()
 	if applyMigrations {
-		has, err := migrations.NewMigrator(label).HasPendingMigrations(db)
+		migrator := migrations.NewMigrator(opts.GetLabel())
+		has, err := migrator.HasPendingMigrations(db)
 		if err != nil {
 			panic(err)
 		}
 		if has {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
-			db = openKV(label, logger, path, true)
-			if err := migrations.NewMigrator(label).Apply(db, datadirCli); err != nil {
+			db = opts.Exclusive().MustOpen()
+			if err := migrator.Apply(db, datadirCli); err != nil {
 				panic(err)
 			}
 			db.Close()
-			db = openKV(label, logger, path, false)
+			db = opts.MustOpen()
 		}
 	}
 	return db
-}
-
-func openKV(label kv.Label, logger log.Logger, path string, exclusive bool) kv.RwDB {
-	opts := kv2.NewMDBX(logger).Path(path).Label(label)
-	if label == kv.ChainDB {
-		opts = opts.MapSize(8 * datasize.TB)
-	}
-	if exclusive {
-		opts = opts.Exclusive()
-	}
-	if databaseVerbosity != -1 {
-		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
-	}
-	return opts.MustOpen()
 }

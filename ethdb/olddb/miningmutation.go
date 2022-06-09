@@ -79,6 +79,9 @@ func (m *miningmutation) getMem(table string, key []byte) ([]byte, bool) {
 	return val, val != nil
 }
 
+func (m *miningmutation) DBSize() (uint64, error) { panic("not implemented") }
+func (m *miningmutation) PageSize() uint64        { panic("not implemented") }
+
 func (m *miningmutation) IncrementSequence(bucket string, amount uint64) (res uint64, err error) {
 	v, ok := m.getMem(kv.Sequence, []byte(bucket))
 	if !ok && m.db != nil {
