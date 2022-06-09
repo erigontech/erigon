@@ -306,7 +306,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
-	vmConfig.TraceJumpDest = true
+	vmConfig.Debug = true
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
@@ -322,11 +322,26 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
+		var ct CallTracer
+		vmConfig.Tracer = &ct
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
+		if err = ct.AddToAggregator(ww.w); err != nil {
+			return 0, nil, fmt.Errorf("adding traces to aggregator: %w", err)
+		}
 		receipts = append(receipts, receipt)
+		for _, log := range receipt.Logs {
+			if err = ww.w.AddLogAddr(log.Address[:]); err != nil {
+				return 0, nil, fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
+			}
+			for _, topic := range log.Topics {
+				if err = ww.w.AddLogTopic(topic[:]); err != nil {
+					return 0, nil, fmt.Errorf("adding event log for topic %x: %w", topic, err)
+				}
+			}
+		}
 		if err = ww.w.FinishTx(); err != nil {
 			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
