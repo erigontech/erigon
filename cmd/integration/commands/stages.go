@@ -49,7 +49,7 @@ var cmdStageHeaders = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageHeaders(db, ctx); err != nil {
@@ -66,7 +66,7 @@ var cmdStageBodies = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageBodies(db, ctx); err != nil {
@@ -83,7 +83,7 @@ var cmdStageSenders = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
 		ctx, _ := common2.RootContext()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageSenders(db, ctx); err != nil {
@@ -100,7 +100,7 @@ var cmdStageExec = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageExec(db, ctx); err != nil {
@@ -117,7 +117,7 @@ var cmdStageTrie = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageTrie(db, ctx); err != nil {
@@ -134,7 +134,7 @@ var cmdStageHashState = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
 		ctx, _ := common2.RootContext()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageHashState(db, ctx); err != nil {
@@ -151,7 +151,7 @@ var cmdStageHistory = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageHistory(db, ctx); err != nil {
@@ -168,7 +168,7 @@ var cmdLogIndex = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageLogIndex(db, ctx); err != nil {
@@ -185,7 +185,7 @@ var cmdCallTraces = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageCallTraces(db, ctx); err != nil {
@@ -202,7 +202,7 @@ var cmdStageTxLookup = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 
 		if err := stageTxLookup(db, ctx); err != nil {
@@ -218,7 +218,7 @@ var cmdPrintStages = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, false)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata).Readonly(), false)
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
@@ -235,7 +235,7 @@ var cmdPrintMigrations = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, false)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -251,7 +251,7 @@ var cmdRemoveMigration = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx, _ := common2.RootContext()
 		logger := log.New()
-		db := openDB(chaindata, logger, false)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {
 			log.Error("Error", "err", err)
@@ -266,7 +266,7 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 		// Nothing to do, migrations will be applied automatically
 		return nil
@@ -278,7 +278,7 @@ var cmdSetPrune = &cobra.Command{
 	Short: "Override existing --prune flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 		return overrideStorageMode(db)
 	},
@@ -289,7 +289,7 @@ var cmdSetSnapshto = &cobra.Command{
 	Short: "Override existing --snapshots flag value (if you know what you are doing)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		db := openDB(chaindata, logger, true)
+		db := openDB(dbCfg(kv.ChainDB, logger, chaindata), true)
 		defer db.Close()
 		_, chainConfig := genesisByChain(chain)
 		snapshots := allSnapshots(chainConfig, db)
