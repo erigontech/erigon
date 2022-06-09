@@ -132,7 +132,13 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		}
 		writeWrapper := state.NewNoopWriter()
 		txNum++ // Pre block transaction
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		getHeader := func(hash common.Hash, number uint64) *types.Header {
+			h, err := blockReader.Header(ctx, historyTx, hash, number)
+			if err != nil {
+				panic(err)
+			}
+			return h
+		}
 		if txNum, _, err = runHistory22(trace, blockNum, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
