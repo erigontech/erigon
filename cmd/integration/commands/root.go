@@ -46,11 +46,10 @@ func dbCfg(label kv.Label, logger log.Logger, path string) kv2.MdbxOpts {
 }
 
 func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
-	label := kv.ChainDB
 	db := opts.MustOpen()
-	opts.Label()
 	if applyMigrations {
-		has, err := migrations.NewMigrator(label).HasPendingMigrations(db)
+		migrator := migrations.NewMigrator(opts.GetLabel())
+		has, err := migrator.HasPendingMigrations(db)
 		if err != nil {
 			panic(err)
 		}
@@ -58,7 +57,7 @@ func openDB(opts kv2.MdbxOpts, applyMigrations bool) kv.RwDB {
 			log.Info("Re-Opening DB in exclusive mode to apply DB migrations")
 			db.Close()
 			db = opts.Exclusive().MustOpen()
-			if err := migrations.NewMigrator(label).Apply(db, datadirCli); err != nil {
+			if err := migrator.Apply(db, datadirCli); err != nil {
 				panic(err)
 			}
 			db.Close()
