@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/log/v3"
@@ -981,6 +982,20 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 
 // GetCurrentValidators get current validators
 func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
+	// Use signer as validator in case of bor devent
+	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
+		validators := []*Validator{
+			{
+				ID:               1,
+				Address:          c.signer,
+				VotingPower:      1000,
+				ProposerPriority: 1,
+			},
+		}
+
+		return validators, nil
+	}
+
 	span, err := c.getSpanForBlock(blockNumber)
 	if err != nil {
 		return nil, err

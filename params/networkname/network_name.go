@@ -15,6 +15,7 @@ const (
 	RialtoChainName     = "rialto"
 	MumbaiChainName     = "mumbai"
 	BorMainnetChainName = "bor-mainnet"
+	BorDevnetChainName  = "bor-devnet"
 )
 
 var All = []string{
@@ -32,4 +33,5 @@ var All = []string{
 	//RialtoChainName,
 	MumbaiChainName,
 	BorMainnetChainName,
+	BorDevnetChainName,
 }

@@ -941,7 +941,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
-	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName {
+	if ctx.GlobalString(ChainFlag.Name) == networkname.DevChainName || ctx.GlobalString(ChainFlag.Name) == networkname.BorDevnetChainName {
 		if etherbase == "" {
 			cfg.Miner.SigKey = core.DevnetSignPrivateKey
 			cfg.Miner.Etherbase = core.DevnetEtherbase
@@ -1054,6 +1054,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return filepath.Join(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
 		return filepath.Join(datadir, "bor-mainnet")
+	case networkname.BorDevnetChainName:
+		return filepath.Join(datadir, "bor-devnet")
 	case networkname.SepoliaChainName:
 		return filepath.Join(datadir, "sepolia")
 	default:
