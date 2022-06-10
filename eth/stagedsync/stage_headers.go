@@ -738,10 +738,10 @@ Loop:
 		if req != nil {
 			_, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
-				log.Trace("Sent request", "height", req.Number)
+				cfg.hd.UpdateStats(req, false /* skeleton */)
 			}
+			// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
+			cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -752,12 +752,10 @@ Loop:
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /*timeout */)
-					log.Trace("Sent request", "height", req.Number)
 					cfg.hd.UpdateStats(req, false /* skeleton */)
-
 				}
+				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
+				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cfg.penalize(ctx, penalties)
@@ -771,7 +769,6 @@ Loop:
 			if req != nil {
 				_, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					log.Trace("Sent skeleton request", "height", req.Number)
 					cfg.hd.UpdateStats(req, true /* skeleton */)
 					lastSkeletonTime = time.Now()
 				}
