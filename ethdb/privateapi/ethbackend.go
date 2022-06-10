@@ -58,10 +58,11 @@ type EthBackendServer struct {
 	// Send Beacon Chain requests to staged sync
 	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
-	statusCh   <-chan PayloadStatus
-	proposing  bool
-	lock       sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	logsFilter *LogsFilterAggregator
+	statusCh    <-chan PayloadStatus
+	builderFunc builder.BlockBuilderFunc
+	proposing   bool
+	lock        sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	logsFilter  *LogsFilterAggregator
 }
 
 type EthBackend interface {
@@ -83,11 +84,12 @@ type PayloadStatus struct {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockAndTxnReader,
-	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus, proposing bool,
+	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
+	builderFunc builder.BlockBuilderFunc, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		requestList: requestList, statusCh: statusCh, builders: make(map[uint64]*builder.BlockBuilder),
-		proposing: proposing, logsFilter: NewLogsFilterAggregator(events),
+		builderFunc: builderFunc, proposing: proposing, logsFilter: NewLogsFilterAggregator(events),
 	}
 
 	ch, clean := s.events.AddLogsSubscription()
@@ -508,7 +510,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao),
 	}
 
-	s.builders[s.payloadId] = builder.NewBlockBuilder(ctx, tx2, &param)
+	s.builders[s.payloadId] = builder.NewBlockBuilder(ctx, tx2, s.builderFunc, &param)
 
 	return &remote.EngineForkChoiceUpdatedReply{
 		PayloadStatus: &remote.EnginePayloadStatus{
