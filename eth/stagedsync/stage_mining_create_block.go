@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -135,13 +136,17 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			return err
 		}
 
-		txs, err = types.DecodeTransactions(txSlots.Txs)
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
+		for i := range txSlots.Txs {
+			s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
 
-		if err != nil {
-			return fmt.Errorf("decode rlp of pending txs: %w", err)
+			transaction, err := types.DecodeTransaction(s)
+			if err == io.EOF {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			txs = append(txs, transaction)
 		}
 		var sender common.Address
 		for i := range txs {
