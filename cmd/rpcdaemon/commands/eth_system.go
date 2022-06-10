@@ -22,14 +22,14 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	execution, err := stages.GetStageProgress(tx, stages.Finish)
+	blockNum, err := getLatestBlockNumber(tx)
 	if err != nil {
 		return 0, err
 	}
-	return hexutil.Uint64(execution), nil
+	return hexutil.Uint64(blockNum), nil
 }
 
-// Syncing implements eth_syncing. Returns a data object detaling the status of the sync process or false if not syncing.
+// Syncing implements eth_syncing. Returns a data object detailing the status of the sync process or false if not syncing.
 func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {

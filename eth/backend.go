@@ -630,6 +630,25 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		})
 	}
 
+	var borcfg *bor.Bor
+	if b, ok := s.engine.(*bor.Bor); ok {
+		borcfg = b
+	} else if br, ok := s.engine.(*serenity.Serenity); ok {
+		if b, ok := br.InnerEngine().(*bor.Bor); ok {
+			borcfg = b
+		}
+	}
+	if borcfg != nil {
+		if cfg.SigKey == nil {
+			log.Error("Etherbase account unavailable locally", "err", err)
+			return fmt.Errorf("signer missing: %w", err)
+		}
+
+		borcfg.Authorize(eb, func(_ common.Address, mimeType string, message []byte) ([]byte, error) {
+			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+		})
+	}
+
 	go func() {
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
