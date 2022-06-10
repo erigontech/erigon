@@ -1000,7 +1000,6 @@ func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	return span.ValidatorSet.Validators, nil
 }
 

@@ -343,7 +343,6 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 
 	removals = make([]*Validator, 0, len(changes))
 	updates = make([]*Validator, 0, len(changes))
-
 	var prevAddr common.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
