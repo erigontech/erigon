@@ -704,6 +704,19 @@ func DefaultBorMainnetGenesisBlock() *Genesis {
 	}
 }
 
+func DefaultBorDevnetGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.BorDevnetChainConfig,
+		Nonce:      0,
+		Timestamp:  1558348305,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      readPrealloc("allocs/bor_devnet.json"),
+	}
+}
+
 // Pre-calculated version of:
 //    DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //    DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
@@ -713,12 +726,8 @@ var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad3
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
 func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
 	// Override the default period to the user requested one
-	// config := *params.AllCliqueProtocolChanges
-	config := *params.MumbaiChainConfig
-	config.ChainID = big.NewInt(1337)
-	config.Bor.Period = map[string]uint64{
-		"0": period,
-	}
+	config := *params.AllCliqueProtocolChanges
+	config.Clique.Period = period
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
 	return &Genesis{
@@ -784,6 +793,8 @@ func DefaultGenesisBlockByChainName(chain string) *Genesis {
 		return DefaultMumbaiGenesisBlock()
 	case networkname.BorMainnetChainName:
 		return DefaultBorMainnetGenesisBlock()
+	case networkname.BorDevnetChainName:
+		return DefaultBorDevnetGenesisBlock()
 	case networkname.KilnDevnetChainName:
 		return DefaultKilnDevnetGenesisBlock()
 	default:
