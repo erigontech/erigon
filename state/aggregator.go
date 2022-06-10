@@ -668,6 +668,22 @@ func (a *Aggregator) WriteAccountStorage(addr, loc []byte, value []byte) error {
 	return a.storage.Put(dbkey, value)
 }
 
+func (a *Aggregator) AddTraceFrom(addr []byte) error {
+	return a.tracesFrom.Add(addr)
+}
+
+func (a *Aggregator) AddTraceTo(addr []byte) error {
+	return a.tracesTo.Add(addr)
+}
+
+func (a *Aggregator) AddLogAddr(addr []byte) error {
+	return a.logAddrs.Add(addr)
+}
+
+func (a *Aggregator) AddLogTopic(topic []byte) error {
+	return a.logTopics.Add(topic)
+}
+
 type FilesStats struct {
 }
 
