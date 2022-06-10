@@ -982,7 +982,7 @@ func (c *Bor) GetCurrentSpan(header *types.Header, state *state.IntraBlockState,
 
 // GetCurrentValidators get current validators
 func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
-	// Use hardcoded validator in case of bor devent
+	// Use signer as validator in case of bor devent
 	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
 		validators := []*Validator{
 			{
