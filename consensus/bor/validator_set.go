@@ -344,7 +344,7 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 	removals = make([]*Validator, 0, len(changes))
 	updates = make([]*Validator, 0, len(changes))
 
-	prevAddr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	var prevAddr common.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
 	for _, valUpdate := range changes {
