@@ -987,7 +987,7 @@ func (c *Bor) GetCurrentValidators(blockNumber uint64) ([]*Validator, error) {
 		validators := []*Validator{
 			{
 				ID:               1,
-				Address:          common.HexToAddress("0x67b1d87101671b127f5f8714789c7192f7ad340e"),
+				Address:          c.signer,
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
