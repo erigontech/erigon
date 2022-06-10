@@ -78,6 +78,14 @@ func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	return p
 }
 
+func (pi *PeerInfo) Close() {
+	pi.lock.Lock()
+	defer pi.lock.Unlock()
+	if pi.tasks != nil {
+		close(pi.tasks)
+	}
+}
+
 func (pi *PeerInfo) ID() [64]byte {
 	return pi.peer.Pubkey()
 }
@@ -494,6 +502,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			log.Trace(fmt.Sprintf("[%s] Start with peer", peerID))
 
 			peerInfo := NewPeerInfo(peer, rw)
+			defer peerInfo.Close()
 
 			defer ss.GoodPeers.Delete(peerID)
 			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
