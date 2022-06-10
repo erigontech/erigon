@@ -365,26 +365,30 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ignoreError = depth == 0 && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
-		switch err {
-		case vm.ErrInvalidJump:
-			topTrace.Error = "Bad jump destination"
-		case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
-			topTrace.Error = "Out of gas"
-		case vm.ErrExecutionReverted:
-			topTrace.Error = "Reverted"
-		case vm.ErrWriteProtection:
-			topTrace.Error = "Mutable Call In Static Context"
-		default:
-			switch err.(type) {
-			case *vm.ErrStackUnderflow:
-				topTrace.Error = "Stack underflow"
-			case *vm.ErrInvalidOpCode:
-				topTrace.Error = "Bad instruction"
+		if err == vm.ErrExecutionReverted {
+			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+			topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
+		} else {
+			topTrace.Result = nil
+			switch err {
+			case vm.ErrInvalidJump:
+				topTrace.Error = "Bad jump destination"
+			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
+				topTrace.Error = "Out of gas"
+			case vm.ErrWriteProtection:
+				topTrace.Error = "Mutable Call In Static Context"
 			default:
-				topTrace.Error = err.Error()
+				switch err.(type) {
+				case *vm.ErrStackUnderflow:
+					topTrace.Error = "Stack underflow"
+				case *vm.ErrInvalidOpCode:
+					topTrace.Error = "Bad instruction"
+				default:
+					topTrace.Error = err.Error()
+				}
 			}
 		}
-		topTrace.Result = nil
 	} else {
 		if len(output) > 0 {
 			switch topTrace.Type {
