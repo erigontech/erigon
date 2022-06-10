@@ -157,6 +157,9 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 		return nil, err
 	}
 	if len(enc) == 0 {
+		if s.trace {
+			fmt.Printf("ReadAccountData [%x] => []\n", address)
+		}
 		return nil, nil
 	}
 	var a accounts.Account
@@ -172,6 +175,9 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 		} else {
 			return nil, err1
 		}
+	}
+	if s.trace {
+		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
 	}
 	return &a, nil
 }

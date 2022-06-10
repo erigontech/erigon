@@ -8,9 +8,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
@@ -19,7 +19,7 @@ import (
 func TestPendingBlock(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
-	ff := rpcservices.New(ctx, nil, nil, mining, func() {})
+	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), false), nil, nil, nil, mining, 5000000)
 	expect := uint64(12345)
@@ -44,7 +44,7 @@ func TestPendingBlock(t *testing.T) {
 func TestPendingLogs(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
-	ff := rpcservices.New(ctx, nil, nil, mining, func() {})
+	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
 	expect := []byte{211}
 
 	ch := make(chan types.Logs, 1)

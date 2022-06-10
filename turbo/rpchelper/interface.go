@@ -1,4 +1,4 @@
-package rpcinterfaces
+package rpchelper
 
 import (
 	"context"
