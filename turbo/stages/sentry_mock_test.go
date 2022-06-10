@@ -118,8 +118,13 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
-	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync)
+	tx, err := m.DB.BeginRo(m.Ctx)
 	require.NoError(err)
+
+	err = stages.MiningStep(tx, m.MiningSync)
+	require.NoError(err)
+
+	tx.Rollback()
 
 	got := <-m.PendingBlocks
 	require.Equal(chain.TopBlock.Transactions().Len(), got.Transactions().Len())

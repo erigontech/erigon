@@ -703,7 +703,15 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 			if !works && hasWork {
 				works = true
-				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
+				go func() {
+					tx, err := db.BeginRo(ctx)
+					if err != nil {
+						errc <- err
+						return
+					}
+					errc <- stages2.MiningStep(tx, mining)
+					tx.Rollback()
+				}()
 			}
 		}
 	}()
