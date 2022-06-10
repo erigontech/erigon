@@ -93,7 +93,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -152,7 +152,7 @@ func TestMockValidExecution(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -188,7 +188,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{TerminalTotalDifficulty: common.Big1}, beaconRequestList, statusCh, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -224,7 +224,7 @@ func TestNoTTD(t *testing.T) {
 	statusCh := make(chan PayloadStatus)
 
 	events := NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, beaconRequestList, statusCh, nil, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &params.ChainConfig{}, beaconRequestList, statusCh, false)
 
 	var err error
 

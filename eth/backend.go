@@ -375,35 +375,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*ethash.Ethash); ok {
 		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 	}
-	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockProposerParametersPOS) (*types.Block, error) {
-		miningStatePos := stagedsync.NewProposingState(&config.Miner)
-		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
-		proposingSync := stagedsync.New(
-			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir),
-				stagedsync.StageHashStateCfg(backend.chainDB, tmpdir),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, tmpdir, blockReader),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
-		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync); err != nil {
-			return nil, err
-		}
-		block := <-miningStatePos.MiningResultPOSCh
-		return block, nil
-	}
 
 	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, backend.sentriesClient.Hd.BeaconRequestList, backend.sentriesClient.Hd.PayloadStatusCh,
-		assembleBlockPOS, config.Miner.EnabledPOS)
+	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader,
+		chainConfig, backend.sentriesClient.Hd.BeaconRequestList, backend.sentriesClient.Hd.PayloadStatusCh, config.Miner.EnabledPOS)
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
-	// If we enabled the proposer flag we initiates the block proposing thread
-	if config.Miner.EnabledPOS && chainConfig.TerminalTotalDifficulty != nil {
-		ethBackendRPC.StartProposer()
-	}
+
 	if stack.Config().PrivateApiAddr != "" {
 		var creds credentials.TransportCredentials
 		if stack.Config().TLSConnection {
