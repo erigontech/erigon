@@ -499,7 +499,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, &InvalidPayloadAttributesErr
 	}
 
-	params := core.BlockProposerParametersPOS{
+	params := core.BlockBuilderParameters{
 		ParentHash:            forkChoice.HeadBlockHash,
 		Timestamp:             req.PayloadAttributes.Timestamp,
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient),

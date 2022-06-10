@@ -12,7 +12,7 @@ import (
 type BlockBuilder struct {
 }
 
-func NewBlockBuilder(ctx context.Context, tx kv.Tx, param *core.BlockProposerParametersPOS) *BlockBuilder {
+func NewBlockBuilder(ctx context.Context, tx kv.Tx, param *core.BlockBuilderParameters) *BlockBuilder {
 	// TODO: start a builder goroutine that stops on ctx.Done
 	tx.Rollback()
 	return &BlockBuilder{}
