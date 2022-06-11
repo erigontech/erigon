@@ -239,9 +239,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	if fromBlock > 0 {
 		fromTxNum = api._txNums[fromBlock-1]
 	}
-	if toBlock > 0 {
-		toTxNum = api._txNums[toBlock-1]
-	}
+	toTxNum = api._txNums[toBlock] // toBlock is an inclusive bound
 
 	if fromBlock > toBlock {
 		stream.WriteNil()
