@@ -283,10 +283,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allTxs.AddRange(fromBlock, toBlock+1)
+		allTxs.AddRange(fromTxNum, toTxNum+1)
 	} else {
-		allTxs.RemoveRange(0, fromBlock)
-		allTxs.RemoveRange(toBlock+1, uint64(0x100000000))
+		allTxs.RemoveRange(0, fromTxNum)
+		allTxs.RemoveRange(toTxNum+1, uint64(0x1000000000000))
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
