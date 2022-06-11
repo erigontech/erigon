@@ -275,7 +275,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			toAddresses[*addr] = struct{}{}
 		}
 	}
-	fmt.Printf("fromTxNum = %d, toTxNum = %d, %d\n", fromTxNum, toTxNum, txsTo.ToArray())
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
@@ -315,15 +314,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	nSeen := uint64(0)
 	nExported := uint64(0)
-	/*
-		f, _ := os.Create("txnums1.txt")
-		for blockNum, txNum := range api._txNums {
-			fmt.Fprintf(f, "%d = %d\n", blockNum, txNum)
-		}
-		f.Close()
-	*/
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	fmt.Printf("allTxs = %d\n", allTxs.ToArray())
 	it := allTxs.Iterator()
 	var lastBlockNum uint64
 	var lastBlockHash common.Hash
@@ -338,7 +329,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
 			return api._txNums[i] > txNum
 		}))
-		fmt.Printf("txNum = %d, blockNum = %d\n", txNum, blockNum)
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 				stream.WriteNil()
