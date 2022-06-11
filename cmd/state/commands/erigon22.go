@@ -314,6 +314,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
+	trace = block.NumberU64() == 1700059
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
@@ -327,6 +328,19 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+		}
+		for from := range ct.froms {
+			if err := ww.w.AddTraceFrom(from[:]); err != nil {
+				return 0, nil, err
+			}
+		}
+		for to := range ct.tos {
+			if trace {
+				fmt.Printf("TraceTo [%x]\n", to[:])
+			}
+			if err := ww.w.AddTraceTo(to[:]); err != nil {
+				return 0, nil, err
+			}
 		}
 		if err = ct.AddToAggregator(ww.w); err != nil {
 			return 0, nil, fmt.Errorf("adding traces to aggregator: %w", err)
