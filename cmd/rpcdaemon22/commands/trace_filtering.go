@@ -330,6 +330,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
+	stateReader := state.NewHistoryReader22(api._agg)
+	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := uint64(it.Next())
 		// Find block number
@@ -436,10 +438,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			return err
 		}
 		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, dbtx, nil, api._blockReader)
-		stateReader := state.NewHistoryReader22(api._agg)
+		stateReader.SetTxNum(txNum)
 		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
 		cachedReader := state.NewCachedReader(stateReader, stateCache)
-		noop := state.NewNoopWriter()
 		cachedWriter := state.NewCachedWriter(noop, stateCache)
 		vmConfig := vm.Config{}
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
