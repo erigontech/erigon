@@ -235,8 +235,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		toBlock = uint64(*req.ToBlock)
 	}
 
-	fromTxNum := api._txNums[fromBlock]
-	toTxNum := api._txNums[toBlock]
+	var fromTxNum, toTxNum uint64
+	if fromBlock > 0 {
+		fromTxNum = api._txNums[fromBlock-1]
+	}
+	if toBlock > 0 {
+		toTxNum = api._txNums[toBlock-1]
+	}
 
 	if fromBlock > toBlock {
 		stream.WriteNil()
@@ -331,7 +336,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		txNum := uint64(it.Next())
 		// Find block number
 		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
-			return api._txNums[i] >= txNum
+			return api._txNums[i] > txNum
 		}))
 		fmt.Printf("txNum = %d, blockNum = %d\n", txNum, blockNum)
 		if blockNum > lastBlockNum {
@@ -344,7 +349,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum)
 		}
-		if txNum+1 == api._txNums[blockNum+1] {
+		if txNum+1 == api._txNums[blockNum] {
 			body, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
 			if err != nil {
 				stream.WriteNil()

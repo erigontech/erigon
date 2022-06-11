@@ -350,8 +350,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			txNums = make([]uint64, allSnapshots.BlocksAvailable()+1)
 			if err = allSnapshots.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
 				for _, b := range bs {
-					if err = b.Iterate(func(blockNum, baseTxNum, _ uint64) {
-						txNums[blockNum] = baseTxNum
+					if err = b.Iterate(func(blockNum, baseTxNum, txAmount uint64) {
+						txNums[blockNum] = baseTxNum + txAmount + 2
 					}); err != nil {
 						return err
 					}
