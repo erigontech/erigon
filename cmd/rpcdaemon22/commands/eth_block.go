@@ -119,7 +119,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, contractHasTEVM)
+	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
 	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)

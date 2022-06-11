@@ -2,8 +2,8 @@ package commands
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
@@ -14,12 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"golang.org/x/exp/constraints"
-	"container/heap"
 )
 
 // Transaction implements trace_transaction
@@ -208,30 +204,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return out, err
 }
 
-type theap[T constraints.Ordered] []T
-
-func (h theap[T]) Len() int {
-    return len(h)
-}
-
-func (h theap[T]) Less(i, j int) bool {
-    return h[i] < h[j]
-}
-
-func (h theap[T]) Swap(i, j int) {
-    h[i], h[j] = h[j], h[i]
-}
-
-func (h *theap[T]) Push(a interface{}) {
-    *h = append(*h, a.(T))
-}
-
-func (h *theap[T]) Pop() interface{} {
-    c := *h
-    *h = c[:len(c)-1]
-    return c[len(c)-1]
-}
-
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
@@ -258,6 +230,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		toBlock = uint64(*req.ToBlock)
 	}
 
+	fromTxNum := api._txNums[fromBlock]
+	toTxNum := api._txNums[toBlock]
+
 	if fromBlock > toBlock {
 		stream.WriteNil()
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
@@ -266,60 +241,46 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
 
-	var fromTxNums, toTxNums theap[uint64]
-	heap.Init(&fromTxNums)
-	heap.Init(&toTxNums)
-
 	var (
-		allBlocks roaring64.Bitmap
-		blocksTo  roaring64.Bitmap
+		allTxs roaring64.Bitmap
+		txsTo  roaring64.Bitmap
 	)
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-				stream.WriteNil()
-				return err
+			it := api._agg.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+			for it.HasNext() {
+				allTxs.Add(it.Next())
 			}
-			allBlocks.Or(b)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-				stream.WriteNil()
-				return err
+			it := api._agg.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, nil)
+			for it.HasNext() {
+				txsTo.Add(it.Next())
 			}
-			blocksTo.Or(b)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		allBlocks.And(&blocksTo)
+		allTxs.And(&txsTo)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		allBlocks.Or(&blocksTo)
+		allTxs.Or(&txsTo)
 	}
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks.AddRange(fromBlock, toBlock+1)
+		allTxs.AddRange(fromBlock, toBlock+1)
 	} else {
-		allBlocks.RemoveRange(0, fromBlock)
-		allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
+		allTxs.RemoveRange(0, fromBlock)
+		allTxs.RemoveRange(toBlock+1, uint64(0x100000000))
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
@@ -344,34 +305,50 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	nSeen := uint64(0)
 	nExported := uint64(0)
 
-	it := allBlocks.Iterator()
+	it := allTxs.Iterator()
 	for it.HasNext() {
-		b := uint64(it.Next())
+		txNum := uint64(it.Next())
+		// Find block number
+		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
+			return txNum >= api._txNums[i]
+		}))
+		txIndex := int(txNum - api._txNums[blockNum] - 1)
+		_, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, txIndex)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+
+		var txs []types.Transaction
+		var blockHash common.Hash
+		var blockNumber uint64
+		var t []*TraceCallResult
+		var block *types.Block
 		// Extract transactions from block
-		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
-		if hashErr != nil {
-			stream.WriteNil()
-			return hashErr
-		}
+		//hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
+		//if hashErr != nil {
+		//	stream.WriteNil()
+		//	return hashErr
+		//}
 
-		block, bErr := api.blockWithSenders(dbtx, hash, b)
-		if bErr != nil {
-			stream.WriteNil()
-			return bErr
-		}
-		if block == nil {
-			stream.WriteNil()
-			return fmt.Errorf("could not find block %x %d", hash, b)
-		}
+		//block, bErr := api.blockWithSenders(dbtx, hash, b)
+		//if bErr != nil {
+		//	stream.WriteNil()
+		//	return bErr
+		//}
+		//if block == nil {
+		//	stream.WriteNil()
+		//	return fmt.Errorf("could not find block %x %d", hash, b)
+		//}
 
-		blockHash := block.Hash()
-		blockNumber := block.NumberU64()
-		txs := block.Transactions()
-		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
-		if tErr != nil {
-			stream.WriteNil()
-			return tErr
-		}
+		//blockHash := block.Hash()
+		//blockNumber := block.NumberU64()
+		//txs := block.Transactions()
+		//t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
+		//if tErr != nil {
+		//	stream.WriteNil()
+		//	return tErr
+		//}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
