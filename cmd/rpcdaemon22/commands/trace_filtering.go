@@ -325,6 +325,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
 			return txNum >= api._txNums[i]
 		}))
+		fmt.Printf("txNum = %d, blockNum = %d\n", txNum, blockNum)
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
 				stream.WriteNil()
