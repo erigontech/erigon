@@ -311,6 +311,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	nExported := uint64(0)
 
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
+	fmt.Printf("allTxs = %d\n", allTxs.ToArray())
 	it := allTxs.Iterator()
 	var lastBlockNum uint64
 	var lastBlockHash common.Hash
