@@ -13,14 +13,35 @@ import (
 func getBlockNumber(number rpc.BlockNumber, tx kv.Tx) (uint64, error) {
 	var blockNum uint64
 	var err error
-	if number == rpc.LatestBlockNumber || number == rpc.PendingBlockNumber {
+	switch number {
+
+	case rpc.LatestBlockNumber:
 		blockNum, err = getLatestBlockNumber(tx)
 		if err != nil {
 			return 0, err
 		}
-	} else if number == rpc.EarliestBlockNumber {
+	case rpc.PendingBlockNumber:
+		blockNum, err = getLatestBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+
+	case rpc.EarliestBlockNumber:
 		blockNum = 0
-	} else {
+
+	case rpc.FinalizeBlockNumber:
+		blockNum, err = getFinalizedBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+
+	case rpc.SafeBlockNumber:
+		blockNum, err = getSafeBlockNumber(tx)
+		if err != nil {
+			return 0, err
+		}
+
+	default:
 		blockNum = uint64(number.Int64())
 	}
 
