@@ -18,6 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/bitmapdb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"golang.org/x/exp/constraints"
+	"container/heap"
 )
 
 // Transaction implements trace_transaction
@@ -206,6 +208,30 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return out, err
 }
 
+type theap[T constraints.Ordered] []T
+
+func (h theap[T]) Len() int {
+    return len(h)
+}
+
+func (h theap[T]) Less(i, j int) bool {
+    return h[i] < h[j]
+}
+
+func (h theap[T]) Swap(i, j int) {
+    h[i], h[j] = h[j], h[i]
+}
+
+func (h *theap[T]) Push(a interface{}) {
+    *h = append(*h, a.(T))
+}
+
+func (h *theap[T]) Pop() interface{} {
+    c := *h
+    *h = c[:len(c)-1]
+    return c[len(c)-1]
+}
+
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
@@ -239,6 +265,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
+
+	var fromTxNums, toTxNums theap[uint64]
+	heap.Init(&fromTxNums)
+	heap.Init(&toTxNums)
 
 	var (
 		allBlocks roaring64.Bitmap
