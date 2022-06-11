@@ -453,29 +453,63 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			return err
 		}
 		for _, pt := range traceResult.Trace {
-			nSeen++
-			pt.BlockHash = &lastBlockHash
-			pt.BlockNumber = &blockNum
-			pt.TransactionHash = &txHash
-			pt.TransactionPosition = &txIndex
-			b, err := json.Marshal(pt)
-			if err != nil {
-				stream.WriteNil()
-				return err
-			}
-			if nSeen > after && nExported < count {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
+			if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
+				nSeen++
+				pt.BlockHash = &lastBlockHash
+				pt.BlockNumber = &blockNum
+				pt.TransactionHash = &txHash
+				pt.TransactionPosition = &txIndex
+				b, err := json.Marshal(pt)
+				if err != nil {
+					stream.WriteNil()
+					return err
 				}
-				stream.Write(b)
-				nExported++
+				if nSeen > after && nExported < count {
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					stream.Write(b)
+					nExported++
+				}
 			}
 		}
 	}
 	stream.WriteArrayEnd()
 	return stream.Flush()
+}
+
+func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
+	switch action := pt.Action.(type) {
+	case *CallTraceAction:
+		_, f := fromAddresses[action.From]
+		_, t := toAddresses[action.To]
+		if f || t {
+			return true
+		}
+	case *CreateTraceAction:
+		_, f := fromAddresses[action.From]
+		if f {
+			return true
+		}
+
+		if res, ok := pt.Result.(*CreateTraceResult); ok {
+			if res.Address != nil {
+				if _, t := toAddresses[*res.Address]; t {
+					return true
+				}
+			}
+		}
+	case *SuicideTraceAction:
+		_, f := fromAddresses[action.Address]
+		_, t := toAddresses[action.RefundAddress]
+		if f || t {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, traceTypes []string, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer, rules *params.Rules) ([]*TraceCallResult, error) {
