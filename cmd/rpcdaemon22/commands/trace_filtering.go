@@ -419,7 +419,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			}
 			continue
 		}
-		txIndex := txNum - api._txNums[blockNum] - 1
+		var startTxNum uint64
+		if blockNum > 0 {
+			startTxNum = api._txNums[blockNum-1]
+		}
+		txIndex := txNum - startTxNum - 1
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
 			stream.WriteNil()
