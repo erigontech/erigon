@@ -684,6 +684,22 @@ func (a *Aggregator) AddLogTopic(topic []byte) error {
 	return a.logTopics.Add(topic)
 }
 
+func (a *Aggregator) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+	return a.logAddrs.IterateRange(addr, startTxNum, endTxNum, roTx)
+}
+
+func (a *Aggregator) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+	return a.logTopics.IterateRange(topic, startTxNum, endTxNum, roTx)
+}
+
+func (a *Aggregator) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+	return a.tracesFrom.IterateRange(addr, startTxNum, endTxNum, roTx)
+}
+
+func (a *Aggregator) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+	return a.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
+}
+
 type FilesStats struct {
 }
 
