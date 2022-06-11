@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -310,6 +311,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	nSeen := uint64(0)
 	nExported := uint64(0)
+
+	f, _ := os.Create("txnums.txt")
+	for blockNum, txNum := range api._txNums {
+		fmt.Fprintf(f, "%d = %d\n", blockNum, txNum)
+	}
+	f.Close()
 
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 	fmt.Printf("allTxs = %d\n", allTxs.ToArray())
