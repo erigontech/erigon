@@ -12,10 +12,15 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
 // Transaction implements trace_transaction
@@ -305,95 +310,155 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	nSeen := uint64(0)
 	nExported := uint64(0)
 
+	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 	it := allTxs.Iterator()
+	var lastBlockNum uint64
+	var lastBlockHash common.Hash
+	var lastHeader *types.Header
+	var lastSigner *types.Signer
+	var lastRules *params.Rules
 	for it.HasNext() {
 		txNum := uint64(it.Next())
 		// Find block number
 		blockNum := uint64(sort.Search(len(api._txNums), func(i int) bool {
 			return txNum >= api._txNums[i]
 		}))
-		txIndex := int(txNum - api._txNums[blockNum] - 1)
-		_, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, txIndex)
+		if blockNum > lastBlockNum {
+			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, nil, blockNum); err != nil {
+				stream.WriteNil()
+				return err
+			}
+			lastBlockNum = blockNum
+			lastBlockHash = lastHeader.Hash()
+			lastSigner = types.MakeSigner(chainConfig, blockNum)
+			lastRules = chainConfig.Rules(blockNum)
+		}
+		if txNum+1 == api._txNums[blockNum+1] {
+			body, err := api._blockReader.Body(ctx, nil, lastBlockHash, blockNum)
+			if err != nil {
+				stream.WriteNil()
+				return err
+			}
+			// Block reward section, handle specially
+			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
+			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
+				nSeen++
+				var tr ParityTrace
+				var rewardAction = &RewardTraceAction{}
+				rewardAction.Author = lastHeader.Coinbase
+				rewardAction.RewardType = "block" // nolint: goconst
+				rewardAction.Value.ToInt().Set(minerReward.ToBig())
+				tr.Action = rewardAction
+				tr.BlockHash = &common.Hash{}
+				copy(tr.BlockHash[:], lastBlockHash.Bytes())
+				tr.BlockNumber = new(uint64)
+				*tr.BlockNumber = blockNum
+				tr.Type = "reward" // nolint: goconst
+				tr.TraceAddress = []int{}
+				b, err := json.Marshal(tr)
+				if err != nil {
+					stream.WriteNil()
+					return err
+				}
+				if nSeen > after && nExported < count {
+					if first {
+						first = false
+					} else {
+						stream.WriteMore()
+					}
+					stream.Write(b)
+					nExported++
+				}
+			}
+			for i, uncle := range body.Uncles {
+				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
+					if i < len(uncleRewards) {
+						nSeen++
+						var tr ParityTrace
+						rewardAction := &RewardTraceAction{}
+						rewardAction.Author = uncle.Coinbase
+						rewardAction.RewardType = "uncle" // nolint: goconst
+						rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
+						tr.Action = rewardAction
+						tr.BlockHash = &common.Hash{}
+						copy(tr.BlockHash[:], lastBlockHash[:])
+						tr.BlockNumber = new(uint64)
+						*tr.BlockNumber = blockNum
+						tr.Type = "reward" // nolint: goconst
+						tr.TraceAddress = []int{}
+						b, err := json.Marshal(tr)
+						if err != nil {
+							stream.WriteNil()
+							return err
+						}
+						if nSeen > after && nExported < count {
+							if first {
+								first = false
+							} else {
+								stream.WriteMore()
+							}
+							stream.Write(b)
+							nExported++
+						}
+					}
+				}
+			}
+			continue
+		}
+		txIndex := txNum - api._txNums[blockNum] - 1
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
 			stream.WriteNil()
 			return err
 		}
-
-		var txs []types.Transaction
-		var blockHash common.Hash
-		var blockNumber uint64
-		var t []*TraceCallResult
-		var block *types.Block
-		// Extract transactions from block
-		//hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
-		//if hashErr != nil {
-		//	stream.WriteNil()
-		//	return hashErr
-		//}
-
-		//block, bErr := api.blockWithSenders(dbtx, hash, b)
-		//if bErr != nil {
-		//	stream.WriteNil()
-		//	return bErr
-		//}
-		//if block == nil {
-		//	stream.WriteNil()
-		//	return fmt.Errorf("could not find block %x %d", hash, b)
-		//}
-
-		//blockHash := block.Hash()
-		//blockNumber := block.NumberU64()
-		//txs := block.Transactions()
-		//t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b))
-		//if tErr != nil {
-		//	stream.WriteNil()
-		//	return tErr
-		//}
-		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-		for i, trace := range t {
-			txPosition := uint64(i)
-			txHash := txs[i].Hash()
-			// Check if transaction concerns any of the addresses we wanted
-			for _, pt := range trace.Trace {
-				if includeAll || filter_trace(pt, fromAddresses, toAddresses) {
-					nSeen++
-					pt.BlockHash = &blockHash
-					pt.BlockNumber = &blockNumber
-					pt.TransactionHash = &txHash
-					pt.TransactionPosition = &txPosition
-					b, err := json.Marshal(pt)
-					if err != nil {
-						stream.WriteNil()
-						return err
-					}
-					if nSeen > after && nExported < count {
-						if first {
-							first = false
-						} else {
-							stream.WriteMore()
-						}
-						stream.Write(b)
-						nExported++
-					}
-				}
-			}
+		txHash := txn.Hash()
+		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
+		if err != nil {
+			stream.WriteNil()
+			return err
 		}
-		minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-		if _, ok := toAddresses[block.Coinbase()]; ok || includeAll {
+		blockCtx, txCtx := transactions.GetEvmContext(msg, lastHeader, true /* requireCanonical */, dbtx, nil, api._blockReader)
+		stateReader := state.NewHistoryReader22(api._agg)
+		stateCache := shards.NewStateCache(32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		cachedReader := state.NewCachedReader(stateReader, stateCache)
+		noop := state.NewNoopWriter()
+		cachedWriter := state.NewCachedWriter(noop, stateCache)
+		vmConfig := vm.Config{}
+		traceResult := &TraceCallResult{Trace: []*ParityTrace{}}
+		var ot OeTracer
+		ot.compat = api.compatibility
+		ot.r = traceResult
+		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
+		ot.traceAddr = []int{}
+		vmConfig.Debug = true
+		vmConfig.Tracer = &ot
+		ibs := state.New(cachedReader)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+
+		gp := new(core.GasPool).AddGas(msg.Gas())
+		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+		var execResult *core.ExecutionResult
+		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+		traceResult.Output = common.CopyBytes(execResult.ReturnData)
+		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
+			stream.WriteNil()
+			return err
+		}
+		if err = ibs.CommitBlock(evm.ChainRules(), cachedWriter); err != nil {
+			stream.WriteNil()
+			return err
+		}
+		for _, pt := range traceResult.Trace {
 			nSeen++
-			var tr ParityTrace
-			var rewardAction = &RewardTraceAction{}
-			rewardAction.Author = block.Coinbase()
-			rewardAction.RewardType = "block" // nolint: goconst
-			rewardAction.Value.ToInt().Set(minerReward.ToBig())
-			tr.Action = rewardAction
-			tr.BlockHash = &common.Hash{}
-			copy(tr.BlockHash[:], block.Hash().Bytes())
-			tr.BlockNumber = new(uint64)
-			*tr.BlockNumber = block.NumberU64()
-			tr.Type = "reward" // nolint: goconst
-			tr.TraceAddress = []int{}
-			b, err := json.Marshal(tr)
+			pt.BlockHash = &lastBlockHash
+			pt.BlockNumber = &blockNum
+			pt.TransactionHash = &txHash
+			pt.TransactionPosition = &txIndex
+			b, err := json.Marshal(pt)
 			if err != nil {
 				stream.WriteNil()
 				return err
@@ -406,39 +471,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				}
 				stream.Write(b)
 				nExported++
-			}
-		}
-		for i, uncle := range block.Uncles() {
-			if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
-				if i < len(uncleRewards) {
-					nSeen++
-					var tr ParityTrace
-					rewardAction := &RewardTraceAction{}
-					rewardAction.Author = uncle.Coinbase
-					rewardAction.RewardType = "uncle" // nolint: goconst
-					rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
-					tr.Action = rewardAction
-					tr.BlockHash = &common.Hash{}
-					copy(tr.BlockHash[:], block.Hash().Bytes())
-					tr.BlockNumber = new(uint64)
-					*tr.BlockNumber = block.NumberU64()
-					tr.Type = "reward" // nolint: goconst
-					tr.TraceAddress = []int{}
-					b, err := json.Marshal(tr)
-					if err != nil {
-						stream.WriteNil()
-						return err
-					}
-					if nSeen > after && nExported < count {
-						if first {
-							first = false
-						} else {
-							stream.WriteMore()
-						}
-						stream.Write(b)
-						nExported++
-					}
-				}
 			}
 		}
 	}

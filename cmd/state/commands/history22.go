@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
@@ -126,9 +125,9 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			txNum += uint64(len(b.Transactions())) + 2 // Pre and Post block transaction
 			continue
 		}
-		readWrapper := &HistoryWrapper22{r: h}
+		readWrapper := state.NewHistoryReader22(h)
 		if traceBlock != 0 {
-			readWrapper.trace = blockNum == uint64(traceBlock)
+			readWrapper.SetTrace(blockNum == uint64(traceBlock))
 		}
 		writeWrapper := state.NewNoopWriter()
 		txNum++ // Pre block transaction
@@ -153,7 +152,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runHistory22(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper22, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReader22, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
@@ -163,8 +162,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper22,
 	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	txNum := txNumStart
 	for i, tx := range block.Transactions() {
-		hw.r.SetTxNum(txNum)
-		hw.txNum = txNum
+		hw.SetTxNum(txNum)
 		ibs := state.New(hw)
 		if daoBlock {
 			misc.ApplyDAOHardFork(ibs)
@@ -180,107 +178,8 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper22,
 		}
 		receipts = append(receipts, receipt)
 		txNum++
-		hw.r.SetTxNum(txNum)
-		hw.txNum = txNum
+		hw.SetTxNum(txNum)
 	}
 
 	return txNum, receipts, nil
-}
-
-// Implements StateReader and StateWriter
-type HistoryWrapper22 struct {
-	r     *libstate.Aggregator
-	txNum uint64
-	trace bool
-}
-
-func (hw *HistoryWrapper22) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := hw.r.ReadAccountDataBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
-	if err != nil {
-		return nil, err
-	}
-	if len(enc) == 0 {
-		if hw.trace {
-			fmt.Printf("ReadAccountData [%x] => []\n", address)
-		}
-		return nil, nil
-	}
-	var a accounts.Account
-	a.Reset()
-	pos := 0
-	nonceBytes := int(enc[pos])
-	pos++
-	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-		pos += nonceBytes
-	}
-	balanceBytes := int(enc[pos])
-	pos++
-	if balanceBytes > 0 {
-		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	codeHashBytes := int(enc[pos])
-	pos++
-	if codeHashBytes > 0 {
-		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
-		pos += codeHashBytes
-	}
-	if pos >= len(enc) {
-		fmt.Printf("panic ReadAccountData(%x)=>[%x]\n", address, enc)
-	}
-	incBytes := int(enc[pos])
-	pos++
-	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
-	}
-	if hw.trace {
-		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
-	}
-	return &a, nil
-}
-
-func (hw *HistoryWrapper22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	enc, err := hw.r.ReadAccountStorageBeforeTxNum(address.Bytes(), key.Bytes(), hw.txNum, nil /* roTx */)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-		return nil, err
-	}
-	if hw.trace {
-		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
-		} else {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc)
-		}
-	}
-	if enc == nil {
-		return nil, nil
-	}
-	return enc, nil
-}
-
-func (hw *HistoryWrapper22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, err := hw.r.ReadAccountCodeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
-	if err != nil {
-		return nil, err
-	}
-	if hw.trace {
-		fmt.Printf("ReadAccountCode [%x] => [%x]\n", address, enc)
-	}
-	return enc, nil
-}
-
-func (hw *HistoryWrapper22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	size, err := hw.r.ReadAccountCodeSizeBeforeTxNum(address.Bytes(), hw.txNum, nil /* roTx */)
-	if err != nil {
-		return 0, err
-	}
-	if hw.trace {
-		fmt.Printf("ReadAccountCodeSize [%x] => [%d]\n", address, size)
-	}
-	return size, nil
-}
-
-func (hw *HistoryWrapper22) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	return 0, nil
 }
