@@ -270,6 +270,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			toAddresses[*addr] = struct{}{}
 		}
 	}
+	fmt.Printf("fromTxNum = %d, toTxNum = %d, %d\n", fromTxNum, toTxNum, txsTo.ToArray())
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
