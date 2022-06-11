@@ -43,3 +43,37 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 
 	return blockNum, nil
 }
+
+func getFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
+	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
+	if forkchoiceFinalizedHash != (common.Hash{}) {
+		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
+		if forkchoiceFinalizedNum != nil {
+			return *forkchoiceFinalizedNum, nil
+		}
+	}
+
+	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return 0, fmt.Errorf("getting latest finalized block number: %w", err)
+	}
+
+	// finalized block is the genesis block
+	if blockNum-128 <= 0 {
+		return 0, nil
+	}
+
+	return blockNum - 128, nil
+}
+
+func getSafeBlockNumber(tx kv.Tx) (uint64, error) {
+	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
+	if forkchoiceSafeHash != (common.Hash{}) {
+		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
+		if forkchoiceSafeNum != nil {
+			return *forkchoiceSafeNum, nil
+		}
+	}
+	// if we dont have a safe hash we return earliest
+	return 0, nil
+}
