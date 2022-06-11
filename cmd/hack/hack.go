@@ -55,7 +55,6 @@ var (
 	verbosity  = flag.Uint("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail (default 3)")
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
-	rewind     = flag.Int("rewind", 1, "rewind to given number of blocks")
 	block      = flag.Int("block", 1, "specifies a block number for operation")
 	blockTotal = flag.Int("blocktotal", 1, "specifies a total amount of blocks to process (will offset from head block if <= 0)")
 	account    = flag.String("account", "0x", "specifies account to investigate")
