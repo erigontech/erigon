@@ -418,11 +418,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 			if req != nil {
 				if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
-					// If request was actually sent to a peer, we update retry time to be 5 seconds in the future
-					cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
-					log.Trace("Sent request", "height", req.Number)
 					cs.Hd.UpdateStats(req, false /* skeleton */)
 				}
+				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
+				cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cs.Penalize(ctx, penalties)
