@@ -342,9 +342,6 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 				return 0, nil, err
 			}
 		}
-		if err = ct.AddToAggregator(ww.w); err != nil {
-			return 0, nil, fmt.Errorf("adding traces to aggregator: %w", err)
-		}
 		receipts = append(receipts, receipt)
 		for _, log := range receipt.Logs {
 			if err = ww.w.AddLogAddr(log.Address[:]); err != nil {
