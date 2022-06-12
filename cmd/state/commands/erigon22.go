@@ -314,7 +314,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
-	trace = block.NumberU64() == 1700059
+	trace = (block.NumberU64() == 1700059 || block.NumberU64() == 1700238)
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
@@ -357,7 +357,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		if trace {
-			fmt.Printf("FinishTx called for %d [%x]\n", txNum, tx.Hash())
+			fmt.Printf("FinishTx called for blockNum=%d, txIndex=%d, txNum=%d txHash=[%x]\n", block.NumberU64(), i, txNum, tx.Hash())
 		}
 		txNum++
 		ww.w.SetTxNum(txNum)
