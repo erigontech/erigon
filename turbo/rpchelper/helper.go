@@ -53,10 +53,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
-				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-				if err != nil {
-					return 0, common.Hash{}, false, fmt.Errorf("getting latest block number: %w", err)
-				}
+				blockNumber = latestBlockNumber
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
 			}
