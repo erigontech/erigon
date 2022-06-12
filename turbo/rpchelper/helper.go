@@ -41,11 +41,16 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 	hash, ok = blockNrOrHash.Hash()
 	if !ok {
 		number := *blockNrOrHash.BlockNumber
-		if number == rpc.LatestBlockNumber {
+		switch number {
+		case rpc.LatestBlockNumber:
 			blockNumber = latestBlockNumber
-		} else if number == rpc.EarliestBlockNumber {
+		case rpc.EarliestBlockNumber:
 			blockNumber = 0
-		} else if number == rpc.PendingBlockNumber {
+		case rpc.FinalizeBlockNumber:
+			blockNumber = getFinalizedBlockNumber(tx)
+		case rpc.SafeBlockNumber:
+			blockNumber = getSafeBlockNumber(tx)
+		case rpc.PendingBlockNumber:
 			pendingBlock := filters.LastPendingBlock()
 			if pendingBlock == nil {
 				blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
@@ -55,7 +60,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 			} else {
 				return pendingBlock.NumberU64(), pendingBlock.Hash(), false, nil
 			}
-		} else {
+		default:
 			blockNumber = uint64(number.Int64())
 		}
 		hash, err = rawdb.ReadCanonicalHash(tx, blockNumber)
@@ -78,6 +83,28 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 		}
 	}
 	return blockNumber, hash, blockNumber == latestBlockNumber, nil
+}
+
+func getFinalizedBlockNumber(db kv.Tx) uint64 {
+	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(db)
+	if forkchoiceFinalizedHash != (common.Hash{}) {
+		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(db, forkchoiceFinalizedHash)
+		if forkchoiceFinalizedNum != nil {
+			return *forkchoiceFinalizedNum
+		}
+	}
+	return 0
+}
+
+func getSafeBlockNumber(db kv.Tx) uint64 {
+	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(db)
+	if forkchoiceSafeHash != (common.Hash{}) {
+		forkchoiceSafeNum := rawdb.ReadHeaderNumber(db, forkchoiceSafeHash)
+		if forkchoiceSafeNum != nil {
+			return *forkchoiceSafeNum
+		}
+	}
+	return 0
 }
 
 func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts.Account, error) {
