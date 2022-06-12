@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon22/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -14,9 +15,9 @@ import (
 // APIList describes the list of available RPC apis
 func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	starknet starknet.CAIROVMClient, filters *rpchelper.Filters, stateCache kvcache.Cache,
-	blockReader services.FullBlockReader, cfg httpcfg.HttpCfg) (list []rpc.API) {
+	blockReader services.FullBlockReader, agg *libstate.Aggregator, txNums []uint64, cfg httpcfg.HttpCfg) (list []rpc.API) {
 
-	base := NewBaseApi(filters, stateCache, blockReader, cfg.WithDatadir)
+	base := NewBaseApi(filters, stateCache, blockReader, agg, txNums, cfg.WithDatadir)
 	if cfg.TevmEnabled {
 		base.EnableTevmExperiment()
 	}

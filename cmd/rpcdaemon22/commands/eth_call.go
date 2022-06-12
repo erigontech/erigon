@@ -63,7 +63,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi.CallArgs, blockNrOrHas
 		return nil, nil
 	}
 
-	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
+	result, err := transactions.DoCall(ctx, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi.CallArgs,
 		}
 
 		result, err := transactions.DoCall(ctx, args, dbtx, numOrHash, block, nil,
-			api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM)
+			api.GasCap, chainConfig, api.filters, api.stateCache, contractHasTEVM, api._blockReader)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit
@@ -400,7 +400,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi.CallArgs, 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, contractHasTEVM)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, bNrOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
 		gp := new(core.GasPool).AddGas(msg.Gas())

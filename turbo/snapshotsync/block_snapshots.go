@@ -109,6 +109,22 @@ func (sn *BodySegment) reopen(dir string) (err error) {
 	return nil
 }
 
+func (sn *BodySegment) Iterate(f func(blockNum, baseTxNum, txAmout uint64)) error {
+	var buf []byte
+	g := sn.seg.MakeGetter()
+	blockNum := sn.idxBodyNumber.BaseDataID()
+	var b types.BodyForStorage
+	for g.HasNext() {
+		buf, _ = g.Next(buf[:0])
+		if err := rlp.DecodeBytes(buf, &b); err != nil {
+			return err
+		}
+		f(blockNum, b.BaseTxId, uint64(b.TxAmount))
+		blockNum++
+	}
+	return nil
+}
+
 func (sn *TxnSegment) close() {
 	if sn.Seg != nil {
 		sn.Seg.Close()

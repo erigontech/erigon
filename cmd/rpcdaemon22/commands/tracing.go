@@ -235,7 +235,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	if api.TevmEnabled {
 		contractHasTEVM = ethdb.GetHasTEVM(dbtx)
 	}
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx, contractHasTEVM)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, dbtx, contractHasTEVM, api._blockReader)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream)
 }

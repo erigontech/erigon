@@ -314,6 +314,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
+	trace = block.NumberU64() == 1700059
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
@@ -328,8 +329,18 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
-		if err = ct.AddToAggregator(ww.w); err != nil {
-			return 0, nil, fmt.Errorf("adding traces to aggregator: %w", err)
+		for from := range ct.froms {
+			if err := ww.w.AddTraceFrom(from[:]); err != nil {
+				return 0, nil, err
+			}
+		}
+		for to := range ct.tos {
+			if trace {
+				fmt.Printf("TraceTo [%x]\n", to[:])
+			}
+			if err := ww.w.AddTraceTo(to[:]); err != nil {
+				return 0, nil, err
+			}
 		}
 		receipts = append(receipts, receipt)
 		for _, log := range receipt.Logs {
@@ -353,6 +364,14 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	}
 
 	ibs := state.New(rw)
+	if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
+		return 0, nil, fmt.Errorf("adding coinbase trace: %w", err)
+	}
+	for _, uncle := range block.Uncles() {
+		if err := ww.w.AddTraceTo(uncle.Coinbase.Bytes()); err != nil {
+			return 0, nil, fmt.Errorf("adding uncle trace: %w", err)
+		}
+	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {

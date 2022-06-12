@@ -940,7 +940,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if api.TevmEnabled {
 		contractHasTEVM = ethdb.GetHasTEVM(tx)
 	}
-	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM)
+	blockCtx, txCtx := transactions.GetEvmContext(msg, header, blockNrOrHash.RequireCanonical, tx, contractHasTEVM, api._blockReader)
 	blockCtx.GasLimit = math.MaxUint64
 	blockCtx.MaxGasLimit = true
 
@@ -1166,7 +1166,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, contractHasTEVM)
+		blockCtx, txCtx := transactions.GetEvmContext(msg, header, parentNrOrHash.RequireCanonical, dbtx, contractHasTEVM, api._blockReader)
 		if useParent {
 			blockCtx.GasLimit = math.MaxUint64
 			blockCtx.MaxGasLimit = true

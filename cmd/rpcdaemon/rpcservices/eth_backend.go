@@ -192,6 +192,9 @@ func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash 
 func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
 	return back.blockReader.CanonicalHash(ctx, tx, blockHeight)
 }
+func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
+	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
+}
 
 func (back *RemoteBackend) EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EnginePayloadStatus, err error) {
 	return back.remoteEthBackend.EngineNewPayloadV1(ctx, payload)

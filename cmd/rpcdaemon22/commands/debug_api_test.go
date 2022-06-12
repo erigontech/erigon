@@ -41,7 +41,7 @@ var debugTraceTransactionNoRefundTests = []struct {
 func TestTraceBlockByNumber(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false)
+	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false)
 	ethApi := NewEthAPI(baseApi, db, nil, nil, nil, 5000000)
 	api := NewPrivateDebugAPI(baseApi, db, 0)
 	for _, tt := range debugTraceTransactionTests {
@@ -88,7 +88,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 func TestTraceBlockByHash(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false)
+	baseApi := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false)
 	ethApi := NewEthAPI(baseApi, db, nil, nil, nil, 5000000)
 	api := NewPrivateDebugAPI(baseApi, db, 0)
 	for _, tt := range debugTraceTransactionTests {
@@ -123,7 +123,7 @@ func TestTraceTransaction(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false),
 		db, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -155,7 +155,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	db := rpcdaemontest.CreateTestKV(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), false),
+		NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, nil, false),
 		db, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
