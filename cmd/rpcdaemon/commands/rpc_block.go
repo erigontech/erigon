@@ -74,17 +74,7 @@ func getFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return 0, fmt.Errorf("getting latest finalized block number: %w", err)
-	}
-
-	// finalized block is the genesis block
-	if blockNum-128 <= 0 {
 	return 0, nil
-	}
-
-	return blockNum - 128, nil
 }
 
 func getSafeBlockNumber(tx kv.Tx) (uint64, error) {
