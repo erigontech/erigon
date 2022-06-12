@@ -267,8 +267,8 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 		}
 		valCompressed := fType != EfHistory
 		removeVals := fType == History && (endTxNum-startTxNum) == maxSpan
-		tmpPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.tmp", d.filenameBase, fType.String(), startTxNum, endTxNum))
-		datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), startTxNum, endTxNum))
+		tmpPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.tmp", d.filenameBase, fType.String(), startTxNum/d.aggregationStep, endTxNum/d.aggregationStep))
+		datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), startTxNum/d.aggregationStep, endTxNum/d.aggregationStep))
 		if removeVals {
 			if comp, err = compress.NewCompressor(context.Background(), "merge", tmpPath, d.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 				return outItems, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
@@ -375,7 +375,7 @@ func (d *Domain) mergeFiles(files [][NumberOfTypes]*filesItem, r DomainRanges, m
 		}
 		comp.Close()
 		comp = nil
-		idxPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.idx", d.filenameBase, fType.String(), startTxNum, endTxNum))
+		idxPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.idx", d.filenameBase, fType.String(), startTxNum/d.aggregationStep, endTxNum/d.aggregationStep))
 		outItem := &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 		outItems[fType] = outItem
 		if removeVals {
@@ -494,7 +494,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 			}
 		}
 	}()
-	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, startTxNum, endTxNum))
+	datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep))
 	if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, ii.dir, compress.MinPatternScore, 1, log.LvlDebug); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ii.filenameBase, err)
 	}
@@ -564,7 +564,7 @@ func (ii *InvertedIndex) mergeFiles(files []*filesItem, startTxNum, endTxNum uin
 	}
 	comp.Close()
 	comp = nil
-	idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, startTxNum, endTxNum))
+	idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep))
 	outItem = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 	if outItem.decompressor, err = compress.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", ii.filenameBase, startTxNum, endTxNum, err)
@@ -609,11 +609,11 @@ func (d *Domain) deleteFiles(outs [][NumberOfTypes]*filesItem) error {
 			if out[fType] == nil {
 				continue
 			}
-			datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), out[fType].startTxNum, out[fType].endTxNum))
+			datPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.dat", d.filenameBase, fType.String(), out[fType].startTxNum/d.aggregationStep, out[fType].endTxNum/d.aggregationStep))
 			if err := os.Remove(datPath); err != nil {
 				return err
 			}
-			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.idx", d.filenameBase, fType.String(), out[fType].startTxNum, out[fType].endTxNum))
+			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s-%s.%d-%d.idx", d.filenameBase, fType.String(), out[fType].startTxNum/d.aggregationStep, out[fType].endTxNum/d.aggregationStep))
 			if err := os.Remove(idxPath); err != nil {
 				return err
 			}
@@ -624,11 +624,11 @@ func (d *Domain) deleteFiles(outs [][NumberOfTypes]*filesItem) error {
 
 func (ii *InvertedIndex) deleteFiles(outs []*filesItem) error {
 	for _, out := range outs {
-		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, out.startTxNum, out.endTxNum))
+		datPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.dat", ii.filenameBase, out.startTxNum/ii.aggregationStep, out.endTxNum/ii.aggregationStep))
 		if err := os.Remove(datPath); err != nil {
 			return err
 		}
-		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, out.startTxNum, out.endTxNum))
+		idxPath := filepath.Join(ii.dir, fmt.Sprintf("%s.%d-%d.idx", ii.filenameBase, out.startTxNum/ii.aggregationStep, out.endTxNum/ii.aggregationStep))
 		if err := os.Remove(idxPath); err != nil {
 			return err
 		}

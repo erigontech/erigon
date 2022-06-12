@@ -21,6 +21,11 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: configure Pagefile
+        if: matrix.os == 'windows-2022'
+        uses: al-cheb/configure-pagefile-action@v1.2
+        with:
+          minimum-size: 8GB
       - uses: actions/checkout@v3
         with:
           submodules: recursive

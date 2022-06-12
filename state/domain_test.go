@@ -86,9 +86,9 @@ func TestCollationBuild(t *testing.T) {
 
 	c, err := d.collate(0, 0, 7, roTx)
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "base-values.0-16.dat"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "base-values.0-1.dat"))
 	require.Equal(t, 2, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "base-history.0-16.dat"))
+	require.True(t, strings.HasSuffix(c.historyPath, "base-history.0-1.dat"))
 	require.Equal(t, 3, c.historyCount)
 	require.Equal(t, 2, len(c.indexBitmaps))
 	require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())

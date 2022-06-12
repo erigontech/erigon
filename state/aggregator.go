@@ -19,6 +19,8 @@ package state
 import (
 	"fmt"
 
+	"sync"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -217,7 +219,6 @@ func (sf AggStaticFiles) Close() {
 
 func (a *Aggregator) buildFiles(step uint64, collation AggCollation) (AggStaticFiles, error) {
 	var sf AggStaticFiles
-	var err error
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -230,29 +231,70 @@ func (a *Aggregator) buildFiles(step uint64, collation AggCollation) (AggStaticF
 			sf.tracesTo.Close()
 		}
 	}()
-	if sf.accounts, err = a.accounts.buildFiles(step, collation.accounts); err != nil {
-		return AggStaticFiles{}, err
+	var wg sync.WaitGroup
+	wg.Add(7)
+	errCh := make(chan error, 7)
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.accounts, err = a.accounts.buildFiles(step, collation.accounts); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.storage, err = a.storage.buildFiles(step, collation.storage); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.code, err = a.code.buildFiles(step, collation.code); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.logAddrs, err = a.logAddrs.buildFiles(step, collation.logAddrs); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.logTopics, err = a.logTopics.buildFiles(step, collation.logTopics); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.tracesFrom, err = a.tracesFrom.buildFiles(step, collation.tracesFrom); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if sf.tracesTo, err = a.tracesTo.buildFiles(step, collation.tracesTo); err != nil {
+			errCh <- err
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+	var lastError error
+	for err := range errCh {
+		lastError = err
 	}
-	if sf.storage, err = a.storage.buildFiles(step, collation.storage); err != nil {
-		return AggStaticFiles{}, err
+	if lastError == nil {
+		closeFiles = false
 	}
-	if sf.code, err = a.code.buildFiles(step, collation.code); err != nil {
-		return AggStaticFiles{}, err
-	}
-	if sf.logAddrs, err = a.logAddrs.buildFiles(step, collation.logAddrs); err != nil {
-		return AggStaticFiles{}, err
-	}
-	if sf.logTopics, err = a.logTopics.buildFiles(step, collation.logTopics); err != nil {
-		return AggStaticFiles{}, err
-	}
-	if sf.tracesFrom, err = a.tracesFrom.buildFiles(step, collation.tracesFrom); err != nil {
-		return AggStaticFiles{}, err
-	}
-	if sf.tracesTo, err = a.tracesTo.buildFiles(step, collation.tracesTo); err != nil {
-		return AggStaticFiles{}, err
-	}
-	closeFiles = false
-	return sf, nil
+	return sf, lastError
 }
 
 func (a *Aggregator) integrateFiles(sf AggStaticFiles, txNumFrom, txNumTo uint64) {
@@ -459,44 +501,84 @@ func (a *Aggregator) mergeFiles(files SelectedStaticFiles, r Ranges, maxSpan uin
 			mf.Close()
 		}
 	}()
-	var err error
-	if r.accounts.any() {
-		if mf.accounts, err = a.accounts.mergeFiles(files.accounts, r.accounts, maxSpan); err != nil {
-			return MergedFiles{}, err
+	var wg sync.WaitGroup
+	wg.Add(7)
+	errCh := make(chan error, 7)
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.accounts.any() {
+			if mf.accounts, err = a.accounts.mergeFiles(files.accounts, r.accounts, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
-	}
-	if r.storage.any() {
-		if mf.storage, err = a.storage.mergeFiles(files.storage, r.storage, maxSpan); err != nil {
-			return MergedFiles{}, err
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.storage.any() {
+			if mf.storage, err = a.storage.mergeFiles(files.storage, r.storage, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
-	}
-	if r.code.any() {
-		if mf.code, err = a.code.mergeFiles(files.code, r.code, maxSpan); err != nil {
-			return MergedFiles{}, err
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.code.any() {
+			if mf.code, err = a.code.mergeFiles(files.code, r.code, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
-	}
-	if r.logAddrs {
-		if mf.logAddrs, err = a.logAddrs.mergeFiles(files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, maxSpan); err != nil {
-			return MergedFiles{}, err
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.logAddrs {
+			if mf.logAddrs, err = a.logAddrs.mergeFiles(files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
-	}
-	if r.logTopics {
-		if mf.logTopics, err = a.logTopics.mergeFiles(files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, maxSpan); err != nil {
-			return MergedFiles{}, err
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.logTopics {
+			if mf.logTopics, err = a.logTopics.mergeFiles(files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
-	}
-	if r.tracesFrom {
-		if mf.tracesFrom, err = a.tracesFrom.mergeFiles(files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, maxSpan); err != nil {
-			return MergedFiles{}, err
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.tracesFrom {
+			if mf.tracesFrom, err = a.tracesFrom.mergeFiles(files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
-	}
-	if r.tracesTo {
-		if mf.tracesTo, err = a.tracesTo.mergeFiles(files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, maxSpan); err != nil {
-			return MergedFiles{}, err
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		if r.tracesTo {
+			if mf.tracesTo, err = a.tracesTo.mergeFiles(files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, maxSpan); err != nil {
+				errCh <- err
+			}
 		}
+	}()
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+	var lastError error
+	for err := range errCh {
+		lastError = err
 	}
-	closeFiles = false
-	return mf, nil
+	if lastError == nil {
+		closeFiles = false
+	}
+	return mf, lastError
 }
 
 func (a *Aggregator) integrateMergedFiles(outs SelectedStaticFiles, in MergedFiles) {
