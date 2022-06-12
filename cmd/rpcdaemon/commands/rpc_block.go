@@ -81,7 +81,7 @@ func getFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 
 	// finalized block is the genesis block
 	if blockNum-128 <= 0 {
-		return 0, nil
+	return 0, nil
 	}
 
 	return blockNum - 128, nil
