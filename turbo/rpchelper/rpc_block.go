@@ -7,7 +7,13 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/rpc"
 )
+
+var UnknownBlockError = &rpc.CustomError{
+	Code:    -39001,
+	Message: "Unknown block",
+}
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
@@ -35,7 +41,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	return 0, nil
+	return 0, UnknownBlockError
 }
 
 func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
@@ -47,5 +53,5 @@ func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 	// if we dont have a safe hash we return earliest
-	return 0, nil
+	return 0, UnknownBlockError
 }
