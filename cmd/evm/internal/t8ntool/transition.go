@@ -72,9 +72,14 @@ func (n *NumberedError) Error() string {
 	return fmt.Sprintf("ERROR(%d): %v", n.errorCode, n.err.Error())
 }
 
-func (n *NumberedError) Code() int {
+func (n *NumberedError) ExitCode() int {
 	return n.errorCode
 }
+
+// compile-time conformance test
+var (
+	_ cli.ExitCoder = (*NumberedError)(nil)
+)
 
 type input struct {
 	Alloc core.GenesisAlloc `json:"alloc,omitempty"`
@@ -96,7 +101,6 @@ func Main(ctx *cli.Context) error {
 
 	var (
 		err     error
-		tracer  vm.Tracer
 		baseDir = ""
 	)
 	var getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error)
@@ -190,8 +194,8 @@ func Main(ctx *cli.Context) error {
 	prestate.Env = *inputData.Env
 
 	vmConfig := vm.Config{
-		Tracer: tracer,
-		Debug:  (tracer != nil),
+		Tracer: nil,
+		Debug:  true,
 	}
 	// Construct the chainconfig
 	var chainConfig *params.ChainConfig
@@ -253,10 +257,16 @@ func Main(ctx *cli.Context) error {
 	}
 
 	// manufacture block from above inputs
-	fmt.Println(getTracer) // temp statement to madatorily use getTracer
 	header := NewHeader(prestate.Env, chainConfig.IsLondon(prestate.Env.Number))
 
-	block := types.NewBlock(header, txs, nil, nil)
+	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
+	header.Number.Add(header.Number, big.NewInt(int64(len(prestate.Env.Ommers))))
+	for i, ommer := range prestate.Env.Ommers {
+		var ommerN big.Int
+		ommerN.SetUint64(header.Number.Uint64() - ommer.Delta)
+		ommerHeaders[i] = &types.Header{Coinbase: ommer.Address, Number: &ommerN}
+	}
+	block := types.NewBlock(header, txs, ommerHeaders, nil)
 
 	var hashError error
 	getHash := func(num uint64) common.Hash {
@@ -281,7 +291,7 @@ func Main(ctx *cli.Context) error {
 	reader, writer := MakePreState(chainConfig.Rules(0), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
-	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true)
+	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, nil, true, getTracer)
 
 	if hashError != nil {
 		return fmt.Errorf("hash error on EBE: %w", err)
@@ -305,28 +315,7 @@ func Main(ctx *cli.Context) error {
 	collector := make(Alloc)
 	dumper := state.NewDumper(tx, prestate.Env.Number)
 	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
-	//return dispatchOutput(ctx, baseDir, result, collector, body)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
-
-	// // earlier logic
-
-	// // Run the test and aggregate the result
-	// db, result, err1 := prestate.Apply(vmConfig, chainConfig, txs, ctx.Int64(RewardFlag.Name), getTracer)
-	// if err1 != nil {
-	// 	return err1
-	// }
-	// body, _ := rlp.EncodeToBytes(txs)
-	// // Dump the excution result
-	// collector := make(Alloc)
-	// tx, err := db.BeginRw(context.Background())
-	// if err != nil {
-	// 	return err
-	// }
-
-	// defer tx.Commit() // mostly empty
-	// dumper := state.NewDumper(tx, prestate.Env.Number)
-	// dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
-	// return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
 // txWithKey is a helper-struct, to allow us to use the types.Transaction along with
@@ -353,8 +342,7 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 			return err
 		}
 	}
-	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
-	var overflow bool
+
 	// Now, read the transaction itself
 	var txJson commands.RPCTransaction
 
@@ -362,26 +350,100 @@ func (t *txWithKey) UnmarshalJSON(input []byte) error {
 		return err
 	}
 
+	// assemble transaction
+	tx, err := getTransaction(txJson)
+	if err != nil {
+		return err
+	}
+	t.tx = tx
+	return nil
+}
+
+func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
+	gasPrice, value := uint256.NewInt(0), uint256.NewInt(0)
+	var overflow bool
+	var chainId *uint256.Int
+
 	if txJson.Value != nil {
 		value, overflow = uint256.FromBig((*big.Int)(txJson.Value))
 		if overflow {
-			return fmt.Errorf("value field caused an overflow (uint256)")
+			return nil, fmt.Errorf("value field caused an overflow (uint256)")
 		}
 	}
 
 	if txJson.GasPrice != nil {
 		gasPrice, overflow = uint256.FromBig((*big.Int)(txJson.GasPrice))
 		if overflow {
-			return fmt.Errorf("gasPrice field caused an overflow (uint256)")
+			return nil, fmt.Errorf("gasPrice field caused an overflow (uint256)")
 		}
 	}
-	// assemble transaction
-	legacyTx := types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
-	legacyTx.V.SetFromBig(txJson.V.ToInt())
-	legacyTx.S.SetFromBig(txJson.S.ToInt())
-	legacyTx.R.SetFromBig(txJson.R.ToInt())
-	t.tx = legacyTx
-	return nil
+
+	if txJson.ChainID != nil {
+		chainId, overflow = uint256.FromBig((*big.Int)(txJson.ChainID))
+		if overflow {
+			return nil, fmt.Errorf("chainId field caused an overflow (uint256)")
+		}
+	}
+
+	switch txJson.Type {
+	case types.LegacyTxType, types.AccessListTxType:
+		legacyTx := types.NewTransaction(uint64(txJson.Nonce), *txJson.To, value, uint64(txJson.Gas), gasPrice, txJson.Input)
+		legacyTx.V.SetFromBig(txJson.V.ToInt())
+		legacyTx.S.SetFromBig(txJson.S.ToInt())
+		legacyTx.R.SetFromBig(txJson.R.ToInt())
+
+		if txJson.Type == types.AccessListTxType {
+			accessListTx := types.AccessListTx{
+				LegacyTx:   *legacyTx,
+				ChainID:    chainId,
+				AccessList: *txJson.Accesses,
+			}
+
+			return &accessListTx, nil
+		} else {
+			return legacyTx, nil
+		}
+
+	case types.DynamicFeeTxType:
+		var tip *uint256.Int
+		var feeCap *uint256.Int
+		if txJson.Tip != nil {
+			tip, overflow = uint256.FromBig((*big.Int)(txJson.Tip))
+			if overflow {
+				return nil, fmt.Errorf("maxPriorityFeePerGas field caused an overflow (uint256)")
+			}
+		}
+
+		if txJson.FeeCap != nil {
+			feeCap, overflow = uint256.FromBig((*big.Int)(txJson.FeeCap))
+			if overflow {
+				return nil, fmt.Errorf("maxFeePerGas field caused an overflow (uint256)")
+			}
+		}
+
+		dynamicFeeTx := types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				ChainID: chainId,
+				Nonce:   uint64(txJson.Nonce),
+				To:      txJson.To,
+				Value:   value,
+				Gas:     uint64(txJson.Gas),
+				Data:    txJson.Input,
+			},
+			Tip:        tip,
+			FeeCap:     feeCap,
+			AccessList: *txJson.Accesses,
+		}
+
+		dynamicFeeTx.V.SetFromBig(txJson.V.ToInt())
+		dynamicFeeTx.S.SetFromBig(txJson.S.ToInt())
+		dynamicFeeTx.R.SetFromBig(txJson.R.ToInt())
+
+		return &dynamicFeeTx, nil
+
+	default:
+		return nil, nil
+	}
 }
 
 // signUnsignedTransactions converts the input txs to canonical transactions.

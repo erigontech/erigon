@@ -103,7 +103,7 @@ var (
 			"\n\tSyntax <forkname>(+ExtraEip)",
 			strings.Join(tests.AvailableForks(), "\n\t    "),
 			strings.Join(vm.ActivateableEips(), ", ")),
-		Value: "Istanbul",
+		Value: "ArrowGlacier",
 	}
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",

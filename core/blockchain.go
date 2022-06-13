@@ -68,11 +68,11 @@ type RejectedTxs []*RejectedTx
 type EphemeralExecResult struct {
 	StateRoot         common.Hash              `json:"stateRoot"`
 	TxRoot            common.Hash              `json:"txRoot"`
-	ReceiptRoot       common.Hash              `json:"receiptRoot"`
+	ReceiptRoot       common.Hash              `json:"receiptsRoot"`
 	LogsHash          common.Hash              `json:"logsHash"`
 	Bloom             types.Bloom              `json:"logsBloom"        gencodec:"required"`
 	Receipts          types.Receipts           `json:"receipts"`
-	Rejected          RejectedTxs              `json:"rejected"`
+	Rejected          RejectedTxs              `json:"rejected,omitempty"`
 	Difficulty        *math.HexOrDecimal256    `json:"currentDifficulty" gencodec:"required"`
 	GasUsed           math.HexOrDecimal64      `json:"gasUsed"`
 	ReceiptForStorage *types.ReceiptForStorage `json:"-"`
@@ -172,7 +172,7 @@ func ExecuteBlockEphemerallyForBSC(
 				panic(err1)
 			}
 			encoder := json.NewEncoder(w)
-			logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
+			logs := vm.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
 			if err2 := encoder.Encode(logs); err2 != nil {
 				panic(err2)
 			}
@@ -255,13 +255,14 @@ func ExecuteBlockEphemerally(
 	chainReader consensus.ChainHeaderReader,
 	contractHasTEVM func(codeHash common.Hash) (bool, error),
 	statelessExec bool, // for usage of this API via cli tools wherein some of the validations need to be relaxed.
+	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
 ) (*EphemeralExecResult, error) {
 
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-	var receipts types.Receipts
+	var receipts = make(types.Receipts, 0)
 	usedGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
@@ -286,28 +287,26 @@ func ExecuteBlockEphemerally(
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
-			vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+			tracer, err := getTracer(i, tx.Hash())
+			if err != nil {
+				panic(err)
+			}
+			vmConfig.Tracer = tracer
 			writeTrace = true
 		}
 
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, contractHasTEVM)
 		if writeTrace {
-			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", tx.Hash()))
-			if err1 != nil {
-				panic(err1)
+			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
+				ftracer.Flush(tx)
 			}
-			encoder := json.NewEncoder(w)
-			logs := FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs())
-			if err2 := encoder.Encode(logs); err2 != nil {
-				panic(err2)
-			}
-			if err2 := w.Close(); err2 != nil {
-				panic(err2)
-			}
+
 			vmConfig.Tracer = nil
 		}
-		if err != nil {
+		if err != nil && statelessExec {
 			rejectedTxs = append(rejectedTxs, &RejectedTx{i, err.Error()})
+		} else if err != nil && !statelessExec {
+			return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
 		} else {
 			includedTxs = append(includedTxs, tx)
 			if !vmConfig.NoReceipts {
@@ -317,13 +316,9 @@ func ExecuteBlockEphemerally(
 	}
 
 	var bloom types.Bloom
-	var receiptSha common.Hash
-
-	if chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts {
-		receiptSha = types.DeriveSha(receipts)
-		if !statelessExec && receiptSha != block.ReceiptHash() {
-			return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
-		}
+	receiptSha := types.DeriveSha(receipts)
+	if !statelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+		return nil, fmt.Errorf("mismatched receipt headers for block %d", block.NumberU64())
 	}
 
 	if !statelessExec && *usedGas != header.GasUsed {
