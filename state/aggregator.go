@@ -662,6 +662,10 @@ func (a *Aggregator) ReadAccountCodeSizeBeforeTxNum(addr []byte, txNum uint64, r
 	return len(code), nil
 }
 
+func (a *Aggregator) ReadyToFinishTx() bool {
+	return (a.txNum+1)%a.aggregationStep == 0
+}
+
 func (a *Aggregator) FinishTx() error {
 	if (a.txNum+1)%a.aggregationStep != 0 {
 		return nil

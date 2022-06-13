@@ -562,9 +562,13 @@ var ChaindataTablesCfg = TableCfg{
 	CodeKeys:           {Flags: DupSort},
 	CodeHistoryKeys:    {Flags: DupSort},
 	CodeIdx:            {Flags: DupSort},
+	LogAddressKeys:     {Flags: DupSort},
 	LogAddressIdx:      {Flags: DupSort},
+	LogTopicsKeys:      {Flags: DupSort},
 	LogTopicsIdx:       {Flags: DupSort},
+	TracesFromKeys:     {Flags: DupSort},
 	TracesFromIdx:      {Flags: DupSort},
+	TracesToKeys:       {Flags: DupSort},
 	TracesToIdx:        {Flags: DupSort},
 }
 
