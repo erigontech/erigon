@@ -212,17 +212,27 @@ func StageLoopStep(
 	return headBlockHash, nil
 }
 
-func MiningStep(tx kv.Tx, mining *stagedsync.Sync) (err error) {
+func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	tx, err := kv.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	miningBatch := olddb.NewMiningBatch(tx)
 	defer miningBatch.Rollback()
 
-	return mining.Run(nil, miningBatch, false)
+	if err = mining.Run(nil, miningBatch, false); err != nil {
+		return err
+	}
+	tx.Rollback()
+	return nil
 }
 
 func NewStagedSync(

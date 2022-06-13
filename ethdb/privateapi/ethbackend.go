@@ -492,14 +492,13 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	headHash := rawdb.ReadHeadBlockHash(tx2)
 	headNumber := rawdb.ReadHeaderNumber(tx2, headHash)
 	headHeader := rawdb.ReadHeader(tx2, headHash, *headNumber)
+	tx2.Rollback()
 
 	if headHeader.Hash() != forkChoice.HeadBlockHash {
-		tx2.Rollback()
 		return nil, fmt.Errorf("unexpected head hash: %x vs %x", headHeader.Hash(), forkChoice.HeadBlockHash)
 	}
 
 	if headHeader.Time >= req.PayloadAttributes.Timestamp {
-		tx2.Rollback()
 		return nil, &InvalidPayloadAttributesErr
 	}
 
@@ -514,7 +513,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		SuggestedFeeRecipient: emptyHeader.Coinbase,
 	}
 
-	s.builders[s.payloadId] = builder.NewBlockBuilder(tx2, s.builderFunc, &param, emptyHeader)
+	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param, emptyHeader)
 
 	return &remote.EngineForkChoiceUpdatedReply{
 		PayloadStatus: &remote.EnginePayloadStatus{

@@ -377,7 +377,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// proof-of-stake mining
-	assembleBlockPOS := func(tx kv.Tx, param *core.BlockBuilderParameters, interrupt *int32) (*types.Block, error) {
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.Block, error) {
 		miningStatePos := stagedsync.NewProposingState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
@@ -389,7 +389,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
 		// We start the mining step
-		if err := stages2.MiningStep(tx, proposingSync); err != nil {
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultPOSCh
@@ -724,15 +724,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 			if !works && hasWork {
 				works = true
-				go func() {
-					tx, err := db.BeginRo(ctx)
-					if err != nil {
-						errc <- err
-						return
-					}
-					errc <- stages2.MiningStep(tx, mining)
-					tx.Rollback()
-				}()
+				go func() { errc <- stages2.MiningStep(ctx, db, mining) }()
 			}
 		}
 	}()
