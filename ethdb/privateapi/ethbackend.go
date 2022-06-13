@@ -510,7 +510,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		PrevRandao:            gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao),
 	}
 
-	s.builders[s.payloadId] = builder.NewBlockBuilder(ctx, tx2, s.builderFunc, &param)
+	s.builders[s.payloadId] = builder.NewBlockBuilder(tx2, s.builderFunc, &param)
 
 	return &remote.EngineForkChoiceUpdatedReply{
 		PayloadStatus: &remote.EnginePayloadStatus{
