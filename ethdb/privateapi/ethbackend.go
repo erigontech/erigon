@@ -21,14 +21,13 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
-
-type assemblePayloadPOSFunc func(param *core.BlockProposerParametersPOS) (*types.Block, error)
 
 // EthBackendAPIVersion
 // 2.0.0 - move all mining-related methods to 'txpool/mining' server
@@ -38,7 +37,7 @@ type assemblePayloadPOSFunc func(param *core.BlockProposerParametersPOS) (*types
 // 3.1.0 - add Subscribe to logs
 var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 1, Patch: 0}
 
-const MaxPendingPayloads = 128
+const MaxBuilders = 128
 
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
@@ -54,17 +53,16 @@ type EthBackendServer struct {
 	blockReader services.BlockAndTxnReader
 	config      *params.ChainConfig
 	// Block proposing for proof-of-stake
-	payloadId       uint64
-	pendingPayloads map[uint64]*pendingPayload
+	payloadId uint64
+	builders  map[uint64]*builder.BlockBuilder
 	// Send Beacon Chain requests to staged sync
 	requestList *engineapi.RequestList
 	// Replies to newPayload & forkchoice requests
-	statusCh           <-chan PayloadStatus
-	assemblePayloadPOS assemblePayloadPOSFunc
-	proposing          bool
-	syncCond           *sync.Cond // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	shutdown           bool
-	logsFilter         *LogsFilterAggregator
+	statusCh    <-chan PayloadStatus
+	builderFunc builder.BlockBuilderFunc
+	proposing   bool
+	lock        sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	logsFilter  *LogsFilterAggregator
 }
 
 type EthBackend interface {
@@ -85,19 +83,13 @@ type PayloadStatus struct {
 	CriticalError   error
 }
 
-type pendingPayload struct {
-	block *types.Block
-	built bool
-}
-
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *Events, blockReader services.BlockAndTxnReader,
 	config *params.ChainConfig, requestList *engineapi.RequestList, statusCh <-chan PayloadStatus,
-	assemblePayloadPOS assemblePayloadPOSFunc, proposing bool,
+	builderFunc builder.BlockBuilderFunc, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
-		requestList: requestList, statusCh: statusCh, pendingPayloads: make(map[uint64]*pendingPayload),
-		assemblePayloadPOS: assemblePayloadPOS, proposing: proposing, syncCond: sync.NewCond(&sync.Mutex{}),
-		logsFilter: NewLogsFilterAggregator(events),
+		requestList: requestList, statusCh: statusCh, builders: make(map[uint64]*builder.BlockBuilder),
+		builderFunc: builderFunc, proposing: proposing, logsFilter: NewLogsFilterAggregator(events),
 	}
 
 	ch, clean := s.events.AddLogsSubscription()
@@ -283,8 +275,8 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 // EngineNewPayloadV1 validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	log.Trace("[NewPayload] acquiring lock")
-	s.syncCond.L.Lock()
-	defer s.syncCond.L.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	log.Trace("[NewPayload] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
@@ -380,23 +372,18 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 		return nil, fmt.Errorf("not a proof-of-stake chain")
 	}
 
-	// TODO(yperbasis): getPayload should stop block assembly if that's currently in fly
 	log.Trace("[GetPayload] acquiring lock")
-	s.syncCond.L.Lock()
-	defer s.syncCond.L.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	log.Trace("[GetPayload] lock acquired")
 
-	payload, ok := s.pendingPayloads[req.PayloadId]
+	builder, ok := s.builders[req.PayloadId]
 	if !ok {
 		log.Warn("Payload not stored", "payloadId", req.PayloadId)
 		return nil, &UnknownPayloadErr
 	}
 
-	// getPayload should stop the build process
-	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.7/src/engine/specification.md#payload-building
-	payload.built = true
-
-	block := payload.block
+	block := builder.Stop()
 
 	var baseFeeReply *types2.H256
 	if block.Header().BaseFee != nil {
@@ -432,8 +419,8 @@ func (s *EthBackendServer) EngineGetPayloadV1(ctx context.Context, req *remote.E
 // EngineForkChoiceUpdatedV1 either states new block head or request the assembling of a new block
 func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	log.Trace("[ForkChoiceUpdated] acquiring lock")
-	s.syncCond.L.Lock()
-	defer s.syncCond.L.Unlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	log.Trace("[ForkChoiceUpdated] lock acquired")
 
 	if s.config.TerminalTotalDifficulty == nil {
@@ -462,9 +449,9 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}
 
 	// TODO(yperbasis): Client software MAY skip an update of the forkchoice state and
-	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree
-	// (i.e. it references an old block).
-	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.6/src/engine/specification.md#specification-1
+	// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
+	// That is, the block referenced by forkchoiceState.headBlockHash is neither the head of the canonical chain nor a block at the tip of any other chain.
+	// https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1
 	tx1.Rollback()
 
 	if s.stageLoopIsBusy() {
@@ -493,7 +480,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	s.evictOldPendingPayloads()
+	s.evictOldBuilders()
 
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
@@ -519,12 +506,15 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	emptyHeader.Coinbase = gointerfaces.ConvertH160toAddress(req.PayloadAttributes.SuggestedFeeRecipient)
 	emptyHeader.MixDigest = gointerfaces.ConvertH256ToHash(req.PayloadAttributes.PrevRandao)
 
-	s.pendingPayloads[s.payloadId] = &pendingPayload{block: types.NewBlock(emptyHeader, nil, nil, nil)}
+	param := core.BlockBuilderParameters{
+		ParentHash:            forkChoice.HeadBlockHash,
+		Timestamp:             req.PayloadAttributes.Timestamp,
+		PrevRandao:            emptyHeader.MixDigest,
+		SuggestedFeeRecipient: emptyHeader.Coinbase,
+	}
 
-	log.Trace("[ForkChoiceUpdated] unpause assemble process")
-	s.syncCond.Broadcast()
+	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param, emptyHeader)
 
-	// successfully assembled the payload and assigned the correct id
 	return &remote.EngineForkChoiceUpdatedReply{
 		PayloadStatus: &remote.EnginePayloadStatus{
 			Status:          remote.EngineStatus_VALID,
@@ -534,90 +524,18 @@ func (s *EthBackendServer) EngineForkChoiceUpdatedV1(ctx context.Context, req *r
 	}, nil
 }
 
-func (s *EthBackendServer) evictOldPendingPayloads() {
+func (s *EthBackendServer) evictOldBuilders() {
 	// sort payload IDs in ascending order
-	ids := make([]uint64, 0, len(s.pendingPayloads))
-	for id := range s.pendingPayloads {
+	ids := make([]uint64, 0, len(s.builders))
+	for id := range s.builders {
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 
-	// remove old payloads so that at most MaxPendingPayloads - 1 remain
-	for i := 0; i <= len(s.pendingPayloads)-MaxPendingPayloads; i++ {
-		delete(s.pendingPayloads, ids[i])
+	// remove old builders so that at most MaxBuilders - 1 remain
+	for i := 0; i <= len(s.builders)-MaxBuilders; i++ {
+		delete(s.builders, ids[i])
 	}
-}
-
-func (s *EthBackendServer) StartProposer() {
-	go func() {
-		log.Trace("[Proposer] acquiring lock")
-		s.syncCond.L.Lock()
-		defer s.syncCond.L.Unlock()
-		log.Trace("[Proposer] lock acquired")
-
-		for {
-			var blockToBuild *types.Block
-			var payloadId uint64
-
-		FindPayloadToBuild:
-			for {
-				if s.shutdown {
-					return
-				}
-
-				tx, err := s.db.BeginRo(s.ctx)
-				if err != nil {
-					log.Error("Error while opening txn in block proposer", "err", err.Error())
-					return
-				}
-				headHash := rawdb.ReadHeadBlockHash(tx)
-				tx.Rollback()
-
-				for id, payload := range s.pendingPayloads {
-					if !payload.built && payload.block.ParentHash() == headHash {
-						blockToBuild = payload.block
-						payloadId = id
-						break FindPayloadToBuild
-					}
-				}
-
-				log.Trace("[Proposer] Wait until we have to process new payloads")
-				s.syncCond.Wait()
-				log.Trace("[Proposer] Wait finished")
-			}
-
-			param := core.BlockProposerParametersPOS{
-				ParentHash:            blockToBuild.ParentHash(),
-				Timestamp:             blockToBuild.Header().Time,
-				PrevRandao:            blockToBuild.MixDigest(),
-				SuggestedFeeRecipient: blockToBuild.Header().Coinbase,
-			}
-
-			log.Trace("[Proposer] starting assembling...")
-			block, err := s.assemblePayloadPOS(&param)
-			log.Trace("[Proposer] payload assembled")
-
-			if err != nil {
-				log.Warn("Error during block assembling", "err", err.Error())
-			} else {
-				payload, ok := s.pendingPayloads[payloadId]
-				if ok && !payload.built { // don't update after engine_getPayload was called
-					payload.block = block
-					payload.built = true
-				}
-			}
-		}
-	}()
-}
-
-func (s *EthBackendServer) StopProposer() {
-	log.Trace("[StopProposer] acquiring lock")
-	s.syncCond.L.Lock()
-	defer s.syncCond.L.Unlock()
-	log.Trace("[StopProposer] lock acquired")
-
-	s.shutdown = true
-	s.syncCond.Broadcast()
 }
 
 func (s *EthBackendServer) NodeInfo(_ context.Context, r *remote.NodesInfoRequest) (*remote.NodesInfoReply, error) {

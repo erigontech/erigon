@@ -65,26 +65,26 @@ func NewProposingState(cfg *params.MiningConfig) MiningState {
 }
 
 type MiningCreateBlockCfg struct {
-	db                      kv.RwDB
-	miner                   MiningState
-	chainConfig             params.ChainConfig
-	engine                  consensus.Engine
-	txPool2                 *txpool.TxPool
-	txPool2DB               kv.RoDB
-	tmpdir                  string
-	blockProposerParameters *core.BlockProposerParametersPOS
+	db                     kv.RwDB
+	miner                  MiningState
+	chainConfig            params.ChainConfig
+	engine                 consensus.Engine
+	txPool2                *txpool.TxPool
+	txPool2DB              kv.RoDB
+	tmpdir                 string
+	blockBuilderParameters *core.BlockBuilderParameters
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockProposerParameters *core.BlockProposerParametersPOS, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
-		db:                      db,
-		miner:                   miner,
-		chainConfig:             chainConfig,
-		engine:                  engine,
-		txPool2:                 txPool2,
-		txPool2DB:               txPool2DB,
-		tmpdir:                  tmpdir,
-		blockProposerParameters: blockProposerParameters,
+		db:                     db,
+		miner:                  miner,
+		chainConfig:            chainConfig,
+		engine:                 engine,
+		txPool2:                txPool2,
+		txPool2DB:              txPool2DB,
+		tmpdir:                 tmpdir,
+		blockBuilderParameters: blockBuilderParameters,
 	}
 }
 
@@ -111,8 +111,8 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return fmt.Errorf("empty block %d", executionAt)
 	}
 
-	if cfg.blockProposerParameters != nil && cfg.blockProposerParameters.ParentHash != parent.Hash() {
-		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockProposerParameters.ParentHash)
+	if cfg.blockBuilderParameters != nil && cfg.blockBuilderParameters.ParentHash != parent.Hash() {
+		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 	}
 
 	isTrans, err := rawdb.Transitioned(tx, executionAt, cfg.chainConfig.TerminalTotalDifficulty)
@@ -125,7 +125,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 			return fmt.Errorf("refusing to mine without etherbase")
 		}
 		// If we do not have an etherbase, let's use the suggested one
-		coinbase = cfg.blockProposerParameters.SuggestedFeeRecipient
+		coinbase = cfg.blockBuilderParameters.SuggestedFeeRecipient
 	}
 
 	blockNum := executionAt + 1
@@ -206,7 +206,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		}
 	} else {
 		// If we are on proof-of-stake timestamp should be already set for us
-		timestamp = cfg.blockProposerParameters.Timestamp
+		timestamp = cfg.blockBuilderParameters.Timestamp
 	}
 
 	header := core.MakeEmptyHeader(parent, &cfg.chainConfig, timestamp, &cfg.miner.MiningConfig.GasLimit)
@@ -231,7 +231,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	if isTrans {
-		header.MixDigest = cfg.blockProposerParameters.PrevRandao
+		header.MixDigest = cfg.blockBuilderParameters.PrevRandao
 
 		current.Header = header
 		current.Uncles = nil

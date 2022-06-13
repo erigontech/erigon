@@ -5,10 +5,9 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	//grpc_prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -43,7 +42,6 @@ func StartGrpc(kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txP
 		if healthCheck {
 			defer healthServer.Shutdown()
 		}
-		defer ethBackendSrv.StopProposer()
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
