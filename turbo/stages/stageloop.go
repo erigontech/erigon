@@ -235,6 +235,29 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	return nil
 }
 
+func StateStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, block *types.Block) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
+		}
+	}() // avoid crash because Erigon's core does many things
+
+	tx, err := kv.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	memoryBatch := olddb.NewMiningBatch(tx)
+	defer miningBatch.Rollback()
+
+	if err = mining.Run(nil, miningBatch, false); err != nil {
+		return err
+	}
+	tx.Rollback()
+	return nil
+}
+
 func NewStagedSync(
 	ctx context.Context,
 	logger log.Logger,
@@ -300,6 +323,50 @@ func NewStagedSync(
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, tmpdir),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, tmpdir, snapshots, isBor),
 			stagedsync.StageFinishCfg(db, tmpdir, logger, headCh), runInTestMode),
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
+	), nil
+}
+
+func NewInMemoryExecution(
+	ctx context.Context,
+	logger log.Logger,
+	db kv.RwDB,
+	p2pCfg p2p.Config,
+	cfg ethconfig.Config,
+	controlServer *sentry.MultiClient,
+	tmpdir string,
+	notifications *stagedsync.Notifications,
+	snapshotDownloader proto_downloader.DownloaderClient,
+	snapshots *snapshotsync.RoSnapshots,
+	headCh chan *types.Block,
+) (*stagedsync.Sync, error) {
+	var blockReader services.FullBlockReader
+	if cfg.Snapshot.Enabled {
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
+	} else {
+		blockReader = snapshotsync.NewBlockReader()
+	}
+	blockRetire := snapshotsync.NewBlockRetire(1, tmpdir, snapshots, db, snapshotDownloader, notifications.Events)
+
+	return stagedsync.New(
+		stagedsync.StateStages(ctx,
+			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, tmpdir, cfg.Prune, blockRetire),
+			stagedsync.StageExecuteBlocksCfg(
+				db,
+				cfg.Prune,
+				cfg.BatchSize,
+				nil,
+				controlServer.ChainConfig,
+				controlServer.Engine,
+				&vm.Config{EnableTEMV: cfg.Prune.Experiments.TEVM},
+				notifications.Accumulator,
+				cfg.StateStream,
+				tmpdir,
+				blockReader,
+			),
+			stagedsync.StageHashStateCfg(db, tmpdir),
+			stagedsync.StageTrieCfg(db, true, true, tmpdir, blockReader)),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	), nil
