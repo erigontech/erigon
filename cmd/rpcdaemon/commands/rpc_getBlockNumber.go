@@ -8,34 +8,22 @@ import (
 
 func getBlockNumber(number rpc.BlockNumber, tx kv.Tx) (uint64, error) {
 	var blockNum uint64
-	var err error
 	switch number {
 
 	case rpc.LatestBlockNumber:
-		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
-			return 0, err
-		}
+		return rpchelper.GetLatestBlockNumber(tx)
+
 	case rpc.PendingBlockNumber:
-		blockNum, err = rpchelper.GetLatestBlockNumber(tx)
-		if err != nil {
-			return 0, err
-		}
+		return rpchelper.GetLatestBlockNumber(tx)
 
 	case rpc.EarliestBlockNumber:
 		blockNum = 0
 
 	case rpc.FinalizeBlockNumber:
-		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
-		if err != nil {
-			return 0, err
-		}
+		return rpchelper.GetFinalizedBlockNumber(tx)
 
 	case rpc.SafeBlockNumber:
-		blockNum, err = rpchelper.GetSafeBlockNumber(tx)
-		if err != nil {
-			return 0, err
-		}
+		return rpchelper.GetSafeBlockNumber(tx)
 
 	default:
 		blockNum = uint64(number.Int64())
