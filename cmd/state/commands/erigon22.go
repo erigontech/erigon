@@ -213,19 +213,10 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 		txNum++ // Pre-block transaction
 		agg.SetTxNum(txNum)
 
-		if txNum, _, rwTx, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig, rwTx, db, ctx); err != nil {
+		if txNum, _, err = processBlock22(trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
 		agg.SetTxNum(txNum)
-		if agg.ReadyToFinishTx() {
-			if err = rwTx.Commit(); err != nil {
-				return err
-			}
-			if rwTx, err = db.BeginRw(ctx); err != nil {
-				return err
-			}
-			agg.SetTx(rwTx)
-		}
 		if err := agg.FinishTx(); err != nil {
 			return fmt.Errorf("failed to finish tx: %w", err)
 		}
@@ -314,8 +305,7 @@ func (s *stat22) delta(aStats libstate.FilesStats, blockNum uint64) *stat22 {
 
 func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *WriterWrapper22, chainConfig *params.ChainConfig,
 	engine consensus.Engine, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
-	rwTx kv.RwTx, db kv.RwDB, ctx context.Context,
-) (uint64, types.Receipts, kv.RwTx, error) {
+) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
@@ -327,7 +317,6 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
-	trace = (block.NumberU64() > 1700000)
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
@@ -340,44 +329,31 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 		vmConfig.Tracer = ct
 		receipt, _, err := core.ApplyTransaction(chainConfig, getHeader, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, nil)
 		if err != nil {
-			return 0, nil, rwTx, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
+			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		for from := range ct.froms {
-			if err := ww.w.AddTraceFrom(common.CopyBytes(from[:])); err != nil {
-				return 0, nil, rwTx, err
+			if err := ww.w.AddTraceFrom(from[:]); err != nil {
+				return 0, nil, err
 			}
 		}
 		for to := range ct.tos {
-			if trace {
-				fmt.Printf("TraceTo [%x]\n", to[:])
-			}
-			if err := ww.w.AddTraceTo(common.CopyBytes(to[:])); err != nil {
-				return 0, nil, rwTx, err
+			if err := ww.w.AddTraceTo(to[:]); err != nil {
+				return 0, nil, err
 			}
 		}
 		receipts = append(receipts, receipt)
 		for _, log := range receipt.Logs {
-			if err = ww.w.AddLogAddr(common.CopyBytes(log.Address[:])); err != nil {
-				return 0, nil, rwTx, fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
+			if err = ww.w.AddLogAddr(log.Address[:]); err != nil {
+				return 0, nil, fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
 			}
 			for _, topic := range log.Topics {
-				if err = ww.w.AddLogTopic(common.CopyBytes(topic[:])); err != nil {
-					return 0, nil, rwTx, fmt.Errorf("adding event log for topic %x: %w", topic, err)
+				if err = ww.w.AddLogTopic(topic[:]); err != nil {
+					return 0, nil, fmt.Errorf("adding event log for topic %x: %w", topic, err)
 				}
 			}
 		}
-		if ww.w.ReadyToFinishTx() {
-			if err = rwTx.Commit(); err != nil {
-				return 0, nil, rwTx, err
-			}
-			if rwTx, err = db.BeginRw(ctx); err != nil {
-				return 0, nil, rwTx, err
-			}
-			ww.w.SetTx(rwTx)
-			rw.roTx = rwTx
-		}
 		if err = ww.w.FinishTx(); err != nil {
-			return 0, nil, rwTx, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
+			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		if trace {
 			fmt.Printf("FinishTx called for blockNum=%d, txIndex=%d, txNum=%d txHash=[%x]\n", block.NumberU64(), i, txNum, tx.Hash())
@@ -388,24 +364,24 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 
 	ibs := state.New(rw)
 	if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
-		return 0, nil, rwTx, fmt.Errorf("adding coinbase trace: %w", err)
+		return 0, nil, fmt.Errorf("adding coinbase trace: %w", err)
 	}
 	for _, uncle := range block.Uncles() {
 		if err := ww.w.AddTraceTo(uncle.Coinbase.Bytes()); err != nil {
-			return 0, nil, rwTx, fmt.Errorf("adding uncle trace: %w", err)
+			return 0, nil, fmt.Errorf("adding uncle trace: %w", err)
 		}
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil, nil); err != nil {
-		return 0, nil, rwTx, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
+		return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 	}
 
 	if err := ibs.CommitBlock(rules, ww); err != nil {
-		return 0, nil, rwTx, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
+		return 0, nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 	}
 
-	return txNum, receipts, rwTx, nil
+	return txNum, receipts, nil
 }
 
 // Implements StateReader and StateWriter
