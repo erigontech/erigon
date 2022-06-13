@@ -27,7 +27,7 @@ type cursorentry struct {
 }
 
 // cursor
-type miningmutationcursor struct {
+type memorymutationcursor struct {
 	// we can keep one cursor type if we store 2 of each kind.
 	cursor    kv.Cursor
 	dupCursor kv.CursorDupSort
@@ -43,12 +43,12 @@ type miningmutationcursor struct {
 	currentDbEntry  cursorentry
 	currentMemEntry cursorentry
 	// we keep the mining mutation so that we can insert new elements in db
-	mutation *miningmutation
+	mutation *memorymutation
 	table    string
 }
 
 // First move cursor to first position and return key and value accordingly.
-func (m *miningmutationcursor) First() ([]byte, []byte, error) {
+func (m *memorymutationcursor) First() ([]byte, []byte, error) {
 	memKey, memValue, err := m.memCursor.First()
 	if err != nil {
 		return nil, nil, err
@@ -68,7 +68,7 @@ func (m *miningmutationcursor) First() ([]byte, []byte, error) {
 	return m.goForward(memKey, memValue, dbKey, dbValue)
 }
 
-func (m *miningmutationcursor) getNextOnDb(dup bool) (key []byte, value []byte, err error) {
+func (m *memorymutationcursor) getNextOnDb(dup bool) (key []byte, value []byte, err error) {
 	if dup {
 		key, value, err = m.dupCursor.NextDup()
 		if err != nil {
@@ -97,7 +97,7 @@ func (m *miningmutationcursor) getNextOnDb(dup bool) (key []byte, value []byte, 
 	return
 }
 
-func (m *miningmutationcursor) convertAutoDupsort(key []byte, value []byte) []byte {
+func (m *memorymutationcursor) convertAutoDupsort(key []byte, value []byte) []byte {
 	// The only dupsorted table we are interested is HashedStorage
 	if m.table != kv.HashedStorage {
 		return key
@@ -106,11 +106,11 @@ func (m *miningmutationcursor) convertAutoDupsort(key []byte, value []byte) []by
 }
 
 // Current return the current key and values the cursor is on.
-func (m *miningmutationcursor) Current() ([]byte, []byte, error) {
+func (m *memorymutationcursor) Current() ([]byte, []byte, error) {
 	return common.CopyBytes(m.currentPair.key), common.CopyBytes(m.currentPair.value), nil
 }
 
-func (m *miningmutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte) (newDbKey []byte, newDbValue []byte, err error) {
+func (m *memorymutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue []byte) (newDbKey []byte, newDbValue []byte, err error) {
 	newDbKey = dbKey
 	newDbValue = dbValue
 	// Check for duplicates
@@ -132,7 +132,7 @@ func (m *miningmutationcursor) skipIntersection(memKey, memValue, dbKey, dbValue
 	return
 }
 
-func (m *miningmutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte) ([]byte, []byte, error) {
+func (m *memorymutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte) ([]byte, []byte, error) {
 	var err error
 	if memValue == nil && dbValue == nil {
 		return nil, nil, nil
@@ -167,7 +167,7 @@ func (m *miningmutationcursor) goForward(memKey, memValue, dbKey, dbValue []byte
 }
 
 // Next returns the next element of the mutation.
-func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
+func (m *memorymutationcursor) Next() ([]byte, []byte, error) {
 	if m.isPrevFromDb {
 		k, v, err := m.getNextOnDb(false)
 		if err != nil {
@@ -185,7 +185,7 @@ func (m *miningmutationcursor) Next() ([]byte, []byte, error) {
 }
 
 // NextDup returns the next element of the mutation.
-func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
+func (m *memorymutationcursor) NextDup() ([]byte, []byte, error) {
 	if m.isPrevFromDb {
 		k, v, err := m.getNextOnDb(true)
 
@@ -204,7 +204,7 @@ func (m *miningmutationcursor) NextDup() ([]byte, []byte, error) {
 }
 
 // Seek move pointer to a key at a certain position.
-func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (m *memorymutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 	dbKey, dbValue, err := m.cursor.Seek(seek)
 	if err != nil {
 		return nil, nil, err
@@ -226,7 +226,7 @@ func (m *miningmutationcursor) Seek(seek []byte) ([]byte, []byte, error) {
 }
 
 // Seek move pointer to a key at a certain position.
-func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
+func (m *memorymutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 	memKey, memValue, err := m.memCursor.SeekExact(seek)
 	if err != nil {
 		return nil, nil, err
@@ -257,37 +257,37 @@ func (m *miningmutationcursor) SeekExact(seek []byte) ([]byte, []byte, error) {
 	return nil, nil, nil
 }
 
-func (m *miningmutationcursor) Put(k, v []byte) error {
+func (m *memorymutationcursor) Put(k, v []byte) error {
 	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 }
 
-func (m *miningmutationcursor) Append(k []byte, v []byte) error {
+func (m *memorymutationcursor) Append(k []byte, v []byte) error {
 	return m.mutation.Put(m.table, common.CopyBytes(k), common.CopyBytes(v))
 
 }
 
-func (m *miningmutationcursor) AppendDup(k []byte, v []byte) error {
+func (m *memorymutationcursor) AppendDup(k []byte, v []byte) error {
 	return m.memDupCursor.AppendDup(common.CopyBytes(k), common.CopyBytes(v))
 }
 
-func (m *miningmutationcursor) PutNoDupData(key, value []byte) error {
+func (m *memorymutationcursor) PutNoDupData(key, value []byte) error {
 	panic("DeleteCurrentDuplicates Not implemented")
 }
 
-func (m *miningmutationcursor) Delete(k, v []byte) error {
+func (m *memorymutationcursor) Delete(k, v []byte) error {
 	return m.mutation.Delete(m.table, k, v)
 }
 
-func (m *miningmutationcursor) DeleteCurrent() error {
+func (m *memorymutationcursor) DeleteCurrent() error {
 	panic("DeleteCurrent Not implemented")
 }
 
-func (m *miningmutationcursor) DeleteCurrentDuplicates() error {
+func (m *memorymutationcursor) DeleteCurrentDuplicates() error {
 	panic("DeleteCurrentDuplicates Not implemented")
 }
 
 // Seek move pointer to a key at a certain position.
-func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
+func (m *memorymutationcursor) SeekBothRange(key, value []byte) ([]byte, error) {
 	if value == nil {
 		_, v, err := m.SeekExact(key)
 		return v, err
@@ -313,7 +313,7 @@ func (m *miningmutationcursor) SeekBothRange(key, value []byte) ([]byte, error) 
 	return retValue, err
 }
 
-func (m *miningmutationcursor) Last() ([]byte, []byte, error) {
+func (m *memorymutationcursor) Last() ([]byte, []byte, error) {
 	// TODO(Giulio2002): make fixes.
 	memKey, memValue, err := m.memCursor.Last()
 	if err != nil {
@@ -373,11 +373,11 @@ func (m *miningmutationcursor) Last() ([]byte, []byte, error) {
 	return dbKey, dbValue, nil
 }
 
-func (m *miningmutationcursor) Prev() ([]byte, []byte, error) {
+func (m *memorymutationcursor) Prev() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
 
-func (m *miningmutationcursor) Close() {
+func (m *memorymutationcursor) Close() {
 	if m.cursor != nil {
 		m.cursor.Close()
 	}
@@ -387,26 +387,26 @@ func (m *miningmutationcursor) Close() {
 	return
 }
 
-func (m *miningmutationcursor) Count() (uint64, error) {
+func (m *memorymutationcursor) Count() (uint64, error) {
 	panic("Not implemented")
 }
 
-func (m *miningmutationcursor) FirstDup() ([]byte, error) {
+func (m *memorymutationcursor) FirstDup() ([]byte, error) {
 	panic("Not implemented")
 }
 
-func (m *miningmutationcursor) NextNoDup() ([]byte, []byte, error) {
+func (m *memorymutationcursor) NextNoDup() ([]byte, []byte, error) {
 	panic("Not implemented")
 }
 
-func (m *miningmutationcursor) LastDup() ([]byte, error) {
+func (m *memorymutationcursor) LastDup() ([]byte, error) {
 	panic("Not implemented")
 }
 
-func (m *miningmutationcursor) CountDuplicates() (uint64, error) {
+func (m *memorymutationcursor) CountDuplicates() (uint64, error) {
 	panic("Not implemented")
 }
 
-func (m *miningmutationcursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
+func (m *memorymutationcursor) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
 	panic("SeekBothExact Not implemented")
 }

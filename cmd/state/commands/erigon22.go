@@ -254,6 +254,7 @@ func Erigon22(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log
 					return err
 				}
 			}
+			agg.SetTx(rwTx)
 		}
 	}
 
@@ -302,7 +303,9 @@ func (s *stat22) delta(aStats libstate.FilesStats, blockNum uint64) *stat22 {
 	return s
 }
 
-func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *WriterWrapper22, chainConfig *params.ChainConfig, engine consensus.Engine, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *WriterWrapper22, chainConfig *params.ChainConfig,
+	engine consensus.Engine, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
+) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
@@ -314,7 +317,6 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 	rules := chainConfig.Rules(block.NumberU64())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
-	trace = block.NumberU64() == 1700059
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
@@ -335,9 +337,6 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			}
 		}
 		for to := range ct.tos {
-			if trace {
-				fmt.Printf("TraceTo [%x]\n", to[:])
-			}
 			if err := ww.w.AddTraceTo(to[:]); err != nil {
 				return 0, nil, err
 			}
@@ -357,7 +356,7 @@ func processBlock22(trace bool, txNumStart uint64, rw *ReaderWrapper22, ww *Writ
 			return 0, nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}
 		if trace {
-			fmt.Printf("FinishTx called for %d [%x]\n", txNum, tx.Hash())
+			fmt.Printf("FinishTx called for blockNum=%d, txIndex=%d, txNum=%d txHash=[%x]\n", block.NumberU64(), i, txNum, tx.Hash())
 		}
 		txNum++
 		ww.w.SetTxNum(txNum)

@@ -225,7 +225,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync) (err e
 	}
 	defer tx.Rollback()
 
-	miningBatch := olddb.NewMiningBatch(tx)
+	miningBatch := olddb.NewMemoryBatch(tx)
 	defer miningBatch.Rollback()
 
 	if err = mining.Run(nil, miningBatch, false); err != nil {

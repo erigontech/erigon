@@ -288,7 +288,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		allTxs.AddRange(fromTxNum, toTxNum+1)
 	} else {
 		allTxs.RemoveRange(0, fromTxNum)
-		allTxs.RemoveRange(toTxNum+1, uint64(0x1000000000000))
+		allTxs.RemoveRange(toTxNum, uint64(0x1000000000000))
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
@@ -414,7 +414,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			startTxNum = api._txNums[blockNum-1]
 		}
 		txIndex := txNum - startTxNum - 1
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, nil, blockNum, int(txIndex))
 		if err != nil {
 			stream.WriteNil()
